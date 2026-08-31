@@ -27,7 +27,9 @@ vi.mock("@/components/thread/thread-header", () => ({
 vi.mock("@/components/thread/thread-timeline", () => ({ ThreadTimeline: () => <div /> }));
 vi.mock("@/components/thread/turn-failure-notice", () => ({ TurnFailureNotice: () => null }));
 vi.mock("@/components/desktop/desktop-workbench", () => ({
-  DesktopWorkbench: () => <div data-testid="workbench" />,
+  DesktopWorkbench: ({ isOpen }: { readonly isOpen?: boolean }) => (
+    <div data-testid="workbench" data-open={String(isOpen)} />
+  ),
 }));
 
 import { ThreadPage } from "./thread-page";
@@ -88,6 +90,14 @@ describe("ThreadPage 把平台默认模型传给 ThreadInput（Web 与 Desktop �
   it("未传 defaultModelRef 时 ThreadInput 收到空值（向后兼容）", () => {
     render(<ThreadPage threadId="t-1" />);
     expect(screen.getByTestId("thread-input").dataset.defaultModelRef).toBe("");
+  });
+});
+
+describe("ThreadPage Desktop 输出区", () => {
+  it("桌面端默认展示输出工作台，用户无需先猜测隐藏入口", () => {
+    render(<ThreadPage threadId="t-1" variant="desktop" />);
+    expect(screen.getByTestId("workbench").dataset.open).toBe("true");
+    expect(screen.getByRole("button", { name: "收起任务工作台" })).toBeTruthy();
   });
 });
 

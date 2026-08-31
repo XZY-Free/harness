@@ -122,7 +122,9 @@ describe("DesktopWorkbench", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: "任务" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "输出内容" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     expect(screen.getByText("整理本周产品方案")).not.toBeNull();
     expect(screen.getByText("等待确认")).not.toBeNull();
     expect(screen.getByText("确认发布方案")).not.toBeNull();

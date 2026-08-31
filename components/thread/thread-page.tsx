@@ -83,7 +83,7 @@ export function ThreadPage({
   // W04：Thread 默认设置 PATCH（Model / Environment）
   const { patchSettings, busy: settingsBusy } = useThreadSettings({ threadId });
   const [locateItem, setLocateItem] = useState<{ itemId: string; requestId: number } | null>(null);
-  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [workbenchOpen, setWorkbenchOpen] = useState(variant === "desktop");
 
   // SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）
   useEffect(() => {
@@ -121,7 +121,7 @@ export function ThreadPage({
     <div
       data-testid="desktop-thread-titlebar"
       className={cn(
-        "relative flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background transition-[padding] duration-200 ease-out",
+        "relative flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background transition-[padding] duration-200 ease-out",
         sidebar?.collapsed ? "pl-48 pr-4" : "px-4",
       )}
     >
@@ -236,7 +236,7 @@ export function ThreadPage({
     <header
       data-testid="web-thread-header-placeholder"
       className={cn(
-        "flex items-center justify-between border-b border-border bg-card py-3.5 pr-4 lg:pr-6",
+        "flex h-12 items-center justify-between border-b border-border bg-background pr-4 lg:pr-6",
         sidebar?.collapsed ? "pl-32" : "pl-4 lg:pl-6",
       )}
     >

@@ -13,11 +13,45 @@
 
 import type { ClientItem } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
-import { ChevronRight } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, CircleSlash2, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 
 interface ToolCallItemProps {
   readonly item: ClientItem;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function fileNameFromInput(input: unknown): string | null {
+  const record = asRecord(input);
+  if (!record) return null;
+  const candidate = [record.path, record.file_path, record.filename].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  if (!candidate) return null;
+  return candidate.replaceAll("\\", "/").split("/").filter(Boolean).pop() ?? null;
+}
+
+function readableToolName(toolName: string | undefined, input: unknown): string {
+  const normalized = toolName?.trim().toLowerCase() ?? "";
+  const fileName = fileNameFromInput(input);
+  if (["read", "read_file", "read_text_file"].includes(normalized)) {
+    return fileName ? `读取 ${fileName}` : "读取文件";
+  }
+  if (["write", "write_file", "edit", "edit_file", "apply_patch"].includes(normalized)) {
+    return fileName ? `编辑 ${fileName}` : "编辑文件";
+  }
+  if (["list_directory", "list_files"].includes(normalized)) return "查看文件夹";
+  if (["search", "search_files", "grep", "ripgrep"].includes(normalized)) return "搜索文件";
+  if (["run", "run_command", "shell", "exec", "exec_command"].includes(normalized)) {
+    return "运行命令";
+  }
+  if (["browser", "open_url", "navigate"].includes(normalized)) return "浏览网页";
+  return "执行操作";
 }
 
 export function ToolCallItem({ item }: ToolCallItemProps) {
@@ -32,7 +66,9 @@ export function ToolCallItem({ item }: ToolCallItemProps) {
   };
   const isPending = item.item_state === "pending";
   const isFailed = item.item_state === "failed";
-  const name = content.tool_display_name ?? content.tool_name ?? "Tool";
+  const isCancelled = item.item_state === "cancelled" || item.item_state === "superseded";
+  const name = content.tool_display_name ?? readableToolName(content.tool_name, content.input);
+  const statusLabel = isPending ? "执行中" : isFailed ? "失败" : isCancelled ? "已取消" : "已完成";
 
   return (
     <div className="my-1">
@@ -41,28 +77,32 @@ export function ToolCallItem({ item }: ToolCallItemProps) {
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
         aria-controls={`tool-call-content-${item.id}`}
-        className="-ml-2 inline-flex items-center gap-2 rounded-lg px-2 py-1 text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        className="-ml-1.5 inline-flex max-w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
       >
         <span
-          aria-hidden="true"
+          aria-label={`工具状态：${statusLabel}`}
           className={cn(
-            "flex size-[17px] shrink-0 items-center justify-center rounded-[5px] text-2xs",
-            isPending && "bg-secondary",
+            "flex size-5 shrink-0 items-center justify-center rounded-md",
+            isPending && "bg-muted text-muted-foreground",
             isFailed && "bg-destructive/10 text-destructive",
-            !isPending && !isFailed && "bg-success/10 text-success",
+            isCancelled && "bg-muted text-foreground-subtle",
+            !isPending && !isFailed && !isCancelled && "bg-success/10 text-success",
           )}
         >
           {isPending ? (
-            <span className="size-[9px] animate-spin rounded-full border-[1.5px] border-border-strong border-t-ring" />
+            <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
           ) : isFailed ? (
-            "!"
+            <CircleAlert aria-hidden="true" className="size-3.5" />
+          ) : isCancelled ? (
+            <CircleSlash2 aria-hidden="true" className="size-3.5" />
           ) : (
-            "✓"
+            <Check aria-hidden="true" className="size-3.5" />
           )}
         </span>
-        <span className="text-foreground">{name}</span>
+        <span className="truncate text-foreground">{name}</span>
         {isPending && <span className="text-2xs text-foreground-subtle">执行中</span>}
         {isFailed && <span className="text-2xs text-destructive">失败</span>}
+        {isCancelled && <span className="text-2xs text-foreground-subtle">已取消</span>}
         <ChevronRight
           aria-hidden="true"
           className={cn(
@@ -73,7 +113,10 @@ export function ToolCallItem({ item }: ToolCallItemProps) {
       </button>
 
       {expanded && (
-        <div id={`tool-call-content-${item.id}`} className="mt-2 rounded-[10px] bg-muted px-4 py-3">
+        <div
+          id={`tool-call-content-${item.id}`}
+          className="mt-1.5 overflow-hidden rounded-lg border border-border/70 bg-muted/55 px-3.5 py-3"
+        >
           {content.input ? (
             <div className="mb-2">
               <div className="text-2xs text-foreground-subtle">输入</div>

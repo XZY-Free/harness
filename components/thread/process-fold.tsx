@@ -12,7 +12,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CircleCheck, LoaderCircle } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 interface ProcessFoldProps {
@@ -22,6 +22,8 @@ interface ProcessFoldProps {
   readonly startedAt?: string;
   /** 过程结束时间（ISO，完成后传入）。 */
   readonly endedAt?: string;
+  /** 折叠区内的过程步骤数量。 */
+  readonly itemCount: number;
   readonly children: ReactNode;
 }
 
@@ -32,7 +34,13 @@ function formatDuration(seconds: number): string {
   return `${m}m ${s}s`;
 }
 
-export function ProcessFold({ running, startedAt, endedAt, children }: ProcessFoldProps) {
+export function ProcessFold({
+  running,
+  startedAt,
+  endedAt,
+  itemCount,
+  children,
+}: ProcessFoldProps) {
   // 运行中默认展开；完成后默认收起
   const [open, setOpen] = useState(running);
   const [elapsed, setElapsed] = useState(0);
@@ -76,16 +84,25 @@ export function ProcessFold({ running, startedAt, endedAt, children }: ProcessFo
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 border-border border-b py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        className="group flex w-full items-center gap-2 rounded-lg px-1.5 py-2 text-left text-muted-foreground text-sm transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
       >
+        {running ? (
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-4 shrink-0 animate-spin text-foreground-subtle"
+          />
+        ) : (
+          <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-foreground-subtle" />
+        )}
+        <span className="tabular-nums text-foreground/90">{label}</span>
+        <span className="text-foreground-subtle text-xs">· {itemCount} 个步骤</span>
         <ChevronRight
           aria-hidden="true"
           className={cn(
-            "size-3 shrink-0 text-foreground-subtle transition-transform duration-200",
+            "ml-auto size-3.5 shrink-0 text-foreground-subtle transition-transform duration-200",
             open && "rotate-90",
           )}
         />
-        <span className="tabular-nums">{label}</span>
       </button>
       <div
         className={cn(
@@ -94,7 +111,7 @@ export function ProcessFold({ running, startedAt, endedAt, children }: ProcessFo
         )}
       >
         <div className="overflow-hidden">
-          <div className="pt-3 pb-1">{children}</div>
+          <div className="border-border/70 border-l pt-1 pb-1 pl-4 ml-3">{children}</div>
         </div>
       </div>
     </div>

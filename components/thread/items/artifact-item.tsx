@@ -33,9 +33,10 @@
  */
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { WorkspaceFileIcon } from "@/components/workspace-panel/workspace-file-icon";
 import type { ClientItem } from "@/lib/client/types";
-import { File, Image as ImageIcon } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { useMemo } from "react";
 
 /** 可用性取值。 */
 export type ArtifactAvailability = "local" | "cloud" | "pending_device" | "unavailable";
@@ -78,19 +79,6 @@ export interface ArtifactItemProps {
   readonly onOpen?: (artifactId: string, availability: ArtifactAvailability) => void;
 }
 
-/** 文件类型 → Lucide 图标。 */
-function getArtifactIcon(
-  artifactType: string | undefined,
-  mediaType: string | undefined,
-): ReactNode {
-  const isImage = artifactType === "image" || mediaType?.startsWith("image/") === true;
-  return isImage ? (
-    <ImageIcon className="size-5" aria-hidden="true" />
-  ) : (
-    <File className="size-5" aria-hidden="true" />
-  );
-}
-
 /** 字节大小 → 人类可读字符串。 */
 function formatByteSize(bytes: number | undefined): string | null {
   if (bytes === undefined || bytes === null || !Number.isFinite(bytes)) return null;
@@ -100,25 +88,6 @@ function formatByteSize(bytes: number | undefined): string | null {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-/** 截断 hash 显示前 16 字符 + ...，完整 hash 通过 title 属性提供。 */
-function formatHash(hash: string | undefined): string | null {
-  if (!hash) return null;
-  // sha256:<hex> 取前 16 位 + ...
-  const stripped = hash.replace(/^sha256:/, "");
-  if (stripped.length <= 16) return hash;
-  return `sha256:${stripped.slice(0, 16)}…`;
-}
-
-/** 简化 content_ref 展示（去掉 scheme:// 前缀，截断中间路径）。 */
-function formatLocation(ref: string | undefined): string | null {
-  if (!ref) return null;
-  // s3://bucket/path/to/file.xlsx → bucket/path/to/file.xlsx
-  const match = ref.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(.+)$/);
-  const path = match ? (match[1] ?? ref) : ref;
-  if (path.length <= 48) return path;
-  return `${path.slice(0, 24)}…${path.slice(-20)}`;
-}
-
 /** 计算可用性。无显式 availability 时按 cloud 处理。 */
 function resolveAvailability(content: ArtifactContent): ArtifactAvailability {
   if (content.availability) return content.availability;
@@ -126,14 +95,20 @@ function resolveAvailability(content: ArtifactContent): ArtifactAvailability {
   return "cloud";
 }
 
-/** 来源链可点击项。 */
-function SourceLink({ label, value }: { label: string; value: string }): ReactNode {
-  return (
-    <span className="text-2xs text-muted-foreground">
-      <span className="text-muted-foreground">{label}：</span>
-      <code className="font-mono text-2xs text-muted-foreground">{value}</code>
-    </span>
-  );
+function artifactTypeLabel(artifactType: string | undefined, mediaType: string): string {
+  if (artifactType === "image" || mediaType.startsWith("image/")) return "图片";
+  if (artifactType === "dataset") return "数据文件";
+  if (
+    artifactType === "code" ||
+    mediaType.includes("javascript") ||
+    mediaType.includes("typescript")
+  ) {
+    return "代码文件";
+  }
+  if (mediaType.includes("spreadsheet") || mediaType.includes("csv")) return "表格";
+  if (mediaType.includes("pdf")) return "PDF 文档";
+  if (mediaType.startsWith("text/")) return "文档";
+  return "文件";
 }
 
 export function ArtifactItem({
@@ -147,15 +122,11 @@ export function ArtifactItem({
   const displayName = content.display_name ?? content.title ?? "未命名文件";
   const mediaType = content.media_type ?? content.content_type ?? "unknown";
   const byteSize = content.byte_size ?? content.size;
-  const contentHash = content.content_hash ?? content.hash;
-  const contentRef = content.content_ref ?? content.location;
-
   const availability = resolveAvailability(content);
   const artifactId = content.artifact_id ?? item.id;
 
   const sizeText = formatByteSize(byteSize);
-  const hashText = formatHash(contentHash);
-  const locationText = formatLocation(contentRef);
+  const typeLabel = artifactTypeLabel(content.artifact_type, mediaType);
 
   // 是否属于当前 Desktop 设备（isDesktop=true + availability=local + device_id 匹配）
   const isLocalOnCurrentDevice =
@@ -208,80 +179,45 @@ export function ArtifactItem({
   };
 
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[80%] rounded-[var(--radius-lg)] border border-border bg-muted px-4 py-3">
+    <div className="flex justify-start py-1">
+      <div className="w-full max-w-xl rounded-xl border border-border bg-card px-3.5 py-3 shadow-sm">
         <div className="flex items-start gap-3">
           {/* 文件图标 */}
-          <div className="flex size-10 shrink-0 items-center justify-center rounded bg-[var(--primary)]/10 text-[var(--primary)]">
-            {getArtifactIcon(content.artifact_type, mediaType)}
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            <WorkspaceFileIcon name={displayName} className="size-4.5" />
           </div>
 
-          <div className="flex-1 min-w-0">
-            <div className="font-medium text-sm text-foreground truncate" title={displayName}>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-foreground text-sm" title={displayName}>
               {displayName}
             </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-muted-foreground">
-              <span>{mediaType}</span>
-              {sizeText ? <span>· {sizeText}</span> : null}
-              {content.artifact_type ? <span>· {content.artifact_type}</span> : null}
-              {content.visibility_scope ? (
-                <span className="rounded bg-card px-1.5 py-0.5 text-3xs">
-                  {content.visibility_scope}
-                </span>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs">
+              <span>{typeLabel}</span>
+              {sizeText ? (
+                <>
+                  <span aria-hidden="true" className="text-foreground-subtle">
+                    ·
+                  </span>
+                  <span>{sizeText}</span>
+                </>
               ) : null}
             </div>
 
-            {/* 来源 / hash / 位置（W05 新增） */}
-            {(content.source_turn_id ||
-              content.source_invocation_id ||
-              content.source_tool_call_id ||
-              hashText ||
-              locationText) && (
-              <div className="mt-1.5 flex flex-col gap-0.5">
-                {content.source_turn_id ? (
-                  <SourceLink label="Turn" value={content.source_turn_id} />
-                ) : null}
-                {content.source_invocation_id ? (
-                  <SourceLink label="Invocation" value={content.source_invocation_id} />
-                ) : null}
-                {content.source_tool_call_id ? (
-                  <SourceLink label="ToolCall" value={content.source_tool_call_id} />
-                ) : null}
-                {hashText ? (
-                  <span className="text-2xs text-muted-foreground">
-                    <span className="text-muted-foreground">hash：</span>
-                    <code
-                      className="font-mono text-2xs text-muted-foreground"
-                      title={contentHash ?? undefined}
-                    >
-                      {hashText}
-                    </code>
-                  </span>
-                ) : null}
-                {locationText ? (
-                  <span className="text-2xs text-muted-foreground">
-                    <span className="text-muted-foreground">位置：</span>
-                    <code className="font-mono text-2xs text-muted-foreground" title={contentRef}>
-                      {locationText}
-                    </code>
-                  </span>
-                ) : null}
-              </div>
-            )}
-
             {/* 可用性提示（pending_device / unavailable / Web 端 local） */}
-            {action.hint ? <div className="mt-1.5 text-2xs text-warning">{action.hint}</div> : null}
+            {action.hint ? <div className="mt-1.5 text-warning text-xs">{action.hint}</div> : null}
           </div>
 
           {/* 操作按钮 */}
-          <button
+          <Button
             type="button"
-            className="shrink-0 rounded-[var(--radius-sm)] border border-border px-2.5 py-1 text-2xs text-muted-foreground transition hover:bg-card hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
             disabled={action.disabled}
             onClick={handleClick}
           >
             {action.label}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

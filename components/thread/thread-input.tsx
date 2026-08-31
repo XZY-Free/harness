@@ -25,7 +25,7 @@ import { useTurnControls } from "@/components/hooks/use-turn-controls";
 import { Button } from "@/components/ui/button";
 import type { ClientPendingInput, ClientThread, ClientTurn } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
-import { Loader2, Send, Square } from "lucide-react";
+import { Loader2, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type AgentOption,
@@ -195,7 +195,7 @@ export function ThreadInput({
   };
 
   return (
-    <div className="sticky bottom-0 z-20 shrink-0 bg-background/95 pt-2 pb-[calc(16px+env(safe-area-inset-bottom))] backdrop-blur-sm">
+    <div className="sticky bottom-0 z-20 shrink-0 bg-background/95 pt-2 pb-[calc(14px+env(safe-area-inset-bottom))] backdrop-blur-md">
       <div className="composer-track">
         {/* W4-1：待办队列移入输入框上方，宽度与输入框对齐；仅在真实 Thread 下渲染。 */}
         {threadId !== null && isRunning && !onSubmitText && (
@@ -216,7 +216,7 @@ export function ThreadInput({
               className="ml-2 shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-destructive/10"
               aria-label="关闭错误提示"
             >
-              ✕
+              <X aria-hidden="true" className="size-3.5" />
             </button>
           </div>
         )}
@@ -224,8 +224,8 @@ export function ThreadInput({
         {/* 大圆角容器 */}
         <div
           className={cn(
-            "rounded-[20px] border border-border bg-background px-4 pb-2.5 pt-3.5 shadow-[0_2px_12px_rgba(0,0,0,0.03)] transition",
-            "focus-within:border-foreground/20 focus-within:shadow-md",
+            "rounded-2xl border border-border bg-card px-4 pt-3.5 pb-2.5 shadow-sm transition-[border-color,box-shadow]",
+            "focus-within:border-border-strong focus-within:shadow-md",
           )}
         >
           <textarea

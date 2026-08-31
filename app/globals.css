@@ -85,11 +85,11 @@
   --chart-5: oklch(0.269 0 0);
 
   /* 侧边栏 token */
-  --sidebar: #f9f9f9;
+  --sidebar: color-mix(in oklab, var(--ring) 4%, #ffffff);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--foreground);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f0f0ef;
+  --sidebar-accent: color-mix(in oklab, var(--ring) 6%, #f4f4f3);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: color-mix(in oklab, var(--foreground) 8%, transparent);
   --sidebar-ring: #0285ff;
@@ -675,10 +675,9 @@ body {
   color: var(--foreground);
 }
 
-/* 消息轨道与输入/操作轨道分离。
- * - 消息轨道（Timeline）：宽屏利用主内容区全宽，不再以固定 1440px 限制，
- *   不被输入框宽度限制。
- * - 输入轨道（composer / 错误提示 / 待办队列 / 新会话错误）：保持适合操作的 1120px。
+/* 对话与输入共用稳定的阅读轴。
+ * Codex 风格的对话区不会随窗口无限拉宽；消息、过程反馈和 composer 始终围绕
+ * 同一条 760px 阅读列排布，仅保留各自独立的语义轨道。
  * 两者均按 16/24/32px 响应式安全内边距居中。
  *
  * 消息宽度体系（Web/Desktop 共用同一组件与 CSS）：
@@ -690,12 +689,14 @@ body {
  *   - 中等宽度（≥640px）：user 82% / assistant 96%
  *   - 宽屏（≥1024px）：user 78% / assistant 92% */
 :root {
+  --conversation-track-max: 760px;
   --conversation-user-max: 88%;
   --conversation-assistant-max: 100%;
 }
 
 .message-track {
   width: 100%;
+  max-width: var(--conversation-track-max);
   margin-inline: auto;
   padding-inline: 16px;
 }
@@ -707,7 +708,7 @@ body {
 
 .composer-track {
   width: 100%;
-  max-width: 1120px;
+  max-width: var(--conversation-track-max);
   margin-inline: auto;
   padding-inline: 16px;
 }
@@ -739,8 +740,8 @@ body {
 .conversation-user-bubble {
   max-width: var(--conversation-user-max);
   margin-left: auto; /* 右对齐并随内容收缩 */
-  border-radius: 15px;
-  padding: 11px 18px;
+  border-radius: 18px;
+  padding: 10px 16px;
   font-size: 14.5px;
   line-height: 1.7;
   white-space: pre-wrap;

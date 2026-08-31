@@ -152,6 +152,7 @@ function renderSegment(
   return (
     <ProcessFold
       running={running}
+      itemCount={segment.items.length}
       startedAt={first?.created_at}
       endedAt={running ? undefined : last?.created_at}
     >

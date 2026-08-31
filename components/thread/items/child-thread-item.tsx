@@ -14,6 +14,7 @@
 
 import type { ClientItem } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
+import { ArrowUpRight, UsersRound } from "lucide-react";
 
 interface ChildThreadItemProps {
   readonly item: ClientItem;
@@ -56,34 +57,17 @@ export function ChildThreadItem({ item }: ChildThreadItemProps) {
   );
 
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[80%] rounded-lg border border-border bg-muted px-4 py-3">
+    <div className="flex justify-start py-1">
+      <div className="w-full max-w-xl rounded-xl border border-border bg-card px-3.5 py-3 shadow-sm">
         <div className="flex items-center gap-2">
           {/* 子任务图标 */}
-          <div className="flex size-8 items-center justify-center rounded bg-primary/10 text-primary">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
+          <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            <UsersRound aria-hidden="true" className="size-4" />
           </div>
 
-          <div className="flex-1">
-            <div className="font-medium text-sm text-foreground">子任务</div>
-            <div className="mt-0.5 text-2xs text-muted-foreground">
-              Agent: {content.target_agent_id?.slice(0, 8) ?? "unknown"}
-            </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-foreground text-sm">协作任务</div>
+            <div className="mt-0.5 text-muted-foreground text-xs">由协作助手处理</div>
           </div>
 
           <span className={stateClass}>{stateLabel}</span>
@@ -91,7 +75,7 @@ export function ChildThreadItem({ item }: ChildThreadItemProps) {
 
         {/* 摘要 */}
         {content.summary && (
-          <div className="mt-2 border-border border-t pt-2 text-xs text-muted-foreground">
+          <div className="mt-3 border-border border-t pt-3 text-muted-foreground text-sm">
             {content.summary}
           </div>
         )}
@@ -108,23 +92,10 @@ export function ChildThreadItem({ item }: ChildThreadItemProps) {
           <div className="mt-3">
             <a
               href={`/chat/${content.child_thread_id}`}
-              className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-border px-2.5 py-1 text-2xs text-muted-foreground transition hover:bg-card hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground"
             >
-              查看子任务
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M7 17L17 7" />
-                <path d="M7 7h10v10" />
-              </svg>
+              查看协作任务
+              <ArrowUpRight aria-hidden="true" className="size-3.5" />
             </a>
           </div>
         )}

@@ -137,45 +137,26 @@ export function ThreadHeader({
     );
   }
 
-  // Web 形态：完整 header（border-b + bg-surface + px-4 py-3.5）。
+  // Web 形态：Codex 式单行轻量标题栏；Goal / 位置仍保留为紧凑元信息。
   // 侧栏收起时左上角有固定的搜索/展开/新建控件，标题区需要预留安全左内边距避免重叠。
   return (
     <header
       data-testid="web-thread-header"
       className={cn(
-        "flex items-center justify-between border-b border-border bg-card py-3.5 pr-4 lg:pr-6",
+        "flex h-12 items-center border-b border-border bg-background pr-4 lg:pr-6",
         sidebar?.collapsed ? "pl-32" : "pl-4 lg:pl-6",
       )}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        {/* 第一行：Thread title + 任务状态 */}
-        <div className="flex items-center gap-3">
-          <h1 className="min-w-0 flex-1 truncate font-semibold text-base text-foreground">
-            {thread.title ?? "新会话"}
-          </h1>
-          <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
-            <span
-              className={cn(
-                "size-1.5 rounded-full",
-                taskStatus.tone === "running" && "animate-gentle-pulse bg-primary",
-                taskStatus.tone === "waiting" && "bg-warning",
-                taskStatus.tone === "success" && "bg-success",
-                taskStatus.tone === "error" && "bg-destructive",
-                taskStatus.tone === "stopped" && "bg-foreground-subtle",
-                taskStatus.tone === "idle" && "bg-foreground-subtle",
-              )}
-            />
-            <span className="text-2xs text-muted-foreground">{taskStatus.label}</span>
-          </div>
-        </div>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <h1 className="min-w-0 flex-1 truncate font-semibold text-sm text-foreground">
+          {thread.title ?? "新会话"}
+        </h1>
 
-        {/* 第二行：Goal + 执行位置（窄屏可换行，不得水平溢出） */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <div className="hidden min-w-0 items-center gap-3 text-xs text-muted-foreground md:flex">
           {/* Goal */}
           {activeGoal && (
             <span className="flex items-center gap-1">
-              <span className="text-foreground-subtle">目标</span>
-              <span className="max-w-[300px] truncate">{activeGoal.objective}</span>
+              <span className="max-w-48 truncate">{activeGoal.objective}</span>
               <span
                 className={cn(
                   "rounded px-1 py-0.5 text-3xs",
@@ -192,8 +173,7 @@ export function ThreadHeader({
           )}
 
           {/* 默认执行位置（W04 接入 Environment 目录显示名） */}
-          <span className="flex items-center gap-1">
-            <span className="text-foreground-subtle">位置</span>
+          <span className="flex items-center gap-1 border-border border-l pl-3">
             {thread.default_environment_definition_id ? (
               <CatalogDisplayName
                 resourceId={thread.default_environment_definition_id}
@@ -203,6 +183,21 @@ export function ThreadHeader({
               <span className="text-xs text-foreground">Cloud</span>
             )}
           </span>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              taskStatus.tone === "running" && "animate-gentle-pulse bg-primary",
+              taskStatus.tone === "waiting" && "bg-warning",
+              taskStatus.tone === "success" && "bg-success",
+              taskStatus.tone === "error" && "bg-destructive",
+              taskStatus.tone === "stopped" && "bg-foreground-subtle",
+              taskStatus.tone === "idle" && "bg-foreground-subtle",
+            )}
+          />
+          <span className="text-2xs text-muted-foreground">{taskStatus.label}</span>
         </div>
       </div>
     </header>

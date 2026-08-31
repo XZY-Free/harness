@@ -1,8 +1,9 @@
 "use client";
 
-import { Icon } from "@/components/icons";
 import { apiFetch } from "@/lib/api-fetch";
+import { ChevronDown, Folder, FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { WorkspaceFileIcon } from "./workspace-file-icon";
 
 export const FILE_TREE_REFRESH_MS = 1500;
 
@@ -86,16 +87,21 @@ function TreeRow({
         <button
           type="button"
           onClick={() => toggle(node.path)}
-          className="flex w-full items-center gap-1 rounded-[var(--radius-sm)] py-1 pr-2 text-left text-[13px] text-[var(--fg-muted)] transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
+          className="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           aria-expanded={isOpen}
         >
-          <Icon.chevron
-            size={12}
-            className={`shrink-0 text-[var(--fg-subtle)] transition-transform ${
+          <ChevronDown
+            aria-hidden="true"
+            className={`size-3 shrink-0 text-foreground-subtle transition-transform ${
               isOpen ? "rotate-0" : "-rotate-90"
             }`}
           />
+          {isOpen ? (
+            <FolderOpen aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <Folder aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          )}
           <span className="truncate">{node.name}</span>
         </button>
         {isOpen ? (
@@ -122,15 +128,15 @@ function TreeRow({
     <button
       type="button"
       onClick={() => onSelectPath(node.path)}
-      className={`flex w-full items-center gap-1.5 rounded-[var(--radius-sm)] py-1 pr-2 text-left text-[13px] transition ${
+      className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm transition-colors ${
         isSelected
-          ? "bg-[var(--surface-2)] text-[var(--fg)]"
-          : "text-[var(--fg-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
+          ? "bg-muted text-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground"
       }`}
       style={{ paddingLeft: `${depth * 12 + 8 + 14}px` }}
       title={node.path}
     >
-      <Icon.fileText size={12} className="shrink-0 text-[var(--fg-subtle)]" />
+      <WorkspaceFileIcon name={node.name} className="size-4 shrink-0 text-foreground-subtle" />
       <span className="truncate">{node.name}</span>
     </button>
   );

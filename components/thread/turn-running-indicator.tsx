@@ -79,11 +79,11 @@ export function TurnRunningIndicator({ turn, items }: TurnRunningIndicatorProps)
   return (
     <output
       data-testid="turn-running-indicator"
-      className="flex items-center gap-2 py-2 text-muted-foreground text-sm"
+      className="flex items-center gap-2 rounded-lg px-1.5 py-2 text-muted-foreground text-sm"
     >
       <Loader2
         aria-hidden="true"
-        className="size-3.5 animate-spin text-primary/80"
+        className="size-4 animate-spin text-foreground-subtle"
         strokeWidth={1.75}
       />
       <span>

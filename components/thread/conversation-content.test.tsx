@@ -190,11 +190,13 @@ describe("用户/助手消息共享 message-track 宽度体系", () => {
 });
 
 describe("globals.css 消息宽度合同（读取真实样式文件）", () => {
-  it("消息轨道 .message-track 不再以固定 px 限制宽度", () => {
+  it("消息轨道与 composer 共用 Codex 式可读列宽，而不是铺满整个主区", () => {
     const trackBlock = globalsCss.match(/\.message-track\s*\{[^}]*\}/)?.[0] ?? "";
+    const composerBlock = globalsCss.match(/\.composer-track\s*\{[^}]*\}/)?.[0] ?? "";
     expect(trackBlock).toContain("width: 100%");
-    // 允许响应式安全 gutter（padding-inline），但消息轨道本身不得有固定 max-width px
-    expect(trackBlock).not.toMatch(/max-width\s*:\s*[\d.]+px/);
+    expect(trackBlock).toContain("max-width: var(--conversation-track-max)");
+    expect(composerBlock).toContain("max-width: var(--conversation-track-max)");
+    expect(globalsCss).toMatch(/--conversation-track-max\s*:\s*760px/);
   });
 
   it("助手正文 .conversation-copy 不再使用 76ch 固定可读宽度", () => {

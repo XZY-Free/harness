@@ -4,6 +4,7 @@ import { DesktopBrowserSurface } from "@/components/desktop/desktop-browser-surf
 import { Button } from "@/components/ui/button";
 import { FileEditor } from "@/components/workspace-panel/file-editor";
 import { FileTree } from "@/components/workspace-panel/file-tree";
+import { WorkspaceFileIcon } from "@/components/workspace-panel/workspace-file-icon";
 import { deriveTaskStatus } from "@/lib/client/derive-task-status";
 import type { ClientGoal, ClientItem, ClientTurn } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
@@ -130,7 +131,7 @@ function getAuxiliaryTab(tab: AuxiliaryWorkbenchTab) {
 }
 
 function tabLabel(tab: WorkbenchTab): string {
-  return tab === "task" ? "任务" : getAuxiliaryTab(tab).label;
+  return tab === "task" ? "输出内容" : getAuxiliaryTab(tab).label;
 }
 
 function TabIcon({ tab }: { tab: AuxiliaryWorkbenchTab }) {
@@ -222,14 +223,14 @@ export function DesktopWorkbench({
       aria-label="任务工作台"
       aria-hidden={!isOpen}
       className={cn(
-        "relative flex h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out",
-        isOpen ? "border-l border-border bg-background" : "border-l border-transparent",
+        "relative flex h-full shrink-0 overflow-hidden bg-background transition-[width] duration-200 ease-out",
+        isOpen ? "p-3 pl-0" : "p-0",
       )}
       style={{ width: isOpen ? width : 0 }}
     >
       <div
         className={cn(
-          "flex h-full min-w-[320px] flex-col transition-[opacity,transform] duration-200 ease-out",
+          "flex h-full min-w-[320px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-[opacity,transform] duration-200 ease-out",
           isOpen ? "translate-x-0 opacity-100" : "translate-x-2 opacity-0",
         )}
       >
@@ -257,7 +258,7 @@ export function DesktopWorkbench({
         <div
           role="tablist"
           aria-label="工作台页签"
-          className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2"
+          className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-3"
         >
           {visibleTabs.map((tab) => (
             <div key={tab} className="group flex min-w-0 items-center">
@@ -407,7 +408,7 @@ function TaskPane({
 }) {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-4">
-      <section className="rounded-lg border border-border bg-card p-3">
+      <section className="rounded-xl bg-muted/55 p-3.5">
         <p className="text-2xs text-muted-foreground">当前任务</p>
         <h2 className="mt-1 font-medium text-foreground text-sm">{taskTitle}</h2>
         <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
@@ -476,7 +477,10 @@ function TaskPane({
                 onClick={() => onLocateItem(artifact.itemId)}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-foreground hover:bg-muted"
               >
-                <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+                <WorkspaceFileIcon
+                  name={artifact.displayName}
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
                 <span className="truncate">{artifact.displayName}</span>
               </button>
             ))}

@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { LogOut, PanelLeft, Plus, Search, Settings, User } from "lucide-react";
+import { Folder, LogOut, PanelLeft, Plus, Search, Settings, User } from "lucide-react";
 /**
  * Desktop 会话侧栏（W3-2）。
  *
@@ -113,7 +113,7 @@ export function DesktopSidebar({
       : "top-2 left-3"
     : collapsed
       ? "top-2 left-3"
-      : "top-2 left-[132px]";
+      : "top-2 left-[168px]";
   const titlebarIconClass =
     "flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40";
   const panelButton = (
@@ -199,13 +199,13 @@ export function DesktopSidebar({
         className={cn(
           // <1180px 一律 overlay drawer（不参与主布局）；≥1180px 为固定侧栏（参与布局）。
           "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out max-[1179px]:fixed max-[1179px]:inset-y-0 max-[1179px]:left-0 max-[1179px]:z-30",
-          collapsed ? "w-0" : "w-[236px]",
+          collapsed ? "w-0" : "w-[276px]",
         )}
       >
         <div
           aria-hidden={collapsed}
           className={cn(
-            "absolute inset-y-0 left-0 flex w-[236px] flex-col border-r border-border bg-muted/85 transition-[opacity,transform] duration-200 ease-out",
+            "absolute inset-y-0 left-0 flex w-[276px] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[opacity,transform] duration-200 ease-out",
             collapsed
               ? "pointer-events-none -translate-x-2 opacity-0"
               : "translate-x-0 opacity-100",
@@ -227,8 +227,10 @@ export function DesktopSidebar({
 
           {/* 全屏时品牌移到标题栏，避免首行重复 */}
           {!isFullScreen && (
-            <div className="px-4 py-1.5 [-webkit-app-region:no-drag]">
-              <span className="font-semibold text-sm text-foreground">SnowHarness</span>
+            <div className="px-4 pt-2 pb-1.5 [-webkit-app-region:no-drag]">
+              <span className="font-semibold text-[15px] tracking-[-0.01em] text-sidebar-foreground">
+                SnowHarness
+              </span>
             </div>
           )}
 
@@ -236,16 +238,24 @@ export function DesktopSidebar({
           <div className="px-3 py-1 [-webkit-app-region:no-drag]">
             <Link
               href={surface === "desktop" ? "/desktop" : "/chat"}
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/40"
             >
               <Plus className="size-4 text-muted-foreground" />
               新建会话
             </Link>
           </div>
 
-          {/* 会话区标题 */}
-          <div className="px-4 py-2">
-            <h2 className="text-sm font-semibold text-foreground">会话</h2>
+          {/* 项目层级：当前产品中的会话统一归入 SnowHarness 项目。 */}
+          <div className="px-4 pt-3 pb-1.5">
+            <h2 className="font-medium text-[11px] text-foreground-subtle">项目</h2>
+          </div>
+
+          <div
+            aria-label="SnowHarness 项目"
+            className="mx-3 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-sidebar-foreground"
+          >
+            <Folder aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate font-medium">SnowHarness</span>
           </div>
 
           {/* 会话列表 */}
@@ -254,8 +264,8 @@ export function DesktopSidebar({
           {/* 底部账号行 */}
           <div className="mt-auto [-webkit-app-region:no-drag]">
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex w-full items-center gap-2 border-t border-border px-4 py-2.5 text-left transition hover:bg-secondary">
-                <div className="flex size-7 items-center justify-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground">
+              <DropdownMenuTrigger className="flex w-full items-center gap-2 border-t border-sidebar-border px-4 py-2.5 text-left transition-colors hover:bg-sidebar-accent">
+                <div className="flex size-7 items-center justify-center rounded-full bg-sidebar-accent text-xs font-medium text-sidebar-accent-foreground">
                   <User className="size-3.5" />
                 </div>
                 <span className="truncate text-sm text-foreground">{userName ?? "用户"}</span>
@@ -312,7 +322,10 @@ function ThreadGroupList({
   readonly surface: "web" | "desktop";
 }) {
   return (
-    <nav className="flex-1 overflow-y-auto px-3 [-webkit-app-region:no-drag]" aria-label="会话列表">
+    <nav
+      className="flex-1 overflow-y-auto px-3 pt-0.5 pl-7 [-webkit-app-region:no-drag]"
+      aria-label="会话列表"
+    >
       {threads.map((t) => (
         <ThreadListItem
           key={t.id}
@@ -343,10 +356,10 @@ function ThreadListItem({
         if (isNarrow) setCollapsed(true);
       }}
       className={cn(
-        "block truncate rounded-md px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+        "block truncate rounded-lg px-2.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/40",
         isActive
-          ? "bg-secondary font-medium text-foreground"
-          : "text-foreground hover:bg-secondary/60",
+          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+          : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
       )}
       title={thread.title ?? "新会话"}
     >

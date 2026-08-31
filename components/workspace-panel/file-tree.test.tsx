@@ -1,15 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/components/icons", () => ({
-  Icon: new Proxy(
-    {},
-    {
-      get: () => () => null,
-    },
-  ),
-}));
-
 import { FILE_TREE_REFRESH_MS, FileTree } from "./file-tree";
 
 afterEach(() => {
@@ -40,8 +31,16 @@ describe("FileTree 工作区同步", () => {
 
     const cssFolder = screen.getByRole("button", { name: "css" });
     expect(cssFolder.getAttribute("aria-expanded")).toBe("true");
+    expect(cssFolder.querySelector(".lucide-folder-open")).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "index.html" }).querySelector(".lucide-file-code-corner"),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "style.css" }).querySelector(".lucide-file-code-corner"),
+    ).not.toBeNull();
     fireEvent.click(cssFolder);
     await waitFor(() => expect(cssFolder.getAttribute("aria-expanded")).toBe("false"));
+    expect(cssFolder.querySelector(".lucide-folder")).not.toBeNull();
     expect(screen.queryByText("style.css")).toBeNull();
   });
 });

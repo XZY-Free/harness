@@ -72,6 +72,14 @@ function renderSidebar(matches: boolean) {
 }
 
 describe("Web 侧栏 overlay drawer 行为", () => {
+  it("用项目文件夹建立会话层级，而不是把会话平铺成无图标文本", () => {
+    renderSidebar(false);
+    expect(screen.getByText("项目")).toBeTruthy();
+    const project = screen.getByLabelText("SnowHarness 项目");
+    expect(project.querySelector(".lucide-folder")).not.toBeNull();
+    expect(project.textContent).toContain("SnowHarness");
+  });
+
   it("≥1180px（固定侧栏）不渲染 backdrop", () => {
     renderSidebar(false);
     expect(screen.queryByRole("button", { name: "关闭会话侧栏" })).toBeNull();

@@ -10,6 +10,7 @@
 
 import type { ClientItem } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
+import { CircleAlert, CircleCheck, LoaderCircle } from "lucide-react";
 
 interface JobResultItemProps {
   readonly item: ClientItem;
@@ -30,43 +31,34 @@ export function JobResultItem({ item }: JobResultItemProps) {
   const isFailed = item.item_state === "failed";
 
   return (
-    <div className="flex justify-start">
+    <div className="flex justify-start py-1">
       <div
         className={cn(
-          "max-w-[80%] rounded-[var(--radius-lg)] border px-4 py-3",
-          isFailed ? "border-destructive/40 bg-destructive/5" : "border-border bg-muted",
+          "w-full max-w-xl rounded-xl border bg-card px-3.5 py-3 shadow-sm",
+          isFailed ? "border-destructive/40" : "border-border",
         )}
       >
         <div className="flex items-center gap-2">
           {/* Job 图标 */}
           <div
             className={cn(
-              "flex size-8 items-center justify-center rounded",
-              isPending && "bg-[var(--primary)]/10 text-[var(--primary)]",
+              "flex size-9 items-center justify-center rounded-lg",
+              isPending && "bg-muted text-muted-foreground",
               isCompleted && "bg-success/10 text-success",
               isFailed && "bg-destructive/10 text-destructive",
             )}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
+            {isPending ? (
+              <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+            ) : isFailed ? (
+              <CircleAlert aria-hidden="true" className="size-4" />
+            ) : (
+              <CircleCheck aria-hidden="true" className="size-4" />
+            )}
           </div>
 
           <div className="flex-1">
-            <div className="font-medium text-sm text-foreground">{content.job_type ?? "Job"}</div>
+            <div className="font-medium text-foreground text-sm">后台任务</div>
             <div className="mt-0.5 text-2xs text-muted-foreground">
               {isPending ? "执行中" : isCompleted ? "已完成" : "失败"}
             </div>
@@ -76,7 +68,7 @@ export function JobResultItem({ item }: JobResultItemProps) {
           <span
             className={cn(
               "rounded px-2 py-0.5 text-3xs",
-              isPending && "bg-[var(--primary)]/10 text-[var(--primary)]",
+              isPending && "bg-muted text-muted-foreground",
               isCompleted && "bg-success/10 text-success",
               isFailed && "bg-destructive/10 text-destructive",
             )}
@@ -95,10 +87,10 @@ export function JobResultItem({ item }: JobResultItemProps) {
               aria-valuemin={0}
               aria-valuemax={100}
               tabIndex={-1}
-              className="h-1.5 overflow-hidden rounded-full bg-card"
+              className="h-1.5 overflow-hidden rounded-full bg-muted"
             >
               <div
-                className="h-full bg-[var(--primary)] transition-all"
+                className="h-full bg-foreground/70 transition-all"
                 style={{ width: `${Math.min(100, Math.max(0, content.progress * 100))}%` }}
               />
             </div>

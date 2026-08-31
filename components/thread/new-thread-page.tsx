@@ -37,7 +37,7 @@ export function NewThreadPage({
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div
         className={cn(
-          "relative flex h-11 shrink-0 items-center border-b border-border bg-background transition-[padding] duration-200 ease-out",
+          "relative flex h-12 shrink-0 items-center border-b border-border bg-background transition-[padding] duration-200 ease-out",
           sidebar?.collapsed ? (surface === "desktop" ? "pl-48 pr-4" : "pl-32 pr-4") : "px-4",
         )}
       >
