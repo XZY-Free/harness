@@ -6199,6 +6199,175 @@
         ]
       }
     },
+    "/gateway/v1/capability-actions": {
+      "post": {
+        "operationId": "post_gateway_v1_capability_actions",
+        "summary": "提交 Harness 行动",
+        "tags": [
+          "gateway"
+        ],
+        "security": [
+          {
+            "workloadAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": true,
+            "description": "Invocation-bound Gateway Workload Token",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "由 `invocation_id + \":\" + action.actionId` 稳定组成",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应，字段语义以对应规范章节为准。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action_id": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "authority_ref": {
+                      "type": "string"
+                    },
+                    "observation": {
+                      "type": "object",
+                      "properties": {
+                        "observationType": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        },
+                        "sourceRefs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "observationType",
+                        "summary",
+                        "sourceRefs",
+                        "data"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "waiting_for_user": {
+                      "type": "null"
+                    },
+                    "next_producer_sequence": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "action_id",
+                    "state",
+                    "authority_ref",
+                    "observation",
+                    "waiting_for_user",
+                    "next_producer_sequence"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "action_id": "action-knowledge-01",
+                  "state": "completed",
+                  "authority_ref": "harness-action:action-knowledge-01",
+                  "observation": {
+                    "observationType": "knowledge",
+                    "summary": "年假制度按当前已发布修订执行",
+                    "sourceRefs": [
+                      "knowledge_document:doc_leave:revision:rev_3:chunk:chunk_7"
+                    ],
+                    "data": {
+                      "status": "ok"
+                    }
+                  },
+                  "waiting_for_user": null,
+                  "next_producer_sequence": 4
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "x-snowharness-doc": "capability-and-collaboration-api.md#提交-harness-行动",
+        "x-snowharness-boundary": "gateway",
+        "x-snowharness-error-codes": [
+          "ACCESS_DENIED",
+          "AUTHENTICATION_REQUIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "RATE_LIMITED",
+          "REQUEST_SCHEMA_INVALID",
+          "RESOURCE_NOT_FOUND"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "invocation_id": {
+                    "type": "string",
+                    "description": "必须等于 Token 绑定的 Invocation"
+                  },
+                  "producer_sequence_start": {
+                    "type": "integer",
+                    "description": "本次行动事件占用的首个 Runtime producer sequence"
+                  },
+                  "action": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "严格 `HarnessNextAction`；每次只能提交一个 action"
+                  }
+                },
+                "required": [
+                  "invocation_id",
+                  "producer_sequence_start",
+                  "action"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/gateway/v1/child-threads": {
       "post": {
         "operationId": "post_gateway_v1_child_threads",
@@ -9226,5 +9395,5 @@
       }
     }
   },
-  "x-snowharness-operation-count": 62
+  "x-snowharness-operation-count": 63
 }

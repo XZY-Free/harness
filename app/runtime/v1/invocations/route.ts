@@ -14,7 +14,7 @@
  * -  扩展：异步启动 HostedHarnessLoop（不阻塞 dispatch 响应）。
  *   - 从 turn_context 提取 thread_id / turn_id（缺失时回退到 placeholder）。
  *   - 调用 startHostedAdapter，loop.run() 内部通过 Event Ingress 回传候选事件。
- *   - 测试可通过 setHostedAdapterOverrides 注入 ingressClient/modelFn；通过 getLastLoopPromise await 完成。
+ *   - 测试可注入 HarnessDecisionPort/HarnessFinalResponsePort；通过 getLastLoopPromise await 完成。
  *
  * 错误映射：
  * - 缺少/非法 Token → 401 AUTHENTICATION_REQUIRED
@@ -97,6 +97,7 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
   if (typeof gw.resume !== "string" || typeof gw.steer !== "string") return false;
   if (typeof gw.tools !== "string" || typeof gw.tool_calls !== "string") return false;
   if (typeof gw.user_action_requests !== "string") return false;
+  if (typeof gw.capability_actions !== "string") return false;
   // §24：governance_config 必填（revision_id + config_digest + config 快照）。
   if (!b.governance_config || typeof b.governance_config !== "object") return false;
   const gov = b.governance_config as Record<string, unknown>;
@@ -110,6 +111,16 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
   const limits = b.execution_limits as Record<string, unknown>;
   if (typeof limits.max_invocation_seconds !== "number") return false;
   if (typeof limits.max_event_bytes !== "number") return false;
+  for (const key of [
+    "max_loop_steps",
+    "max_agent_calls",
+    "max_tool_calls",
+    "max_knowledge_searches",
+    "max_consecutive_same_action",
+  ]) {
+    const value = limits[key];
+    if (value !== undefined && (!Number.isInteger(value) || (value as number) <= 0)) return false;
+  }
   if (
     b.workspace !== undefined &&
     b.workspace !== null &&

@@ -23,9 +23,15 @@
  * - Agent Loop 6 步：理解—查看索引—按需加载—行动—验证—继续/完成。
  */
 import { randomUUID } from "node:crypto";
-import type { AgentCallDisposition } from "@/lib/agents/calls/domain/agent-call";
-import { IngressInvocationTerminalError } from "@/lib/runtime/errors";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import {
+  type HarnessActionExecutors,
+  type HarnessDecisionPort,
+  type HarnessFinalResponsePort,
+  HarnessLoop,
+  HarnessLoopError,
+  type HarnessLoopRecoveryPort,
+} from "@/lib/runtime/harness-loop/loop";
 import type {
   RuntimeCapabilitiesResponse,
   StartInvocationRequestBody,
@@ -47,6 +53,10 @@ export interface GatewayEndpoints {
   resume: string;
   /** steer 命令端点。 */
   steer: string;
+  tools: string;
+  tool_calls: string;
+  user_action_requests: string;
+  capability_actions: string;
 }
 
 // ─── EventIngressClient ─────────────────────────────────
@@ -168,29 +178,6 @@ export type TransientEventBatchSink = (params: {
   }>;
 }) => Promise<void>;
 
-// ─── Harness Loop → AgentCall 桥接（Agent 与 Runtime Authority ）──────────
-
-/**
- * AgentCall action 调用结果（归一化，由 Harness Loop 消费）。
- *
- * - terminal/completed：Agent 结果作为受信任 capability result，交给 Harness 决定最终回答。
- * - pending：AgentCall 仍 queued/running，返回 durable handoff，不调用模型 fallback。
- * - waiting_user：AgentCall 等待用户补充（A2A input-required），Harness Loop 转 parent
- *   waiting_user，resume 复用 SAME AgentCall/task/context。
- * - terminal/failed|cancelled|lost：已提交的 agent.call 无法完成，Harness fail closed。
- */
-export type HarnessRequiredAgentResult = AgentCallDisposition;
-
-/** Harness Loop → AgentCall 桥接器。 */
-export type AgentCallExecutor = (params: {
-  tenantId: string;
-  parentInvocationId: string;
-  threadId: string;
-  turnId: string;
-  agentId: string;
-  input: string;
-}) => Promise<HarnessRequiredAgentResult>;
-
 // ─── startInvocation 类型 ─────────────────────────────────
 
 /** startInvocation 请求参数。 */
@@ -208,11 +195,6 @@ export interface StartInvocationParams {
     capability_id: string;
     mode: "preferred";
   }>;
-  /**
-   * Harness Loop → AgentCall 桥接器（由结构化 agent.call action 使用）。
-   * 当前协议只传递 directive，不因 preferred 自动调用。
-   */
-  agentCallExecutor?: AgentCallExecutor;
   /** 输入 Item 列表（来自 startInvocation 请求体 input_items）。 */
   inputItems: unknown[];
   contextHandle?: string;
@@ -320,6 +302,16 @@ export function hostedAdapterCapabilities(): RuntimeCapabilitiesResponse {
       max_invocation_seconds: 600,
       max_event_bytes: 1_048_576,
     },
+    harness_action_protocol: {
+      version: "1",
+      action_types: [
+        "knowledge.search",
+        "tool.call",
+        "agent.call",
+        "request_user_input",
+        "respond",
+      ],
+    },
   };
 }
 
@@ -337,8 +329,6 @@ export interface HostedHarnessLoopParams {
     capability_id: string;
     mode: "preferred";
   }>;
-  /** Harness Loop → AgentCall action 桥接器。 */
-  agentCallExecutor?: AgentCallExecutor;
   inputItems: unknown[];
   contextHandle?: string;
   workspace?: StartInvocationRequestBody["workspace"];
@@ -349,8 +339,14 @@ export interface HostedHarnessLoopParams {
   authToken: string;
   /** 可注入的 Event Ingress 客户端（测试用）；不传则用 HTTP 默认实现。 */
   ingressClient?: EventIngressClient;
-  /** 模型执行器。未配置时拒绝执行，绝不生成伪造回复。 */
-  modelFn?: (userMessage: string, context: HostedModelContext) => string | Promise<string>;
+  /** 每步只产出一个结构化行动。 */
+  decisionPort?: HarnessDecisionPort;
+  /** respond 行动提交后才允许生成最终正文。 */
+  finalResponsePort?: HarnessFinalResponsePort;
+  /** 统一行动执行器注册表；缺失的已提交行动必须 fail closed。 */
+  actionExecutors?: HarnessActionExecutors;
+  /** 从持久行动事件恢复 Loop 状态。 */
+  recoveryPort?: HarnessLoopRecoveryPort;
   /** response.delta 等短生命周期事件回传通道。 */
   transientEventBatchSink?: TransientEventBatchSink;
   /** 实际执行本轮的模型标识。 */
@@ -367,29 +363,12 @@ export interface HostedHarnessLoopResult {
   responseText: string;
   /** 真实失败时填写；pending/waiting_user 不伪装成失败。 */
   failureReason?: string;
-  /** agent.call 尚未终结时的正式 child handoff。 */
-  agentCallHandoff?: Extract<HarnessRequiredAgentResult, { outcome: "pending" | "waiting_user" }>;
+  /** Loop 正在等待正式 UserActionRequest。 */
+  waitingForUser?: boolean;
+  /** 稳定失败码。 */
+  errorCode?: string;
   /** 已发送的候选事件列表。 */
   sentEvents: RuntimeCandidateEvent[];
-}
-
-export interface HostedModelContext {
-  /** 当前 Invocation 的 ExecutionBinding 冻结模型。 */
-  modelRef: string;
-  contextHandle?: string;
-  workspace?: StartInvocationRequestBody["workspace"];
-  executionLimits?: StartInvocationRequestBody["execution_limits"];
-  traceContext?: StartInvocationRequestBody["trace_context"];
-  /**
-   * 已完成 agent.call 的受信任 observation；无此 action 时为 undefined。
-   */
-  agentResult?: {
-    callId: string;
-    resultText: string;
-    resultJson: unknown;
-  };
-  /** 模型每产生一段正文即调用；事件只进 transient 通道，不写持久账本。 */
-  emitTextDelta?: (delta: string) => Promise<void>;
 }
 
 /**
@@ -415,17 +394,8 @@ function extractUserMessage(inputItems: unknown[]): string {
 }
 
 /**
- * Hosted Runtime 参考 Agent Loop（简化版 6 步）。
- *
- * 6 步：理解—查看索引—按需加载—行动—验证—继续/完成。
- *
- * 简化实现：正文生成过程走 transient response.delta，完成后回传 2 个持久候选事件：
- * 1. response.completed（seq=1）：Agent 输出正式文本（model_ref 来自实际执行器配置）
- * 2. execution.completed（seq=2）：标记执行完成
- *
- * 容错：response.completed 会把 Invocation 转入 completed 终态，
- * execution.completed 会被 ingress 拒绝（IngressInvocationTerminalError）。
- * 捕获此错误视为成功（终态已达成）。
+ * Hosted Runtime Harness 行动循环。
+ * 决策、行动执行和最终正文生成分离；每个行动先写持久 commitment 再执行。
  */
 export class HostedHarnessLoop {
   private readonly params: HostedHarnessLoopParams;
@@ -449,89 +419,90 @@ export class HostedHarnessLoop {
         gatewayEndpoints: this.params.gatewayEndpoints,
         authToken: this.params.authToken,
       });
-    try {
-      const userMessage = extractUserMessage(this.params.inputItems);
-      if (!this.params.modelFn) {
-        throw new Error("Hosted Runtime 未配置模型执行器");
-      }
-      const responseText = await this.params.modelFn(userMessage, {
-        modelRef: this.params.modelRef ?? "unknown",
-        contextHandle: this.params.contextHandle,
-        workspace: this.params.workspace,
-        executionLimits: this.params.executionLimits,
-        traceContext: this.params.traceContext,
-        emitTextDelta: this.params.transientEventBatchSink
-          ? async (delta) => {
-              if (!delta) return;
-              const transientSequence = this.nextTransientSequence;
-              this.nextTransientSequence += 1;
-              await this.params.transientEventBatchSink?.({
-                invocationId: this.params.invocationId,
-                transientSequenceStart: transientSequence,
-                events: [
-                  {
-                    transient_id: `hosted-response-delta-${randomUUID()}`,
-                    transient_sequence: transientSequence,
-                    type: "response.delta",
-                    payload: { delta },
-                  },
-                ],
-              });
-            }
-          : undefined,
-      });
-      // ─── 6 步压缩执行 ────────────────────────────────────
-      // 1. 理解（模型执行器内部完成；正文增量走 transient 通道）
-      // 2. 查看索引（简化：跳过）
-      // 3. 按需加载（简化：跳过）
-      // 4. 行动（response.completed：输出正式文本）
-      // 5. 验证（简化：通过）
-      // 6. 完成（execution.completed：标记终态）
-
-      // 4. response.completed（seq=1）
-      await this.sendEvent(ingressClient, "response.completed", {
-        text: responseText,
-        item_type: "assistant_message",
-        model_ref: this.params.modelRef ?? "unknown",
-        finish_reason: "stop",
-      });
-
-      // 6. execution.completed（seq=2）— 容错 IngressInvocationTerminalError
-      try {
-        await this.sendEvent(ingressClient, "execution.completed", {
-          finish_reason: "execution.completed",
-        });
-      } catch (err) {
-        if (!(err instanceof IngressInvocationTerminalError)) {
-          throw err;
-        }
-        // Invocation 已被 response.completed 转入 completed 终态；视为成功
-      }
-
-      return {
-        completed: true,
-        responseText,
-        sentEvents: this.sentEvents,
-      };
-    } catch (err) {
-      const isMissingModelExecutor = !this.params.modelFn;
-      try {
-        await this.sendEvent(ingressClient, "execution.failed", {
-          error_code: isMissingModelExecutor
-            ? "MODEL_EXECUTOR_UNAVAILABLE"
-            : "MODEL_EXECUTION_FAILED",
-          error_summary: isMissingModelExecutor ? "模型执行器未配置" : "模型调用失败",
-        });
-      } catch {
-        // 失败事件的回传本身不可用时，保留原始失败结果供 Runtime 诊断。
-      }
-      return {
-        completed: false,
-        responseText: "",
-        failureReason: err instanceof Error ? err.message : String(err),
-        sentEvents: this.sentEvents,
-      };
-    }
+    const missingDecisionPort: HarnessDecisionPort = {
+      async decideNextAction() {
+        throw new HarnessLoopError(
+          "MODEL_EXECUTOR_UNAVAILABLE",
+          "Hosted Runtime 未配置 HarnessDecisionPort",
+        );
+      },
+    };
+    const missingFinalResponsePort: HarnessFinalResponsePort = {
+      async generateFinalResponse() {
+        throw new HarnessLoopError(
+          "MODEL_EXECUTOR_UNAVAILABLE",
+          "Hosted Runtime 未配置 HarnessFinalResponsePort",
+        );
+      },
+    };
+    const loop = new HarnessLoop({
+      invocationId: this.params.invocationId,
+      tenantId: this.params.tenantId,
+      threadId: this.params.threadId ?? "",
+      turnId: this.params.turnId ?? "",
+      objective: extractUserMessage(this.params.inputItems),
+      contextHandle: this.params.contextHandle,
+      workspace: this.params.workspace,
+      executionLimits: this.params.executionLimits,
+      traceContext: this.params.traceContext,
+      capabilityDirectives: this.params.capabilityDirectives,
+      decisionPort: this.params.decisionPort ?? missingDecisionPort,
+      finalResponsePort: this.params.finalResponsePort ?? missingFinalResponsePort,
+      executors: this.params.actionExecutors ?? {},
+      limits: this.params.executionLimits
+        ? {
+            maxLoopSteps: this.params.executionLimits.max_loop_steps,
+            maxAgentCalls: this.params.executionLimits.max_agent_calls,
+            maxToolCalls: this.params.executionLimits.max_tool_calls,
+            maxKnowledgeSearches: this.params.executionLimits.max_knowledge_searches,
+            maxConsecutiveSameAction: this.params.executionLimits.max_consecutive_same_action,
+          }
+        : undefined,
+      recoveryPort: this.params.recoveryPort
+        ? {
+            load: async (invocationId) => {
+              const snapshot = await this.params.recoveryPort?.load(invocationId);
+              if (!snapshot) {
+                throw new Error("Harness Loop recovery snapshot 缺失");
+              }
+              this.nextSequence = snapshot.nextProducerSequence;
+              return snapshot;
+            },
+          }
+        : undefined,
+      modelRef: this.params.modelRef ?? "unknown",
+      eventWriter: {
+        write: (type, payload) => this.sendEvent(ingressClient, type, payload),
+      },
+      emitTextDelta: this.params.transientEventBatchSink
+        ? async (delta) => {
+            if (!delta) return;
+            const transientSequence = this.nextTransientSequence;
+            this.nextTransientSequence += 1;
+            await this.params.transientEventBatchSink?.({
+              invocationId: this.params.invocationId,
+              transientSequenceStart: transientSequence,
+              events: [
+                {
+                  transient_id: `hosted-response-delta-${randomUUID()}`,
+                  transient_sequence: transientSequence,
+                  type: "response.delta",
+                  payload: { delta },
+                },
+              ],
+            });
+          }
+        : undefined,
+    });
+    const result = await loop.run();
+    return {
+      completed: result.completed,
+      waitingForUser: result.waitingForUser,
+      responseText: result.responseText,
+      errorCode: result.errorCode,
+      failureReason: result.failureReason,
+      sentEvents: this.sentEvents,
+    };
   }
 
   /**
@@ -583,8 +554,10 @@ export interface CreateHostedAdapterParams {
   eventBatchSink?: EventBatchSink;
   /** 可注入的 transient 事件回传 Sink。 */
   transientEventBatchSink?: TransientEventBatchSink;
-  /** 模型执行器。未配置时会拒绝生成，不允许任何伪造回复。 */
-  modelFn?: (userMessage: string, context: HostedModelContext) => string | Promise<string>;
+  decisionPort?: HarnessDecisionPort;
+  finalResponsePort?: HarnessFinalResponsePort;
+  actionExecutors?: HarnessActionExecutors;
+  recoveryPort?: HarnessLoopRecoveryPort;
   /** 实际执行本轮的模型标识。 */
   modelRef?: string;
 }
@@ -707,7 +680,6 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           threadId: startParams.threadId,
           turnId: startParams.turnId,
           capabilityDirectives: startParams.capabilityDirectives,
-          agentCallExecutor: startParams.agentCallExecutor,
           inputItems: startParams.inputItems,
           contextHandle: startParams.contextHandle,
           gatewayEndpoints: startParams.gatewayEndpoints,
@@ -717,7 +689,10 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           runtimeEndpoint: params.platformEndpoint,
           authToken: startParams.authToken,
           ingressClient,
-          modelFn: params.modelFn,
+          decisionPort: params.decisionPort,
+          finalResponsePort: params.finalResponsePort,
+          actionExecutors: params.actionExecutors,
+          recoveryPort: params.recoveryPort,
           transientEventBatchSink: params.transientEventBatchSink,
           modelRef: params.modelRef,
           correlationId: startParams.correlationId,

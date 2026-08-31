@@ -23,7 +23,7 @@ export class UnsupportedRuntimeProtocolError extends Error {
   }
 }
 
-/** 单个 protocolType 的 Transport 工厂（闭包内绑定该协议所需装配，如 sink/modelFn）。 */
+/** 单个 protocolType 的 Transport 工厂（闭包内绑定该协议所需事件与 Harness 模型端口）。 */
 export type RuntimeTransportFactory = (input: {
   /** managed endpoint configuration（external endpoint URL 或 in-process 引用）。 */
   endpoint: string;

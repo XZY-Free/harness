@@ -59,6 +59,7 @@ import {
 import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import {
   createRuntime,
   getRuntimeById,
@@ -273,7 +274,7 @@ function mockAdapterParams(sink: EventBatchSink): CreateHostedAdapterParams {
     platformEndpoint: "https://platform.internal",
     platformAuthToken: "test-token",
     eventBatchSink: sink,
-    modelFn: (userMessage) => `测试执行器回复：${userMessage}`,
+    ...createDirectResponsePorts((view) => `测试执行器回复：${view.objective}`),
     modelRef: "test-model",
   };
 }

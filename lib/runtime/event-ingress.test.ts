@@ -1061,6 +1061,25 @@ describe("RuntimeEventIngress 序列校验", () => {
     ).rejects.toThrow(EventSequenceGapError);
   });
 
+  it("跨批次 producerSequence 跳号也拒绝", async () => {
+    const { invocationId } = await seedRunningInvocation(ctx);
+    await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 1,
+      events: [makeEvent("evt-cross-batch-1", 1, "progress.snapshot", { step: 1 })],
+    });
+
+    await expect(
+      ingressEventBatch({
+        tenantId: ctx.tenantId,
+        invocationId,
+        producerSequenceStart: 3,
+        events: [makeEvent("evt-cross-batch-3", 3, "progress.snapshot", { step: 3 })],
+      }),
+    ).rejects.toThrow(EventSequenceGapError);
+  });
+
   it("producerSequenceStart 与 events[0] 不匹配 → IngressSequenceStartMismatchError", async () => {
     const { invocationId } = await seedRunningInvocation(ctx);
 

@@ -58,13 +58,14 @@ import {
   IngressInvocationNotFoundError,
   IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
+import { HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
 import {
   getInvocationById,
   setInvocationOutputItem,
   updateInvocationState,
 } from "@/lib/runtime/invocation-queries";
 import { redactSensitiveData } from "@/lib/security/unified-redaction";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt } from "drizzle-orm";
 
 /** 事务句柄类型。 */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -365,6 +366,26 @@ async function processIngressBatch(
     }
   }
 
+  // 跨批次也必须连续。允许一个重放批次以前缀已存在事件开头，但首个新事件
+  // 必须紧跟当前 Invocation 已持久化的最大 producerSequence。
+  const firstNew = dedupResults.find((result) => result.existing === null);
+  if (firstNew) {
+    const [latest] = await tx
+      .select({ producerSequence: runtimeEventIngressTable.producerSequence })
+      .from(runtimeEventIngressTable)
+      .where(eq(runtimeEventIngressTable.invocationId, params.invocationId))
+      .orderBy(desc(runtimeEventIngressTable.producerSequence))
+      .limit(1);
+    const expected = (latest?.producerSequence ?? 0) + 1;
+    if (firstNew.event.producer_sequence !== expected) {
+      throw new EventSequenceGapError(
+        params.invocationId,
+        expected,
+        firstNew.event.producer_sequence,
+      );
+    }
+  }
+
   // 7. 写入新事件 ingress 行（ingressState=accepted）
   const newIngressIds: string[] = [];
   for (const result of dedupResults) {
@@ -510,6 +531,10 @@ async function mapCandidateEvent(
     "execution.completed",
     "execution.failed",
     "execution.cancelled",
+    "harness.action.proposed",
+    "harness.action.started",
+    "harness.action.completed",
+    "harness.action.failed",
   ];
   if (!knownTypes.includes(candidateType)) {
     throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
@@ -528,9 +553,52 @@ async function mapCandidateEvent(
       return await mapExecutionFailed(tx, ctx);
     case "execution.cancelled":
       return await mapExecutionCancelled(tx, ctx);
+    case "harness.action.proposed":
+    case "harness.action.started":
+    case "harness.action.completed":
+    case "harness.action.failed":
+      return await mapHarnessActionEvent(tx, ctx);
     default:
       throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
   }
+}
+
+/** Harness action 事件只记录行动账本，不创建 Item，也不直接改变 Invocation 状态。 */
+async function mapHarnessActionEvent(
+  tx: Tx,
+  ctx: {
+    tenantId: string;
+    invocation: Invocation;
+    threadId: string;
+    turnId: string | null;
+    event: RuntimeCandidateEvent;
+    actorType: ThreadEventActorType;
+    correlationId: string | null;
+  },
+): Promise<CandidateMappingResult> {
+  if (!ctx.turnId) {
+    throw new IngressInvocationNotFoundError(ctx.invocation.id);
+  }
+  const parsed = HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA.safeParse(ctx.event.payload);
+  const expectedState = ctx.event.type.slice("harness.action.".length);
+  if (!parsed.success || parsed.data.state !== expectedState) {
+    throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+  }
+  const sequence = await allocateEventSequences(tx, ctx.threadId, 1);
+  const event = await insertThreadEvent(tx, ctx.threadId, sequence, {
+    eventType: ctx.event.type,
+    turnId: ctx.turnId,
+    invocationId: ctx.invocation.id,
+    actorType: ctx.actorType,
+    payload: parsed.data,
+    correlationId: ctx.correlationId ?? undefined,
+    idempotencyKey: `${ctx.event.type}:${parsed.data.action_id}`,
+  });
+  return {
+    threadEventId: event.id,
+    threadSequence: event.eventSequence,
+    itemId: null,
+  };
 }
 
 /** 计算 ThreadItem 内容 hash（复用 event payload hash 算法）。 */

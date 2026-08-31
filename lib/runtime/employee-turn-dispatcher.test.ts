@@ -263,10 +263,24 @@ describe("dispatchEmployeeTurn", () => {
       turnId: turn.id,
       modelRef: "test-model",
       // 顶层恒为 base harness route；modelRef 作为 Thread 模型事实进入 Binding。
-      modelFn: async (message, context) => {
-        await context.emitTextDelta?.("真实执行器");
-        await context.emitTextDelta?.(`回复：${message}`);
-        return `真实执行器回复：${message}`;
+      decisionPort: {
+        async decideNextAction() {
+          return {
+            actionId: "respond-1",
+            stepNo: 1,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "直接回答",
+            payload: { evidenceRefs: [] },
+          };
+        },
+      },
+      finalResponsePort: {
+        async generateFinalResponse(view, emitDelta) {
+          await emitDelta?.("真实执行器");
+          await emitDelta?.(`回复：${view.objective}`);
+          return `真实执行器回复：${view.objective}`;
+        },
       },
     });
     await dispatched.completion;

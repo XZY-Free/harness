@@ -55,6 +55,7 @@ import {
 import { DEFAULT_ROUTE_SCOPE_KEY, dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
@@ -99,6 +100,10 @@ function mockGatewayEndpoints(): GatewayEndpoints {
     cancel: "https://platform.internal/cancel",
     resume: "https://platform.internal/resume",
     steer: "https://platform.internal/steer",
+    tools: "https://platform.internal/tools",
+    tool_calls: "https://platform.internal/tool-calls",
+    user_action_requests: "https://platform.internal/user-action-requests",
+    capability_actions: "https://platform.internal/capability-actions",
   };
 }
 
@@ -130,7 +135,7 @@ function mockAdapterParams(sink: EventBatchSink): CreateHostedAdapterParams {
     platformEndpoint: "https://platform.internal",
     platformAuthToken: "test-token",
     eventBatchSink: sink,
-    modelFn: (userMessage) => `测试执行器回复：${userMessage}`,
+    ...createDirectResponsePorts((view) => `测试执行器回复：${view.objective}`),
     modelRef: "test-model",
   };
 }
@@ -159,7 +164,7 @@ describe("S05-C05 HostedAdapter 基本能力", () => {
 
     const result = await adapter.getLastLoopPromise?.();
     expect(result?.completed).toBe(false);
-    expect(result?.failureReason).toContain("未配置模型执行器");
+    expect(result?.failureReason).toContain("未配置 HarnessDecisionPort");
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: "execution.failed",
@@ -288,7 +293,7 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
     expect(mock.events.some((event) => event.type === "progress.snapshot")).toBe(false);
   });
 
-  it("response.completed 事件（seq=1，包含 text + model_ref + finish_reason）", async () => {
+  it("response.completed 事件在 respond commitment 后形成（seq=3）", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -306,13 +311,13 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
 
     const responseEvent = mock.events.find((e) => e.type === "response.completed");
     expect(responseEvent).toBeDefined();
-    expect(responseEvent?.producer_sequence).toBe(1);
+    expect(responseEvent?.producer_sequence).toBe(3);
     expect(responseEvent?.payload.text).toBe(loopResult?.responseText);
     expect(responseEvent?.payload.model_ref).toBe("test-model");
     expect(responseEvent?.payload.finish_reason).toBe("stop");
   });
 
-  it("execution.completed 事件（seq=2，终态）", async () => {
+  it("execution.completed 事件在 action.completed 后形成（seq=5，终态）", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -330,11 +335,11 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
 
     const execEvent = mock.events.find((e) => e.type === "execution.completed");
     expect(execEvent).toBeDefined();
-    expect(execEvent?.producer_sequence).toBe(2);
+    expect(execEvent?.producer_sequence).toBe(5);
     expect(execEvent?.payload.finish_reason).toBe("execution.completed");
   });
 
-  it("producer_sequence 在整个 Invocation 内连续递增（1→2）", async () => {
+  it("producer_sequence 覆盖 action 与终态事件并连续递增（1→5）", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -350,10 +355,15 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
     const loopPromise = adapter.getLastLoopPromise?.();
     await loopPromise;
 
-    // 2 个持久事件，序号连续 1, 2
-    expect(mock.events).toHaveLength(2);
-    expect(mock.events[0]?.producer_sequence).toBe(1);
-    expect(mock.events[1]?.producer_sequence).toBe(2);
+    expect(mock.events).toHaveLength(5);
+    expect(mock.events.map((event) => event.producer_sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(mock.events.map((event) => event.type)).toEqual([
+      "harness.action.proposed",
+      "harness.action.started",
+      "response.completed",
+      "harness.action.completed",
+      "execution.completed",
+    ]);
   });
 
   it("Loop 完成后返回 completed=true + responseText + sentEvents", async () => {
@@ -375,7 +385,7 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
     expect(result?.completed).toBe(true);
     expect(result?.failureReason).toBeUndefined();
     expect(result?.responseText).toContain("完成测试");
-    expect(result?.sentEvents).toHaveLength(2);
+    expect(result?.sentEvents).toHaveLength(5);
   });
 
   it("response.completed payload.text 包含用户消息内容（Item 内容）", async () => {
@@ -499,7 +509,13 @@ describe("S05-C05 HostedAdapter AgentUseDirective", () => {
       platformEndpoint: "https://platform.internal",
       platformAuthToken: "test-token",
       eventBatchSink: sink,
-      modelFn: async () => "基础模型已回答",
+      ...createDirectResponsePorts(async () => "基础模型已回答"),
+      actionExecutors: {
+        "agent.call": async () => {
+          executorCalls += 1;
+          throw new Error("preferred 不应直接触发 AgentCall");
+        },
+      },
       modelRef: "test-model",
     });
 
@@ -510,10 +526,6 @@ describe("S05-C05 HostedAdapter AgentUseDirective", () => {
       capabilityDirectives: [
         { capability_type: "agent", capability_id: "agent-1", mode: "preferred" },
       ],
-      agentCallExecutor: async () => {
-        executorCalls += 1;
-        throw new Error("preferred 不应直接触发 AgentCall");
-      },
       inputItems: mockInputItems("无需 Agent 的问题"),
       gatewayEndpoints: mockGatewayEndpoints(),
       authToken: mockAuthToken(),

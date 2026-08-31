@@ -95,6 +95,13 @@ export async function buildRuntimeStartRequestForInvocation(
   } | null;
   const maxInvocationSeconds = caps?.limits?.max_invocation_seconds ?? 600;
   const maxEventBytes = caps?.limits?.max_event_bytes ?? 1_048_576;
+  const governanceLoopLimits = input.governanceConfig.config.harnessLoopLimits as
+    | Record<string, unknown>
+    | undefined;
+  const positiveLimit = (key: string, fallback: number): number => {
+    const value = governanceLoopLimits?.[key];
+    return Number.isInteger(value) && (value as number) > 0 ? (value as number) : fallback;
+  };
 
   // context_handle（每次 dispatch 重新签发）
   const contextHandle = await issueContextHandle({
@@ -165,6 +172,11 @@ export async function buildRuntimeStartRequestForInvocation(
     execution_limits: {
       max_invocation_seconds: maxInvocationSeconds,
       max_event_bytes: maxEventBytes,
+      max_loop_steps: positiveLimit("maxLoopSteps", 12),
+      max_agent_calls: positiveLimit("maxAgentCalls", 3),
+      max_tool_calls: positiveLimit("maxToolCalls", 8),
+      max_knowledge_searches: positiveLimit("maxKnowledgeSearches", 6),
+      max_consecutive_same_action: positiveLimit("maxConsecutiveSameAction", 2),
     },
     trace_context: {
       trace_id: input.correlationId ?? invocation.id,

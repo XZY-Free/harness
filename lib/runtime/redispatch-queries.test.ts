@@ -543,6 +543,7 @@ function buildRedispatchParams(
         tools: "https://gateway.internal/tools",
         tool_calls: "https://gateway.internal/tool-calls",
         user_action_requests: "https://gateway.internal/user-action-requests",
+        capability_actions: "https://gateway.internal/capability-actions",
       },
       governanceConfig: {
         revision_id: "gov-rev-1",
@@ -1079,6 +1080,7 @@ describe("01 专项 Durable Dispatch Retry（Attempt lane）", () => {
           tools: "https://gateway.internal/tools",
           tool_calls: "https://gateway.internal/tool-calls",
           user_action_requests: "https://gateway.internal/user-action-requests",
+          capability_actions: "https://gateway.internal/capability-actions",
         },
         governanceConfig: {
           revision_id: "test-governance-revision",
@@ -1516,6 +1518,7 @@ function buildWorkerAttemptParams(
         tools: "https://gateway.internal/tools",
         tool_calls: "https://gateway.internal/tool-calls",
         user_action_requests: "https://gateway.internal/user-action-requests",
+        capability_actions: "https://gateway.internal/capability-actions",
       },
       governanceConfig: {
         revision_id: "test-governance-revision",

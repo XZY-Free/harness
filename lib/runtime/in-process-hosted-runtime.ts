@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  type AgentCallExecutor,
-  type HostedModelContext,
   type RuntimeAdapter,
   type StartInvocationParams,
   type TransientEventBatchSink,
@@ -9,6 +7,12 @@ import {
   hostedAdapterCapabilities,
 } from "@/lib/runtime/adapters/hosted-adapter";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import type {
+  HarnessActionExecutors,
+  HarnessDecisionPort,
+  HarnessFinalResponsePort,
+  HarnessLoopRecoveryPort,
+} from "@/lib/runtime/harness-loop/loop";
 import type {
   CancelInvocationRequest,
   CancelInvocationResponse,
@@ -21,8 +25,6 @@ import type {
   SteerInvocationRequest,
   SteerInvocationResponse,
 } from "@/lib/runtime/runtime-client";
-
-type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
 
 interface PendingInvocation {
   readonly request: StartInvocationRequest;
@@ -40,11 +42,12 @@ export interface InProcessHostedRuntimeClient extends RuntimeHttpClient {
 }
 
 export function createInProcessHostedRuntimeClient(params: {
-  modelFn: ModelFn;
+  decisionPort: HarnessDecisionPort;
+  finalResponsePort: HarnessFinalResponsePort;
   /** 平台租户 id（Harness Loop 调 AgentCall 时作用域）。 */
   tenantId?: string;
-  /** Harness Loop → AgentCall action 桥接器。 */
-  agentCallExecutor?: AgentCallExecutor;
+  actionExecutors?: HarnessActionExecutors;
+  recoveryPort?: HarnessLoopRecoveryPort;
   ingressEventBatch: (params: {
     invocationId: string;
     events: RuntimeCandidateEvent[];
@@ -94,7 +97,10 @@ export function createInProcessHostedRuntimeClient(params: {
           platformEndpoint: "in-process://platform",
           platformAuthToken,
           modelRef,
-          modelFn: params.modelFn,
+          decisionPort: params.decisionPort,
+          finalResponsePort: params.finalResponsePort,
+          actionExecutors: params.actionExecutors,
+          recoveryPort: params.recoveryPort,
           eventBatchSink: params.ingressEventBatch,
           transientEventBatchSink: params.ingressTransientEventBatch,
         });
@@ -105,7 +111,6 @@ export function createInProcessHostedRuntimeClient(params: {
           threadId: turnContext?.thread_id ?? null,
           turnId: turnContext?.turn_id ?? null,
           capabilityDirectives: invocation.request.requestBody.capability_directives,
-          agentCallExecutor: params.agentCallExecutor,
           inputItems: invocation.request.requestBody.input_items,
           contextHandle: invocation.request.requestBody.context_handle,
           gatewayEndpoints: invocation.request.requestBody.gateway_endpoints,

@@ -18,6 +18,7 @@ import {
 import type { RunnerSigningIdentity } from "@/lib/runtime/domain/runner-signing-identity";
 import { PUBLICATION_CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { computeEvidenceManifestDigest } from "@/lib/runtime/domain/runtime-conformance-run";
+import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import { runPublicationConformanceSuite } from "@/lib/runtime/runtime-conformance-runner";
 import {
   buildDsseConformanceEnvelope,
@@ -186,7 +187,7 @@ function createEvidenceProvider(options?: {
         platformEndpoint: "in-process://hosted-conformance-test",
         platformAuthToken: "conformance-test-token",
         eventBatchSink: capturing.sink,
-        modelFn: async (message) => `conformance probe reply: ${message}`,
+        ...createDirectResponsePorts(async (view) => `conformance probe reply: ${view.objective}`),
         modelRef: "conformance-test-model",
       });
       const caseResults = await runPublicationConformanceSuite({

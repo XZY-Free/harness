@@ -191,6 +191,44 @@ curl 'https://snow.example.com/gateway/v1/skills/skill_anomaly_review/content?in
 
 成功返回内容时幂等写 `CapabilityUse`。内容超过 Gateway 上限时返回短期受控 `content_ref` 和相同 hash，Runtime 仍必须在使用前校验完整内容 hash。Skill 不得携带 Secret；违反内容扫描策略返回 `CAPABILITY_CONTENT_BLOCKED`。
 
+### 3.4 提交 Harness 行动
+
+`POST /gateway/v1/capability-actions`
+
+| 请求参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---:|---|
+| Authorization | Header | string | 是 | Invocation-bound Gateway Workload Token |
+| Idempotency-Key | Header | string | 是 | 由 `invocation_id + ":" + action.actionId` 稳定组成 |
+| invocation_id | Body | string | 是 | 必须等于 Token 绑定的 Invocation |
+| producer_sequence_start | Body | integer | 是 | 本次行动事件占用的首个 Runtime producer sequence |
+| action | Body | object | 是 | 严格 `HarnessNextAction`；每次只能提交一个 action |
+
+```bash
+curl -X POST 'https://snow.example.com/gateway/v1/capability-actions' \
+  -H 'Authorization: Bearer <invocation-workload-token>' \
+  -H 'Idempotency-Key: inv_01J...:action-knowledge-01' \
+  -H 'Content-Type: application/json' \
+  -d '{"invocation_id":"inv_01J...","producer_sequence_start":1,"action":{"actionId":"action-knowledge-01","stepNo":1,"actionType":"knowledge.search","purposeCode":"load_policy","shortPurpose":"读取年假制度","payload":{"query":"年假制度","maxResults":5}}}'
+```
+
+```json
+{
+  "action_id": "action-knowledge-01",
+  "state": "completed",
+  "authority_ref": "harness-action:action-knowledge-01",
+  "observation": {
+    "observationType": "knowledge",
+    "summary": "年假制度按当前已发布修订执行",
+    "sourceRefs": ["knowledge_document:doc_leave:revision:rev_3:chunk:chunk_7"],
+    "data": {"status":"ok"}
+  },
+  "waiting_for_user": null,
+  "next_producer_sequence": 4
+}
+```
+
+平台先把 `harness.action.proposed`、`harness.action.started` 写入现有 Runtime Event Ingress，再调用平台内执行器；成功后写 `harness.action.completed`，失败写 `harness.action.failed`。相同 `actionId` 与相同 digest 重试返回既有结果，不重复执行已完成行动。External Runtime 不直连数据库、Credential 或 Agent endpoint。`respond` 由 Runtime 自己提交并调用 Final Response Port，不经本接口。
+
 ## 4. Child Thread Command API
 
 ### 4.1 创建委派 Child Thread

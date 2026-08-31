@@ -26,6 +26,13 @@ export const INITIAL_GOVERNANCE_CONFIG: GovernanceConfig = {
   commandDenyList: [],
   formatOnWrite: false,
   verifyBeforeDelivery: true,
+  harnessLoopLimits: {
+    maxLoopSteps: 12,
+    maxAgentCalls: 3,
+    maxToolCalls: 8,
+    maxKnowledgeSearches: 6,
+    maxConsecutiveSameAction: 2,
+  },
 };
 
 /** 校验失败异常（§55.1 invalid config）。 */
@@ -60,5 +67,22 @@ export function validateGovernanceConfig(config: unknown): asserts config is Gov
   }
   if (typeof c.verifyBeforeDelivery !== "boolean") {
     throw new GovernanceConfigValidationError("verifyBeforeDelivery 必须是布尔");
+  }
+  if (c.harnessLoopLimits !== undefined) {
+    if (!c.harnessLoopLimits || typeof c.harnessLoopLimits !== "object") {
+      throw new GovernanceConfigValidationError("harnessLoopLimits 必须是对象");
+    }
+    for (const key of [
+      "maxLoopSteps",
+      "maxAgentCalls",
+      "maxToolCalls",
+      "maxKnowledgeSearches",
+      "maxConsecutiveSameAction",
+    ]) {
+      const value = (c.harnessLoopLimits as Record<string, unknown>)[key];
+      if (value !== undefined && (!Number.isInteger(value) || (value as number) <= 0)) {
+        throw new GovernanceConfigValidationError(`harnessLoopLimits.${key} 必须是正整数`);
+      }
+    }
   }
 }

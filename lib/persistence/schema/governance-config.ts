@@ -43,6 +43,14 @@ export interface GovernanceConfig {
   commandDenyList: string[];
   formatOnWrite: boolean;
   verifyBeforeDelivery: boolean;
+  /** Harness 行动循环预算；省略时由 Runtime 使用统一默认值。 */
+  harnessLoopLimits?: {
+    maxLoopSteps?: number;
+    maxAgentCalls?: number;
+    maxToolCalls?: number;
+    maxKnowledgeSearches?: number;
+    maxConsecutiveSameAction?: number;
+  };
 }
 
 // ─── LifecycleState ──────────────────────────────────────────

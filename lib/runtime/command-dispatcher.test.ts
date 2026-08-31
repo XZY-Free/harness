@@ -539,6 +539,7 @@ function buildCommandRuntimeEndpointResolution(
       tools: "https://gateway.internal/tools",
       tool_calls: "https://gateway.internal/tool-calls",
       user_action_requests: "https://gateway.internal/user-action-requests",
+      capability_actions: "https://gateway.internal/capability-actions",
     },
     governanceConfig: {
       revision_id: "gov-rev-1",
@@ -1408,6 +1409,7 @@ describe("S05-C04 dispatchResumeCommand", () => {
           tools: "https://gateway.internal/tools",
           tool_calls: "https://gateway.internal/tool-calls",
           user_action_requests: "https://gateway.internal/user-action-requests",
+          capability_actions: "https://gateway.internal/capability-actions",
         },
       }),
       correlationId: "resume-redispatch-test-1",
@@ -2094,6 +2096,7 @@ describe("S05-C04 基础 Harness Route redispatch 不依赖 Agent（§8.3）", (
           tools: "https://gateway.internal/tools",
           tool_calls: "https://gateway.internal/tool-calls",
           user_action_requests: "https://gateway.internal/user-action-requests",
+          capability_actions: "https://gateway.internal/capability-actions",
         },
       }),
       correlationId: "resume-base-harness-redispatch",

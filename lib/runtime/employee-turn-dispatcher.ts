@@ -1,4 +1,3 @@
-import { invokeRequiredAgent } from "@/lib/agents/calls/application/harness-required-agent";
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
@@ -8,13 +7,20 @@ import { logger } from "@/lib/logger";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
-import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
 import {
   type RuntimeTransportAuth,
   resolveOutboundRuntimeAuth,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { HARNESS_NEXT_ACTION_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
+import type {
+  HarnessActionExecutors,
+  HarnessDecisionPort,
+  HarnessFinalResponsePort,
+} from "@/lib/runtime/harness-loop/loop";
+import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
+import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import type { InProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { collectModelText } from "@/lib/runtime/model-text-stream";
@@ -22,9 +28,7 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
-import { streamText } from "ai";
-
-type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
+import { generateObject, streamText } from "ai";
 
 /** 使用统一解析入口 — Projection 是唯一数据源。 */
 const configuredResolver = createConfiguredRouteResolver({
@@ -54,17 +58,42 @@ export interface EmployeeTurnDispatchResult {
   completion: Promise<void>;
 }
 
-function configuredModelFn(): ModelFn {
-  return async (message, context) => {
-    if (!aiConfig.apiKey) {
-      throw new Error("LLM_API_KEY 未配置");
-    }
-    const result = streamText({
-      model: getChatModel(context.modelRef),
-      prompt: message,
-      maxOutputTokens: aiConfig.maxOutputTokens || undefined,
-    });
-    return collectModelText(result.fullStream, context.emitTextDelta);
+function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
+  return {
+    async decideNextAction(view) {
+      if (!aiConfig.apiKey) {
+        throw new Error("LLM_API_KEY 未配置");
+      }
+      const { object } = await generateObject({
+        model: getChatModel(modelRef),
+        schema: HARNESS_NEXT_ACTION_SCHEMA,
+        prompt: [
+          "你是 SnowHarness 的行动决策器。每步只返回一个符合 Schema 的行动，不输出正文或隐藏推理。",
+          "只有 observations 足以支持回答时才返回 respond；用户 preferred Agent 只是候选，不表示必须调用。",
+          JSON.stringify(view),
+        ].join("\n\n"),
+      });
+      return object;
+    },
+  };
+}
+
+function configuredFinalResponsePort(modelRef: string): HarnessFinalResponsePort {
+  return {
+    async generateFinalResponse(view, emitDelta) {
+      if (!aiConfig.apiKey) {
+        throw new Error("LLM_API_KEY 未配置");
+      }
+      const result = streamText({
+        model: getChatModel(modelRef),
+        prompt: [
+          "根据当前用户目标与已完成 observations 生成最终可见回答。不得声称执行过 actionHistory 中不存在或未 completed 的行动。",
+          JSON.stringify(view),
+        ].join("\n\n"),
+        maxOutputTokens: aiConfig.maxOutputTokens || undefined,
+      });
+      return collectModelText(result.fullStream, emitDelta);
+    },
   };
 }
 
@@ -81,7 +110,9 @@ export async function dispatchEmployeeTurn(params: {
   threadId: string;
   turnId: string;
   modelRef?: string;
-  modelFn?: ModelFn;
+  decisionPort?: HarnessDecisionPort;
+  finalResponsePort?: HarnessFinalResponsePort;
+  actionExecutors?: HarnessActionExecutors;
   /**
    * ExecutionSubject：由调用方（服务端 route 层）从认证 Principal 生成。
    * 禁止从 Turn JSON / 请求体接受 caller 自报 subject；本层不做校验兜底。
@@ -171,20 +202,15 @@ export async function dispatchEmployeeTurn(params: {
     factories: {
       harness_runtime_protocol: () =>
         createInProcessHostedRuntimeClient({
-          modelFn: params.modelFn ?? configuredModelFn(),
+          decisionPort:
+            params.decisionPort ?? configuredDecisionPort(params.modelRef ?? aiConfig.chatModel),
+          finalResponsePort:
+            params.finalResponsePort ??
+            configuredFinalResponsePort(params.modelRef ?? aiConfig.chatModel),
           tenantId: params.tenantId,
-          // Harness Loop → AgentCall action 桥接器；preferred directive 本身不触发调用。
-          agentCallExecutor: (exec) =>
-            invokeRequiredAgent({
-              tenantId: params.tenantId,
-              parentInvocationId: exec.parentInvocationId,
-              threadId: exec.threadId,
-              turnId: exec.turnId,
-              agentId: exec.agentId,
-              input: exec.input,
-              executionSubject: params.executionSubject ?? null,
-              resolveRoute,
-            }),
+          actionExecutors:
+            params.actionExecutors ?? createPlatformHarnessActionExecutors(params.tenantId),
+          recoveryPort: createMySqlHarnessLoopRecoveryPort(params.tenantId),
           ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
             await ingressEventBatch({
               tenantId: params.tenantId,
@@ -235,6 +261,7 @@ export async function dispatchEmployeeTurn(params: {
           tools: "in-process://gateway/v1/tools",
           tool_calls: "in-process://gateway/v1/tool-calls",
           user_action_requests: "in-process://gateway/v1/user-action-requests",
+          capability_actions: "in-process://gateway/v1/capability-actions",
         },
         governanceConfig: {
           revision_id: binding.governanceConfigRevisionId,

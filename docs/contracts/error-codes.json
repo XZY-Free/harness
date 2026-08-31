@@ -1,5 +1,5 @@
 {
-  "contract_version": "11.1.0",
+  "contract_version": "11.2.0",
   "errors": {
     "ACCESS_DENIED": {
       "http": 403,
@@ -7,6 +7,14 @@
     },
     "ACTION_SCOPE_DENIED": {
       "http": 403,
+      "retryable": false
+    },
+    "AGENT_ACTION_NOT_ALLOWED": {
+      "http": 403,
+      "retryable": false
+    },
+    "AGENT_CALL_EXECUTOR_UNAVAILABLE": {
+      "http": 503,
       "retryable": false
     },
     "ACTIVE_LEGAL_HOLD": {
@@ -149,6 +157,26 @@
       "http": 422,
       "retryable": false
     },
+    "HARNESS_ACTION_EXECUTOR_UNAVAILABLE": {
+      "http": 503,
+      "retryable": false
+    },
+    "HARNESS_ACTION_SCHEMA_INVALID": {
+      "http": 422,
+      "retryable": false
+    },
+    "HARNESS_LOOP_REPEATED_ACTION": {
+      "http": 422,
+      "retryable": false
+    },
+    "HARNESS_LOOP_STATE_RECOVERY_FAILED": {
+      "http": 409,
+      "retryable": false
+    },
+    "HARNESS_LOOP_STEP_LIMIT_EXCEEDED": {
+      "http": 422,
+      "retryable": false
+    },
     "IDEMPOTENCY_CONFLICT": {
       "http": 409,
       "retryable": false
@@ -172,6 +200,10 @@
     "JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT": {
       "http": 409,
       "retryable": false
+    },
+    "KNOWLEDGE_ACTION_FAILED": {
+      "http": 503,
+      "retryable": true
     },
     "JOB_USER_ACTION_NOT_ALLOWED": {
       "http": 409,
@@ -283,6 +315,10 @@
     },
     "TOOL_SCHEMA_CHANGED": {
       "http": 409,
+      "retryable": true
+    },
+    "TOOL_ACTION_FAILED": {
+      "http": 503,
       "retryable": true
     },
     "TURN_ALREADY_TERMINAL": {

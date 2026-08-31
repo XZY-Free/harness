@@ -1,4 +1,5 @@
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import {
   type InProcessHostedRuntimeClient,
   createInProcessHostedRuntimeClient,
@@ -11,11 +12,10 @@ describe("InProcessHostedRuntimeClient", () => {
     const events: RuntimeCandidateEvent[] = [];
     let modelCalls = 0;
     const client = createInProcessHostedRuntimeClient({
-      modelFn: async (message, context) => {
+      ...createDirectResponsePorts(async (view) => {
         modelCalls += 1;
-        expect(context.modelRef).toBe("configured-model");
-        return `模型回复：${message}`;
-      },
+        return `模型回复：${view.objective}`;
+      }),
       ingressEventBatch: async ({ events: batch }) => {
         events.push(...batch);
       },
@@ -47,6 +47,7 @@ describe("InProcessHostedRuntimeClient", () => {
           tools: "in-process://tools",
           tool_calls: "in-process://tool-calls",
           user_action_requests: "in-process://user-action-requests",
+          capability_actions: "in-process://capability-actions",
         },
         governance_config: {
           revision_id: "gov-rev-1",
@@ -73,10 +74,13 @@ describe("InProcessHostedRuntimeClient", () => {
 
     expect(modelCalls).toBe(1);
     expect(events.map((event) => event.type)).toEqual([
+      "harness.action.proposed",
+      "harness.action.started",
       "response.completed",
+      "harness.action.completed",
       "execution.completed",
     ]);
-    expect(events[0]?.payload).toMatchObject({
+    expect(events.find((event) => event.type === "response.completed")?.payload).toMatchObject({
       text: "模型回复：你好",
       model_ref: "configured-model",
     });
@@ -84,7 +88,7 @@ describe("InProcessHostedRuntimeClient", () => {
 
   it("尚未启动时不暴露 Agent Loop Promise", () => {
     const client = createInProcessHostedRuntimeClient({
-      modelFn: async () => "已完成",
+      ...createDirectResponsePorts(async () => "已完成"),
       ingressEventBatch: async () => {},
     });
 

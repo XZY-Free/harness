@@ -1,5 +1,5 @@
 {
-  "contract_version": "11.0.0",
+  "contract_version": "11.1.0",
   "compatibility": {
     "new_event_type": "additive",
     "new_optional_payload_field": "additive",
@@ -42,6 +42,10 @@
     "invocation.waiting": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "invocation_id"], "skippable_for_projection": false},
     "invocation.resumed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "invocation_id"], "skippable_for_projection": false},
     "invocation.completed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "invocation_id"], "skippable_for_projection": false},
+    "harness.action.proposed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "turn_id", "invocation_id", "action_id"], "skippable_for_projection": false},
+    "harness.action.started": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "turn_id", "invocation_id", "action_id"], "skippable_for_projection": false},
+    "harness.action.completed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "turn_id", "invocation_id", "action_id"], "skippable_for_projection": false},
+    "harness.action.failed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "turn_id", "invocation_id", "action_id"], "skippable_for_projection": false},
     "invocation.failed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "invocation_id"], "skippable_for_projection": false},
     "invocation.cancelled": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "invocation_id"], "skippable_for_projection": false},
     "invocation.lost": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id", "invocation_id"], "skippable_for_projection": false},

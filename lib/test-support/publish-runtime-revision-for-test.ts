@@ -28,6 +28,7 @@ import {
   type RuntimeConformanceReport,
   computeEvidenceManifestDigest,
 } from "@/lib/runtime/domain/runtime-conformance-run";
+import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
@@ -127,7 +128,7 @@ export async function runPublicationConformanceForTest(params: {
     platformEndpoint: "in-process://conformance-test",
     platformAuthToken: "conformance-test-token",
     eventBatchSink: capturing.sink,
-    modelFn: async (message) => `conformance probe reply: ${message}`,
+    ...createDirectResponsePorts(async (view) => `conformance probe reply: ${view.objective}`),
     modelRef: "conformance-test-model",
   });
 

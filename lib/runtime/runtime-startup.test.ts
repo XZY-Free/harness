@@ -354,6 +354,7 @@ function buildRuntimeEndpointResolution(runtimeRevisionId: string): RuntimeEndpo
       tools: "https://platform.internal/gateway/v1/tools",
       tool_calls: "https://platform.internal/gateway/v1/tool-calls",
       user_action_requests: "https://platform.internal/gateway/v1/user-action-requests",
+      capability_actions: "https://platform.internal/gateway/v1/capability-actions",
     },
     governanceConfig: {
       revision_id: "gov-rev-1",
@@ -484,6 +485,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
           tools: "https://gw/tools",
           tool_calls: "https://gw/tool-calls",
           user_action_requests: "https://gw/user-action-requests",
+          capability_actions: "https://gw/capability-actions",
         },
         workspace: { workspace_binding_id: null, workspace_type: "none" },
         governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
@@ -528,6 +530,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
             tools: "https://gw/tools",
             tool_calls: "https://gw/tool-calls",
             user_action_requests: "https://gw/user-action-requests",
+            capability_actions: "https://gw/capability-actions",
           },
           workspace: { workspace_binding_id: null, workspace_type: "none" },
           governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
@@ -572,6 +575,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
             tools: "https://gw/tools",
             tool_calls: "https://gw/tool-calls",
             user_action_requests: "https://gw/user-action-requests",
+            capability_actions: "https://gw/capability-actions",
           },
           workspace: { workspace_binding_id: null, workspace_type: "none" },
           governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
@@ -616,6 +620,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
             tools: "https://gw/tools",
             tool_calls: "https://gw/tool-calls",
             user_action_requests: "https://gw/user-action-requests",
+            capability_actions: "https://gw/capability-actions",
           },
           workspace: { workspace_binding_id: null, workspace_type: "none" },
           governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
@@ -982,6 +987,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
             tools: "https://gw/tools",
             tool_calls: "https://gw/tool-calls",
             user_action_requests: "https://gw/user-action-requests",
+            capability_actions: "https://gw/capability-actions",
           },
           governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
           gateway_access: {
@@ -1026,6 +1032,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
         tools: "https://gw/tools",
         tool_calls: "https://gw/tool-calls",
         user_action_requests: "https://gw/user-action-requests",
+        capability_actions: "https://gw/capability-actions",
       },
       governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
       gateway_access: {
@@ -1096,6 +1103,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
             tools: "https://gw/tools",
             tool_calls: "https://gw/tool-calls",
             user_action_requests: "https://gw/user-action-requests",
+            capability_actions: "https://gw/capability-actions",
           },
           governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
           gateway_access: {
@@ -1139,6 +1147,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
         tools: "https://gw/tools",
         tool_calls: "https://gw/tool-calls",
         user_action_requests: "https://gw/user-action-requests",
+        capability_actions: "https://gw/capability-actions",
       },
       governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
       gateway_access: {
@@ -1188,14 +1197,28 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
   });
 
   it("Runtime route 把当前输入、handle、workspace、limits、trace 传入实际 HostedHarnessLoop", async () => {
-    let modelArgs: unknown[] = [];
+    let decisionView: unknown = null;
     const adapter = createHostedAdapter({
       platformEndpoint: "https://platform.internal",
       platformAuthToken: "unused",
       eventBatchSink: async () => {},
-      modelFn: (...args: unknown[]) => {
-        modelArgs = args;
-        return "ok";
+      decisionPort: {
+        async decideNextAction(view) {
+          decisionView = view;
+          return {
+            actionId: "respond-1",
+            stepNo: 1,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "测试回答",
+            payload: { evidenceRefs: [] },
+          };
+        },
+      },
+      finalResponsePort: {
+        async generateFinalResponse() {
+          return "ok";
+        },
       },
       modelRef: "test-model",
     });
@@ -1231,6 +1254,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
             tools: "https://gw/tools",
             tool_calls: "https://gw/tool-calls",
             user_action_requests: "https://gw/user-action-requests",
+            capability_actions: "https://gw/capability-actions",
           },
           workspace: { workspace_binding_id: "wbind-1", workspace_type: "managed" },
           governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
@@ -1248,13 +1272,14 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     );
     expect(response.status).toBe(202);
     await adapter.getLastLoopPromise?.();
-    expect(modelArgs[0]).toBe("真实当前输入");
-    expect(modelArgs[1]).toEqual({
-      modelRef: "test-model",
-      contextHandle: "ctx_actual",
-      workspace: { workspace_binding_id: "wbind-1", workspace_type: "managed" },
-      executionLimits: { max_invocation_seconds: 321, max_event_bytes: 654 },
-      traceContext: { trace_id: "trace-1", span_id: "span-1" },
+    expect(decisionView).toMatchObject({
+      objective: "真实当前输入",
+      context: {
+        contextHandle: "ctx_actual",
+        workspace: { workspace_binding_id: "wbind-1", workspace_type: "managed" },
+        executionLimits: { max_invocation_seconds: 321, max_event_bytes: 654 },
+        traceContext: { trace_id: "trace-1", span_id: "span-1" },
+      },
     });
   });
 

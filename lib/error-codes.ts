@@ -22,6 +22,8 @@ export const API_ERROR_CODES = {
   ACTION_SCOPE_DENIED: { http: 403, retryable: false },
   ACTIVE_LEGAL_HOLD: { http: 409, retryable: false },
   AGENT_CAPABILITY_UNSUPPORTED: { http: 422, retryable: false },
+  AGENT_ACTION_NOT_ALLOWED: { http: 403, retryable: false },
+  AGENT_CALL_EXECUTOR_UNAVAILABLE: { http: 503, retryable: false },
   AGENT_CONTRACT_SNAPSHOT_MISSING: { http: 409, retryable: false },
   ARTIFACT_ATTESTATION_FAILED: { http: 422, retryable: false },
   ARTIFACT_ATTESTATION_REVOKED: { http: 409, retryable: false },
@@ -108,6 +110,13 @@ export const API_ERROR_CODES = {
   PROJECTION_ORPHANED_ROUTE: { http: 422, retryable: false },
   /** : Hosted 供应 AgentRevision 绑定验证失败。 */
   HOSTED_REVISION_BINDING_INVALID: { http: 422, retryable: false },
+  HARNESS_ACTION_EXECUTOR_UNAVAILABLE: { http: 503, retryable: false },
+  HARNESS_ACTION_SCHEMA_INVALID: { http: 422, retryable: false },
+  HARNESS_LOOP_REPEATED_ACTION: { http: 422, retryable: false },
+  HARNESS_LOOP_STATE_RECOVERY_FAILED: { http: 409, retryable: false },
+  HARNESS_LOOP_STEP_LIMIT_EXCEEDED: { http: 422, retryable: false },
+  KNOWLEDGE_ACTION_FAILED: { http: 503, retryable: true },
+  TOOL_ACTION_FAILED: { http: 503, retryable: true },
 } as const satisfies Readonly<Record<string, ApiErrorDefinition>>;
 
 export type ApiErrorCode = keyof typeof API_ERROR_CODES;

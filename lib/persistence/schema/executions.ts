@@ -475,6 +475,10 @@ export const RUNTIME_CANDIDATE_EVENT_TYPES = [
   "execution.completed",
   "execution.failed",
   "execution.cancelled",
+  "harness.action.proposed",
+  "harness.action.started",
+  "harness.action.completed",
+  "harness.action.failed",
 ] as const;
 export type RuntimeCandidateEventType = (typeof RUNTIME_CANDIDATE_EVENT_TYPES)[number];
 

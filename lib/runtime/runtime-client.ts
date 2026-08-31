@@ -62,6 +62,7 @@ export interface GatewayEndpoints {
   tools: string;
   tool_calls: string;
   user_action_requests: string;
+  capability_actions: string;
 }
 
 /** Runtime 能力探测响应（GET /runtime/v1/capabilities）。 */
@@ -83,6 +84,12 @@ export interface RuntimeCapabilitiesResponse {
   limits: {
     max_invocation_seconds: number;
     max_event_bytes: number;
+  };
+  harness_action_protocol?: {
+    version: "1";
+    action_types: Array<
+      "knowledge.search" | "tool.call" | "agent.call" | "request_user_input" | "respond"
+    >;
   };
 }
 
@@ -120,6 +127,11 @@ export interface StartInvocationRequestBody {
   execution_limits: {
     max_invocation_seconds: number;
     max_event_bytes: number;
+    max_loop_steps?: number;
+    max_agent_calls?: number;
+    max_tool_calls?: number;
+    max_knowledge_searches?: number;
+    max_consecutive_same_action?: number;
   };
   trace_context: {
     trace_id: string;

@@ -21,6 +21,7 @@ import {
   computeCaseEvidenceDigest,
   computeEvidenceManifestDigest,
 } from "@/lib/runtime/domain/runtime-conformance-run";
+import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import { runPublicationConformanceSuite } from "@/lib/runtime/runtime-conformance-runner";
 import {
   buildDsseConformanceEnvelope,
@@ -46,7 +47,7 @@ function createConformanceHostedAdapter() {
       platformEndpoint: "in-process://conformance-test",
       platformAuthToken: "conformance-test-token",
       eventBatchSink: capturing.sink,
-      modelFn: async (message) => `probe: ${message}`,
+      ...createDirectResponsePorts(async (view) => `probe: ${view.objective}`),
       modelRef: "conformance-test-model",
     }),
     capturing,
@@ -601,6 +602,7 @@ describe("关口01 Codex 审查修复", () => {
     // 反转顶层键序构造「值等价但 JSON.stringify 不同」的 capabilities。
     const reordered = {
       limits: probe.limits,
+      harness_action_protocol: probe.harness_action_protocol,
       features: probe.features,
       protocol_versions: probe.protocol_versions,
     };
