@@ -36,7 +36,7 @@ export default async function StudioLayout({
     principal = await resolveStudioPrincipal(await headers());
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      return <StudioGatePage status={401} message="未认证：缺少 SSO 身份" />;
+      return <StudioGatePage status={401} message="当前身份无法进入管理后台" fullScreen />;
     }
     throw error;
   }
@@ -47,7 +47,7 @@ export default async function StudioLayout({
   }
   const allowed = await hasStudioAction(principal, "studio.access");
   if (!allowed) {
-    return <StudioGatePage status={403} message="无 studio.access 权限" />;
+    return <StudioGatePage status={403} message="当前账号没有后台访问权限" fullScreen />;
   }
 
   // S11-W01：解析 Principal 并计算 8 大菜单可见性。
@@ -73,10 +73,9 @@ export default async function StudioLayout({
 
   return (
     <StudioToastProvider>
-      <div className="flex h-screen bg-[var(--bg)]">
+      <div className="flex h-dvh bg-background text-foreground">
         <StudioNav visibleItems={visibility} />
-        {/* 12-P2-6：小屏 pt-12 给 hamburger 留空间，px-4 紧凑；md+ 恢复 px-8 py-6 */}
-        <main className="min-w-0 flex-1 overflow-y-auto px-4 pt-12 pb-6 md:px-8 md:py-6">
+        <main className="min-w-0 flex-1 overflow-y-auto px-5 pt-16 pb-10 md:px-10 md:py-10 lg:px-12">
           {children}
         </main>
       </div>

@@ -1,4 +1,9 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
+import { StudioPage } from "@/components/studio/studio-page";
+import {
+  StudioSettingsRow,
+  StudioSettingsSection,
+} from "@/components/studio/studio-settings-section";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
@@ -17,17 +22,23 @@ export default async function ObservabilityPage() {
   const gate = await requireStudioPagePermission("studio.access");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
+  const unavailable = (
+    <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">尚未开放</span>
+  );
+
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">观测与评测</h1>
-      <p className="mt-2 text-[13px] text-[var(--fg-muted)]">
-        结构化 Trace、Observation、EvaluationRun、实验配置和告警入口。
-      </p>
-      <div className="mt-6 rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface)]/50 p-6 text-center">
-        <p className="text-[13px] text-[var(--fg-subtle)]">
-          S11-W05 将在此页接入 Trace 树与 Observation；S11-W06 将在此页接入 Evaluation 评测。
-        </p>
-      </div>
-    </div>
+    <StudioPage title="观测与评测" description="查看智能体运行情况、质量结果与异常提醒。">
+      <StudioSettingsSection title="运行质量">
+        <StudioSettingsRow title="调用追踪" description="查看一次任务中各个步骤的运行情况。">
+          {unavailable}
+        </StudioSettingsRow>
+        <StudioSettingsRow title="质量评测" description="汇总质量检查与验收结果。">
+          {unavailable}
+        </StudioSettingsRow>
+        <StudioSettingsRow title="异常提醒" description="集中查看需要处理的运行异常。">
+          {unavailable}
+        </StudioSettingsRow>
+      </StudioSettingsSection>
+    </StudioPage>
   );
 }

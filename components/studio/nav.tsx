@@ -1,180 +1,339 @@
 "use client";
 
-import { Icon } from "@/components/icons";
 import { ThemeToggle } from "@/components/studio/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { t } from "@/lib/i18n";
 import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
+import { cn } from "@/lib/utils";
+import {
+  Activity,
+  ArrowLeft,
+  Blocks,
+  Bot,
+  ChartNoAxesCombined,
+  LayoutDashboard,
+  type LucideIcon,
+  Menu,
+  Search,
+  ServerCog,
+  Settings2,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /**
- * 统一管理后台一级导航（S11-W01 重组）。
- *
- * 7 个一级菜单（按方案 §后台信息架构）：
- * 1. 智能体（/studio/agents）— Agent / Revision / Route / 发布
- * 2. 能力与知识（/studio/capabilities）— Skill / Tool / Knowledge / Connection / 风险变化
- * 3. Runtime 与环境（/studio/runtime）— RuntimeRevision / Environment / Desktop
- * 4. 观测与评测（/studio/observability）— Trace / Observation / Evaluation / 实验和告警
- * 5. 安全与审计（/studio/security）— Policy / Permission / Credential / Audit / Legal Hold
- * 6. 运营（/studio/operations）— 使用量 / 成本 / 容量 / 配额 / 失败与服务水平
- * 7. 平台设置（/studio/settings）— 组织 / 身份 / 模型供应方 / 保留策略 / 平台参数
- *
- * 原「会话与协作（/studio/threads）」菜单已随 legacy Studio threads 页移除（P2-closeout）。
- * 员工侧会话 UI 由 /chat 提供（正式 Employee Thread API）。
- *
- * 菜单可见性由 server 端 `computeStudioNavVisibility` 计算，通过 `visibleItems` prop 传入。
- * 隐藏菜单不渲染，但服务端 Action Scope 校验仍然独立执行（菜单可见性不能代替授权）。
- *
- * 12-P2-6：移动端适配——小屏（< md）侧栏收起，hamburger 按钮控制展开/收起；
- * md+ 始终展开。收起态点击导航项后自动收起。
+ * Studio 的一级导航。菜单权限由服务端计算，本组件只负责展示、路由归属与本地搜索。
+ * 搜索始终在权限过滤之后进行，不能让服务端隐藏的菜单重新出现。
  */
 
 type NavItem = {
-  href: string;
-  labelKey: string;
-  icon: React.ReactNode;
-  navId: keyof StudioNavVisibility;
+  readonly id: string;
+  readonly href: string;
+  readonly labelKey: string;
+  readonly icon: LucideIcon;
+  readonly aliases: readonly string[];
+  readonly navId?: keyof StudioNavVisibility;
+  readonly keywords?: readonly string[];
 };
 
-const ITEMS: NavItem[] = [
+type NavGroup = {
+  readonly id: string;
+  readonly label: string;
+  readonly items: readonly NavItem[];
+};
+
+const NAV_GROUPS: readonly NavGroup[] = [
   {
-    href: "/studio/agents",
-    labelKey: "studio.nav.agents",
-    icon: <Icon.snowflake size={16} />,
-    navId: "agents",
+    id: "workspace",
+    label: "工作台",
+    items: [
+      {
+        id: "overview",
+        href: "/studio",
+        labelKey: "studio.nav.overview",
+        icon: LayoutDashboard,
+        aliases: ["/studio"],
+        keywords: ["首页", "概览"],
+      },
+    ],
   },
   {
-    href: "/studio/capabilities",
-    labelKey: "studio.nav.capabilities",
-    icon: <Icon.write size={16} />,
-    navId: "capabilities",
+    id: "build",
+    label: "构建",
+    items: [
+      {
+        id: "agents",
+        href: "/studio/agents",
+        labelKey: "studio.nav.agents",
+        icon: Bot,
+        aliases: ["/studio/agents", "/studio/resources"],
+        navId: "agents",
+        keywords: ["资源", "发布", "路由"],
+      },
+      {
+        id: "capabilities",
+        href: "/studio/capabilities",
+        labelKey: "studio.nav.capabilities",
+        icon: Blocks,
+        aliases: ["/studio/capabilities", "/studio/skills", "/studio/artifacts"],
+        navId: "capabilities",
+        keywords: ["技能", "工具", "知识", "产物"],
+      },
+    ],
   },
   {
-    href: "/studio/runtime",
-    labelKey: "studio.nav.runtime",
-    icon: <Icon.settings size={16} />,
-    navId: "runtime",
+    id: "run",
+    label: "运行",
+    items: [
+      {
+        id: "runtime",
+        href: "/studio/runtime",
+        labelKey: "studio.nav.runtime",
+        icon: ServerCog,
+        aliases: ["/studio/runtime"],
+        navId: "runtime",
+        keywords: ["环境", "桌面"],
+      },
+      {
+        id: "observability",
+        href: "/studio/observability",
+        labelKey: "studio.nav.observability",
+        icon: Activity,
+        aliases: ["/studio/observability"],
+        navId: "observability",
+        keywords: ["追踪", "评测", "告警"],
+      },
+      {
+        id: "operations",
+        href: "/studio/operations",
+        labelKey: "studio.nav.operations",
+        icon: ChartNoAxesCombined,
+        aliases: ["/studio/operations", "/studio/analytics"],
+        navId: "operations",
+        keywords: ["用量", "成本", "容量", "配额"],
+      },
+    ],
   },
   {
-    href: "/studio/observability",
-    labelKey: "studio.nav.observability",
-    icon: <Icon.read size={16} />,
-    navId: "observability",
-  },
-  {
-    href: "/studio/security",
-    labelKey: "studio.nav.security",
-    icon: <Icon.settings size={16} />,
-    navId: "security",
-  },
-  {
-    href: "/studio/operations",
-    labelKey: "studio.nav.operations",
-    icon: <Icon.list size={16} />,
-    navId: "operations",
-  },
-  {
-    href: "/studio/settings",
-    labelKey: "studio.nav.settings",
-    icon: <Icon.settings size={16} />,
-    navId: "settings",
+    id: "governance",
+    label: "治理",
+    items: [
+      {
+        id: "security",
+        href: "/studio/security",
+        labelKey: "studio.nav.security",
+        icon: ShieldCheck,
+        aliases: [
+          "/studio/security",
+          "/studio/audit",
+          "/studio/governance",
+          "/studio/permission-rules",
+        ],
+        navId: "security",
+        keywords: ["策略", "权限", "凭证", "审计"],
+      },
+      {
+        id: "settings",
+        href: "/studio/settings",
+        labelKey: "studio.nav.settings",
+        icon: Settings2,
+        aliases: ["/studio/settings"],
+        navId: "settings",
+        keywords: ["用户", "角色", "组织", "配置"],
+      },
+    ],
   },
 ];
 
-function isActive(pathname: string, href: string): boolean {
-  // /studio 首页 = 总览（不属于 7 大菜单，是默认着陆页）
-  if (href === "/studio") return pathname === "/studio";
-  return pathname === href || pathname.startsWith(`${href}/`);
+function routeMatches(pathname: string, alias: string): boolean {
+  if (alias === "/studio") return pathname === alias;
+  return pathname === alias || pathname.startsWith(`${alias}/`);
+}
+
+function isActive(pathname: string, item: NavItem): boolean {
+  return item.aliases.some((alias) => routeMatches(pathname, alias));
 }
 
 interface StudioNavProps {
-  /** 7 大菜单可见性（server 端计算，client 接收）。 */
+  /** 一级菜单可见性，由 server 端计算。 */
   readonly visibleItems: StudioNavVisibility;
+}
+
+interface NavPanelProps {
+  readonly variant: "desktop" | "mobile";
+  readonly pathname: string;
+  readonly groups: readonly NavGroup[];
+  readonly query: string;
+  readonly onQueryChange: (query: string) => void;
+}
+
+function NavPanel({ variant, pathname, groups, query, onQueryChange }: NavPanelProps) {
+  const mobile = variant === "mobile";
+
+  return (
+    <nav
+      aria-label={mobile ? "移动后台菜单" : "管理后台"}
+      className={cn(
+        "w-68 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+        mobile
+          ? "fixed inset-y-0 left-0 z-40 flex animate-in slide-in-from-left shadow-sm duration-200 motion-reduce:animate-none md:hidden"
+          : "hidden h-full md:flex",
+      )}
+    >
+      <div className={cn("px-3", mobile ? "pt-14" : "pt-3")}>
+        <Link
+          href="/chat"
+          className="flex h-8 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-3 focus-visible:ring-sidebar-ring/50"
+        >
+          <ArrowLeft className="size-4" aria-hidden="true" />
+          <span>返回使用端</span>
+        </Link>
+      </div>
+
+      <div className="px-5 pt-5 pb-3">
+        <div className="text-sm font-semibold tracking-tight">管理后台</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">SnowHarness</p>
+      </div>
+
+      <div className="relative px-3 pb-3">
+        <Search
+          className="pointer-events-none absolute top-2 left-5 size-4 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          type="search"
+          aria-label="搜索后台菜单"
+          value={query}
+          onChange={(event) => onQueryChange(event.currentTarget.value)}
+          placeholder="搜索设置与功能"
+          className="border-sidebar-border bg-background/70 pl-8 shadow-none"
+        />
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        {groups.length > 0 ? (
+          <div className="space-y-4">
+            {groups.map((group) => (
+              <section key={group.id} aria-labelledby={`studio-nav-${variant}-${group.id}`}>
+                <h2
+                  id={`studio-nav-${variant}-${group.id}`}
+                  className="px-2 pb-1.5 text-xs font-medium text-muted-foreground"
+                >
+                  {group.label}
+                </h2>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const active = isActive(pathname, item);
+                    const ItemIcon = item.icon;
+
+                    return (
+                      <Link
+                        key={item.id}
+                        href={item.href}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex h-8 items-center gap-2.5 rounded-lg px-2 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-sidebar-ring/50",
+                          active
+                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                            : "text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                        )}
+                      >
+                        <ItemIcon className="size-4" aria-hidden="true" />
+                        <span className="truncate">{t(item.labelKey)}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <p className="px-2 py-8 text-center text-sm text-muted-foreground">没有匹配的菜单</p>
+        )}
+      </div>
+
+      <div className="border-t border-sidebar-border p-3">
+        <ThemeToggle />
+      </div>
+    </nav>
+  );
 }
 
 export function StudioNav({ visibleItems }: StudioNavProps) {
   const pathname = usePathname();
-  // 小屏侧栏开合态：默认收起（小屏），md+ 由 CSS 强制展开（CSS 覆盖 state）
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
-  // 路由切换后自动收起小屏侧栏（点击导航项跳转后体验）
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname 是触发信号（路由变化时收起），非直接引用
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname 变化是关闭移动抽屉的触发信号
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  // 总览（/studio）始终可见（任何通过 studio.access 的管理员都能看），
-  // 其余 7 项按 visibleItems 过滤。
-  const visibleMainItems = ITEMS.filter((item) => visibleItems[item.navId]);
+  const visibleGroups = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+
+    return NAV_GROUPS.map((group) => {
+      const permittedItems = group.items.filter(
+        (item) => item.navId === undefined || visibleItems[item.navId],
+      );
+      const items = normalizedQuery
+        ? permittedItems.filter((item) => {
+            const searchableText = [t(item.labelKey), group.label, ...(item.keywords ?? [])]
+              .join(" ")
+              .toLocaleLowerCase("zh-CN");
+            return searchableText.includes(normalizedQuery);
+          })
+        : permittedItems;
+
+      return { ...group, items };
+    }).filter((group) => group.items.length > 0);
+  }, [query, visibleItems]);
 
   return (
     <>
-      {/* 小屏 hamburger 按钮（< md 显示）—— fixed 定位悬浮左上 */}
-      <button
+      <Button
         type="button"
-        onClick={() => setMobileOpen((v) => !v)}
+        variant="outline"
+        size="icon-lg"
+        onClick={() => setMobileOpen((open) => !open)}
         aria-label={mobileOpen ? t("studio.nav.close") : t("studio.nav.open")}
         aria-expanded={mobileOpen}
-        className="fixed top-3 left-3 z-50 flex size-9 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] text-[var(--fg)] shadow-[var(--shadow-sm)] md:hidden"
+        className="fixed top-3 left-3 z-50 bg-background shadow-sm md:hidden"
       >
-        {mobileOpen ? <Icon.close size={16} /> : <Icon.list size={16} />}
-      </button>
+        {mobileOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+      </Button>
 
-      {/* 遮罩：小屏展开时点遮罩收起 */}
       {mobileOpen && (
-        <button
+        <Button
           type="button"
-          aria-label={t("studio.nav.close")}
+          variant="ghost"
+          aria-label="关闭后台菜单"
           onClick={() => setMobileOpen(false)}
-          className="fixed inset-0 z-30 bg-black/30 md:hidden"
+          className="fixed inset-0 z-30 h-auto w-auto rounded-none bg-foreground/15 p-0 hover:bg-foreground/15 md:hidden"
         />
       )}
 
-      <nav
-        className={`fixed top-0 left-0 z-40 flex h-full w-[220px] shrink-0 flex-col gap-1 border-r border-[var(--border)] bg-[var(--surface)] p-3 transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="mb-3 px-2 text-[12px] font-semibold uppercase tracking-wider text-[var(--fg-subtle)]">
-          {t("studio.nav.title")}
-        </div>
-        {/* 总览（始终可见） */}
-        <Link
-          href="/studio"
-          className={`flex items-center gap-2.5 rounded-[var(--radius-sm)] px-3 py-2 text-[14px] transition ${
-            isActive(pathname, "/studio")
-              ? "bg-[var(--accent-soft)] font-medium text-[var(--primary)]"
-              : "text-[var(--fg-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
-          }`}
-        >
-          <span className="shrink-0">
-            <Icon.snowflake size={16} />
-          </span>
-          {t("studio.nav.overview")}
-        </Link>
-        {/* 7 大菜单（按 visibleItems 过滤） */}
-        {visibleMainItems.map((item) => {
-          const active = isActive(pathname, item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-2.5 rounded-[var(--radius-sm)] px-3 py-2 text-[14px] transition ${
-                active
-                  ? "bg-[var(--accent-soft)] font-medium text-[var(--primary)]"
-                  : "text-[var(--fg-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
-              }`}
-            >
-              <span className="shrink-0">{item.icon}</span>
-              {t(item.labelKey)}
-            </Link>
-          );
-        })}
-        <div className="mt-auto pt-2">
-          <ThemeToggle />
-        </div>
-      </nav>
+      <NavPanel
+        variant="desktop"
+        pathname={pathname}
+        groups={visibleGroups}
+        query={query}
+        onQueryChange={setQuery}
+      />
+
+      {mobileOpen && (
+        <NavPanel
+          variant="mobile"
+          pathname={pathname}
+          groups={visibleGroups}
+          query={query}
+          onQueryChange={setQuery}
+        />
+      )}
     </>
   );
 }

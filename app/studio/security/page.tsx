@@ -1,6 +1,10 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
+import { StudioPage } from "@/components/studio/studio-page";
+import {
+  StudioSettingsLinkRow,
+  StudioSettingsSection,
+} from "@/components/studio/studio-settings-section";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
-import Link from "next/link";
 
 /**
  * 统一管理后台 — 安全与审计页（S11-W01 整合）。
@@ -15,59 +19,39 @@ import Link from "next/link";
  */
 export const dynamic = "force-dynamic";
 
-interface SectionLink {
-  readonly href: string;
-  readonly title: string;
-  readonly description: string;
-}
-
-const SECTIONS: readonly SectionLink[] = [
-  {
-    href: "/studio/audit",
-    title: "审计日志 Audit",
-    description: "查看、导出管理员操作审计记录（导出产生新审计事件）。",
-  },
-  {
-    href: "/studio/governance",
-    title: "治理配置 Governance",
-    description: "Runtime 执行治理配置（受保护路径/命令黑名单/写前格式化/交付前校验）。",
-  },
-  {
-    href: "/studio/permission-rules",
-    title: "权限规则 Permission",
-    description: "Tool 执行策略（allow / pause / block），发布为不可变的 Policy Revision。",
-  },
-  {
-    href: "/studio/settings",
-    title: "用户角色 Roles",
-    description: "管理员角色与权限绑定（role_action_binding）。",
-  },
-];
-
 export default async function SecurityPage() {
   const gate = await requireStudioPagePermission("studio.access");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">安全与审计</h1>
-      <p className="mt-2 text-[13px] text-[var(--fg-muted)]">
-        Policy 发布、Permission 决策、Credential 引用、Effect、Audit 与事件处置。 Credential
-        原值在任何角色下均不可见（方案 §S11-W01）。
-      </p>
-
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        {SECTIONS.map((section) => (
-          <Link
-            key={section.href}
-            href={section.href}
-            className="block rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4 transition hover:border-[var(--primary)]/40 hover:bg-[var(--surface-2)]"
-          >
-            <div className="font-medium text-[15px] text-[var(--fg)]">{section.title}</div>
-            <div className="mt-1 text-[12px] text-[var(--fg-muted)]">{section.description}</div>
-          </Link>
-        ))}
-      </div>
-    </div>
+    <StudioPage
+      title="安全与审计"
+      description="管理运行保护、工具权限和后台操作记录。访问凭证的原始内容不会在界面中展示。"
+    >
+      <StudioSettingsSection title="安全策略">
+        <StudioSettingsLinkRow
+          href="/studio/governance"
+          title="运行保护"
+          description="设置受保护路径、受限命令和交付前检查。"
+        />
+        <StudioSettingsLinkRow
+          href="/studio/permission-rules"
+          title="工具权限"
+          description="决定工具执行时允许、等待确认或阻止。"
+        />
+      </StudioSettingsSection>
+      <StudioSettingsSection title="访问与记录">
+        <StudioSettingsLinkRow
+          href="/studio/settings"
+          title="成员角色"
+          description="为现有成员分配后台角色模板。"
+        />
+        <StudioSettingsLinkRow
+          href="/studio/audit"
+          title="操作记录"
+          description="查看后台敏感操作及其执行结果。"
+        />
+      </StudioSettingsSection>
+    </StudioPage>
   );
 }

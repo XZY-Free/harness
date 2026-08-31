@@ -59,7 +59,11 @@ describe("themeInitScript", () => {
     expect(runThemeInit("/chat/new", "dark", false)).toEqual(["light"]);
   });
 
-  it("Studio 没有保存主题时继续跟随系统主题", () => {
-    expect(runThemeInit("/studio", null, true)).toEqual(["dark"]);
+  it("Studio 没有保存主题时默认使用参考界面的浅色主题", () => {
+    expect(runThemeInit("/studio", null, true)).toEqual(["light"]);
+  });
+
+  it("Studio 明确保存的暗色选择仍然生效", () => {
+    expect(runThemeInit("/studio/settings", "dark", false)).toEqual(["dark"]);
   });
 });

@@ -1,5 +1,6 @@
 import { AgentRegistrationWorkspace } from "@/components/studio/agent-registration-workspace";
 import { StudioGatePage } from "@/components/studio/gate-page";
+import { StudioPage } from "@/components/studio/studio-page";
 import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
@@ -23,8 +24,11 @@ export default async function ResourcesPage() {
   const canManageRoutes = await hasStudioAction(gate.principal, "route.update");
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">资源</h1>
+    <StudioPage
+      title="智能体"
+      description="登记外部智能体，管理版本、运行服务和员工侧发布。"
+      width="wide"
+    >
       <AgentRegistrationWorkspace
         canReadAgents={canReadAgents}
         canRegisterContract={canRegisterContract}
@@ -32,6 +36,6 @@ export default async function ResourcesPage() {
         canPublishRuntime={canPublishRuntime}
         canManageRoutes={canManageRoutes}
       />
-    </div>
+    </StudioPage>
   );
 }

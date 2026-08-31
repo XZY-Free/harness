@@ -1,6 +1,10 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
+import { StudioPage } from "@/components/studio/studio-page";
+import {
+  StudioSettingsLinkRow,
+  StudioSettingsSection,
+} from "@/components/studio/studio-settings-section";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
-import Link from "next/link";
 
 /**
  * 统一管理后台 — 能力与知识页（S11-W01 占位）。
@@ -15,54 +19,24 @@ import Link from "next/link";
  */
 export const dynamic = "force-dynamic";
 
-interface SectionLink {
-  readonly href: string;
-  readonly title: string;
-  readonly description: string;
-}
-
-const SECTIONS: readonly SectionLink[] = [
-  {
-    href: "/studio/skills",
-    title: "技能 Skill",
-    description: "技能定义、版本、发布与回滚。",
-  },
-  {
-    href: "/studio/resources?tab=agents",
-    title: "智能体 Agent",
-    description: "智能体元数据档案。",
-  },
-  {
-    href: "/studio/artifacts",
-    title: "产物 Artifact",
-    description: "Artifact 列表与索引。",
-  },
-];
-
 export default async function CapabilitiesPage() {
   const gate = await requireStudioPagePermission("studio.access");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">能力与知识</h1>
-      <p className="mt-2 text-[13px] text-[var(--fg-muted)]">
-        统一管理 Skill、Tool、Knowledge、SchemaRevision、CatalogEntry、模型连接与风险变化。 S11-W03
-        将在此页直接渲染能力内容；当前阶段可访问以下既有子页面。
-      </p>
-
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        {SECTIONS.map((section) => (
-          <Link
-            key={section.href}
-            href={section.href}
-            className="block rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4 transition hover:border-[var(--primary)]/40 hover:bg-[var(--surface-2)]"
-          >
-            <div className="font-medium text-[15px] text-[var(--fg)]">{section.title}</div>
-            <div className="mt-1 text-[12px] text-[var(--fg-muted)]">{section.description}</div>
-          </Link>
-        ))}
-      </div>
-    </div>
+    <StudioPage title="能力与知识" description="管理员工工作时可以使用的技能与智能体。">
+      <StudioSettingsSection title="可用能力">
+        <StudioSettingsLinkRow
+          href="/studio/skills"
+          title="技能"
+          description="维护技能内容、版本和发布状态。"
+        />
+        <StudioSettingsLinkRow
+          href="/studio/agents"
+          title="智能体"
+          description="登记智能体，管理版本与员工侧发布。"
+        />
+      </StudioSettingsSection>
+    </StudioPage>
   );
 }

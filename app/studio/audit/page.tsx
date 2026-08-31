@@ -1,5 +1,6 @@
 import { AuditLogTable } from "@/components/studio/audit-log-table";
 import { StudioGatePage } from "@/components/studio/gate-page";
+import { StudioPage } from "@/components/studio/studio-page";
 import { listStudioAuditEvents } from "@/lib/studio/admin-audit";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
@@ -19,15 +20,15 @@ export default async function AuditPage() {
   const logs = await listStudioAuditEvents({ tenantId: gate.principal.tenantId, limit: 100 });
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">审计</h1>
-      <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
-        后台敏感写操作审计（append-only）。展示最近 100 条；记录不含 secret / 文件内容 /
-        完整命令输出。
-      </p>
-      <div className="mt-4">
+    <StudioPage
+      title="操作记录"
+      description="查看最近 100 条后台敏感操作。记录只读，且不会展示凭证、文件正文或完整命令输出。"
+      width="wide"
+    >
+      <section aria-label="最近记录" className="space-y-3">
+        <h2 className="px-0.5 text-sm font-semibold text-foreground">最近记录</h2>
         <AuditLogTable logs={logs} />
-      </div>
-    </div>
+      </section>
+    </StudioPage>
   );
 }

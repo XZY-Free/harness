@@ -9,8 +9,8 @@ export const metadata: Metadata = {
 
 /**
  * P2 修复（12 Studio P2-2）：暗色模式防 FOUC。
- * 在首帧渲染前同步读 localStorage 主题。员工 Web 与 Desktop 未设置时统一使用浅色，
- * Studio 仍跟随 prefers-color-scheme 并保留独立主题选择；Studio 的保存值不污染员工界面。
+ * 在首帧渲染前同步读 localStorage 主题。员工 Web 与 Desktop 始终使用浅色；Studio
+ * 默认使用浅色并尊重已保存的显式选择，Studio 的保存值不污染员工界面。
  */
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

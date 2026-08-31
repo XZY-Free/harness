@@ -123,7 +123,7 @@ describe("computeStudioNavVisibility", () => {
       makeBinding("skill.create"),
       makeBinding("tool.create"),
       makeBinding("audit.export"),
-      makeBinding("policy.publish"),
+      makeBinding("user.manage"),
     ]);
 
     const visibility = await computeStudioNavVisibility(makePrincipal("non-default-user"));
@@ -134,13 +134,26 @@ describe("computeStudioNavVisibility", () => {
     expect(visibility.operations).toBe(true);
     // security: policy.publish 或 audit.export → true
     expect(visibility.security).toBe(true);
-    // settings: policy.publish → true
+    // settings: user.manage → true（与设置页真实门禁一致）
     expect(visibility.settings).toBe(true);
     // 其他无绑定
     expect(visibility.agents).toBe(false);
     expect(visibility.conversations).toBe(false);
     expect(visibility.runtime).toBe(false);
     expect(visibility.observability).toBe(false);
+  });
+
+  it("平台设置只随 user.manage 显示，不因 policy.publish 误显示", async () => {
+    (authConfig as { mode: string }).mode = "trusted-headers";
+    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([makeBinding("policy.publish")]);
+    expect((await computeStudioNavVisibility(makePrincipal("non-default-user"))).settings).toBe(
+      false,
+    );
+
+    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([makeBinding("user.manage")]);
+    expect((await computeStudioNavVisibility(makePrincipal("non-default-user"))).settings).toBe(
+      true,
+    );
   });
 
   it("查询异常 → 全部隐藏（fail-closed）", async () => {

@@ -1,5 +1,10 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { RouteActivationPanel } from "@/components/studio/route-activation-panel";
+import { StudioPage } from "@/components/studio/studio-page";
+import {
+  StudioSettingsRow,
+  StudioSettingsSection,
+} from "@/components/studio/studio-settings-section";
 import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
@@ -22,18 +27,23 @@ export default async function OperationsPage() {
   const canManageRoutes = await hasStudioAction(gate.principal, "route.update");
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">运营</h1>
-      <p className="mt-2 text-[13px] text-[var(--fg-muted)]">
-        使用量、成本、容量、队列、配额、失败率与服务水平（SLA）。 告警从可执行阈值产生，可跳转相关
-        Invocation/Event/Trace。
-      </p>
-      <RouteActivationPanel canManage={canManageRoutes} />
-      <div className="mt-6 rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface)]/50 p-6 text-center">
-        <p className="text-[13px] text-[var(--fg-subtle)]">
-          S11-W07 将在此页接入成本容量投影与告警。
-        </p>
-      </div>
-    </div>
+    <StudioPage title="运营" description="管理员工侧智能体发布，并查看平台使用情况。" width="wide">
+      <section aria-label="发布给员工" className="space-y-3">
+        <div className="space-y-1 px-0.5">
+          <h2 className="text-sm font-semibold text-foreground">发布给员工</h2>
+          <p className="text-xs leading-5 text-muted-foreground">
+            选择已经发布的智能体版本，并配置员工侧调用地址。
+          </p>
+        </div>
+        <RouteActivationPanel canManage={canManageRoutes} />
+      </section>
+      <StudioSettingsSection title="运营数据">
+        <StudioSettingsRow title="成本与容量" description="用量、容量与异常提醒正在准备中。">
+          <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+            尚未开放
+          </span>
+        </StudioSettingsRow>
+      </StudioSettingsSection>
+    </StudioPage>
   );
 }

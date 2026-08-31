@@ -1,5 +1,6 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { GovernanceEditor } from "@/components/studio/governance-editor";
+import { StudioPage } from "@/components/studio/studio-page";
 import { loadGovernanceConfigFromDB } from "@/lib/governance/governance-repository";
 import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
@@ -21,15 +22,16 @@ export default async function GovernancePage() {
   const loaded = await loadGovernanceConfigFromDB(gate.principal.tenantId);
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">治理配置</h1>
-      <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
-        管理 Runtime 执行的治理配置（受保护路径 / 命令黑名单 / 写前格式化 / 交付前校验）。
-        {canWrite
-          ? "保存将发布一个新的 published Revision（ETag/If-Match 乐观锁）。"
-          : "只读展示。编辑需要 governance.config.publish 权限。"}
-      </p>
-      <div className="mt-4">
+    <StudioPage
+      title="运行保护"
+      description={
+        canWrite
+          ? "设置受保护路径、受限命令、写入格式化和交付前检查。保存后立即应用新配置。"
+          : "查看当前运行保护配置。你没有修改权限。"
+      }
+    >
+      <section aria-label="保护规则" className="space-y-3">
+        <h2 className="px-0.5 text-sm font-semibold text-foreground">保护规则</h2>
         <GovernanceEditor
           initialConfig={loaded.config}
           initialVersionNo={loaded.set.versionNo}
@@ -37,7 +39,7 @@ export default async function GovernancePage() {
           revisionNo={loaded.revision.revisionNo}
           publishedAt={loaded.revision.publishedAt?.toISOString() ?? null}
         />
-      </div>
-    </div>
+      </section>
+    </StudioPage>
   );
 }

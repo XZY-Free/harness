@@ -1,8 +1,12 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { RuntimeControlPanel } from "@/components/studio/runtime-control-panel";
+import { StudioPage } from "@/components/studio/studio-page";
+import {
+  StudioSettingsLinkRow,
+  StudioSettingsSection,
+} from "@/components/studio/studio-settings-section";
 import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
-import Link from "next/link";
 
 /**
  * 统一管理后台 — Runtime 治理页（07 §10/§11）。
@@ -19,19 +23,27 @@ export default async function RuntimePage() {
   const canPublish = await hasStudioAction(gate.principal, "runtime.publish");
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">Runtime 与环境</h1>
-      <p className="mt-2 text-[13px] text-[var(--fg-muted)]">
-        RuntimeRevision 发布治理（按 runtimeEvidenceKind 区分证据门禁）、实例与 Environment 概览。
-      </p>
-      <p className="mt-2 text-[13px] text-[var(--fg-muted)]">
-        Route 操作复用既有治理入口：
-        <Link href="/studio/operations" className="ml-1 underline">
-          运维与部署
-        </Link>
-        。
-      </p>
-      <RuntimeControlPanel canPublish={canPublish} />
-    </div>
+    <StudioPage
+      title="运行服务与环境"
+      description="查看运行服务的版本、验收结果与发布状态。"
+      width="wide"
+    >
+      <section aria-label="运行服务" className="space-y-3">
+        <div className="space-y-1 px-0.5">
+          <h2 className="text-sm font-semibold text-foreground">运行服务</h2>
+          <p className="text-xs leading-5 text-muted-foreground">
+            发布入口只会在所需验收已经通过时出现。
+          </p>
+        </div>
+        <RuntimeControlPanel canPublish={canPublish} />
+      </section>
+      <StudioSettingsSection title="相关设置">
+        <StudioSettingsLinkRow
+          href="/studio/operations"
+          title="员工侧发布"
+          description="配置智能体的员工侧调用地址和访问方式。"
+        />
+      </StudioSettingsSection>
+    </StudioPage>
   );
 }

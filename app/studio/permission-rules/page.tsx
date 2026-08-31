@@ -1,5 +1,6 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { PermissionRulesEditor } from "@/components/studio/permission-rules-editor";
+import { StudioPage } from "@/components/studio/studio-page";
 import { hasStudioAction } from "@/lib/identity/studio-access";
 import { loadPolicySetAndRules } from "@/lib/permission/policy-queries";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
@@ -22,14 +23,17 @@ export default async function PermissionRulesPage() {
   const loaded = await loadPolicySetAndRules(gate.principal.tenantId);
 
   return (
-    <div>
-      <h1 className="text-[22px] font-semibold text-[var(--fg)]">权限规则</h1>
-      <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
-        管理 Tool 执行策略（allow / pause / block）。保存将发布一个新的 Policy Revision （ruleKey
-        跨修订稳定，ETag/If-Match 乐观锁）。
-        {canWrite ? "" : "只读展示。编辑需要 policy.publish 权限。"}
-      </p>
-      <div className="mt-4">
+    <StudioPage
+      title="工具权限"
+      description={
+        canWrite
+          ? "设置工具执行时允许、等待确认或阻止的规则。保存后立即应用新策略。"
+          : "查看当前工具权限规则。你没有修改权限。"
+      }
+      width="wide"
+    >
+      <section aria-label="权限规则" className="space-y-3">
+        <h2 className="px-0.5 text-sm font-semibold text-foreground">权限规则</h2>
         <PermissionRulesEditor
           initialDefaultDecision={loaded.defaultDecision}
           initialRules={loaded.rules.map((row) => ({
@@ -47,7 +51,7 @@ export default async function PermissionRulesPage() {
           revisionNo={loaded.revision.revisionNo}
           publishedAt={loaded.revision.publishedAt?.toISOString() ?? null}
         />
-      </div>
-    </div>
+      </section>
+    </StudioPage>
   );
 }

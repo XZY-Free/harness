@@ -1,6 +1,11 @@
 "use client";
 
+import { Check, Save, ShieldCheck, UserRound } from "lucide-react";
 import { useMemo, useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 
 /**
  * Settings 用户/角色管理 client UI（关口02 02-2c grant 化适配）。
@@ -131,130 +136,146 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
 
   if (visibleUsers.length === 0) {
     return (
-      <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-6 text-[13px] text-[var(--fg-muted)]">
+      <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        <UserRound className="mx-auto mb-3 size-5" aria-hidden="true" />
         暂无用户。
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-[260px_1fr]">
-      {/* 用户列表 */}
-      <div className="overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
-        <div className="border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[12px] font-medium text-[var(--fg-subtle)]">
-          用户
-        </div>
-        <ul className="max-h-[480px] overflow-auto">
-          {visibleUsers.map((u) => {
-            const active = u.id === selectedId;
-            const isSelf = u.id === currentUserId;
-            return (
-              <li key={u.id}>
-                <button
-                  type="button"
-                  onClick={() => selectUser(u.id)}
-                  className={`flex w-full flex-col items-start gap-0.5 border-b border-[var(--border)] px-3 py-2 text-left text-[13px] transition ${
-                    active
-                      ? "bg-[var(--accent-soft)] text-[var(--primary)]"
-                      : "text-[var(--fg-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--fg)]"
-                  }`}
-                >
-                  <span className="font-medium">
-                    {u.displayName ?? u.email}
-                    {isSelf && (
-                      <span className="ml-2 rounded-[var(--radius-sm)] bg-[var(--surface-2)] px-1.5 py-0.5 text-[11px] text-[var(--fg-subtle)]">
-                        当前用户
-                      </span>
+    <section
+      aria-label="成员角色管理"
+      data-slot="studio-settings-group"
+      className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs"
+    >
+      <div className="grid lg:grid-cols-[14rem_1fr]">
+        <div className="border-b border-border lg:border-r lg:border-b-0">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-sm font-medium text-foreground">用户</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">选择需要配置角色的成员</p>
+          </div>
+          <ul className="max-h-80 overflow-auto p-1.5 lg:max-h-[30rem]">
+            {visibleUsers.map((u) => {
+              const active = u.id === selectedId;
+              const isSelf = u.id === currentUserId;
+              return (
+                <li key={u.id} className="py-0.5">
+                  <Button
+                    variant="ghost"
+                    onClick={() => selectUser(u.id)}
+                    aria-pressed={active}
+                    className={cn(
+                      "h-auto w-full items-start justify-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left",
+                      active && "bg-accent text-accent-foreground hover:bg-accent",
                     )}
-                  </span>
-                  <span className="font-mono text-[11px] text-[var(--fg-subtle)]">{u.email}</span>
-                  <span className="text-[11px] text-[var(--fg-subtle)]">
-                    {u.templateKeys.map((k) => roleByKey.get(k)?.name ?? k).join(", ") || "无角色"}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+                  >
+                    <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <UserRound className="size-3.5" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5 font-medium text-foreground">
+                        <span className="truncate">{u.displayName ?? u.email}</span>
+                        {isSelf && (
+                          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                            我
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">
+                        {u.email}
+                      </span>
+                      <span className="mt-1 block truncate text-xs font-normal text-muted-foreground">
+                        {u.templateKeys.map((k) => roleByKey.get(k)?.name ?? k).join("、") ||
+                          "无角色"}
+                      </span>
+                    </span>
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
-      {/* 角色模板编辑 */}
-      <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-        {selected ? (
-          <>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[15px] font-medium text-[var(--fg)]">
-                  {selected.displayName ?? selected.email}
-                  {selected.id === currentUserId && (
-                    <span className="ml-2 text-[12px] text-[var(--fg-subtle)]">当前用户</span>
+        <div className="min-w-0">
+          {selected ? (
+            <>
+              <div className="flex flex-col gap-4 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate text-base font-semibold text-foreground">
+                      {selected.displayName ?? selected.email}
+                    </h3>
+                    {selected.id === currentUserId && (
+                      <span className="shrink-0 text-xs text-muted-foreground">当前用户</span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 truncate text-sm text-muted-foreground">{selected.email}</p>
+                </div>
+                <Button onClick={save} disabled={saving} className="self-start sm:self-auto">
+                  <Save aria-hidden="true" />
+                  {saving ? "保存中…" : "保存角色"}
+                </Button>
+              </div>
+
+              {message && (
+                <div
+                  role={message.kind === "ok" ? "status" : "alert"}
+                  className={cn(
+                    "mx-5 mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-sm",
+                    message.kind === "ok"
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "bg-destructive/10 text-destructive",
                   )}
+                >
+                  {message.kind === "ok" && <Check className="size-4" aria-hidden="true" />}
+                  {message.text}
                 </div>
-                <div className="font-mono text-[12px] text-[var(--fg-subtle)]">
-                  {selected.email}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={save}
-                disabled={saving}
-                className="rounded-[var(--radius-sm)] bg-[var(--primary)] px-3 py-1.5 text-[13px] font-medium text-[var(--accent-fg)] transition hover:opacity-90 disabled:opacity-50"
-              >
-                {saving ? "保存中…" : "保存"}
-              </button>
-            </div>
+              )}
 
-            {message && (
-              <div
-                className={`mt-3 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] ${
-                  message.kind === "ok"
-                    ? "bg-[var(--accent-soft)] text-[var(--primary)]"
-                    : "bg-[var(--danger-soft)] text-[var(--danger)]"
-                }`}
-              >
-                {message.text}
+              <div className="flex items-center gap-2 border-b border-border px-5 py-3 text-sm font-medium text-foreground">
+                <ShieldCheck className="size-4 text-muted-foreground" aria-hidden="true" />
+                角色权限
               </div>
-            )}
-
-            <div className="mt-4">
-              <h3 className="mb-2 text-[13px] font-medium text-[var(--fg)]">角色模板</h3>
-              <div className="flex flex-col gap-2">
+              <div>
                 {roles.map((r) => {
                   const checked = draft[selected.id]?.has(r.key) ?? false;
                   return (
-                    <label
+                    <div
                       key={r.key}
-                      className="flex cursor-pointer items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-[13px] hover:bg-[var(--surface-2)]"
+                      data-slot="studio-settings-row"
+                      className="flex items-start gap-3 border-b border-border px-5 py-3.5 transition-colors last:border-b-0 hover:bg-muted/50 focus-within:bg-muted/50"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        id={`role-${r.key}`}
                         checked={checked}
-                        onChange={() => toggleRole(r.key)}
+                        onCheckedChange={() => toggleRole(r.key)}
+                        aria-label={r.name}
                         className="mt-0.5"
                       />
-                      <span className="flex-1">
-                        <span className="font-medium text-[var(--fg)]">{r.name}</span>
-                        <span className="ml-2 font-mono text-[11px] text-[var(--fg-subtle)]">
-                          {r.key}
-                          {r.isSystem ? " · 内置" : ""}
+                      <label htmlFor={`role-${r.key}`} className="flex-1 cursor-pointer">
+                        <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                          {r.name}
+                          {r.isSystem && (
+                            <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                              内置
+                            </span>
+                          )}
                         </span>
-                        <span
-                          className="mt-1 block text-[11px] text-[var(--fg-subtle)]"
-                          title={r.actions.join(", ")}
-                        >
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                           {permissionLabels(r.actions).join("、") || "无权限"}
                         </span>
-                      </span>
-                    </label>
+                      </label>
+                    </div>
                   );
                 })}
               </div>
-            </div>
-          </>
-        ) : (
-          <div className="text-[13px] text-[var(--fg-muted)]">选择左侧用户。</div>
-        )}
+            </>
+          ) : (
+            <div className="p-8 text-center text-sm text-muted-foreground">选择一名用户。</div>
+          )}
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

@@ -1,8 +1,11 @@
-import { MetricCard } from "@/components/studio/metric-card";
+import { StudioPage } from "@/components/studio/studio-page";
+import {
+  StudioSettingsRow,
+  StudioSettingsSection,
+} from "@/components/studio/studio-settings-section";
 import { listAgents } from "@/lib/agents/persistence/agent-queries";
 import { listSkills } from "@/lib/capability/skill-studio-queries";
 import { resolvePrincipal } from "@/lib/identity/resolver";
-import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { headers } from "next/headers";
 
 /**
@@ -35,29 +38,15 @@ export default async function StudioOverviewPage() {
   const activeSkills = skills.length;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <h1 className="text-[22px] font-semibold text-[var(--fg)]">{t("studio.overview.title")}</h1>
-      </div>
-
-      {/* ── 资源计数 ── */}
-      <section>
-        <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wider text-[var(--fg-subtle)]">
-          {t("studio.overview.section.resources")}
-        </h2>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-          <MetricCard
-            label={t("studio.overview.metric.active_skills")}
-            value={activeSkills}
-            sub={`共 ${skills.length} 条`}
-          />
-          <MetricCard
-            label={t("studio.overview.metric.agents")}
-            value={agents.length}
-            sub={t("studio.overview.metric.agents_sub")}
-          />
-        </div>
-      </section>
-    </div>
+    <StudioPage title={t("studio.overview.title")} description="查看当前组织可用的智能体与技能。">
+      <StudioSettingsSection title={t("studio.overview.section.resources")}>
+        <StudioSettingsRow title="启用中的技能" description={`技能库共 ${skills.length} 条记录`}>
+          <span className="text-sm font-medium tabular-nums text-foreground">{activeSkills}</span>
+        </StudioSettingsRow>
+        <StudioSettingsRow title="智能体" description="当前组织内已登记的智能体">
+          <span className="text-sm font-medium tabular-nums text-foreground">{agents.length}</span>
+        </StudioSettingsRow>
+      </StudioSettingsSection>
+    </StudioPage>
   );
 }

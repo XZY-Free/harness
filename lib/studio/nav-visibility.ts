@@ -11,8 +11,7 @@
  * - 给定 Principal，批量查询其 role_action_binding，按 8 个一级菜单的 action 集合
  * 计算可见性。
  * - 任何一个关联 action 允许 → 该菜单可见（"任意匹配"语义）。
- * - 部分菜单（运营 / 平台设置）暂未在 ACTION_CODES 中定义专门写操作，
- * 采用"主体拥有任意管理 action"作为可见条件（admin 默认全部可见）。
+ * - 运营沿用审计导出权限；平台设置与页面门禁统一使用 user.manage。
  *
  * 安全边界：
  * - 菜单可见性只是 UX 层，不能代替服务端 Action Scope 校验（每个写 API 仍走 requireActionScope）。
@@ -77,8 +76,8 @@ export const NAV_ACTION_MAPPING: Record<StudioNavId, readonly ActionCode[]> = {
   ],
   // 运营：成本 / 容量 / 配额（暂未定义专门 action code，归并到 audit.export）
   operations: ["audit.export"],
-  // 平台设置：组织 / 模型供应方 / 保留策略（暂未定义专门 action code，归并到 policy.publish）
-  settings: ["policy.publish"],
+  // 平台设置：用户 / 角色 / 组织配置，与设置页 user.manage 门禁保持一致
+  settings: ["user.manage"],
 };
 
 /** 菜单可见性结果：8 个 bool。 */
