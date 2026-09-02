@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -18,15 +19,24 @@ import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+const SKILL_TOOL_OPTIONS = [
+  { value: "writeFile", label: "写入文件" },
+  { value: "readFile", label: "读取文件" },
+  { value: "listFiles", label: "浏览文件" },
+  { value: "runCommand", label: "运行命令" },
+  { value: "runTests", label: "运行测试" },
+  { value: "reportReady", label: "标记完成" },
+] as const;
+
+const DEFAULT_SKILL_TOOLS = SKILL_TOOL_OPTIONS.map((tool) => tool.value);
+
 /** 新建技能并生成首个可用版本。 */
 export function SkillCreator() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [tools, setTools] = useState(
-    "writeFile,readFile,listFiles,runCommand,runTests,reportReady",
-  );
+  const [tools, setTools] = useState<Set<string>>(() => new Set(DEFAULT_SKILL_TOOLS));
   const [promptMd, setPromptMd] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +45,15 @@ export function SkillCreator() {
     if (busy) return;
     setOpen(nextOpen);
     if (nextOpen) setError(null);
+  }
+
+  function toggleTool(tool: string, checked: boolean) {
+    setTools((current) => {
+      const next = new Set(current);
+      if (checked) next.add(tool);
+      else next.delete(tool);
+      return next;
+    });
   }
 
   async function submit() {
@@ -48,10 +67,9 @@ export function SkillCreator() {
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim(),
-          tools: tools
-            .split(",")
-            .map((item) => item.trim())
-            .filter(Boolean),
+          tools: SKILL_TOOL_OPTIONS.filter((tool) => tools.has(tool.value)).map(
+            (tool) => tool.value,
+          ),
           promptMd,
         }),
       });
@@ -63,6 +81,7 @@ export function SkillCreator() {
       setOpen(false);
       setName("");
       setDescription("");
+      setTools(new Set(DEFAULT_SKILL_TOOLS));
       setPromptMd("");
       router.refresh();
     } catch {
@@ -112,19 +131,32 @@ export function SkillCreator() {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="skill-tools">可用工具</Label>
-            <Input
-              id="skill-tools"
-              value={tools}
-              onChange={(event) => setTools(event.target.value)}
-              className="font-mono text-xs"
-              aria-describedby="skill-tools-help"
-            />
+          <fieldset aria-describedby="skill-tools-help" className="space-y-2">
+            <legend className="text-sm font-medium text-foreground">可用工具</legend>
             <p id="skill-tools-help" className="text-xs leading-5 text-muted-foreground">
-              多个工具使用英文逗号分隔。
+              选择这项技能工作时可以使用的能力。
             </p>
-          </div>
+            <div className="grid grid-cols-2 gap-2">
+              {SKILL_TOOL_OPTIONS.map((tool) => (
+                <div
+                  key={tool.value}
+                  className="flex items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm transition-colors hover:bg-muted/50 has-data-[state=checked]:border-foreground/20 has-data-[state=checked]:bg-muted/60"
+                >
+                  <Checkbox
+                    id={`skill-tool-${tool.value}`}
+                    checked={tools.has(tool.value)}
+                    onCheckedChange={(checked) => toggleTool(tool.value, checked === true)}
+                  />
+                  <label
+                    htmlFor={`skill-tool-${tool.value}`}
+                    className="min-w-0 flex-1 cursor-pointer"
+                  >
+                    {tool.label}
+                  </label>
+                </div>
+              ))}
+            </div>
+          </fieldset>
 
           <div className="space-y-2">
             <Label htmlFor="skill-instructions">工作说明</Label>

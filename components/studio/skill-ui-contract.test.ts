@@ -42,6 +42,8 @@ describe("技能后台界面合同", () => {
     const detail = source("app/studio/skills/[id]/page.tsx");
     expect(list).toContain("<StudioPage");
     expect(list).toContain("overflow-x-auto");
+    expect(list).toContain('data-slot="skills-empty-state"');
+    expect(list).toContain("skills.length === 0 ?");
     expect(detail).toContain("<StudioPage");
     expect(detail).toContain("<StudioSettingsSection");
   });

@@ -59,61 +59,63 @@ export default async function SkillsPage() {
       width="wide"
     >
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="min-w-3xl w-full text-sm">
-            <thead className="bg-muted/60 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium">名称</th>
-                <th className="px-4 py-3 text-left font-medium">来源</th>
-                <th className="px-4 py-3 text-left font-medium">状态</th>
-                <th className="px-4 py-3 text-left font-medium">同步状态</th>
-                <th className="px-4 py-3 text-left font-medium">最近同步</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {skills.length === 0 && (
+        {skills.length === 0 ? (
+          <div
+            data-slot="skills-empty-state"
+            className="px-5 py-12 text-center text-sm leading-6 text-muted-foreground"
+          >
+            暂无技能。可以新建技能，或从技能库同步已有内容。
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-3xl w-full text-sm">
+              <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
-                    暂无技能。可以新建技能，或从技能库同步已有内容。
-                  </td>
+                  <th className="px-4 py-3 text-left font-medium">名称</th>
+                  <th className="px-4 py-3 text-left font-medium">来源</th>
+                  <th className="px-4 py-3 text-left font-medium">状态</th>
+                  <th className="px-4 py-3 text-left font-medium">同步状态</th>
+                  <th className="px-4 py-3 text-left font-medium">最近同步</th>
                 </tr>
-              )}
-              {skills.map((skill) => (
-                <tr key={skill.id} className="transition-colors hover:bg-muted/30">
-                  <td className="px-4 py-3.5">
-                    <Link
-                      href={`/studio/skills/${skill.id}`}
-                      className="font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {skill.displayName || skill.skillKey}
-                    </Link>
-                    {skill.displayName && skill.displayName !== skill.skillKey && (
-                      <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-                        {skill.skillKey}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5 text-muted-foreground">
-                    {SOURCE_LABEL[skill.sourceType] ?? "其他来源"}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <Badge variant="secondary">
-                      {LIFECYCLE_LABEL[skill.lifecycleState] ?? "状态未知"}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3.5 text-muted-foreground">
-                    {skill.syncState ? (SYNC_STATE_LABEL[skill.syncState] ?? "状态未知") : "—"}
-                  </td>
-                  <td className="px-4 py-3.5 whitespace-nowrap text-muted-foreground">
-                    {skill.lastSyncedAt
-                      ? skill.lastSyncedAt.toLocaleString("zh-CN", { hour12: false })
-                      : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {skills.map((skill) => (
+                  <tr key={skill.id} className="transition-colors hover:bg-muted/30">
+                    <td className="px-4 py-3.5">
+                      <Link
+                        href={`/studio/skills/${skill.id}`}
+                        className="font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {skill.displayName || skill.skillKey}
+                      </Link>
+                      {skill.displayName && skill.displayName !== skill.skillKey && (
+                        <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+                          {skill.skillKey}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5 text-muted-foreground">
+                      {SOURCE_LABEL[skill.sourceType] ?? "其他来源"}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <Badge variant="secondary">
+                        {LIFECYCLE_LABEL[skill.lifecycleState] ?? "状态未知"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3.5 text-muted-foreground">
+                      {skill.syncState ? (SYNC_STATE_LABEL[skill.syncState] ?? "状态未知") : "—"}
+                    </td>
+                    <td className="px-4 py-3.5 whitespace-nowrap text-muted-foreground">
+                      {skill.lastSyncedAt
+                        ? skill.lastSyncedAt.toLocaleString("zh-CN", { hour12: false })
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </StudioPage>
   );

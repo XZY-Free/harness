@@ -224,7 +224,7 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
                   className={cn(
                     "mx-5 mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-sm",
                     message.kind === "ok"
-                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      ? "bg-success/10 text-success"
                       : "bg-destructive/10 text-destructive",
                   )}
                 >

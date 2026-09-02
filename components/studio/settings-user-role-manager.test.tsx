@@ -64,6 +64,7 @@ describe("SettingsUserRoleManager", () => {
       }),
     );
     expect((await screen.findByRole("status")).textContent).toContain("已保存");
+    expect(view.container.innerHTML).not.toContain("emerald-");
   });
 
   it("保存失败用 alert 公告服务端错误消息", async () => {

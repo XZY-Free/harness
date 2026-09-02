@@ -28,14 +28,21 @@ export function StudioPage({
         className,
       )}
     >
-      <header className="mb-10 flex items-start justify-between gap-6">
+      <header className="mb-10 flex flex-col items-start justify-between gap-5 sm:flex-row sm:gap-6">
         <div className="min-w-0 space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
           {description && (
             <div className="max-w-2xl text-sm leading-6 text-muted-foreground">{description}</div>
           )}
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && (
+          <div
+            data-slot="studio-page-actions"
+            className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end"
+          >
+            {actions}
+          </div>
+        )}
       </header>
 
       <div className="space-y-10">{children}</div>
