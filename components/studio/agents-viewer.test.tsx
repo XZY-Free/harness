@@ -34,9 +34,12 @@ describe("AgentsViewer", () => {
   it("通过统一控制面客户端加载服务端 Agent DTO", async () => {
     render(<AgentsViewer />);
 
+    expect(screen.getByRole("status").textContent).toContain("正在加载智能体");
     await waitFor(() => expect(screen.getByText("客服智能体")).toBeTruthy());
-    expect(screen.getByText("support")).toBeTruthy();
     expect(screen.getByText("已启用")).toBeTruthy();
+    expect(screen.getByText("已关联版本")).toBeTruthy();
+    expect(screen.queryByText("revision-1")).toBeNull();
+    expect(screen.queryByText("support")).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/admin/api/v1/agents", expect.any(Object));
   });
 
@@ -62,7 +65,8 @@ describe("AgentsViewer", () => {
     );
 
     const view = render(<AgentsViewer refreshToken={0} />);
-    await waitFor(() => expect(screen.getByText("智能体列表加载失败")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toContain("智能体列表加载失败");
 
     view.rerender(<AgentsViewer refreshToken={1} />);
     await waitFor(() => expect(screen.getByText("企业人力智能助手")).toBeTruthy());

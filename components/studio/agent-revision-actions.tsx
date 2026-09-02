@@ -1,33 +1,65 @@
 "use client";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 /**
  * AgentRevision 操作面板。
  *
- * 先选 exact Snapshot，再以四个严格 JSON editor 输入
- * model_policy / permission_requirements / delegation_policy /
- * agent_interface_requirements，调用 source-free Create Revision API；
- * 绝不出现 source type / Git commit / artifact ref / instruction hash / framework。
- * Publish / Withdraw 尊重 Idempotency-Key / If-Match（etag）。
+ * 先从后端权威合同列表选择 exact Snapshot，再提交四个严格 JSON 对象；
+ * 发布与撤回继续使用后端返回的 revision id / etag，并携带
+ * Idempotency-Key / If-Match。界面只隐藏技术标识，不改变交接值。
  */
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   type AgentRevisionSummaryDTO,
   ControlPlaneRequestError,
   type PublishAgentRevisionResponse,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
-import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, CheckCircle2, LoaderCircle } from "lucide-react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
-/** AgentRevisionSummaryDTO.etag 即 If-Match 值（正式端点合同）。 */
 const POLICY_FIELDS = [
-  { key: "model_policy", label: "model_policy" },
-  { key: "permission_requirements", label: "permission_requirements" },
-  { key: "delegation_policy", label: "delegation_policy" },
-  { key: "agent_interface_requirements", label: "agent_interface_requirements" },
+  { key: "model_policy", label: "模型策略", description: "约束模型选择、参数与调用范围。" },
+  {
+    key: "permission_requirements",
+    label: "权限要求",
+    description: "声明版本运行时需要的权限。",
+  },
+  { key: "delegation_policy", label: "委派策略", description: "约束任务委派与协作边界。" },
+  {
+    key: "agent_interface_requirements",
+    label: "接口要求",
+    description: "声明智能体对外接口的必要条件。",
+  },
 ] as const;
 
+const REVISION_STATE_LABEL: Record<AgentRevisionSummaryDTO["revision_state"], string> = {
+  draft: "草稿",
+  published: "已发布",
+  withdrawn: "已撤回",
+};
+
 type PolicyKey = (typeof POLICY_FIELDS)[number]["key"];
+type BusyAction = "create" | `publish:${string}` | `withdraw:${string}`;
 
 function classifyError(err: unknown): string {
   if (err instanceof ControlPlaneRequestError) {
@@ -41,12 +73,12 @@ function classifyError(err: unknown): string {
       case "BUSINESS_CONSTRAINT_VIOLATION":
         return "业务约束拒绝（如发布前置条件未满足）";
       case "ACTION_SCOPE_DENIED":
-        return "无对应操作权限";
+        return "没有执行该操作的权限";
       default:
-        return `操作失败（${err.code ?? "未知错误"}）`;
+        return "操作失败，请稍后重试";
     }
   }
-  return "操作失败";
+  return "操作失败，请稍后重试";
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> | null {
@@ -66,7 +98,7 @@ interface AgentRevisionActionsProps {
   readonly preferredSnapshotId?: string | null;
   /** 递增代次：上游变更后重新加载合同与版本列表。 */
   readonly refreshToken?: number;
-  /** 发布成功回调（完整 PublishAgentRevisionResponse），发布动作仍由用户点击触发。 */
+  /** 发布成功回调；仅真实 publish API 成功后触发。 */
   readonly onPublished?: (result: PublishAgentRevisionResponse) => void;
 }
 
@@ -76,8 +108,9 @@ export function AgentRevisionActions({
   refreshToken = 0,
   onPublished,
 }: AgentRevisionActionsProps) {
+  const formId = useId();
   const [snapshots, setSnapshots] = useState<
-    Array<{ snapshot_id: string; contract_version: string }>
+    Array<{ snapshot_id: string; contract_version: string; captured_at: string }>
   >([]);
   const [snapshotId, setSnapshotId] = useState("");
   const [policies, setPolicies] = useState<Record<PolicyKey, string>>({
@@ -87,11 +120,12 @@ export function AgentRevisionActions({
     agent_interface_requirements: "{}",
   });
   const [revisions, setRevisions] = useState<AgentRevisionSummaryDTO[] | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingWithdrawal, setPendingWithdrawal] = useState<AgentRevisionSummaryDTO | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken 是刷新代次信号（合同登记后重载合同与版本列表），非直接引用
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken 是刷新代次信号，非直接引用
   const reload = useCallback(async () => {
     try {
       const [contracts, revisionList] = await Promise.all([
@@ -102,11 +136,11 @@ export function AgentRevisionActions({
         contracts.items.map((item) => ({
           snapshot_id: item.snapshot_id,
           contract_version: item.contract_version,
+          captured_at: item.captured_at,
         })),
       );
       setRevisions(revisionList.items);
-      // 保留仍在真实列表中的人工选择；当前选择已无效时才选择真实存在的 preferred；
-      // 都不存在则清空，绝不设置不存在的值或生成假 option。
+      // 人工选择仍在权威列表时保留；否则只接受权威列表中真实存在的 handoff。
       const ids = new Set(contracts.items.map((item) => item.snapshot_id));
       setSnapshotId((current) => {
         if (ids.has(current)) return current;
@@ -118,8 +152,6 @@ export function AgentRevisionActions({
   }, [agentId, refreshToken, preferredSnapshotId]);
 
   useEffect(() => {
-    // 不在此处清空 snapshotId：是否保留/清空由 reload 按真实列表统一判定，
-    // 否则刷新代次变化会先把人工选择清掉。
     setRevisions(null);
     setError(null);
     setNotice(null);
@@ -133,12 +165,12 @@ export function AgentRevisionActions({
     for (const field of POLICY_FIELDS) {
       const parsed = parseJsonObject(policies[field.key]);
       if (!parsed) {
-        setError(`${field.label} 不是合法 JSON 对象`);
+        setError(`${field.label}必须是 JSON 对象`);
         return;
       }
       body[field.key] = parsed;
     }
-    setBusy(true);
+    setBusyAction("create");
     try {
       const created = await client.agents.createRevision(
         agentId,
@@ -159,36 +191,35 @@ export function AgentRevisionActions({
     } catch (err) {
       setError(classifyError(err));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function publish(revision: AgentRevisionSummaryDTO) {
     setError(null);
     setNotice(null);
-    setBusy(true);
+    setBusyAction(`publish:${revision.id}`);
     try {
       const result = await client.agents.publishRevision(
         revision.id,
         { release_notes: "Studio 发布" },
         { idempotencyKey: crypto.randomUUID(), ifMatch: revision.etag },
       );
-      // 只用真实 publish API 返回的响应交接；在 reload 之前触发，
-      // 避免发布已成功但列表刷新失败时丢失真实发布事件。
+      // 在 reload 前交接真实响应，避免发布成功而刷新失败时丢失发布事件。
       onPublished?.(result);
       setNotice(`版本 ${revision.revision_no} 已发布`);
       await reload();
     } catch (err) {
       setError(classifyError(err));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function withdraw(revision: AgentRevisionSummaryDTO) {
     setError(null);
     setNotice(null);
-    setBusy(true);
+    setBusyAction(`withdraw:${revision.id}`);
     try {
       await client.agents.withdrawRevision(
         revision.id,
@@ -200,104 +231,202 @@ export function AgentRevisionActions({
     } catch (err) {
       setError(classifyError(err));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
 
+  const busy = busyAction !== null;
+  const selectedSnapshot = snapshots.find((snapshot) => snapshot.snapshot_id === snapshotId);
+
   return (
-    <div className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-[13px] font-medium text-[var(--fg)]">智能体版本操作</div>
-
-      <label className="block text-[12px] text-[var(--fg-muted)]">
-        创建版本使用的合同
-        <select
-          value={snapshotId}
-          onChange={(e) => setSnapshotId(e.target.value)}
-          aria-label="创建版本使用的合同"
-          className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
-        >
-          <option value="">（选择合同）</option>
-          {snapshots.map((snapshot) => (
-            <option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
-              {snapshot.snapshot_id}（{snapshot.contract_version}）
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {POLICY_FIELDS.map((field) => (
-          <label key={field.key} className="text-[12px] text-[var(--fg-muted)]">
-            {field.label}（严格 JSON）
-            <textarea
-              value={policies[field.key]}
-              onChange={(e) => setPolicies((prev) => ({ ...prev, [field.key]: e.target.value }))}
-              rows={4}
-              spellCheck={false}
-              aria-label={field.label}
-              className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 font-mono text-[12px] text-[var(--fg)]"
-            />
-          </label>
-        ))}
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <label htmlFor={`${formId}-contract`} className="text-sm font-medium text-foreground">
+          创建版本使用的合同
+        </label>
+        <Select value={snapshotId || null} onValueChange={(value) => setSnapshotId(value ?? "")}>
+          <SelectTrigger
+            id={`${formId}-contract`}
+            aria-label="创建版本使用的合同"
+            data-selected-id={snapshotId}
+            className="w-full bg-background"
+          >
+            <SelectValue>
+              {selectedSnapshot
+                ? `合同版本 ${selectedSnapshot.contract_version} · ${new Date(selectedSnapshot.captured_at).toLocaleDateString("zh-CN")}`
+                : "选择已登记合同"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}>
+            {snapshots.map((snapshot, index) => (
+              <SelectItem key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
+                合同版本 {snapshot.contract_version} ·{" "}
+                {new Date(snapshot.captured_at).toLocaleDateString("zh-CN")} · 记录 {index + 1}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {snapshots.length === 0 && revisions !== null && (
+          <p className="text-xs text-muted-foreground">该智能体尚无可用合同，请先完成合同登记。</p>
+        )}
       </div>
 
-      <button
-        type="button"
-        disabled={!snapshotId || busy}
-        onClick={createRevision}
-        className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] text-[var(--fg)] disabled:opacity-50"
-      >
-        {busy ? "处理中…" : "创建草稿版本"}
-      </button>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {POLICY_FIELDS.map((field) => {
+          const inputId = `${formId}-${field.key}`;
+          return (
+            <div key={field.key} className="rounded-xl border bg-muted/20 p-3">
+              <label htmlFor={inputId} className="text-sm font-medium text-foreground">
+                {field.label}
+              </label>
+              <p className="mt-0.5 text-xs text-muted-foreground">{field.description}</p>
+              <Textarea
+                id={inputId}
+                value={policies[field.key]}
+                onChange={(event) =>
+                  setPolicies((current) => ({ ...current, [field.key]: event.target.value }))
+                }
+                rows={5}
+                spellCheck={false}
+                aria-label={field.label}
+                className="mt-3 min-h-28 resize-y bg-background font-mono text-xs"
+              />
+            </div>
+          );
+        })}
+      </div>
 
-      {revisions && revisions.length > 0 && (
-        <div className="overflow-hidden rounded border border-[var(--border)]">
-          <table className="w-full text-[12px]">
-            <thead className="bg-[var(--surface-2)] text-[var(--fg-subtle)]">
-              <tr>
-                <th className="px-2 py-1 text-left font-medium">版本</th>
-                <th className="px-2 py-1 text-left font-medium">状态</th>
-                <th className="px-2 py-1 text-left font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {revisions.map((revision) => (
-                <tr key={revision.id} className="border-t border-[var(--border)]">
-                  <td className="px-2 py-1 font-mono text-[var(--fg-muted)]">
-                    #{revision.revision_no}
-                  </td>
-                  <td className="px-2 py-1 text-[var(--fg-muted)]">{revision.revision_state}</td>
-                  <td className="px-2 py-1">
-                    {revision.revision_state === "draft" && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => publish(revision)}
-                        className="mr-2 rounded border border-[var(--border)] px-2 py-0.5 text-[var(--fg)] disabled:opacity-50"
-                      >
-                        发布
-                      </button>
-                    )}
-                    {revision.revision_state === "published" && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => withdraw(revision)}
-                        className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--fg)] disabled:opacity-50"
-                      >
-                        撤回
-                      </button>
-                    )}
-                  </td>
+      <Button type="button" disabled={!snapshotId || busy} onClick={createRevision}>
+        {busyAction === "create" && <LoaderCircle className="size-4 animate-spin" aria-hidden />}
+        {busyAction === "create" ? "创建中…" : "创建草稿版本"}
+      </Button>
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold text-foreground">版本记录</h3>
+        {revisions === null && !error && (
+          <output
+            aria-live="polite"
+            className="flex items-center gap-2 rounded-xl border px-4 py-6 text-sm text-muted-foreground"
+          >
+            <LoaderCircle className="size-4 animate-spin" aria-hidden />
+            正在加载版本记录…
+          </output>
+        )}
+        {revisions?.length === 0 && (
+          <div className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            暂无版本记录
+          </div>
+        )}
+        {revisions && revisions.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border bg-card">
+            <table className="min-w-[520px] w-full text-sm">
+              <thead className="bg-muted/60 text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium">版本</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium">状态</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {revisions.map((revision) => (
+                  <tr key={revision.id} className="border-t first:border-t-0">
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      第 {revision.revision_no} 版
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex rounded-full bg-secondary px-2 py-1 text-xs text-secondary-foreground">
+                        {REVISION_STATE_LABEL[revision.revision_state]}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {revision.revision_state === "draft" && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => publish(revision)}
+                        >
+                          {busyAction === `publish:${revision.id}` && (
+                            <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                          )}
+                          {busyAction === `publish:${revision.id}` ? "发布中…" : "发布"}
+                        </Button>
+                      )}
+                      {revision.revision_state === "published" && (
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => setPendingWithdrawal(revision)}
+                        >
+                          {busyAction === `withdraw:${revision.id}` && (
+                            <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                          )}
+                          {busyAction === `withdraw:${revision.id}` ? "撤回中…" : "撤回"}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
+          {error}
         </div>
       )}
+      {notice && (
+        <output
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-sm text-foreground"
+        >
+          <CheckCircle2 className="size-4 text-success" aria-hidden />
+          {notice}
+        </output>
+      )}
 
-      {error && <div className="text-[12px] text-[var(--danger)]">{error}</div>}
-      {notice && <div className="text-[12px] text-[var(--fg)]">{notice}</div>}
+      <AlertDialog
+        open={pendingWithdrawal !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) setPendingWithdrawal(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              确认撤回第 {pendingWithdrawal?.revision_no ?? "—"} 版？
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              撤回后，该版本不能再用于新的员工会话；已有记录仍会保留。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={busy}
+              onClick={async () => {
+                const revision = pendingWithdrawal;
+                if (!revision) return;
+                await withdraw(revision);
+                setPendingWithdrawal(null);
+              }}
+            >
+              {busy ? "撤回中…" : "确认撤回"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

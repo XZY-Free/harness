@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 /**
  * Agent Contract 登记面板— agent-contract.json 文件导入形态。
  *
@@ -14,7 +16,8 @@ import {
   type RegisterAgentContractResponse,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
-import { useCallback, useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, FileJson2, LoaderCircle } from "lucide-react";
+import { useCallback, useId, useRef, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
@@ -131,6 +134,7 @@ interface AgentContractRegistrationPanelProps {
 export function AgentContractRegistrationPanel({
   onRegistered,
 }: AgentContractRegistrationPanelProps) {
+  const fileInputId = useId();
   const [preview, setPreview] = useState<ContractPreview | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -223,12 +227,29 @@ export function AgentContractRegistrationPanel({
   const busy = submitting;
 
   return (
-    <div className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-[13px] font-medium text-[var(--fg)]">登记智能体合同</div>
-      <label className="block text-[12px] text-[var(--fg-muted)]">
-        选择智能体合同文件
-        <input
+    <div className="space-y-4" aria-busy={busy}>
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">登记智能体合同</h3>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">
+          文件仅用于本次校验与登记，不会保存文件名、路径或原始内容。
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-dashed bg-muted/30 p-4">
+        <label htmlFor={fileInputId} className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+            <FileJson2 className="size-4" aria-hidden />
+          </span>
+          <span>
+            <span className="block text-sm font-medium text-foreground">选择智能体合同文件</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              支持 JSON，文件大小不超过 1 MiB
+            </span>
+          </span>
+        </label>
+        <Input
           key={fileInputKey}
+          id={fileInputId}
           type="file"
           accept=".json,application/json"
           aria-label="选择智能体合同文件"
@@ -237,59 +258,66 @@ export function AgentContractRegistrationPanel({
             const file = e.target.files?.[0];
             void handleFile(file);
           }}
-          className="mt-1 block w-full max-w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)] file:mr-2 file:rounded file:border-0 file:bg-transparent file:text-[12px] file:text-[var(--fg-muted)]"
+          className="mt-3 bg-background"
         />
-      </label>
+      </div>
+
       {preview && (
-        <dl className="grid grid-cols-1 gap-x-4 gap-y-1 rounded border border-[var(--border)] bg-[var(--surface-2)] p-3 text-[12px] sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <dt className="text-[var(--fg-muted)]">智能体名称</dt>
-            <dd className="truncate text-[var(--fg)]">{preview.name}</dd>
+        <div className="rounded-xl border bg-card p-4">
+          <div className="mb-4 flex items-center gap-2">
+            <CheckCircle2 className="size-4 text-success" aria-hidden />
+            <h4 className="text-sm font-medium text-foreground">合同内容已读取</h4>
           </div>
-          <div>
-            <dt className="text-[var(--fg-muted)]">稳定标识</dt>
-            <dd className="truncate text-[var(--fg)]">{preview.agentId}</dd>
-          </div>
-          <div>
-            <dt className="text-[var(--fg-muted)]">智能体版本</dt>
-            <dd className="text-[var(--fg)]">{preview.agentVersion}</dd>
-          </div>
-          <div>
-            <dt className="text-[var(--fg-muted)]">合同版本</dt>
-            <dd className="text-[var(--fg)]">{preview.contractVersion}</dd>
-          </div>
-          <div>
-            <dt className="text-[var(--fg-muted)]">能力数量</dt>
-            <dd className="text-[var(--fg)]">{preview.capabilityCount} 项</dd>
-          </div>
-          <div className="sm:col-span-2">
-            <dt className="text-[var(--fg-muted)]">交互能力</dt>
-            <dd className="text-[var(--fg)]">{preview.interactionSummary}</dd>
-          </div>
-          <div className="sm:col-span-2">
-            <dt className="text-[var(--fg-muted)]">通信协议</dt>
-            <dd className="text-[var(--fg)]">A2A 0.3.0</dd>
-          </div>
-        </dl>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <dt className="text-xs text-muted-foreground">智能体名称</dt>
+              <dd className="mt-0.5 truncate font-medium text-foreground">{preview.name}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">智能体版本</dt>
+              <dd className="mt-0.5 text-foreground">{preview.agentVersion}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">合同版本</dt>
+              <dd className="mt-0.5 text-foreground">{preview.contractVersion}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">能力数量</dt>
+              <dd className="mt-0.5 text-foreground">{preview.capabilityCount} 项</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">通信协议</dt>
+              <dd className="mt-0.5 text-foreground">A2A 0.3.0</dd>
+            </div>
+            <div className="sm:col-span-2">
+              <dt className="text-xs text-muted-foreground">交互能力</dt>
+              <dd className="mt-0.5 text-foreground">{preview.interactionSummary}</dd>
+            </div>
+          </dl>
+        </div>
       )}
       {error && (
-        <div className="text-[12px] text-[var(--danger)]" role="alert">
+        <div
+          className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
           {error}
         </div>
       )}
       {success && (
-        <div className="text-[12px] text-[var(--fg)]">
-          {success}：<span>{successName}</span>
-        </div>
+        <output
+          className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-sm text-foreground"
+          aria-live="polite"
+        >
+          <CheckCircle2 className="size-4 text-success" aria-hidden />
+          {success}：<span className="font-medium">{successName}</span>
+        </output>
       )}
-      <button
-        type="button"
-        disabled={!preview || busy}
-        onClick={submit}
-        className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] text-[var(--fg)] disabled:opacity-50"
-      >
+      <Button type="button" disabled={!preview || busy} onClick={submit}>
+        {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden />}
         {busy ? "登记中…" : "登记合同"}
-      </button>
+      </Button>
     </div>
   );
 }

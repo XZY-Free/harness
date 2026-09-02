@@ -131,7 +131,7 @@ describe("AgentContractRegistrationPanel（合同文件导入）", () => {
       );
     });
     expect(screen.getByText("企业人力智能助手")).toBeTruthy();
-    expect(screen.getByText(/hr-assistant/)).toBeTruthy();
+    expect(screen.queryByText(/hr-assistant/)).toBeNull();
     expect(screen.getAllByText(/1\.0\.0/).length).toBeGreaterThan(0);
     expect(screen.getByText(/2\s*项/)).toBeTruthy();
     expect(screen.getByText(/流式/)).toBeTruthy();
@@ -157,7 +157,8 @@ describe("AgentContractRegistrationPanel（合同文件导入）", () => {
     fireEvent.click(screen.getByRole("button", { name: "登记合同" }));
 
     // 成功结果：中文展示智能体名称与“已登记”，不出现 snapshot id/digest。
-    await waitFor(() => expect(screen.getByText(/已登记/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect(screen.getByRole("status").textContent).toContain("已登记");
     expect(screen.getByText(/企业人力智能助手/)).toBeTruthy();
     expect(screen.queryByText(/snap-0001/)).toBeNull();
     expect(screen.queryByText(/digest/)).toBeNull();

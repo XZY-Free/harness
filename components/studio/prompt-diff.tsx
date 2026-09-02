@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useMemo, useState } from "react";
 
 /**
@@ -59,12 +66,17 @@ export function diffLines(oldText: string, newText: string): DiffLine[] {
 type VersionLite = { id: string; version: number; promptTemplate: string | null };
 
 const ROW_CLASS: Record<DiffLine["type"], string> = {
-  add: "bg-[var(--ok-soft)] text-[var(--ok)]",
-  del: "bg-[var(--danger-soft)] text-[var(--danger)]",
-  same: "text-[var(--fg-subtle)]",
+  add: "bg-success/10 text-success",
+  del: "bg-destructive/10 text-destructive",
+  same: "text-muted-foreground",
 };
 
 const PREFIX: Record<DiffLine["type"], string> = { add: "+", del: "-", same: " " };
+const ACCESSIBLE_CHANGE: Record<DiffLine["type"], string | null> = {
+  add: "新增",
+  del: "删除",
+  same: null,
+};
 
 export function PromptDiff({ versions }: { versions: VersionLite[] }) {
   const [aId, setAId] = useState(versions[0]?.id ?? "");
@@ -78,50 +90,57 @@ export function PromptDiff({ versions }: { versions: VersionLite[] }) {
   }, [versions, aId, bId]);
 
   if (versions.length < 2) {
-    return <div className="text-[13px] text-[var(--fg-muted)]">至少需要 2 个版本才能对比。</div>;
+    return <p className="text-sm text-muted-foreground">至少需要两个版本才能进行内容对比。</p>;
   }
 
   return (
-    <div>
-      <div className="mb-3 flex items-center gap-3 text-[13px]">
-        <label className="flex items-center gap-1.5">
-          旧
-          <select
-            value={aId}
-            onChange={(e) => setAId(e.target.value)}
-            className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-2 py-1"
-          >
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={aId} onValueChange={(value) => setAId(value ?? "")}>
+          <SelectTrigger aria-label="较早版本" className="min-w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
             {versions.map((v) => (
-              <option key={v.id} value={v.id}>
-                v{v.version}
-              </option>
+              <SelectItem key={v.id} value={v.id}>
+                版本 {v.version}
+              </SelectItem>
             ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5">
-          新
-          <select
-            value={bId}
-            onChange={(e) => setBId(e.target.value)}
-            className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-2 py-1"
-          >
+          </SelectContent>
+        </Select>
+        <span aria-hidden className="text-sm text-foreground-subtle">
+          对比
+        </span>
+        <Select value={bId} onValueChange={(value) => setBId(value ?? "")}>
+          <SelectTrigger aria-label="较新版本" className="min-w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
             {versions.map((v) => (
-              <option key={v.id} value={v.id}>
-                v{v.version}
-              </option>
+              <SelectItem key={v.id} value={v.id}>
+                版本 {v.version}
+              </SelectItem>
             ))}
-          </select>
-        </label>
+          </SelectContent>
+        </Select>
       </div>
-      <pre className="overflow-auto rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-3 text-[12px] leading-[1.6]">
+      <section
+        aria-label="版本内容差异"
+        className="max-h-96 overflow-auto bg-muted/40 p-4 font-mono text-xs leading-6 whitespace-pre"
+      >
         {diff.map((line, idx) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: diff 行无稳定 id，列表顺序固定不重排
-          <div key={`row-${idx}`} className={`px-2 ${ROW_CLASS[line.type]}`}>
-            <span className="select-none pr-2 opacity-60">{PREFIX[line.type]}</span>
+          <div key={`row-${idx}`} className={`min-w-max px-2 ${ROW_CLASS[line.type]}`}>
+            {ACCESSIBLE_CHANGE[line.type] && (
+              <span className="sr-only">{ACCESSIBLE_CHANGE[line.type]}</span>
+            )}
+            <span aria-hidden className="select-none pr-2 opacity-60">
+              {PREFIX[line.type]}
+            </span>
             {line.text || " "}
           </div>
         ))}
-      </pre>
+      </section>
     </div>
   );
 }

@@ -4,18 +4,31 @@ import { SkillDeleteButton } from "@/components/studio/skill-delete-button";
 import { SkillFileEditor } from "@/components/studio/skill-file-editor";
 import { SkillSyncMeta } from "@/components/studio/skill-sync-meta";
 import { SkillVersionTimeline } from "@/components/studio/skill-version-timeline";
+import { StudioPage } from "@/components/studio/studio-page";
+import {
+  StudioSettingsRow,
+  StudioSettingsSection,
+} from "@/components/studio/studio-settings-section";
 import { getSkillById } from "@/lib/capability/skill-queries";
 import { getSkillSyncInfo, listSkillVersions } from "@/lib/capability/skill-studio-queries";
 import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 import { notFound } from "next/navigation";
 
-/**
- * Agent Studio Skill 详情（Phase 4-4 Stage B + 02 文档 §7.1/§7.2）。
- * server component 取 skill + 版本列表；版本时间线 + prompt diff + 发布/回滚（client）。
- * 同步 Skill（source=capability-market）只读：隐藏删除/编辑/发布回滚按钮,显示同步元数据。
- */
 export const dynamic = "force-dynamic";
+
+const LIFECYCLE_LABEL: Record<string, string> = {
+  draft: "草稿",
+  enabled: "可用",
+  disabled: "已归档",
+  retired: "已停用",
+};
+
+const VISIBILITY_LABEL: Record<string, string> = {
+  tenant: "组织内可见",
+  internal: "员工可用",
+  owner: "仅负责人可见",
+};
 
 export default async function SkillDetailPage({
   params,
@@ -27,75 +40,107 @@ export default async function SkillDetailPage({
 
   const { tenantId } = gate.principal;
   const { id } = await params;
-  const sk = await getSkillById({ tenantId, skillId: id });
-  if (!sk) notFound();
+  const skill = await getSkillById({ tenantId, skillId: id });
+  if (!skill) notFound();
+
   const versions = await listSkillVersions(tenantId, id);
   const canWrite = await hasStudioAction(gate.principal, "skill.write");
-  const isSynced = sk.sourceType === "capability_market";
-  // 同步 Skill 只读：写按钮一律隐藏（服务端已硬拦截,前端隐藏仅为体验）
+  const isSynced = skill.sourceType === "capability_market";
   const effectiveCanWrite = canWrite && !isSynced;
   const syncInfo = isSynced ? await getSkillSyncInfo(tenantId, id) : null;
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-[22px] font-semibold text-[var(--fg)]">{sk.skillKey}</h1>
-        {effectiveCanWrite && <SkillDeleteButton skillId={sk.id} skillName={sk.skillKey} />}
-      </div>
-      <p className="mt-1 text-[13px] text-[var(--fg-muted)]">
-        {sk.description ?? "（无描述）"} · 状态 {sk.lifecycleState} · 可见性 {sk.visibilityScope} ·
-        来源 {isSynced ? "同步镜像（只读）" : "本地自建"}
-      </p>
-
-      {isSynced && syncInfo && (
-        <SkillSyncMeta
-          skillId={sk.id}
-          skillName={sk.skillKey}
-          syncState={syncInfo.syncState}
-          remoteAssetId={syncInfo.remoteAssetId}
-          remoteName={syncInfo.remoteName}
-          remoteDisplayName={syncInfo.remoteDisplayName}
-          remoteVersion={syncInfo.remoteVersion}
-          remoteContentHash={syncInfo.remoteContentHash}
-          lastSyncedAt={
-            syncInfo.lastSyncedAt
-              ? syncInfo.lastSyncedAt.toLocaleString("zh-CN", { hour12: false })
-              : null
-          }
-          lastError={syncInfo.lastError}
-        />
+    <StudioPage
+      title={skill.displayName || skill.skillKey}
+      description={
+        <div className="space-y-1">
+          <p>{skill.description ?? "暂无描述"}</p>
+          <p className="text-xs">
+            {LIFECYCLE_LABEL[skill.lifecycleState] ?? "状态未知"} ·{" "}
+            {VISIBILITY_LABEL[skill.visibilityScope] ?? "可见范围未知"} ·{" "}
+            {isSynced ? "技能库同步，只读" : "本地创建"}
+          </p>
+          {skill.displayName && skill.displayName !== skill.skillKey && (
+            <p className="font-mono text-xs">技能标识：{skill.skillKey}</p>
+          )}
+        </div>
+      }
+      actions={
+        effectiveCanWrite ? (
+          <SkillDeleteButton skillId={skill.id} skillName={skill.displayName || skill.skillKey} />
+        ) : null
+      }
+      width="wide"
+    >
+      {isSynced && (
+        <StudioSettingsSection
+          title="同步信息"
+          description="该技能由技能库统一维护，当前页面只提供查看和停止同步。"
+        >
+          {syncInfo ? (
+            <SkillSyncMeta
+              skillId={skill.id}
+              skillName={skill.displayName || skill.skillKey}
+              syncState={syncInfo.syncState}
+              remoteAssetId={syncInfo.remoteAssetId}
+              remoteName={syncInfo.remoteName}
+              remoteDisplayName={syncInfo.remoteDisplayName}
+              remoteVersion={syncInfo.remoteVersion}
+              remoteContentHash={syncInfo.remoteContentHash}
+              lastSyncedAt={
+                syncInfo.lastSyncedAt
+                  ? syncInfo.lastSyncedAt.toLocaleString("zh-CN", { hour12: false })
+                  : null
+              }
+              lastError={syncInfo.lastError}
+            />
+          ) : (
+            <StudioSettingsRow
+              title="同步状态暂不可用"
+              description="未找到这项技能的同步记录，请返回列表重新同步。"
+            />
+          )}
+        </StudioSettingsSection>
       )}
 
-      <section className="mt-6">
-        <h2 className="mb-3 text-[15px] font-medium text-[var(--fg)]">版本时间线</h2>
+      <StudioSettingsSection
+        title="版本记录"
+        description="查看历史版本，并在需要时恢复或重新设为当前版本。"
+      >
         <SkillVersionTimeline
-          skillId={sk.id}
-          versions={versions.map((v) => ({
-            id: v.id,
-            version: v.versionNo,
-            status: v.revisionState,
-            createdAt: v.createdAt,
-            commitSha: v.contentRef,
+          skillId={skill.id}
+          versions={versions.map((version) => ({
+            id: version.id,
+            version: version.versionNo,
+            status: version.revisionState,
+            createdAt: version.createdAt,
+            commitSha: version.contentRef,
           }))}
-          currentVersionId={sk.currentVersionId}
+          currentVersionId={skill.currentVersionId}
           canWrite={effectiveCanWrite}
         />
-      </section>
+      </StudioSettingsSection>
 
-      <section className="mt-8">
-        <SkillFileEditor skillId={sk.id} skillName={sk.skillKey} canWrite={effectiveCanWrite} />
-      </section>
+      <SkillFileEditor
+        skillId={skill.id}
+        skillName={skill.displayName || skill.skillKey}
+        canWrite={effectiveCanWrite}
+      />
 
-      <section className="mt-8">
-        <h2 className="mb-3 text-[15px] font-medium text-[var(--fg)]">Prompt Diff</h2>
-        <PromptDiff
-          versions={versions.map((v) => ({
-            id: v.id,
-            version: v.versionNo,
-            promptTemplate: v.manifestJson ? JSON.stringify(v.manifestJson) : null,
-          }))}
-        />
-      </section>
-    </div>
+      <StudioSettingsSection
+        title="版本内容对比"
+        description="选择两个版本，逐行查看工作说明发生的变化。"
+      >
+        <div className="p-4">
+          <PromptDiff
+            versions={versions.map((version) => ({
+              id: version.id,
+              version: version.versionNo,
+              promptTemplate: version.manifestJson ? JSON.stringify(version.manifestJson) : null,
+            }))}
+          />
+        </div>
+      </StudioSettingsSection>
+    </StudioPage>
   );
 }

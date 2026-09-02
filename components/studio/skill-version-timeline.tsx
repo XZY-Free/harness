@@ -1,14 +1,10 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { RotateCcw, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
-/**
- * Phase 4-4 Stage B：skill 版本时间线 + 发布 / 回滚操作。
- *
- * 写操作走 /studio/api/* （client fetch），受后端 skill.write 守卫。操作成功后 router.refresh()
- * 让 server component 重取最新 currentVersionId。无权限用户按钮点击会收到 403，前端提示。
- */
 
 type VersionLite = {
   id: string;
@@ -31,11 +27,11 @@ async function postAction(
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      return { ok: false, message: body?.error?.message ?? `HTTP ${res.status}` };
+      return { ok: false, message: body?.error?.message ?? "操作失败" };
     }
     return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "网络错误" };
+  } catch {
+    return { ok: false, message: "网络连接失败" };
   }
 }
 
@@ -53,74 +49,75 @@ export function SkillVersionTimeline({
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const currentVersion = versions.find((version) => version.id === currentVersionId)?.version;
 
-  async function handle(skillId: string, v: VersionLite, kind: "publish" | "rollback") {
-    setBusy(`${kind}:${v.id}`);
+  async function handle(version: VersionLite, kind: "publish" | "rollback") {
+    setBusy(version.id);
     setError(null);
-    const r = await postAction(skillId, v.id, kind);
+    const result = await postAction(skillId, version.id, kind);
     setBusy(null);
-    if (!r.ok) {
-      setError(`v${v.version} ${kind} 失败：${r.message ?? ""}`);
+    if (!result.ok) {
+      setError(`版本 ${version.version} 操作失败：${result.message ?? "请稍后重试"}`);
       return;
     }
     router.refresh();
   }
 
   if (versions.length === 0) {
-    return <div className="text-[13px] text-[var(--fg-muted)]">该 skill 暂无版本。</div>;
+    return <p className="px-4 py-6 text-sm text-muted-foreground">暂无已保存的版本。</p>;
   }
 
   return (
-    <div>
-      <ul className="flex flex-col gap-2">
-        {versions.map((v) => {
-          const isCurrent = v.id === currentVersionId;
-          return (
-            <li
-              key={v.id}
-              className="flex items-center justify-between rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-            >
-              <div className="flex items-center gap-2.5 text-[13px]">
-                <span className="font-medium text-[var(--fg)]">v{v.version}</span>
-                {v.commitSha && (
-                  <span className="font-mono text-[11px] text-[var(--fg-subtle)]">
-                    {v.commitSha.slice(0, 7)}
-                  </span>
-                )}
-                {isCurrent && (
-                  <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] text-[var(--primary)]">
-                    当前
-                  </span>
-                )}
-                <span className="text-[var(--fg-subtle)]">
-                  {new Date(v.createdAt).toLocaleString()}
-                </span>
+    <ul className="divide-y divide-border">
+      {versions.map((version) => {
+        const isCurrent = version.id === currentVersionId;
+        const isOlder = currentVersion !== undefined && version.version < currentVersion;
+        const actionKind = isOlder ? "rollback" : "publish";
+        return (
+          <li
+            key={version.id}
+            className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-foreground">
+                {version.version}
               </div>
-              {canWrite && (
+              <div className="min-w-0 space-y-0.5">
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={isCurrent || busy !== null}
-                    onClick={() => handle(skillId, v, "publish")}
-                    className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-[12px] text-[var(--fg-muted)] transition hover:bg-[var(--surface-2)] disabled:opacity-40"
-                  >
-                    发布
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isCurrent || busy !== null}
-                    onClick={() => handle(skillId, v, "rollback")}
-                    className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-[12px] text-[var(--fg-muted)] transition hover:bg-[var(--surface-2)] disabled:opacity-40"
-                  >
-                    回滚
-                  </button>
+                  <span className="text-sm font-medium text-foreground">
+                    版本 {version.version}
+                  </span>
+                  {isCurrent && <Badge variant="secondary">当前使用</Badge>}
                 </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      {error && <div className="mt-2 text-[12px] text-[var(--danger)]">{error}</div>}
-    </div>
+                <p className="text-xs text-muted-foreground">
+                  {new Date(version.createdAt).toLocaleString("zh-CN", { hour12: false })}
+                </p>
+              </div>
+            </div>
+            {canWrite && !isCurrent && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy !== null}
+                onClick={() => handle(version, actionKind)}
+              >
+                {isOlder ? (
+                  <RotateCcw data-icon="inline-start" aria-hidden />
+                ) : (
+                  <Send data-icon="inline-start" aria-hidden />
+                )}
+                {busy === version.id ? "处理中…" : isOlder ? "恢复此版本" : "设为当前版本"}
+              </Button>
+            )}
+          </li>
+        );
+      })}
+      {error && (
+        <li role="alert" className="px-4 py-3 text-sm text-destructive">
+          {error}
+        </li>
+      )}
+    </ul>
   );
 }

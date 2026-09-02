@@ -28,15 +28,7 @@ export default async function OperationsPage() {
 
   return (
     <StudioPage title="运营" description="管理员工侧智能体发布，并查看平台使用情况。" width="wide">
-      <section aria-label="发布给员工" className="space-y-3">
-        <div className="space-y-1 px-0.5">
-          <h2 className="text-sm font-semibold text-foreground">发布给员工</h2>
-          <p className="text-xs leading-5 text-muted-foreground">
-            选择已经发布的智能体版本，并配置员工侧调用地址。
-          </p>
-        </div>
-        <RouteActivationPanel canManage={canManageRoutes} />
-      </section>
+      <RouteActivationPanel canManage={canManageRoutes} />
       <StudioSettingsSection title="运营数据">
         <StudioSettingsRow title="成本与容量" description="用量、容量与异常提醒正在准备中。">
           <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">

@@ -1,12 +1,12 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 /**
- * capability-market 同步按钮（02 文档 §7.1）。
- * 仅 admin 可见（列表页/详情页由 server 侧 hasPermission 控制渲染）。
- * 点击 → POST /studio/api/skills/sync → 展示分组结果（imported/updated/uptodate/conflict/blocked/failed/missing）。
+ * 从已配置的技能库同步内容。可见性由服务端权限判断。
  */
 export function SkillSyncButton() {
   const router = useRouter();
@@ -23,7 +23,7 @@ export function SkillSyncButton() {
       const res = await fetch("/studio/api/skills/sync", { method: "POST" });
       const body = await res.json();
       if (!res.ok) {
-        setError(body?.error?.message ?? `HTTP ${res.status}`);
+        setError(body?.error?.message ?? "同步失败，请稍后重试");
         return;
       }
       const d = body.data;
@@ -37,34 +37,38 @@ export function SkillSyncButton() {
         远端已下线: d.missing?.length ?? 0,
       });
       router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "网络错误");
+    } catch {
+      setError("网络连接失败，未能同步技能库");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={run}
-        disabled={busy}
-        className="rounded-[var(--radius)] bg-[var(--primary)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
-      >
-        {busy ? "同步中…" : "同步 capability-market"}
-      </button>
-      {error && <span className="text-[12px] text-[var(--danger)]">{error}</span>}
+    <div className="flex flex-col items-end gap-1.5">
+      <Button type="button" onClick={run} disabled={busy} variant="outline">
+        <RefreshCw
+          data-icon="inline-start"
+          aria-hidden
+          className={busy ? "animate-spin" : undefined}
+        />
+        {busy ? "同步中…" : "同步技能库"}
+      </Button>
+      {error && (
+        <span role="alert" className="max-w-72 text-right text-xs text-destructive">
+          {error}
+        </span>
+      )}
       {result && (
-        <span className="text-[12px] text-[var(--fg-muted)]">
+        <output className="max-w-96 text-right text-xs text-muted-foreground">
           {Object.entries(result)
             .filter(([, n]) => n > 0)
             .map(([k, n]) => `${k} ${n}`)
             .join(" · ") || "无变化"}
           {(result.名称冲突 ?? 0) > 0 && (
-            <span className="ml-2 text-[var(--danger)]">（有名称冲突,请在详情页处理）</span>
+            <span className="ml-2 text-destructive">有名称冲突，请检查技能列表。</span>
           )}
-        </span>
+        </output>
       )}
     </div>
   );

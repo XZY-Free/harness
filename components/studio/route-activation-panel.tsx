@@ -1,11 +1,15 @@
 "use client";
 
-/**
- * 「发布给员工」面板 — 为黑盒 Agent 冻结 A2A Route endpoint Authority。
- *
- * AgentRevision 只负责合同；实际调用位置、身份方式、凭证引用和网络区域只写入
- * targetKind=agent 的 RouteRevision。此面板不读取、不选择也不提交 RuntimeRevision。
- */
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   type AgentDTO,
   type AgentRevisionSummaryDTO,
@@ -13,6 +17,7 @@ import {
   type CredentialRefSummaryDTO,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
+import { CheckCircle2, LoaderCircle, Send, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
@@ -37,6 +42,12 @@ function classifyError(err: unknown): string {
   return "发布失败，请稍后重试";
 }
 
+function credentialLabel(credential: CredentialRefSummaryDTO): string {
+  const fingerprint = credential.fingerprint.split(":").at(-1) ?? credential.fingerprint;
+  const kind = credential.provider === "a2a-bearer" ? "智能体令牌" : "访问令牌";
+  return `${kind} · ${fingerprint.slice(-8)}`;
+}
+
 interface RouteActivationPanelProps {
   readonly canManage: boolean;
   /** 上游真实 AgentRevision 发布成功后递增，要求重新读取权威资产。 */
@@ -45,6 +56,12 @@ interface RouteActivationPanelProps {
   readonly preferredAgentRevisionId?: string | null;
 }
 
+/**
+ * 「发布给员工」面板 — 为黑盒 Agent 冻结 A2A Route endpoint Authority。
+ *
+ * AgentRevision 只负责合同；实际调用位置、身份方式、凭证引用和网络区域只写入
+ * targetKind=agent 的 RouteRevision。此面板不读取、不选择也不提交 RuntimeRevision。
+ */
 export function RouteActivationPanel({
   canManage,
   refreshToken = 0,
@@ -130,6 +147,15 @@ export function RouteActivationPanel({
     () => agentRevisions.find((revision) => revision.id === agentRevisionId) ?? null,
     [agentRevisions, agentRevisionId],
   );
+  const selectedCredential = useMemo(
+    () => credentials.find((credential) => credential.id === credentialRefId) ?? null,
+    [credentials, credentialRefId],
+  );
+
+  function agentRevisionLabel(revision: AgentRevisionSummaryDTO): string {
+    const agentName = agentsById.get(revision.agent_id)?.display_name ?? "未知智能体";
+    return `${agentName} · 第${revision.revision_no}版`;
+  }
 
   function changeIdentityMode(value: "none" | "bearer") {
     setIdentityMode(value);
@@ -198,100 +224,167 @@ export function RouteActivationPanel({
 
   if (!canManage) {
     return (
-      <div className="mt-4 text-[13px] text-[var(--fg-muted)]">
-        你没有发布智能体的权限（发布仍由服务端严格校验）。
+      <div
+        role="note"
+        className="mt-4 flex items-start gap-3 rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-xs"
+      >
+        <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        当前账号没有发布智能体的权限。
       </div>
     );
   }
 
-  const fieldClass =
-    "mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]";
-
   return (
-    <div className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-[13px] font-medium text-[var(--fg)]">发布给员工</div>
-      {loading && (
-        <div className="text-[12px] text-[var(--fg-muted)]">正在加载智能体与访问凭证…</div>
-      )}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <label className="text-[12px] text-[var(--fg-muted)]">
-          智能体版本
-          <select
-            value={agentRevisionId}
-            onChange={(event) => applyAgentRevisionId(event.target.value)}
-            aria-label="智能体版本"
-            className={fieldClass}
-          >
-            <option value="">（选择智能体版本）</option>
-            {agentRevisions.map((revision) => (
-              <option key={revision.id} value={revision.id}>
-                {agentsById.get(revision.agent_id)?.display_name ?? "未知智能体"} · 第{" "}
-                {revision.revision_no} 版
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-[12px] text-[var(--fg-muted)]">
-          端点 URL
-          <input
-            value={endpointRef}
-            onChange={(event) => setEndpointRef(event.target.value)}
-            aria-label="端点 URL"
-            className={fieldClass}
-            autoComplete="off"
-          />
-        </label>
-        <label className="text-[12px] text-[var(--fg-muted)]">
-          网络区域
-          <input
-            value={networkZone}
-            onChange={(event) => setNetworkZone(event.target.value)}
-            aria-label="网络区域"
-            className={fieldClass}
-            autoComplete="off"
-          />
-        </label>
-        <label className="text-[12px] text-[var(--fg-muted)]">
-          身份模式
-          <select
-            value={identityMode}
-            onChange={(event) => changeIdentityMode(event.target.value as "none" | "bearer")}
-            aria-label="身份模式"
-            className={fieldClass}
-          >
-            <option value="none">无需认证</option>
-            <option value="bearer">访问令牌</option>
-          </select>
-        </label>
-        {identityMode === "bearer" && (
-          <label className="text-[12px] text-[var(--fg-muted)] sm:col-span-2">
-            访问凭证
-            <select
-              value={credentialRefId}
-              onChange={(event) => setCredentialRefId(event.target.value)}
-              aria-label="访问凭证"
-              className={fieldClass}
+    <section
+      aria-label="发布给员工"
+      className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs"
+    >
+      <div className="flex flex-col gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold text-foreground">发布给员工</h2>
+          <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+            设置员工新建会话时使用的智能体与访问方式。
+          </p>
+        </div>
+        <span className="w-fit shrink-0 rounded-lg bg-muted px-2 py-1 text-xs text-muted-foreground">
+          仅影响新会话
+        </span>
+      </div>
+
+      <div className="space-y-5 px-5 py-5">
+        {loading && (
+          <output className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            正在加载可发布版本与访问凭证…
+          </output>
+        )}
+
+        {!loading && agentRevisions.length === 0 && !error && (
+          <output className="block rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+            暂无可发布的智能体版本。
+          </output>
+        )}
+
+        <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="staff-agent-revision">智能体版本</Label>
+            <Select
+              value={agentRevisionId}
+              onValueChange={(value) => applyAgentRevisionId(value ?? "")}
+              disabled={loading || agentRevisions.length === 0}
             >
-              <option value="">（选择访问凭证）</option>
-              {credentials.map((credential) => (
-                <option key={credential.id} value={credential.id}>
-                  {credential.provider} · {credential.fingerprint}
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger id="staff-agent-revision" aria-label="智能体版本" className="w-full">
+                <SelectValue placeholder="选择智能体版本">
+                  {selectedAgentRevision ? agentRevisionLabel(selectedAgentRevision) : null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align="start">
+                {agentRevisions.map((revision) => (
+                  <SelectItem key={revision.id} value={revision.id}>
+                    {agentRevisionLabel(revision)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="staff-endpoint">调用地址</Label>
+            <Input
+              id="staff-endpoint"
+              name="staffEndpoint"
+              type="url"
+              value={endpointRef}
+              onChange={(event) => setEndpointRef(event.target.value)}
+              aria-label="调用地址"
+              placeholder="输入 HTTPS 调用地址…"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="staff-network-zone">网络区域</Label>
+            <Input
+              id="staff-network-zone"
+              name="staffNetworkZone"
+              value={networkZone}
+              onChange={(event) => setNetworkZone(event.target.value)}
+              aria-label="网络区域"
+              placeholder="例如：公网区域…"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="staff-identity-mode">认证方式</Label>
+            <Select
+              value={identityMode}
+              onValueChange={(value) => changeIdentityMode(value as "none" | "bearer")}
+            >
+              <SelectTrigger id="staff-identity-mode" aria-label="认证方式" className="w-full">
+                <SelectValue>{identityMode === "none" ? "无需认证" : "令牌认证"}</SelectValue>
+              </SelectTrigger>
+              <SelectContent align="start">
+                <SelectItem value="none">无需认证</SelectItem>
+                <SelectItem value="bearer">令牌认证</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {identityMode === "bearer" && (
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="staff-credential">访问凭证</Label>
+              <Select
+                value={credentialRefId}
+                onValueChange={(value) => setCredentialRefId(value ?? "")}
+                disabled={loading || credentials.length === 0}
+              >
+                <SelectTrigger id="staff-credential" aria-label="访问凭证" className="w-full">
+                  <SelectValue placeholder="选择已配置的访问凭证">
+                    {selectedCredential ? credentialLabel(selectedCredential) : null}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  {credentials.map((credential) => (
+                    <SelectItem key={credential.id} value={credential.id}>
+                      {credentialLabel(credential)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {credentials.length === 0 && !loading && (
+                <p className="text-xs text-muted-foreground">暂无可用的访问凭证。</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            {error}
+          </div>
+        )}
+        {notice && (
+          <output className="flex items-center gap-2 rounded-xl bg-success/10 px-3 py-2 text-sm text-success">
+            <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+            {notice}
+          </output>
         )}
       </div>
-      <button
-        type="button"
-        disabled={!canSubmit}
-        onClick={publishToStaff}
-        className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] text-[var(--fg)] disabled:opacity-50"
-      >
-        {busy ? "发布中…" : "发布给员工"}
-      </button>
-      {error && <div className="text-[12px] text-[var(--danger)]">{error}</div>}
-      {notice && <div className="text-[12px] text-[var(--fg)]">{notice}</div>}
-    </div>
+
+      <div className="flex justify-end border-t border-border bg-muted/30 px-5 py-4">
+        <Button type="button" disabled={!canSubmit} onClick={publishToStaff}>
+          {busy ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Send aria-hidden="true" />
+          )}
+          {busy ? "发布中…" : "发布给员工"}
+        </Button>
+      </div>
+    </section>
   );
 }

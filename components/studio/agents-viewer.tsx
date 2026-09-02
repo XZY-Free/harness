@@ -1,11 +1,9 @@
 "use client";
 
 import { AgentContractPanel } from "@/components/studio/agent-contract-panel";
-import {
-  type AgentDTO,
-  ControlPlaneRequestError,
-  createControlPlaneClient,
-} from "@/lib/control-plane-client";
+import { Button } from "@/components/ui/button";
+import { type AgentDTO, createControlPlaneClient } from "@/lib/control-plane-client";
+import { ChevronDown, ChevronRight, CircleAlert, LoaderCircle } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
@@ -39,13 +37,9 @@ export function AgentsViewer({ refreshToken = 0 }: AgentsViewerProps) {
         setAgents(result.items);
         setError(null);
       },
-      (reason: unknown) => {
+      () => {
         if (!active) return;
-        setError(
-          reason instanceof ControlPlaneRequestError
-            ? `${reason.message}（请求 ${reason.requestId || "未知"}）`
-            : "智能体列表加载失败",
-        );
+        setError("智能体列表加载失败，请稍后重试");
       },
     );
     return () => {
@@ -54,70 +48,92 @@ export function AgentsViewer({ refreshToken = 0 }: AgentsViewerProps) {
   }, [refreshToken]);
 
   return (
-    <div className="mt-4 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
-      <table className="w-full text-[13px]">
-        <thead className="bg-[var(--surface-2)] text-[var(--fg-subtle)]">
+    <div className="overflow-x-auto rounded-xl border bg-card">
+      <table className="min-w-[680px] w-full text-sm">
+        <thead className="bg-muted/60 text-muted-foreground">
           <tr>
-            <th className="px-3 py-2 text-left font-medium">名称</th>
-            <th className="px-3 py-2 text-left font-medium">标识</th>
-            <th className="px-3 py-2 text-left font-medium">状态</th>
-            <th className="px-3 py-2 text-left font-medium">当前修订</th>
-            <th className="px-3 py-2 text-left font-medium">更新时间</th>
+            <th className="px-4 py-3 text-left text-xs font-medium">智能体</th>
+            <th className="px-4 py-3 text-left text-xs font-medium">状态</th>
+            <th className="px-4 py-3 text-left text-xs font-medium">当前版本</th>
+            <th className="px-4 py-3 text-left text-xs font-medium">更新时间</th>
+            <th className="px-4 py-3 text-right text-xs font-medium">合同</th>
           </tr>
         </thead>
         <tbody>
           {agents === null && !error && (
             <tr>
-              <td colSpan={5} className="px-3 py-6 text-center text-[var(--fg-muted)]">
-                正在加载…
+              <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                <output aria-live="polite" className="inline-flex items-center gap-2 text-sm">
+                  <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                  正在加载智能体…
+                </output>
               </td>
             </tr>
           )}
           {error && (
             <tr>
-              <td colSpan={5} className="px-3 py-6 text-center text-[var(--danger)]">
-                {error}
+              <td colSpan={5} className="px-4 py-10 text-center">
+                <div
+                  role="alert"
+                  className="inline-flex items-center gap-2 text-sm text-destructive"
+                >
+                  <CircleAlert className="size-4" aria-hidden />
+                  {error}
+                </div>
               </td>
             </tr>
           )}
           {agents?.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-3 py-6 text-center text-[var(--fg-muted)]">
+              <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
                 暂无智能体
               </td>
             </tr>
           )}
           {agents?.map((agent) => (
             <Fragment key={agent.id}>
-              <tr className="border-t border-[var(--border)]">
-                <td className="px-3 py-2 text-[var(--fg)]">
-                  <button
+              <tr className="border-t first:border-t-0">
+                <td className="px-4 py-3">
+                  <div className="font-medium text-foreground">{agent.display_name}</div>
+                  {agent.description && (
+                    <div className="mt-0.5 max-w-md truncate text-xs text-muted-foreground">
+                      {agent.description}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex rounded-full bg-secondary px-2 py-1 text-xs text-secondary-foreground">
+                    {LIFECYCLE_LABEL[agent.lifecycle_state]}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {agent.current_revision_id ? "已关联版本" : "尚未关联"}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {agent.updated_at ? new Date(agent.updated_at).toLocaleString("zh-CN") : "—"}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     aria-expanded={expandedAgentId === agent.id}
+                    aria-label={`${expandedAgentId === agent.id ? "收起" : "查看"}${agent.display_name}合同`}
                     onClick={() =>
                       setExpandedAgentId((current) => (current === agent.id ? null : agent.id))
                     }
-                    className="text-left"
                   >
-                    <div>{agent.display_name}</div>
-                    {agent.description && (
-                      <div className="text-[12px] text-[var(--fg-muted)]">{agent.description}</div>
+                    {expandedAgentId === agent.id ? "收起" : "查看"}
+                    {expandedAgentId === agent.id ? (
+                      <ChevronDown className="size-4" aria-hidden />
+                    ) : (
+                      <ChevronRight className="size-4" aria-hidden />
                     )}
-                  </button>
-                </td>
-                <td className="px-3 py-2 font-mono text-[var(--fg-muted)]">{agent.agent_key}</td>
-                <td className="px-3 py-2 text-[var(--fg-muted)]">
-                  {LIFECYCLE_LABEL[agent.lifecycle_state]}
-                </td>
-                <td className="px-3 py-2 font-mono text-[var(--fg-muted)]">
-                  {agent.current_revision_id ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-[var(--fg-muted)]">
-                  {agent.updated_at ? new Date(agent.updated_at).toLocaleString() : "—"}
+                  </Button>
                 </td>
               </tr>
               {expandedAgentId === agent.id && (
-                <tr className="border-t border-[var(--border)] bg-[var(--surface-2)]">
+                <tr className="border-t bg-muted/30">
                   <td colSpan={5} className="p-0">
                     <AgentContractPanel agentId={agent.id} loadContracts={loadContracts} />
                   </td>

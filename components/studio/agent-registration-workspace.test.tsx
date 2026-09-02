@@ -6,7 +6,7 @@ import type {
   RuntimeDTO,
   RuntimeRevisionDTO,
 } from "@/lib/control-plane-client";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fetchMock = vi.fn();
@@ -315,7 +315,15 @@ function selectFile(input: HTMLInputElement, file: File) {
 }
 
 function selectValue(label: string): string {
-  return (screen.getByLabelText(label) as HTMLSelectElement).value;
+  return screen.getByLabelText(label).getAttribute("data-selected-id") ?? "";
+}
+
+function selectHiddenValue(label: string): string {
+  const trigger = screen.getByLabelText(label);
+  return (
+    (trigger.parentElement?.querySelector('input[aria-hidden="true"]') as HTMLInputElement | null)
+      ?.value ?? ""
+  );
 }
 
 function publishPosts(): Array<{ body: unknown; headers: Headers }> {
@@ -349,7 +357,11 @@ async function renderWorkspaceAndRegisterContract(
     ),
   );
   fireEvent.click(screen.getByRole("button", { name: "登记合同" }));
-  await waitFor(() => expect(screen.getByText(/已登记/)).toBeTruthy());
+  await waitFor(() =>
+    expect(screen.getAllByRole("status").some((item) => item.textContent?.includes("已登记"))).toBe(
+      true,
+    ),
+  );
 }
 
 beforeEach(() => {
@@ -367,9 +379,10 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
   it("登记合同后不 remount/不刷新：档案显示 HR 智能体，创建版本的选择为 agent-1/snap-0001", async () => {
     await renderWorkspaceAndRegisterContract();
 
-    // 登记后（同一次挂载，无 remount）：档案区域出现 HR 智能体行（agent_key + 草稿状态）。
-    await waitFor(() => expect(screen.getByText("hr-assistant")).toBeTruthy());
+    // 登记后（同一次挂载，无 remount）：档案区域出现 HR 智能体行与草稿状态。
+    await waitFor(() => expect(screen.getAllByText("企业人力智能助手").length).toBeGreaterThan(0));
     expect(screen.getByText("草稿")).toBeTruthy();
+    expect(screen.queryByText("hr-assistant")).toBeNull();
 
     // 调用方没有 rerender；合同面板成功后允许为清空已选文件而重挂 input。
     expect(screen.getAllByLabelText("选择智能体合同文件")).toHaveLength(1);
@@ -378,13 +391,13 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     await waitFor(() => expect(selectValue("创建版本的智能体")).toBe("agent-1"));
     await waitFor(() => expect(selectValue("创建版本使用的合同")).toBe("snap-0001"));
 
-    // 选择器里确实存在对应 option（不是空值假通过）。
-    const revisionAgentSelect = screen.getByLabelText("创建版本的智能体") as HTMLSelectElement;
-    expect(Array.from(revisionAgentSelect.options).some((o) => o.value === "agent-1")).toBe(true);
-    const revisionContractSelect = screen.getByLabelText("创建版本使用的合同") as HTMLSelectElement;
-    expect(Array.from(revisionContractSelect.options).some((o) => o.value === "snap-0001")).toBe(
-      true,
-    );
+    // 两个值都来自重新读取的权威列表：打开选择器可看到真实选项，不是空值假通过。
+    fireEvent.click(screen.getByLabelText("创建版本的智能体"));
+    const agentOption = await screen.findByRole("option", { name: "企业人力智能助手" });
+    fireEvent.pointerDown(agentOption, { pointerType: "mouse" });
+    fireEvent.click(agentOption);
+    fireEvent.click(screen.getByLabelText("创建版本使用的合同"));
+    expect(await screen.findByRole("option", { name: /合同版本 1\.0\.0.*记录 1/ })).toBeTruthy();
   });
 
   it("两个选择器中文可访问名互不冲突，不再使用 aria-label=agent；不新增 URL/Git/source/secret 输入", async () => {
@@ -471,6 +484,8 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
       canManageRoutes: true,
     });
 
+    await waitFor(() => expect(screen.queryByText("正在加载可发布版本与访问凭证…")).toBeNull());
+
     // 创建草稿版本（合同已交接为 snap-0001，草稿本身不是可发布状态）。
     const createButton = (await screen.findByRole("button", {
       name: "创建草稿版本",
@@ -491,21 +506,22 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
       ).toBe(true),
     );
     await waitFor(() => expect(screen.getByText(/版本 1 已发布/)).toBeTruthy());
-    // 发布后档案当前版本同步刷新，不要求用户重载页面。
-    await waitFor(() => expect(screen.getByRole("cell", { name: "arev-1" })).toBeTruthy());
+    // 发布后档案当前版本同步刷新，不要求用户重载页面；默认不暴露内部 revision id。
+    await waitFor(() => expect(screen.getByRole("cell", { name: "已关联版本" })).toBeTruthy());
+    expect(screen.queryByRole("cell", { name: "arev-1" })).toBeNull();
 
     // Agent 发布后路由面板被刷新并选中真实 published arev-1（preferred 交接）。
-    await waitFor(() =>
-      expect((screen.getByLabelText("智能体版本") as HTMLSelectElement).value).toBe("arev-1"),
-    );
+    await waitFor(() => expect(selectHiddenValue("智能体版本")).toBe("arev-1"));
 
     // 路由面板绝不提供运行服务版本选择（Runtime 与 Agent 端点事实解耦）。
-    expect(screen.queryByLabelText("运行服务版本")).toBeNull();
+    const routeSection = screen.getByRole("button", { name: "发布给员工" }).closest("section");
+    if (!routeSection) throw new Error("发布给员工区域不存在");
+    expect(within(routeSection).queryByLabelText("运行服务版本")).toBeNull();
     // 同页 RuntimeControlPanel 独立读取自己的资产；Agent Route 面板的零 Runtime
     // 依赖由 RouteActivationPanel 单组件测试精确验证，不能在共享工作台误归因。
 
     // 填端点/网络（identity 保持 none）后点击发布给员工。
-    fireEvent.change(screen.getByLabelText("端点 URL"), {
+    fireEvent.change(screen.getByLabelText("调用地址"), {
       target: { value: "https://agent.example.com/a2a" },
     });
     fireEvent.change(screen.getByLabelText("网络区域"), { target: { value: "public" } });
@@ -544,6 +560,11 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
       canManageRoutes: true,
     });
 
+    await waitFor(() => expect(screen.queryByText("正在加载可发布版本与访问凭证…")).toBeNull());
+    await waitFor(() => expect(screen.getAllByText("企业人力智能助手").length).toBeGreaterThan(0));
+    await waitFor(() => expect(selectValue("创建版本的智能体")).toBe("agent-1"));
+    await waitFor(() => expect(selectValue("创建版本使用的合同")).toBe("snap-0001"));
+
     // 记录发布运行服务前的 Agent Route 资产 GET 次数。
     const agentGets = () =>
       fetchMock.mock.calls.filter(
@@ -569,7 +590,7 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     ).toBeGreaterThanOrEqual(1);
 
     // 未发布智能体版本：路由面板不预选任何 AgentRevision（无 fabricated 交接）。
-    expect((screen.getByLabelText("智能体版本") as HTMLSelectElement).value).toBe("");
+    expect(selectHiddenValue("智能体版本")).toBe("");
   });
 
   it("canManageRoutes 缺省为 false：不渲染「发布给员工」路由区域且零路由写", async () => {

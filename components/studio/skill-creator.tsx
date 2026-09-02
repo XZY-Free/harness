@@ -1,12 +1,24 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-/**
- * 新建技能对话框。POST /studio/api/skills → 建目录 + SKILL.md + v1。
- * name 校验由后端 assertValidSkillName 兜底,前端只做非空。
- */
+/** 新建技能并生成首个可用版本。 */
 export function SkillCreator() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -18,6 +30,12 @@ export function SkillCreator() {
   const [promptMd, setPromptMd] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function changeOpen(nextOpen: boolean) {
+    if (busy) return;
+    setOpen(nextOpen);
+    if (nextOpen) setError(null);
+  }
 
   async function submit() {
     if (!name.trim() || busy) return;
@@ -32,14 +50,14 @@ export function SkillCreator() {
           description: description.trim(),
           tools: tools
             .split(",")
-            .map((s) => s.trim())
+            .map((item) => item.trim())
             .filter(Boolean),
           promptMd,
         }),
       });
       const body = await res.json();
       if (!res.ok) {
-        setError(body?.error?.message ?? `HTTP ${res.status}`);
+        setError(body?.error?.message ?? "创建失败，请稍后重试");
         return;
       }
       setOpen(false);
@@ -47,94 +65,95 @@ export function SkillCreator() {
       setDescription("");
       setPromptMd("");
       router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "网络错误");
+    } catch {
+      setError("网络连接失败，技能未创建");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--primary)] px-3 py-1.5 text-[13px] font-medium text-[var(--accent-fg)] transition hover:bg-[var(--accent-hover)]"
-      >
-        + 新建技能
-      </button>
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setOpen(false)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
-          }}
-        >
-          <div
-            className="w-full max-w-lg rounded-[var(--radius)] bg-[var(--surface)] p-5"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-[16px] font-semibold text-[var(--fg)]">新建技能</h2>
-            <div className="mt-4 space-y-3 text-[13px]">
-              <label className="block">
-                <span className="text-[var(--fg-muted)]">name（小写字母数字+连字符）</span>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="build-from-idea"
-                  className="mt-1 w-full rounded-[var(--radius-sm)] bg-[var(--bg)] px-2.5 py-1.5 font-mono outline-none ring-1 ring-[var(--border)] focus:ring-[var(--accent-ring)]"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[var(--fg-muted)]">描述</span>
-                <input
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="mt-1 w-full rounded-[var(--radius-sm)] bg-[var(--bg)] px-2.5 py-1.5 outline-none ring-1 ring-[var(--border)] focus:ring-[var(--accent-ring)]"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[var(--fg-muted)]">工具白名单（逗号分隔）</span>
-                <input
-                  value={tools}
-                  onChange={(e) => setTools(e.target.value)}
-                  className="mt-1 w-full rounded-[var(--radius-sm)] bg-[var(--bg)] px-2.5 py-1.5 font-mono text-[12px] outline-none ring-1 ring-[var(--border)] focus:ring-[var(--accent-ring)]"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[var(--fg-muted)]">SKILL.md 正文（工作指令）</span>
-                <textarea
-                  value={promptMd}
-                  onChange={(e) => setPromptMd(e.target.value)}
-                  rows={8}
-                  placeholder="# 技能指令&#10;agent 会通过 readSkillFile 读取本文件..."
-                  className="mt-1 w-full rounded-[var(--radius-sm)] bg-[var(--bg)] px-2.5 py-1.5 font-mono text-[12px] outline-none ring-1 ring-[var(--border)] focus:ring-[var(--accent-ring)]"
-                />
-              </label>
-            </div>
-            {error && <div className="mt-3 text-[12px] text-[var(--danger)]">{error}</div>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-1.5 text-[13px] text-[var(--fg-muted)]"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={submit}
-                disabled={busy || !name.trim()}
-                className="rounded-[var(--radius-sm)] bg-[var(--primary)] px-3 py-1.5 text-[13px] font-medium text-[var(--accent-fg)] disabled:opacity-40"
-              >
-                {busy ? "创建中…" : "创建"}
-              </button>
-            </div>
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogTrigger render={<Button />}>
+        <Plus data-icon="inline-start" aria-hidden />
+        新建技能
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>新建技能</DialogTitle>
+          <DialogDescription>
+            创建一项可复用的工作能力，创建后仍可继续编辑和发布版本。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 py-1">
+          <div className="space-y-2">
+            <Label htmlFor="skill-name">技能标识</Label>
+            <Input
+              id="skill-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="build-from-idea"
+              autoComplete="off"
+              aria-describedby="skill-name-help"
+            />
+            <p id="skill-name-help" className="text-xs leading-5 text-muted-foreground">
+              使用小写字母、数字和连字符，创建后不可修改。
+            </p>
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="skill-description">描述</Label>
+            <Input
+              id="skill-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="说明这项技能适合处理什么工作"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="skill-tools">可用工具</Label>
+            <Input
+              id="skill-tools"
+              value={tools}
+              onChange={(event) => setTools(event.target.value)}
+              className="font-mono text-xs"
+              aria-describedby="skill-tools-help"
+            />
+            <p id="skill-tools-help" className="text-xs leading-5 text-muted-foreground">
+              多个工具使用英文逗号分隔。
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="skill-instructions">工作说明</Label>
+            <Textarea
+              id="skill-instructions"
+              value={promptMd}
+              onChange={(event) => setPromptMd(event.target.value)}
+              rows={8}
+              placeholder="写下执行步骤、判断标准和需要遵守的边界。"
+              className="min-h-44 resize-y font-mono text-xs"
+            />
+          </div>
+
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
         </div>
-      )}
-    </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />} disabled={busy}>
+            取消
+          </DialogClose>
+          <Button type="button" onClick={submit} disabled={busy || !name.trim()}>
+            {busy ? "创建中…" : "创建技能"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

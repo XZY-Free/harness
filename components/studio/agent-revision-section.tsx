@@ -5,10 +5,18 @@
  */
 import { AgentRevisionActions } from "@/components/studio/agent-revision-actions";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   type PublishAgentRevisionResponse,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
-import { useEffect, useState } from "react";
+import { CircleAlert, LoaderCircle } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
@@ -29,14 +37,18 @@ export function AgentsRevisionSection({
   refreshToken = 0,
   onPublished,
 }: AgentsRevisionSectionProps) {
+  const selectId = useId();
   const [agents, setAgents] = useState<Array<{ id: string; display_name: string }>>([]);
   const [agentId, setAgentId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const selectedAgent = agents.find((agent) => agent.id === agentId);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken 是刷新代次信号（合同登记后重载列表），非直接引用
   useEffect(() => {
     let active = true;
     setError(null);
+    setLoaded(false);
     client.agents
       .list()
       .then((list) => {
@@ -50,35 +62,67 @@ export function AgentsRevisionSection({
           if (preferredAgentId && ids.has(preferredAgentId)) return preferredAgentId;
           return ids.has(current) ? current : "";
         });
+        setLoaded(true);
       })
       .catch(() => {
-        if (active) setError("智能体列表加载失败");
+        if (active) {
+          setError("智能体列表加载失败，请稍后重试");
+          setLoaded(true);
+        }
       });
     return () => {
       active = false;
     };
   }, [refreshToken, preferredAgentId]);
 
-  if (error) return <div className="text-[13px] text-[var(--danger)]">{error}</div>;
+  if (error) {
+    return (
+      <div role="alert" className="flex items-center gap-2 text-sm text-destructive">
+        <CircleAlert className="size-4" aria-hidden />
+        {error}
+      </div>
+    );
+  }
+
+  if (!loaded) {
+    return (
+      <output aria-live="polite" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <LoaderCircle className="size-4 animate-spin" aria-hidden />
+        正在加载可管理的智能体…
+      </output>
+    );
+  }
 
   return (
-    <div className="space-y-3">
-      <label className="block text-[12px] text-[var(--fg-muted)]">
-        创建版本的智能体
-        <select
-          value={agentId}
-          onChange={(e) => setAgentId(e.target.value)}
-          aria-label="创建版本的智能体"
-          className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
-        >
-          <option value="">（选择智能体）</option>
-          {agents.map((agent) => (
-            <option key={agent.id} value={agent.id}>
-              {agent.display_name}
-            </option>
-          ))}
-        </select>
-      </label>
+    <div className="space-y-4">
+      {agents.length === 0 ? (
+        <div className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+          暂无可创建版本的智能体
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <label htmlFor={selectId} className="text-sm font-medium text-foreground">
+            创建版本的智能体
+          </label>
+          <Select value={agentId || null} onValueChange={(value) => setAgentId(value ?? "")}>
+            <SelectTrigger
+              id={selectId}
+              aria-label="创建版本的智能体"
+              data-selected-id={agentId}
+              className="w-full bg-background"
+            >
+              <SelectValue>{selectedAgent?.display_name ?? "选择智能体"}</SelectValue>
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              {agents.map((agent) => (
+                <SelectItem key={agent.id} value={agent.id}>
+                  {agent.display_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {agentId && (
         <AgentRevisionActions
           agentId={agentId}

@@ -34,6 +34,17 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+function selectedValue(label: string): string {
+  return screen.getByLabelText(label).getAttribute("data-selected-id") ?? "";
+}
+
+async function chooseAgent(name: string) {
+  fireEvent.click(screen.getByLabelText("创建版本的智能体"));
+  const option = await screen.findByRole("option", { name });
+  fireEvent.pointerDown(option, { pointerType: "mouse" });
+  fireEvent.click(option);
+}
+
 describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
   it("刷新成功后清除旧列表错误并恢复版本选择", async () => {
     let fail = true;
@@ -46,7 +57,8 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
     });
 
     const view = render(<AgentsRevisionSection refreshToken={0} />);
-    await waitFor(() => expect(screen.getByText("智能体列表加载失败")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toContain("智能体列表加载失败");
 
     fail = false;
     view.rerender(<AgentsRevisionSection refreshToken={1} />);
@@ -58,35 +70,33 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
     stubAgents([agent("agent-1", "HR 智能体"), agent("agent-2", "客服智能体")]);
 
     const view = render(<AgentsRevisionSection preferredAgentId="agent-1" refreshToken={0} />);
-    const select = () => screen.getByLabelText("创建版本的智能体") as HTMLSelectElement;
-    await waitFor(() => expect(select().value).toBe("agent-1"));
+    await waitFor(() => expect(selectedValue("创建版本的智能体")).toBe("agent-1"));
 
     // 人工改选另一个真实智能体。
-    fireEvent.change(select(), { target: { value: "agent-2" } });
-    expect(select().value).toBe("agent-2");
+    await chooseAgent("客服智能体");
+    expect(selectedValue("创建版本的智能体")).toBe("agent-2");
 
     // 刷新后 preferred 仍真实存在：优先交接，不保留人工选择。
     view.rerender(<AgentsRevisionSection preferredAgentId="agent-1" refreshToken={1} />);
-    await waitFor(() => expect(select().value).toBe("agent-1"));
+    await waitFor(() => expect(selectedValue("创建版本的智能体")).toBe("agent-1"));
   });
 
   it("无 preferred 时保留仍在真实列表中的人工选择，已删除则清空", async () => {
     stubAgents([agent("agent-1", "HR 智能体"), agent("agent-2", "客服智能体")]);
 
     const view = render(<AgentsRevisionSection refreshToken={0} />);
-    const select = () => screen.getByLabelText("创建版本的智能体") as HTMLSelectElement;
-    await waitFor(() => expect(select().options.length).toBe(3));
+    await waitFor(() => expect(screen.getByLabelText("创建版本的智能体")).toBeTruthy());
 
-    fireEvent.change(select(), { target: { value: "agent-2" } });
+    await chooseAgent("客服智能体");
 
     // 刷新后 agent-2 仍在列表：保留人工选择。
     view.rerender(<AgentsRevisionSection refreshToken={1} />);
-    await waitFor(() => expect(select().value).toBe("agent-2"));
+    await waitFor(() => expect(selectedValue("创建版本的智能体")).toBe("agent-2"));
 
     // agent-2 被删除且无 preferred：清空，不保留失效 id。
     stubAgents([agent("agent-1", "HR 智能体")]);
     view.rerender(<AgentsRevisionSection refreshToken={2} />);
-    await waitFor(() => expect(select().value).toBe(""));
+    await waitFor(() => expect(selectedValue("创建版本的智能体")).toBe(""));
   });
 
   it("透传 onPublished：版本真实发布成功后回调携带返回 id", async () => {
@@ -136,8 +146,7 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
     const onPublished = vi.fn();
 
     render(<AgentsRevisionSection preferredAgentId="agent-1" onPublished={onPublished} />);
-    const select = () => screen.getByLabelText("创建版本的智能体") as HTMLSelectElement;
-    await waitFor(() => expect(select().value).toBe("agent-1"));
+    await waitFor(() => expect(selectedValue("创建版本的智能体")).toBe("agent-1"));
 
     const publishButton = await screen.findByRole("button", { name: "发布" });
     fireEvent.click(publishButton);

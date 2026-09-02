@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { RuntimeControlPanel } from "@/components/studio/runtime-control-panel";
 import type {
   PublishRuntimeRevisionResponse,
@@ -128,6 +130,34 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () => {
+  it("使用统一界面组件、语义颜色与可识别状态呈现运行服务", async () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "components/studio/runtime-control-panel.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("@/components/ui/button");
+    expect(source).toContain("@/components/ui/badge");
+    expect(source).toContain("@/components/ui/card");
+    expect(source).not.toMatch(/<button\b/);
+    expect(source).not.toMatch(/var\(--(?:fg|bg|surface|border|danger)/);
+    expect(source).not.toMatch(/text-\[\d+(?:\.\d+)?px\]/);
+    expect(source).not.toMatch(/emerald-/);
+
+    render(<RuntimeControlPanel canPublish refreshToken={0} />);
+    await waitFor(() => expect(screen.getByText("HR 外部运行服务")).toBeTruthy());
+
+    expect(screen.getByRole("region", { name: "运行服务版本" })).toBeTruthy();
+    expect(document.querySelector('[data-slot="card"]')).toBeTruthy();
+    expect(document.querySelector('[data-slot="badge"]')).toBeTruthy();
+    expect(document.querySelector('[data-slot="button"]')).toBeTruthy();
+    expect(screen.getByText("服务地址")).toBeTruthy();
+    expect(screen.getByText("发布校验")).toBeTruthy();
+    expect(screen.getByText(/智能体通信/)).toBeTruthy();
+    expect(screen.queryByText(/A2A/)).toBeNull();
+    expect(screen.queryByText(runtime.runtime_key)).toBeNull();
+    expect(document.body.textContent).not.toContain(draftRevision.runtime_target_digest);
+  });
+
   it("refreshToken 改变必须重新 GET /admin/api/v1/runtimes 与 revisions；首次失败刷新成功后清除旧错误", async () => {
     backend.failRuntimes = true;
     const runtimesCalls = () =>
@@ -216,6 +246,95 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
     expect(publishPosts()).toHaveLength(0);
   });
 
+  it("bearer 身份缺少访问凭证时 fail closed：展示中文原因且不提供发布入口", async () => {
+    backend.revisions = [revisionFixture({ credential_ref_id: null })];
+
+    render(<RuntimeControlPanel canPublish refreshToken={0} />);
+    await waitFor(() => expect(screen.getByText("第 1 版")).toBeTruthy());
+
+    expect(screen.getByText("缺少访问凭证")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "发布运行服务版本" })).toBeNull();
+    expect(publishPosts()).toHaveLength(0);
+  });
+
+  it("hosted_artifact 必须同时具备通过的验收与工件证明，并精确提交首个证明 id", async () => {
+    backend.revisions = [
+      revisionFixture({
+        runtime_evidence_kind: "hosted_artifact",
+        artifact_id: "artifact-1",
+        artifact_digest: `sha256:${"a".repeat(64)}`,
+        artifact_ref: "oci://registry.example/runtime@sha256:deadbeef",
+        attestation_ids: [],
+      }),
+    ];
+
+    const view = render(<RuntimeControlPanel canPublish refreshToken={0} />);
+    await waitFor(() => expect(screen.getByText("第 1 版")).toBeTruthy());
+    expect(screen.getByText("缺少工件证明")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "发布运行服务版本" })).toBeNull();
+
+    backend.revisions = [
+      revisionFixture({
+        runtime_evidence_kind: "hosted_artifact",
+        artifact_id: "artifact-1",
+        artifact_digest: `sha256:${"a".repeat(64)}`,
+        artifact_ref: "oci://registry.example/runtime@sha256:deadbeef",
+        attestation_ids: ["attestation-1"],
+      }),
+    ];
+    view.rerender(<RuntimeControlPanel canPublish refreshToken={1} />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "发布运行服务版本" })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "发布运行服务版本" }));
+
+    await waitFor(() => expect(publishPosts()).toHaveLength(1));
+    expect(publishPosts()[0]?.body).toEqual({
+      expected_version_no: 3,
+      attestation_id: "attestation-1",
+      conformance_run_id: "conf-1",
+    });
+  });
+
+  it("刷新代次只允许最新响应落地，较慢旧响应不得覆盖新列表", async () => {
+    let resolveOldList: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/admin/api/v1/runtimes") {
+        if (!resolveOldList) {
+          return await new Promise<Response>((resolvePromise) => {
+            resolveOldList = resolvePromise;
+          });
+        }
+        return Response.json({
+          items: [{ ...runtime, id: "rt-new", display_name: "最新运行服务" }],
+          total: 1,
+        });
+      }
+      if (url === "/admin/api/v1/runtimes/rt-new/revisions") {
+        return Response.json({ items: [], total: 0 });
+      }
+      if (url === "/admin/api/v1/runtimes/rt-old/revisions") {
+        return Response.json({ items: [], total: 0 });
+      }
+      return Response.json({ items: [], total: 0 });
+    });
+
+    const view = render(<RuntimeControlPanel canPublish refreshToken={0} />);
+    await waitFor(() => expect(resolveOldList).toBeTruthy());
+    view.rerender(<RuntimeControlPanel canPublish refreshToken={1} />);
+    await waitFor(() => expect(screen.getByText("最新运行服务")).toBeTruthy());
+
+    resolveOldList?.(
+      Response.json({
+        items: [{ ...runtime, id: "rt-old", display_name: "过期运行服务" }],
+        total: 1,
+      }),
+    );
+    await waitFor(() => expect(screen.queryByText("过期运行服务")).toBeNull());
+    expect(screen.getByText("最新运行服务")).toBeTruthy();
+  });
+
   it("列表错误只显示稳定中文，不回显后端原始 endpoint 或令牌诊断", async () => {
     fetchMock.mockResolvedValue(
       Response.json(
@@ -235,5 +354,61 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
     await waitFor(() => expect(screen.getByText("运行服务列表加载失败")).toBeTruthy());
     expect(document.body.textContent).not.toContain("internal.example");
     expect(document.body.textContent).not.toContain("leaked-token");
+  });
+
+  it("已有列表刷新失败后立即降为只读，不允许对过期版本再次发布", async () => {
+    const view = render(<RuntimeControlPanel canPublish refreshToken={0} />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "发布运行服务版本" })).toBeTruthy(),
+    );
+
+    backend.failRuntimes = true;
+    view.rerender(<RuntimeControlPanel canPublish refreshToken={1} />);
+
+    await waitFor(() => expect(screen.getByText("运行服务列表加载失败")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "发布运行服务版本" })).toBeNull();
+    expect(publishPosts()).toHaveLength(0);
+  });
+
+  it("空列表刷新失败时显示错误，不把失败遮成稳定空态", async () => {
+    let listCalls = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) !== "/admin/api/v1/runtimes") {
+        return Response.json({ items: [], total: 0 });
+      }
+      listCalls += 1;
+      if (listCalls === 1) return Response.json({ items: [], total: 0 });
+      throw new Error("refresh failed");
+    });
+
+    const view = render(<RuntimeControlPanel canPublish refreshToken={0} />);
+    await waitFor(() => expect(screen.getByText("暂无运行服务")).toBeTruthy());
+
+    view.rerender(<RuntimeControlPanel canPublish refreshToken={1} />);
+    await waitFor(() => expect(screen.getByText("运行服务列表加载失败")).toBeTruthy());
+    expect(screen.queryByText("暂无运行服务")).toBeNull();
+  });
+
+  it("撤回已发布版本必须二次确认，确认前不发出写请求", async () => {
+    backend.published = true;
+    render(<RuntimeControlPanel canPublish refreshToken={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: "撤回" }));
+
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.getByText("确认撤回第 1 版？")).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/withdraw") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "确认撤回" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/withdraw") && init?.method === "POST",
+        ),
+      ).toHaveLength(1),
+    );
   });
 });

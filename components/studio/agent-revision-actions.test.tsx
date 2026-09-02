@@ -43,6 +43,13 @@ function draftRevision() {
   };
 }
 
+function publishedRevision() {
+  return {
+    ...draftRevision(),
+    revision_state: "published" as const,
+  };
+}
+
 function stubBackend(contracts: AgentContractSnapshotDTO[]) {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -74,6 +81,17 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+function selectedSnapshot(): string {
+  return screen.getByLabelText("创建版本使用的合同").getAttribute("data-selected-id") ?? "";
+}
+
+async function chooseSnapshot(record: number) {
+  fireEvent.click(screen.getByLabelText("创建版本使用的合同"));
+  const option = await screen.findByRole("option", { name: new RegExp(`记录 ${record}$`) });
+  fireEvent.pointerDown(option, { pointerType: "mouse" });
+  fireEvent.click(option);
+}
+
 describe("AgentRevisionActions（刷新时选择保留/清空）", () => {
   it("reload 后保留仍在真实列表中的人工选择，不被旧 handoff 抢回", async () => {
     stubBackend([snapshot("snap-0001"), snapshot("snap-0002")]);
@@ -81,34 +99,32 @@ describe("AgentRevisionActions（刷新时选择保留/清空）", () => {
     const view = render(
       <AgentRevisionActions agentId="agent-1" preferredSnapshotId="snap-0001" refreshToken={0} />,
     );
-    const select = () => screen.getByLabelText("创建版本使用的合同") as HTMLSelectElement;
-    await waitFor(() => expect(select().value).toBe("snap-0001"));
+    await waitFor(() => expect(selectedSnapshot()).toBe("snap-0001"));
 
     // 人工改选另一个真实合同。
-    fireEvent.change(select(), { target: { value: "snap-0002" } });
-    expect(select().value).toBe("snap-0002");
+    await chooseSnapshot(2);
+    expect(selectedSnapshot()).toBe("snap-0002");
 
     // 刷新代次变化触发 reload：人工选择仍有效，不得回退到 preferred。
     view.rerender(
       <AgentRevisionActions agentId="agent-1" preferredSnapshotId="snap-0001" refreshToken={1} />,
     );
-    await waitFor(() => expect(select().value).toBe("snap-0002"));
+    await waitFor(() => expect(selectedSnapshot()).toBe("snap-0002"));
   });
 
   it("当前选择已不在真实列表且无 preferred 时清空，不保留失效值", async () => {
     stubBackend([snapshot("snap-0001"), snapshot("snap-0002")]);
 
     const view = render(<AgentRevisionActions agentId="agent-1" refreshToken={0} />);
-    const select = () => screen.getByLabelText("创建版本使用的合同") as HTMLSelectElement;
-    await waitFor(() => expect(select().value).toBe(""));
+    await waitFor(() => expect(selectedSnapshot()).toBe(""));
 
-    fireEvent.change(select(), { target: { value: "snap-0002" } });
-    expect(select().value).toBe("snap-0002");
+    await chooseSnapshot(2);
+    expect(selectedSnapshot()).toBe("snap-0002");
 
     // 刷新后 snap-0002 已被删除、preferred 为空：清空选择。
     stubBackend([snapshot("snap-0001")]);
     view.rerender(<AgentRevisionActions agentId="agent-1" refreshToken={1} />);
-    await waitFor(() => expect(select().value).toBe(""));
+    await waitFor(() => expect(selectedSnapshot()).toBe(""));
   });
 });
 
@@ -137,6 +153,44 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
     expect(onPublished).toHaveBeenCalledWith(
       expect.objectContaining({ id: "arev-1", revision_state: "published" }),
     );
+  });
+
+  it("发布请求保留幂等键与版本匹配头，成功反馈使用可访问状态", async () => {
+    stubBackend([snapshot("snap-0001")]);
+    render(<AgentRevisionActions agentId="agent-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "发布" }));
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("版本 1 已发布"));
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url) === "/admin/api/v1/agent-revisions/arev-1/publish" && init?.method === "POST",
+    );
+    expect(call).toBeTruthy();
+    const headers = new Headers(call?.[1]?.headers);
+    expect(headers.get("Idempotency-Key")).toBeTruthy();
+    expect(headers.get("If-Match")).toBe("agent-revision-1");
+  });
+
+  it("四个策略字段只接受 JSON 对象，错误反馈使用中文且不会发出创建请求", async () => {
+    stubBackend([snapshot("snap-0001")]);
+    render(<AgentRevisionActions agentId="agent-1" preferredSnapshotId="snap-0001" />);
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "创建草稿版本" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.change(screen.getByLabelText("模型策略"), { target: { value: "[]" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建草稿版本" }));
+
+    expect(screen.getByRole("alert").textContent).toContain("模型策略必须是 JSON 对象");
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url) === "/admin/api/v1/agents/agent-1/revisions" && init?.method === "POST",
+      ),
+    ).toBe(false);
   });
 
   it("创建草稿版本不得触发 onPublished", async () => {
@@ -201,5 +255,40 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
 
     await waitFor(() => expect(screen.getByText(/业务约束拒绝/)).toBeTruthy());
     expect(onPublished).not.toHaveBeenCalled();
+  });
+
+  it("撤回已发布智能体版本必须明确二次确认，确认前零写请求", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        return Response.json({ items: [snapshot("snap-0001")], total: 1 });
+      }
+      if (url.endsWith("/revisions") && (init?.method ?? "GET") === "GET") {
+        return Response.json({ items: [publishedRevision()], total: 1 });
+      }
+      if (url.endsWith("/withdraw") && init?.method === "POST") {
+        return Response.json({ id: "arev-1", revision_state: "withdrawn" });
+      }
+      return Response.json({ items: [], total: 0 });
+    });
+    render(<AgentRevisionActions agentId="agent-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "撤回" }));
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.getByText("确认撤回第 1 版？")).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/withdraw") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "确认撤回" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/withdraw") && init?.method === "POST",
+        ),
+      ).toHaveLength(1),
+    );
   });
 });

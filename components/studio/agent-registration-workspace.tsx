@@ -16,6 +16,8 @@ import type {
   PublishAgentRevisionResponse,
   RegisterAgentContractResponse,
 } from "@/lib/control-plane-client";
+import { BookOpenCheck, FileUp, GitBranch, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { useCallback, useState } from "react";
 
 /** 登记成功后的交接：空值表示尚无已登记合同。 */
@@ -39,6 +41,33 @@ interface AgentRegistrationWorkspaceProps {
   readonly canPublishRuntime?: boolean;
   /** 路由管理权限（route.update）；默认 false，无权限不渲染「发布给员工」区域。 */
   readonly canManageRoutes?: boolean;
+}
+
+function WorkspaceSection({
+  title,
+  description,
+  icon: Icon,
+  children,
+}: {
+  readonly title: string;
+  readonly description: string;
+  readonly icon: LucideIcon;
+  readonly children: ReactNode;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="flex items-start gap-3 border-b bg-muted/40 px-5 py-4">
+        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+          <Icon className="size-4" aria-hidden />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+          <p className="mt-0.5 text-sm leading-5 text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
 }
 
 export function AgentRegistrationWorkspace({
@@ -75,46 +104,50 @@ export function AgentRegistrationWorkspace({
   }, []);
 
   return (
-    <div>
+    <div className="space-y-5">
       {!canReadAgents ? (
-        <p className="mt-4 text-[13px] text-[var(--fg-muted)]">无可见资源档案。</p>
-      ) : (
-        <div className="mt-4">
-          <p className="mb-2 text-[13px] text-[var(--fg-muted)]">智能体档案与当前版本。</p>
-          <AgentsViewer refreshToken={handoff.refreshToken + routeHandoff.refreshToken} />
+        <div className="rounded-2xl border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
+          当前账号没有可查看的智能体。
         </div>
+      ) : (
+        <WorkspaceSection
+          title="智能体档案"
+          description="查看已登记的智能体、启用状态和当前版本。"
+          icon={BookOpenCheck}
+        >
+          <AgentsViewer refreshToken={handoff.refreshToken + routeHandoff.refreshToken} />
+        </WorkspaceSection>
       )}
 
       {canRegisterContract && (
-        <div className="mt-6">
-          <p className="mb-2 text-[13px] text-[var(--fg-muted)]">
-            导入外部智能体合同。运行地址和访问凭证在后续步骤填写。
-          </p>
+        <WorkspaceSection
+          title="导入合同"
+          description="选择智能体合同文件，核对内容后完成登记。运行地址与访问凭证稍后配置。"
+          icon={FileUp}
+        >
           <AgentContractRegistrationPanel onRegistered={handleRegistered} />
-        </div>
+        </WorkspaceSection>
       )}
 
       {canManageRevisions && canReadAgents && (
-        <div className="mt-6">
-          <p className="mb-2 text-[13px] text-[var(--fg-muted)]">创建、发布或撤回智能体版本。</p>
+        <WorkspaceSection
+          title="版本管理"
+          description="基于已登记合同创建版本，并控制员工侧可用状态。"
+          icon={GitBranch}
+        >
           <AgentsRevisionSection
             preferredAgentId={handoff.agentId}
             preferredSnapshotId={handoff.snapshotId}
             refreshToken={handoff.refreshToken}
             onPublished={handleAgentRevisionPublished}
           />
-        </div>
+        </WorkspaceSection>
       )}
 
       {/* runtime.publish 的 action scope 是 runtime/environment，后端独立授权；
           发布入口只由 canPublishRuntime 控制，不附加智能体读取权限。 */}
       {canPublishRuntime && (
-        <div className="mt-6">
-          <p className="mb-2 text-[13px] text-[var(--fg-muted)]">
-            发布运行服务版本（外部服务须先通过实际能力验收）。
-          </p>
-          <RuntimeControlPanel canPublish refreshToken={0} preferredRuntimeRevisionId={null} />
-        </div>
+        <RuntimeControlPanel canPublish refreshToken={0} preferredRuntimeRevisionId={null} />
       )}
 
       {/* route.update 的 action scope 由服务端独立授权；发布给员工入口只由
@@ -122,16 +155,11 @@ export function AgentRegistrationWorkspace({
           revision id，并在重新 GET 的真实 published 列表中验证后才选择，
           路由写仍由用户显式点击触发。 */}
       {canManageRoutes && (
-        <div className="mt-6">
-          <p className="mb-2 text-[13px] text-[var(--fg-muted)]">
-            发布给员工：选择已发布的智能体版本并填写调用地址，激活默认路由。
-          </p>
-          <RouteActivationPanel
-            canManage
-            refreshToken={routeHandoff.refreshToken}
-            preferredAgentRevisionId={routeHandoff.agentRevisionId}
-          />
-        </div>
+        <RouteActivationPanel
+          canManage
+          refreshToken={routeHandoff.refreshToken}
+          preferredAgentRevisionId={routeHandoff.agentRevisionId}
+        />
       )}
     </div>
   );

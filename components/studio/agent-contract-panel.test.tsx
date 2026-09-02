@@ -1,7 +1,9 @@
 import { AgentContractPanel } from "@/components/studio/agent-contract-panel";
 import type { AgentContractSnapshotDTO } from "@/lib/control-plane-client";
-import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+afterEach(cleanup);
 
 function snapshotFixture(): AgentContractSnapshotDTO {
   return {
@@ -81,11 +83,11 @@ describe("AgentContractPanel（09 §4/§5）", () => {
     render(<AgentContractPanel agentId="agent-1" loadContracts={loadContracts} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/execution_subject/)).toBeTruthy();
+      expect(screen.getByText("执行主体")).toBeTruthy();
     });
-    expect(screen.getAllByText(/Agent 声明/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/智能体声明/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("管理员登记").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/timezone/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("时区").length).toBeGreaterThanOrEqual(1);
   });
 
   it("展示 Snapshot id、Agent version、三个 digest 与 interaction 六布尔（07 §5）", async () => {
@@ -95,19 +97,34 @@ describe("AgentContractPanel（09 §4/§5）", () => {
     await waitFor(() => {
       expect(screen.getAllByText(/snap-0001-full/).length).toBeGreaterThanOrEqual(1);
     });
-    expect(screen.getAllByText(/capabilityDigest/).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/contextDigest/).length).toBeGreaterThanOrEqual(1);
+    const technicalDetails = screen.getByText("查看技术信息").closest("details");
+    expect(technicalDetails?.open).toBe(false);
+    expect(screen.getAllByText(/能力摘要/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/上下文摘要/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(`sha256:${"b".repeat(64)}`).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(`sha256:${"c".repeat(64)}`).length).toBeGreaterThanOrEqual(1);
-    // 六布尔：true 显示 ✓、false 显示 ✗。
-    expect(screen.getAllByLabelText("interaction_streaming_transport")[0]?.textContent).toContain(
-      "✓",
+    // 六布尔以可访问文本表达，避免用文本符号冒充图标。
+    expect(screen.getAllByLabelText("流式传输：支持")[0]?.textContent).toContain("支持");
+    expect(screen.getAllByLabelText("增量内容：不支持")[0]?.textContent).toContain("不支持");
+    expect(screen.getAllByLabelText("恢复任务：支持")[0]?.textContent).toContain("支持");
+    expect(screen.getAllByLabelText("取消任务：不支持")[0]?.textContent).toContain("不支持");
+    expect(document.body.textContent).not.toContain("interaction_");
+  });
+
+  it("加载与失败状态可被辅助技术及时感知", async () => {
+    let rejectLoad: ((reason: Error) => void) | undefined;
+    const loadContracts = vi.fn(
+      () =>
+        new Promise<{ items: AgentContractSnapshotDTO[] }>((_resolve, reject) => {
+          rejectLoad = reject;
+        }),
     );
-    expect(screen.getAllByLabelText("interaction_incremental_content")[0]?.textContent).toContain(
-      "✗",
-    );
-    expect(screen.getAllByLabelText("interaction_resume")[0]?.textContent).toContain("✓");
-    expect(screen.getAllByLabelText("interaction_cancel")[0]?.textContent).toContain("✗");
+    render(<AgentContractPanel agentId="agent-1" loadContracts={loadContracts} />);
+
+    expect(screen.getByRole("status").textContent).toContain("合同加载中");
+    rejectLoad?.(new Error("failed"));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toContain("合同加载失败");
   });
 
   it("无 Snapshot 时显示空态（Agent 未登记外部合同）", async () => {
