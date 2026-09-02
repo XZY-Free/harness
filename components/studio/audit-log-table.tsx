@@ -58,6 +58,11 @@ const ACTION_LABEL: Record<AuditActionType, string> = {
   "approval.resolved": "审批处理",
 };
 
+function actionLabel(actionType: string): string {
+  if (!Object.hasOwn(ACTION_LABEL, actionType)) return "其他操作";
+  return ACTION_LABEL[actionType as AuditActionType];
+}
+
 const TARGET_TYPE_LABEL: Record<string, string> = {
   agent: "智能体",
   agent_call: "智能体调用",
@@ -341,7 +346,7 @@ export function AuditLogTable({ logs }: Props) {
                   )}
                 </td>
                 <td className="px-4 py-3 font-medium text-foreground">
-                  {ACTION_LABEL[log.actionType] ?? "其他操作"}
+                  {actionLabel(log.actionType)}
                 </td>
                 <td className="px-4 py-3">
                   <span className="block text-foreground">{targetLabel}</span>
