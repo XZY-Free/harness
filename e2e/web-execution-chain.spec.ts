@@ -116,6 +116,13 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   await agentTrigger.click();
   await expect(page.getByText("当前问题需要时优先咨询；简单问题可能直接回答。")).toBeVisible();
   await expect(page.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
+  const agentDialog = page.getByRole("dialog", { name: "优先助手" });
+  expect(
+    await agentDialog.evaluate((element) =>
+      element.parentElement ? getComputedStyle(element.parentElement).position : null,
+    ),
+    "浮层必须相对视口定位，退出动画不得撑宽文档",
+  ).toBe("fixed");
 
   // popover 打开与关闭后，消息输入框都保持 enabled（空态不阻止输入）。
   await expect(input).toBeEnabled();
@@ -127,11 +134,39 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
     await page.setViewportSize({ width, height: 800 });
     await expect(agentTrigger).toBeVisible();
     await expect(input).toBeEnabled();
+    const layout = await page.evaluate(() => ({
+      viewport: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      overflowing: (document.documentElement.scrollWidth > window.innerWidth
+        ? Array.from(document.querySelectorAll("body *"))
+        : []
+      )
+        .filter((element) => element.getBoundingClientRect().right > window.innerWidth)
+        .map((element) => ({
+          tag: element.tagName,
+          slot: element.getAttribute("data-slot"),
+          className: element.getAttribute("class"),
+          right: element.getBoundingClientRect().right,
+          position: getComputedStyle(element).position,
+        })),
+    }));
     expect(
-      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      `${width}px 不应出现页面级横向溢出`,
-    ).toBe(true);
+      layout.scrollWidth,
+      `${width}px 不应横向溢出：${JSON.stringify(layout)}`,
+    ).toBeLessThanOrEqual(layout.viewport);
   }
+
+  await expect(agentDialog).toBeHidden();
+  await agentTrigger.click();
+  await expect(agentDialog).toBeVisible();
+  await expect(agentDialog).toHaveCSS("opacity", "1");
+  const dialogBounds = await agentDialog.boundingBox();
+  if (!dialogBounds) throw new Error("打开的助手浮层必须具有可见边界");
+  expect(dialogBounds.x).toBeGreaterThanOrEqual(0);
+  expect(dialogBounds.x + dialogBounds.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("selector-mobile.png") });
+  await page.keyboard.press("Escape");
+  await expect(agentDialog).toBeHidden();
 
   // ─── 2. 发送首条消息（同时创建 Thread + 首个 Turn）──────
   await input.fill("请用一句话介绍 SnowHarness。");
