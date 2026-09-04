@@ -59,6 +59,13 @@ export function createInProcessHostedRuntimeClient(params: {
     producerSequenceStart: number;
   }) => Promise<void>;
   ingressTransientEventBatch?: TransientEventBatchSink;
+  executionLease?: {
+    acquire(input: { tenantId: string; invocationId: string; ownerRef: string }): Promise<{
+      id: string;
+    } | null>;
+    renew(input: { invocationId: string; leaseId: string }): Promise<boolean>;
+    release(input: { invocationId: string; leaseId: string }): Promise<void>;
+  };
 }): InProcessHostedRuntimeClient {
   const pending = new Map<string, PendingInvocation>();
   let lastLaunchPromise: Promise<void> | null = null;
@@ -90,52 +97,78 @@ export function createInProcessHostedRuntimeClient(params: {
         const invocation = pending.get(invocationId);
         if (!invocation) return;
         pending.delete(invocationId);
+        const tenantId = params.tenantId ?? "";
+        const lease = params.executionLease
+          ? await params.executionLease.acquire({
+              tenantId,
+              invocationId,
+              ownerRef: `hosted-start:${invocationId}`,
+            })
+          : null;
+        if (params.executionLease && !lease) {
+          throw new Error(`Invocation ${invocationId} 执行租约被占用`);
+        }
+        const renewTimer =
+          params.executionLease && lease
+            ? setInterval(() => {
+                void params.executionLease
+                  ?.renew({ invocationId, leaseId: lease.id })
+                  .catch(() => undefined);
+              }, 30_000)
+            : null;
 
-        // Hosted Runtime 只接受内部 Workload Token。
-        if (invocation.request.auth.mode !== "workload_token") {
-          throw new Error(
-            `InProcessHostedRuntime 收到非法 auth mode（${invocation.request.auth.mode}）`,
-          );
+        try {
+          // Hosted Runtime 只接受内部 Workload Token。
+          if (invocation.request.auth.mode !== "workload_token") {
+            throw new Error(
+              `InProcessHostedRuntime 收到非法 auth mode（${invocation.request.auth.mode}）`,
+            );
+          }
+          const platformAuthToken = invocation.request.auth.token;
+          const adapter: RuntimeAdapter = createHostedAdapter({
+            platformEndpoint: "in-process://platform",
+            platformAuthToken,
+            modelRef,
+            decisionPort: params.decisionPort,
+            finalResponsePort: params.finalResponsePort,
+            actionExecutors:
+              params.actionExecutors ??
+              (invocation.request.requestBody.capability_catalog
+                ? await params.actionExecutorFactory?.(
+                    invocation.request.requestBody.capability_catalog,
+                    invocationId,
+                  )
+                : undefined),
+            recoveryPort: params.recoveryPort,
+            eventBatchSink: params.ingressEventBatch,
+            transientEventBatchSink: params.ingressTransientEventBatch,
+          });
+          const turnContext = invocation.request.requestBody.turn_context;
+          const started = await adapter.startInvocation({
+            invocationId,
+            tenantId: params.tenantId,
+            threadId: turnContext?.thread_id ?? null,
+            turnId: turnContext?.turn_id ?? null,
+            capabilityDirectives: invocation.request.requestBody.capability_directives,
+            capabilityCatalog: invocation.request.requestBody.capability_catalog,
+            inputItems: invocation.request.requestBody.input_items,
+            contextHandle: invocation.request.requestBody.context_handle,
+            gatewayEndpoints: invocation.request.requestBody.gateway_endpoints,
+            workspace: invocation.request.requestBody.workspace ?? null,
+            executionLimits: invocation.request.requestBody.execution_limits,
+            traceContext: invocation.request.requestBody.trace_context,
+            authToken: platformAuthToken,
+          } satisfies StartInvocationParams);
+          if (!started.accepted) {
+            throw new Error(`InProcessHostedRuntime 拒绝 Invocation: ${invocationId}`);
+          }
+          await adapter.getLastLoopPromise?.();
+        } finally {
+          if (renewTimer) clearInterval(renewTimer);
+          if (params.executionLease && lease) {
+            await params.executionLease.release({ invocationId, leaseId: lease.id });
+          }
         }
-        const platformAuthToken = invocation.request.auth.token;
-        const adapter: RuntimeAdapter = createHostedAdapter({
-          platformEndpoint: "in-process://platform",
-          platformAuthToken,
-          modelRef,
-          decisionPort: params.decisionPort,
-          finalResponsePort: params.finalResponsePort,
-          actionExecutors:
-            params.actionExecutors ??
-            (invocation.request.requestBody.capability_catalog
-              ? await params.actionExecutorFactory?.(
-                  invocation.request.requestBody.capability_catalog,
-                  invocationId,
-                )
-              : undefined),
-          recoveryPort: params.recoveryPort,
-          eventBatchSink: params.ingressEventBatch,
-          transientEventBatchSink: params.ingressTransientEventBatch,
-        });
-        const turnContext = invocation.request.requestBody.turn_context;
-        const started = await adapter.startInvocation({
-          invocationId,
-          tenantId: params.tenantId,
-          threadId: turnContext?.thread_id ?? null,
-          turnId: turnContext?.turn_id ?? null,
-          capabilityDirectives: invocation.request.requestBody.capability_directives,
-          capabilityCatalog: invocation.request.requestBody.capability_catalog,
-          inputItems: invocation.request.requestBody.input_items,
-          contextHandle: invocation.request.requestBody.context_handle,
-          gatewayEndpoints: invocation.request.requestBody.gateway_endpoints,
-          workspace: invocation.request.requestBody.workspace ?? null,
-          executionLimits: invocation.request.requestBody.execution_limits,
-          traceContext: invocation.request.requestBody.trace_context,
-          authToken: platformAuthToken,
-        } satisfies StartInvocationParams);
-        if (!started.accepted) {
-          throw new Error(`InProcessHostedRuntime 拒绝 Invocation: ${invocationId}`);
-        }
-        await adapter.getLastLoopPromise?.();
       })();
       return lastLaunchPromise;
     },

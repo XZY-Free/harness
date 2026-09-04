@@ -24,7 +24,7 @@ export const CONTROL_PLANE_CONSUMERS: RegisteredConsumer[] = [
   {
     name: "invocation_continuation",
     subscribedEventTypes: ["agent_call.continuation.requested"],
-    maxAttempts: 10,
+    maxAttempts: 8,
   },
   {
     name: "route_projection",

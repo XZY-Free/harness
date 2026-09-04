@@ -24,6 +24,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import {
   type HarnessActionExecutors,
   type HarnessDecisionPort,
@@ -32,7 +33,6 @@ import {
   HarnessLoopError,
   type HarnessLoopRecoveryPort,
 } from "@/lib/runtime/harness-loop/loop";
-import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import type {
   RuntimeCapabilitiesResponse,
   StartInvocationRequestBody,
@@ -545,6 +545,8 @@ interface AdapterState {
   lastLoopPromise: Promise<HostedHarnessLoopResult> | null;
   /** 最后一次创建的 HostedHarnessLoop 实例（诊断用）。 */
   lastLoop: HostedHarnessLoop | null;
+  /** 按 Invocation 保存冻结的 Loop 参数，resume 必须重建同一个执行而非只 ACK。 */
+  loopParamsByInvocation: Map<string, HostedHarnessLoopParams>;
 }
 
 // ─── createHostedAdapter 工厂 ─────────────────────────────
@@ -585,6 +587,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
     nextSequence: 1,
     lastLoopPromise: null,
     lastLoop: null,
+    loopParamsByInvocation: new Map(),
   };
 
   // 包装 eventBatchSink 以跟踪 producer_sequence 连续性
@@ -705,6 +708,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           modelRef: params.modelRef,
           correlationId: startParams.correlationId,
         };
+        state.loopParamsByInvocation.set(startParams.invocationId, loopParams);
 
         const loop = new HostedHarnessLoop(loopParams);
         state.lastLoop = loop;
@@ -751,9 +755,25 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
       };
     },
 
-    async handleResume(): Promise<ResumeResult> {
-      // Hosted 参考实现：Resume 不需要额外事件（Invocation 由平台 command-dispatcher 转回 running）
-      // 映射时同样只返回 ack
+    async handleResume(resumeParams): Promise<ResumeResult> {
+      const loopParams = state.loopParamsByInvocation.get(resumeParams.invocationId);
+      if (!loopParams) {
+        throw new HarnessLoopError(
+          "HARNESS_LOOP_STATE_RECOVERY_FAILED",
+          `Hosted Runtime 无法恢复未登记的 Invocation：${resumeParams.invocationId}`,
+        );
+      }
+      const loop = new HostedHarnessLoop({
+        ...loopParams,
+        ...(resumeParams.gatewayEndpoints
+          ? { gatewayEndpoints: resumeParams.gatewayEndpoints }
+          : {}),
+        ...(resumeParams.authToken ? { authToken: resumeParams.authToken } : {}),
+      });
+      state.lastLoop = loop;
+      const runPromise = loop.run();
+      state.lastLoopPromise = runPromise;
+      await runPromise;
       return {
         resume_state: "accepted",
         runtime_execution_ref: `${refPrefix}-exec-resume-${randomUUID()}`,

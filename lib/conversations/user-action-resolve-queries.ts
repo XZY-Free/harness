@@ -27,6 +27,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { updateToolCallState } from "@/lib/capability/tool-call-queries";
+import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-plane-event-delivery";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { ThreadNotFoundError } from "@/lib/conversations/errors";
 import {
   allocateEventSequences,
@@ -43,6 +46,7 @@ import {
   UserActionStateError,
   UserActionValidationError,
 } from "@/lib/permission/user-action-queries";
+import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import {
   type InvocationCommand,
   type Thread,
@@ -470,6 +474,13 @@ export async function resolveGenericUserAction(
         : {}),
     };
     const resumePayloadHash = computeEventPayloadHash(resumePayload);
+    const agentRefs = agentCallResumeRefs(request.promptJson);
+    const agentCallId = agentRefs.agent_call_id;
+    const durableAgentResume =
+      request.requestType === "input" &&
+      request.purpose === "a2a_input_required" &&
+      params.resolution === "submit" &&
+      typeof agentCallId === "string";
     await tx.insert(invocationCommandTable).values({
       id: resumeCommandId,
       invocationId: invocation.id,
@@ -478,15 +489,64 @@ export async function resolveGenericUserAction(
       commandType: "resume",
       commandPayloadJson: resumePayload,
       commandPayloadHash: resumePayloadHash,
-      commandState: "queued",
+      // Agent UAR 先由 durable continuation 恢复同一外部 Agent；父 Runtime 不能抢跑。
+      commandState: durableAgentResume ? "acknowledged" : "queued",
       runtimeExecutionRef: null,
       idempotencyKey: params.idempotencyKey ?? null,
       errorCode: null,
       errorMessage: null,
       dispatchedAt: null,
-      acknowledgedAt: null,
+      acknowledgedAt: durableAgentResume ? now : null,
       failedAt: null,
     });
+
+    if (durableAgentResume && agentCallId) {
+      const [call] = await tx
+        .select({ id: agentCallTable.id, versionNo: agentCallTable.versionNo })
+        .from(agentCallTable)
+        .where(
+          and(
+            eq(agentCallTable.id, agentCallId),
+            eq(agentCallTable.tenantId, params.tenantId),
+            eq(agentCallTable.parentInvocationId, invocation.id),
+            eq(agentCallTable.state, "waiting_user"),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!call) throw new UserActionStateError("Agent UserAction 与 waiting AgentCall 不匹配");
+      const continuationId = randomUUID();
+      const append = resolveOutboxAppend({
+        id: continuationId,
+        tenantId: params.tenantId,
+        eventKey: `user-action:${request.id}:agent-resume`,
+        eventType: "agent_call.continuation.requested",
+        aggregateId: call.id,
+        aggregateVersion: call.versionNo,
+        payload: {
+          parent_invocation_id: invocation.id,
+          agent_call_id: call.id,
+          source_version: call.versionNo,
+          kind: "resume_agent_after_user_response",
+          user_action_request_id: request.id,
+        },
+        occurredAt: now,
+      });
+      await tx.insert(controlPlaneOutboxEvent).values({
+        ...append,
+        schemaVersion: "1.0",
+        availableAt: now,
+      });
+      await tx.insert(controlPlaneEventDelivery).values({
+        id: randomUUID(),
+        eventId: continuationId,
+        consumerName: "invocation_continuation",
+        state: "pending",
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+      });
+    }
 
     // 10. 回读 Thread / UserActionRequest / InvocationCommand
     const [refreshedThread] = await tx

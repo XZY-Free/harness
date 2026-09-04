@@ -26,6 +26,8 @@ export interface OutboxRelayWorkerConfig {
   baseBackoffMs: number;
   maxBackoffMs: number;
   renewIntervalMs?: number;
+  /** 固定重试表；第 N 次失败使用下标 N-1。 */
+  retryScheduleMs?: readonly number[];
 }
 
 const DEFAULT_CONFIG: OutboxRelayWorkerConfig = {
@@ -106,6 +108,13 @@ export interface OutboxRelayWorkerDependencies {
   store?: OutboxRelayWorkerStore;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
+  classifyError?: typeof classifyOutboxError;
+  onDeadLetter?: (params: {
+    delivery: ControlPlaneEventDelivery;
+    event: ControlPlaneOutboxEvent;
+    errorCode: string;
+    errorSummary: string;
+  }) => Promise<void>;
 }
 
 export function createOutboxRelayWorker(
@@ -118,6 +127,7 @@ export function createOutboxRelayWorker(
   const store = dependencies.store ?? mysqlOutboxRelayWorkerStore;
   const now = dependencies.now ?? (() => new Date());
   const wait = dependencies.sleep ?? sleep;
+  const classifyError = dependencies.classifyError ?? classifyOutboxError;
   let running = false;
 
   return {
@@ -216,9 +226,9 @@ export function createOutboxRelayWorker(
         return;
       }
 
-      const classification = classifyOutboxError(error);
+      const classification = classifyError(error);
       if (classification.category === "permanent" || delivery.attemptCount >= config.maxAttempts) {
-        await deadLetterOwned(delivery, classification.code, classification.summary);
+        await deadLetterOwned(delivery, classification.code, classification.summary, event);
         return;
       }
 
@@ -226,11 +236,18 @@ export function createOutboxRelayWorker(
         const affectedRows = await store.retry({
           deliveryId: delivery.id,
           workerId: config.workerId,
-          nextAttemptAt: computeOutboxBackoff(
-            delivery.attemptCount,
-            config.baseBackoffMs,
-            config.maxBackoffMs,
-          ),
+          nextAttemptAt: config.retryScheduleMs
+            ? new Date(
+                now().getTime() +
+                  (config.retryScheduleMs[
+                    Math.min(delivery.attemptCount - 1, config.retryScheduleMs.length - 1)
+                  ] ?? config.maxBackoffMs),
+              )
+            : computeOutboxBackoff(
+                delivery.attemptCount,
+                config.baseBackoffMs,
+                config.maxBackoffMs,
+              ),
           errorCode: classification.code,
           errorSummary: classification.summary,
         });
@@ -260,8 +277,12 @@ export function createOutboxRelayWorker(
     delivery: ControlPlaneEventDelivery,
     errorCode: string,
     errorSummary: string,
+    event?: ControlPlaneOutboxEvent,
   ): Promise<void> {
     try {
+      if (event && dependencies.onDeadLetter) {
+        await dependencies.onDeadLetter({ delivery, event, errorCode, errorSummary });
+      }
       const affectedRows = await store.deadLetter({
         deliveryId: delivery.id,
         workerId: config.workerId,

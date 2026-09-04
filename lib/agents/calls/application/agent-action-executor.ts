@@ -16,10 +16,8 @@ import {
   RequiredContextUnavailableError,
 } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import { OutboundCredentialError } from "@/lib/identity/resolve-outbound-credential";
-import { logger } from "@/lib/logger";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
-import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import type { HarnessActionExecutors } from "@/lib/runtime/harness-loop/loop";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
@@ -119,16 +117,6 @@ export function createAgentActionExecutor(
       });
       const disposition = toAgentCallDisposition(current);
       if (disposition.outcome === "pending" || disposition.outcome === "waiting_user") {
-        if (disposition.outcome === "waiting_user") {
-          try {
-            await coordinateAgentInputRequired(params.tenantId, disposition.callId);
-          } catch (error) {
-            logger.warn("Harness recovery 尚未完成 Agent input-required Parent 协调", {
-              callId: disposition.callId,
-              error: error instanceof Error ? error.message : "unknown",
-            });
-          }
-        }
         return {
           authorityRef: `agent-call:${disposition.callId}`,
           pending: {
@@ -139,10 +127,20 @@ export function createAgentActionExecutor(
         };
       }
       if (disposition.state !== "completed") {
-        throw new AgentActionExecutionError(
-          normalizeTerminalCode(disposition.errorCode),
-          disposition.errorSummary,
-        );
+        return {
+          authorityRef: `agent-call:${disposition.callId}`,
+          observation: {
+            observationType: "agent",
+            summary: disposition.errorSummary.slice(0, 20_000),
+            sourceRefs: [`agent-call:${disposition.callId}`],
+            data: {
+              callId: disposition.callId,
+              state: disposition.state,
+              errorCode: normalizeTerminalCode(disposition.errorCode),
+              errorSummary: disposition.errorSummary,
+            },
+          },
+        };
       }
       return {
         authorityRef: `agent-call:${disposition.callId}`,

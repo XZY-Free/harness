@@ -57,6 +57,7 @@ const ACTION_LABEL: Record<AuditActionType, string> = {
   "thread.purged": "会话清理",
   "approval.resolved": "审批处理",
   "capability.action.execute": "运行能力调用",
+  "invocation.continuation.dead_letter": "执行续跑转人工处理",
 };
 
 function actionLabel(actionType: string): string {

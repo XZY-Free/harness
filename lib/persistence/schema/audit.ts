@@ -99,6 +99,7 @@ export const AUDIT_ACTION_TYPES = [
   "approval.resolved",
   // Runtime 跨边界能力调用：caller workload 与 effective subject 同时进入脱敏元数据。
   "capability.action.execute",
+  "invocation.continuation.dead_letter",
 ] as const;
 export type AuditActionType = (typeof AUDIT_ACTION_TYPES)[number];
 

@@ -63,4 +63,20 @@ describe("Topic 01 production wiring", () => {
     expect(transition).toContain("beforeVersionNo");
     expect(transition).toContain("afterVersionNo");
   });
+
+  it("Continuation worker 进入正式启动入口并调用唯一 Harness resume 能力", () => {
+    const bootstrap = source("scripts/workers/control-plane-outbox-worker.ts");
+    const worker = source("lib/runtime/continuation/production-invocation-continuation-worker.ts");
+    const resume = source("lib/runtime/application/production-resume-harness-invocation.ts");
+    const resumeCore = source("lib/runtime/application/resume-harness-invocation.ts");
+    const adapter = source("lib/runtime/adapters/hosted-adapter.ts");
+    expect(bootstrap).toContain("createProductionInvocationContinuationWorker");
+    expect(bootstrap).toContain("continuationWorker.start()");
+    expect(worker).toContain("resumeHarnessInvocation");
+    expect(resume).toContain("createResumeHarnessInvocation");
+    expect(resumeCore).toContain("recoverTrustedExecutionSubject");
+    expect(resume).toContain("createHttpRuntimeClient().resumeInvocation");
+    expect(adapter).toContain("new HostedHarnessLoop");
+    expect(adapter).not.toContain("Resume 不需要额外事件");
+  });
 });

@@ -1,4 +1,3 @@
-import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/resume-agent-call-from-user-action";
 import {
   type Principal,
   conversationErrorToResponse,
@@ -43,7 +42,6 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
  */
 import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolve-queries";
 import { db } from "@/lib/db/client";
-import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -67,10 +65,6 @@ import type { UserActionResolution } from "@/lib/persistence/schema/user-action-
 import { dispatchResumeCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { InvocationAlreadyTerminalError } from "@/lib/runtime/errors";
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
-import {
-  type ExecutionSubject,
-  recoverTrustedExecutionSubject,
-} from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -226,25 +220,36 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         : {}),
     });
 
-    // 08 §5 + 03 专项：A2A 协议下真实调用远端 resume（继续原 Invocation/taskId/
-    // contextId）；hosted 协议由既有状态机吸收。网关返回真实命令结果，
-    // 本路由绝不吞掉远端 failed/dispatched 而虚报成功。
-    const gatewayResult = await dispatchResumeCommandToRuntime({
-      tenantId: principal.tenantId,
-      commandId: result.resumeCommand.id,
-      actorId: principal.userIdentityId,
-      correlationId: requestId,
-    });
+    // Agent input-required 先由同事务 Outbox 恢复原 AgentCall/task/context；父 Runtime
+    // 不得在 Agent 回答被接受前抢跑。普通 UAR 仍走 Runtime Command Gateway。
+    const durableAgentResume =
+      result.request.requestType === "input" &&
+      result.request.purpose === "a2a_input_required" &&
+      body.resolution === "submit";
+    const gatewayResult = durableAgentResume
+      ? ({ dispatched: false, reason: "protocol_not_remote" } as const)
+      : await dispatchResumeCommandToRuntime({
+          tenantId: principal.tenantId,
+          commandId: result.resumeCommand.id,
+          actorId: principal.userIdentityId,
+          correlationId: requestId,
+        });
 
     // 04 专项（P1-4）：dispatched=false 必须显式 switch——只有 protocol_not_remote
     // 是 local runtime success；unsupported_capability / command_not_found 是真实失败，
     // 不再一把梭成 local_runtime 200。
     let resumeDispatch: {
-      mode: "remote" | "local_runtime";
+      mode: "remote" | "local_runtime" | "agent_continuation";
       command_state: string;
       pending_retry?: boolean;
     };
-    if (gatewayResult.dispatched) {
+    if (durableAgentResume) {
+      resumeDispatch = {
+        mode: "agent_continuation",
+        command_state: "acknowledged",
+        pending_retry: true,
+      };
+    } else if (gatewayResult.dispatched) {
       if (gatewayResult.command.commandState === "acknowledged") {
         resumeDispatch = { mode: "remote", command_state: "acknowledged" };
       } else if (gatewayResult.command.commandState === "dispatched") {
@@ -328,33 +333,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       });
     }
 
-    let agentResume: Awaited<ReturnType<typeof resumeAgentCallFromUserAction>> = { resumed: false };
-    if (body.resolution === "submit") {
-      const binding = await getExecutionBindingByInvocation(
-        principal.tenantId,
-        result.invocation.id,
-      );
-      if (!binding) {
-        return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "ExecutionBinding 不存在", {
-          requestId,
-        });
-      }
-      let executionSubject: ExecutionSubject;
-      try {
-        executionSubject = recoverTrustedExecutionSubject(binding, principal.tenantId);
-      } catch {
-        return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "可信执行主体不可恢复", {
-          requestId,
-        });
-      }
-      agentResume = await resumeAgentCallFromUserAction({
-        tenantId: principal.tenantId,
-        request: result.request,
-        responseRedactedJson: body.response_redacted,
-        executionSubject,
-      });
-    }
-
     const responseBody = {
       thread_id: result.thread.id,
       request_id: result.request.id,
@@ -367,9 +345,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       resume_command_id: result.resumeCommand.id,
       // 唯一 Authority 是真实 Gateway/Command 结果（resume_dispatch）。
       resume_dispatch: resumeDispatch,
-      ...(agentResume.resumed
-        ? { agent_call_resume: { call_id: agentResume.callId, state: agentResume.state } }
-        : {}),
+      ...(durableAgentResume ? { agent_call_resume: { state: "pending" } } : {}),
       ...(result.grantId ? { grant_id: result.grantId } : {}),
       event_ids: result.events.map((e) => e.id),
     };

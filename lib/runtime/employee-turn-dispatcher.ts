@@ -26,6 +26,11 @@ import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import type { InProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { collectModelText } from "@/lib/runtime/model-text-stream";
+import {
+  releaseInvocationExecutionLease,
+  renewInvocationExecutionLease,
+  tryAcquireInvocationExecutionLease,
+} from "@/lib/runtime/persistence/invocation-execution-lease";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
@@ -61,7 +66,7 @@ export interface EmployeeTurnDispatchResult {
   completion: Promise<void>;
 }
 
-function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
+export function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
   return {
     async decideNextAction(view) {
       if (!aiConfig.apiKey) {
@@ -81,7 +86,7 @@ function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
   };
 }
 
-function configuredFinalResponsePort(modelRef: string): HarnessFinalResponsePort {
+export function configuredFinalResponsePort(modelRef: string): HarnessFinalResponsePort {
   return {
     async generateFinalResponse(view, emitDelta) {
       if (!aiConfig.apiKey) {
@@ -247,6 +252,11 @@ export async function dispatchEmployeeTurn(params: {
               events,
               transientSequenceStart,
             });
+          },
+          executionLease: {
+            acquire: tryAcquireInvocationExecutionLease,
+            renew: renewInvocationExecutionLease,
+            release: releaseInvocationExecutionLease,
           },
         }),
     },

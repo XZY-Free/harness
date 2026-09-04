@@ -10,6 +10,7 @@ import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route
 import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
+import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 
 const buildRouteEligibility = createBuildRouteEligibility({
   store: mysqlRouteEligibilityStore,
@@ -22,17 +23,20 @@ const handler = createProjectionEventHandler({
 });
 
 const worker = createOutboxRelayWorker(handler);
+const continuationWorker = createProductionInvocationContinuationWorker();
 
 // 优雅关闭
 process.on("SIGTERM", () => {
   worker.stop();
+  continuationWorker.stop();
 });
 
 process.on("SIGINT", () => {
   worker.stop();
+  continuationWorker.stop();
 });
 
-worker.start().catch((error) => {
+Promise.all([worker.start(), continuationWorker.start()]).catch((error) => {
   console.error("[control-plane-outbox-worker] 启动失败:", error);
   process.exit(1);
 });

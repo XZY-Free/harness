@@ -138,7 +138,13 @@ export const AgentCallContinuationRequestedPayload = z.object({
   parent_invocation_id: id,
   agent_call_id: id,
   source_version: z.number().int().positive(),
-  kind: z.enum(["coordinate_user_input", "resume_parent", "resume_agent_or_parent"]),
+  kind: z.enum([
+    "coordinate_user_input",
+    "resume_parent",
+    "resume_agent_after_user_response",
+    "resume_agent_or_parent",
+  ]),
+  user_action_request_id: id.optional(),
 });
 
 // ─── 事件类型 → Payload Schema 映射 ─────────────────────────
