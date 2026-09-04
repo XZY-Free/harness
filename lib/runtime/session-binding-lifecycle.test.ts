@@ -14,6 +14,7 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import {
   closeSessionBinding,
   createSessionBinding,
@@ -50,6 +51,7 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       runtimeRevisionId: "rr-1",
       threadId,
       externalSessionRef: "ctx-1",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     expect(binding.runtimeRevisionId).toBe("rr-1");
     expect(binding.threadId).toBe(threadId);
@@ -64,12 +66,14 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       runtimeRevisionId: "rr-1",
       threadId,
       externalSessionRef: "ctx-old",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
       threadId,
       externalSessionRef: "ctx-new",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     const reusable = await findReusableSessionBinding({
       tenantId,
@@ -93,6 +97,7 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       runtimeRevisionId: "rr-1",
       threadId,
       externalSessionRef: "ctx-1",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
 
     // RuntimeRevision 不同。
@@ -120,6 +125,7 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       runtimeRevisionId: "rr-1",
       threadId,
       externalSessionRef: "ctx-closed",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     await closeSessionBinding(closed.id);
     expect(
@@ -135,6 +141,7 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       runtimeRevisionId: "rr-1",
       threadId,
       externalSessionRef: "ctx-lost",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     await markSessionBindingLost(lost.id);
     expect(
@@ -153,6 +160,7 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       runtimeRevisionId: "rr-1",
       threadId,
       externalSessionRef: "ctx-keep",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     // Turn 终态不触发关闭（06 §3）：无自动 close 路径，binding 保持 active 可复用。
     const reusable = await findReusableSessionBinding({

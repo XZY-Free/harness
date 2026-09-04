@@ -1,8 +1,10 @@
+import type { RuntimeEvidenceKind } from "@/lib/persistence/schema/runtimes";
 /**
  * RuntimeTransport Resolver。
  *
- * protocolType 真正决定 Transport：
- * - harness_runtime_protocol → SnowHarness Runtime Protocol（Hosted/HTTP wire）。
+ * protocolType + runtimeEvidenceKind 共同决定 Transport：
+ * - harness_runtime_protocol + hosted_artifact → Hosted local transport。
+ * - harness_runtime_protocol + external_endpoint → External HTTP transport。
  *
  * Resolver 输入只来自：
  * - ExecutionBinding；
@@ -17,8 +19,15 @@ import type { RuntimeTransport } from "@/lib/runtime/transport/runtime-transport
 
 /** protocolType 未注册（fail-closed，不回退到任何默认 Transport）。 */
 export class UnsupportedRuntimeProtocolError extends Error {
-  constructor(readonly protocolType: string) {
-    super(`不支持的 Runtime protocolType：${protocolType}`);
+  constructor(
+    readonly protocolType: string,
+    readonly runtimeEvidenceKind?: string,
+  ) {
+    super(
+      runtimeEvidenceKind
+        ? `不支持的 Runtime transport 组合：${protocolType} + ${runtimeEvidenceKind}`
+        : `不支持的 Runtime protocolType：${protocolType}`,
+    );
     this.name = "UnsupportedRuntimeProtocolError";
   }
 }
@@ -34,7 +43,9 @@ export type RuntimeTransportFactory = (input: {
   auth: RuntimeTransportAuth;
 }) => RuntimeTransport;
 
-export type RuntimeTransportFactories = Partial<Record<string, RuntimeTransportFactory>>;
+export type RuntimeTransportFactories = Partial<
+  Record<string, Partial<Record<RuntimeEvidenceKind, RuntimeTransportFactory>>>
+>;
 
 export interface CreateRuntimeTransportResolverParams {
   /** 已注册的 protocolType → Transport 工厂。 */
@@ -44,6 +55,8 @@ export interface CreateRuntimeTransportResolverParams {
 export interface ResolveRuntimeTransportInput {
   /** RuntimeRevision.protocolType（权威值）。 */
   protocolType: string;
+  /** RuntimeRevision.runtimeEvidenceKind（权威值，不从 endpoint 形状推断）。 */
+  runtimeEvidenceKind: RuntimeEvidenceKind;
   /** managed endpoint configuration（external endpoint URL 或 in-process 引用）。 */
   endpoint: string;
   /**
@@ -60,16 +73,16 @@ export type RuntimeTransportResolver = (
 /**
  * 创建 RuntimeTransport Resolver。
  *
- * Resolver 不含任何 framework/业务分支：只按 protocolType 查工厂表；
- * 未知 protocolType 抛 UnsupportedRuntimeProtocolError（Hosted 路径无行为回退）。
+ * Resolver 不含任何 framework/业务分支：只按 protocolType + runtimeEvidenceKind 查工厂表；
+ * 未知组合抛 UnsupportedRuntimeProtocolError，不做 Hosted fallback。
  */
 export function createRuntimeTransportResolver(
   params: CreateRuntimeTransportResolverParams,
 ): RuntimeTransportResolver {
   return async (input) => {
-    const factory = params.factories[input.protocolType];
+    const factory = params.factories[input.protocolType]?.[input.runtimeEvidenceKind];
     if (!factory) {
-      throw new UnsupportedRuntimeProtocolError(input.protocolType);
+      throw new UnsupportedRuntimeProtocolError(input.protocolType, input.runtimeEvidenceKind);
     }
     return factory({ endpoint: input.endpoint, auth: input.auth });
   };

@@ -859,6 +859,7 @@ describe("S05-C02 RuntimeSessionBinding 仓储", () => {
       runtimeRevisionId: ctx.runtimeRevision.id,
       threadId: ctx.threadId,
       externalSessionRef: "rss-binding-001",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
 
     expect(binding.tenantId).toBe(ctx.tenantId);
@@ -878,6 +879,7 @@ describe("S05-C02 RuntimeSessionBinding 仓储", () => {
       runtimeRevisionId: ctx.runtimeRevision.id,
       threadId: ctx.threadId,
       externalSessionRef: "rss-find-001",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
 
     const found = await getSessionBindingByExternalRef(ctx.runtimeRevision.id, "rss-find-001");
@@ -894,12 +896,14 @@ describe("S05-C02 RuntimeSessionBinding 仓储", () => {
       runtimeRevisionId: ctx.runtimeRevision.id,
       threadId: ctx.threadId,
       externalSessionRef: "rss-list-001",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     await createSessionBinding({
       tenantId: ctx.tenantId,
       runtimeRevisionId: ctx.runtimeRevision.id,
       threadId: ctx.threadId,
       externalSessionRef: "rss-list-002",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
 
     const list = await getSessionBindingsByThread(ctx.tenantId, ctx.threadId);
@@ -915,6 +919,7 @@ describe("S05-C02 RuntimeSessionBinding 仓储", () => {
       runtimeRevisionId: ctx.runtimeRevision.id,
       threadId: ctx.threadId,
       externalSessionRef: "rss-close-001",
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
 
     const closed = await closeSessionBinding(binding.id);

@@ -92,6 +92,7 @@ import {
   type StartInvocationRequest,
   type StartInvocationResponse,
   createMockRuntimeClient,
+  defaultRuntimeCapabilities,
 } from "@/lib/runtime/runtime-client";
 import { createSessionBinding, getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
@@ -434,6 +435,7 @@ async function seedInvocation(params: {
       threadId: params.threadId ?? null,
       jobId: params.jobId ?? null,
       externalSessionRef: `ext-session-${invocation.id}`,
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     await db
       .update(invocationTable)

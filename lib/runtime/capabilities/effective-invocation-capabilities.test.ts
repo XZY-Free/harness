@@ -16,9 +16,11 @@ import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   resolveEffectiveInvocationCapabilities,
   resolveRuntimeLevelCapabilities,
+  runtimeCapabilitiesMatchPublishedRevision,
 } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import { createVerifiedAttestation } from "@/lib/test-support/create-verified-attestation";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -27,6 +29,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 function projection(flags: {
   cancel?: string;
   resume?: string;
+  steer?: string;
   inputRequired?: string;
   streaming?: string;
 }) {
@@ -38,6 +41,7 @@ function projection(flags: {
         incremental_content: "not_applicable",
         input_required: flags.inputRequired ?? "pass",
         resume: flags.resume ?? "pass",
+        steer: flags.steer ?? "pass",
         cancel: flags.cancel ?? "pass",
         durable_task_recovery: "not_measured",
       },
@@ -125,8 +129,7 @@ describe("resolveRuntimeLevelCapabilities（05 §4 Base Harness）", () => {
     });
     expect(caps.cancel).toBe(true);
     expect(caps.resume).toBe(false);
-    // External 投影不含 steer（measured.steer 恒 false）。
-    expect(caps.steer).toBe(false);
+    expect(caps.steer).toBe(true);
   });
 
   it("形状不可识别/未知协议 → fail-closed 全 false", () => {
@@ -192,5 +195,61 @@ describe("resolveEffectiveInvocationCapabilities（05 §3 精确公式；专题0
       binding: { runtimeRevisionId: "revision-not-exist" },
     });
     expect(caps.cancel).toBe(false);
+  });
+
+  it("Session 实际能力与 Revision measured 取交集，非法快照 fail-closed", async () => {
+    const { tenantId, ownerId } = await seedTenant();
+    const runtimeRevisionId = await seedRuntimeRevision(tenantId, ownerId, projection({}));
+    const observed = defaultRuntimeCapabilities();
+    observed.features.resume = false;
+    const capabilities = await resolveEffectiveInvocationCapabilities({
+      tenantId,
+      binding: { runtimeRevisionId },
+      sessionCapabilitiesJson: observed,
+    });
+    expect(capabilities.cancel).toBe(true);
+    expect(capabilities.resume).toBe(false);
+
+    const invalid = await resolveEffectiveInvocationCapabilities({
+      tenantId,
+      binding: { runtimeRevisionId },
+      sessionCapabilitiesJson: { features: { resume: true } },
+    });
+    expect(invalid).toEqual({
+      cancel: false,
+      resume: false,
+      steer: false,
+      user_action: false,
+      streaming: false,
+    });
+  });
+
+  it("start response 的核心能力必须与已发布 measured 事实一致", () => {
+    const observed = defaultRuntimeCapabilities();
+    expect(
+      runtimeCapabilitiesMatchPublishedRevision(
+        {
+          protocolType: "harness_runtime_protocol",
+          runtimeCapabilitiesJson: projection({}),
+        },
+        observed,
+      ),
+    ).toBe(true);
+    observed.features.cancel = false;
+    expect(
+      runtimeCapabilitiesMatchPublishedRevision(
+        {
+          protocolType: "harness_runtime_protocol",
+          runtimeCapabilitiesJson: projection({}),
+        },
+        observed,
+      ),
+    ).toBe(false);
+    expect(
+      runtimeCapabilitiesMatchPublishedRevision(
+        { protocolType: "harness_runtime_protocol", runtimeCapabilitiesJson: { unknown: true } },
+        observed,
+      ),
+    ).toBe(false);
   });
 });

@@ -295,16 +295,22 @@ export function createHttpRuntimeClient(options?: {
   async function doFetch(
     url: string,
     init: RequestInit & { headers: Record<string, string> },
+    dispatchPossiblyStarted: boolean,
   ): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       return await fetch(url, { ...init, signal: controller.signal });
     } catch (err) {
-      // fetch 抛 TypeError 视为网络错误（DNS / 连接拒绝 / 超时）
+      const stableCode = controller.signal.aborted
+        ? "RUNTIME_TIMEOUT"
+        : classifyNetworkFailure(err);
       throw new RuntimeHttpClientError(
         "network",
-        `Runtime 网络不可达：${url} — ${err instanceof Error ? err.message : String(err)}`,
+        stableCode === "RUNTIME_TIMEOUT" ? "Runtime 请求超时" : "Runtime 网络连接失败",
+        undefined,
+        undefined,
+        { stableCode, retryable: true, dispatchPossiblyStarted },
       );
     } finally {
       clearTimeout(timer);
@@ -312,7 +318,7 @@ export function createHttpRuntimeClient(options?: {
   }
 
   /** 读取非 2xx 响应错误体，构造 RuntimeHttpClientError(kind=http)。 */
-  async function throwHttpError(resp: Response): Promise<never> {
+  async function throwHttpError(resp: Response, dispatchPossiblyStarted: boolean): Promise<never> {
     let runtimeErrorCode: string | undefined;
     let message = `Runtime HTTP ${resp.status}`;
     try {
@@ -324,7 +330,27 @@ export function createHttpRuntimeClient(options?: {
     } catch {
       // 响应体非 JSON 或为空，使用默认 message
     }
-    throw new RuntimeHttpClientError("http", message, resp.status, runtimeErrorCode);
+    throw new RuntimeHttpClientError("http", message, resp.status, runtimeErrorCode, {
+      dispatchPossiblyStarted,
+    });
+  }
+
+  async function readJson(resp: Response, dispatchPossiblyStarted: boolean): Promise<unknown> {
+    try {
+      return await resp.json();
+    } catch {
+      throw new RuntimeHttpClientError(
+        "protocol",
+        "Runtime 返回了非法 JSON",
+        undefined,
+        undefined,
+        {
+          stableCode: "RUNTIME_INVALID_JSON",
+          retryable: false,
+          dispatchPossiblyStarted,
+        },
+      );
+    }
   }
 
   return {
@@ -333,19 +359,26 @@ export function createHttpRuntimeClient(options?: {
       auth: RuntimeTransportAuth,
     ): Promise<RuntimeCapabilitiesResponse> {
       const url = `${endpoint}/runtime/v1/capabilities?protocol_version=${RUNTIME_PROTOCOL_VERSION}`;
-      const resp = await doFetch(url, {
-        method: "GET",
-        // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-        headers: outboundAuthHeaders(auth, { allowWorkloadToken: true }),
-      });
+      const resp = await doFetch(
+        url,
+        {
+          method: "GET",
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
+          headers: outboundAuthHeaders(auth, { allowWorkloadToken: true }),
+        },
+        false,
+      );
       if (!resp.ok) {
-        await throwHttpError(resp);
+        await throwHttpError(resp, false);
       }
-      const body = (await resp.json()) as RuntimeCapabilitiesResponse;
-      if (!body || !Array.isArray(body.protocol_versions) || typeof body.features !== "object") {
+      const body = await readJson(resp, false);
+      if (!isRuntimeCapabilitiesResponse(body)) {
         throw new RuntimeHttpClientError(
           "protocol",
           "Runtime 能力响应结构非法：缺少 protocol_versions 或 features",
+          undefined,
+          undefined,
+          { dispatchPossiblyStarted: false },
         );
       }
       return body;
@@ -353,24 +386,34 @@ export function createHttpRuntimeClient(options?: {
 
     async startInvocation(req: StartInvocationRequest): Promise<StartInvocationResponse> {
       const url = `${req.runtimeEndpoint}/runtime/v1/invocations`;
-      const resp = await doFetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-          [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+      const resp = await doFetch(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
+            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
+            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+          },
+          body: JSON.stringify(req.requestBody),
         },
-        body: JSON.stringify(req.requestBody),
-      });
+        true,
+      );
       if (!resp.ok) {
-        await throwHttpError(resp);
+        await throwHttpError(resp, true);
       }
-      const body = (await resp.json()) as StartInvocationResponse;
-      if (!body || typeof body.invocation_id !== "string" || typeof body.accepted !== "boolean") {
+      const body = await readJson(resp, true);
+      if (
+        !isStartInvocationResponse(body) ||
+        body.invocation_id !== req.requestBody.invocation_id
+      ) {
         throw new RuntimeHttpClientError(
           "protocol",
           "Runtime startInvocation 响应结构非法：缺少 invocation_id 或 accepted",
+          undefined,
+          undefined,
+          { dispatchPossiblyStarted: true },
         );
       }
       return body;
@@ -378,70 +421,186 @@ export function createHttpRuntimeClient(options?: {
 
     async cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse> {
       const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/cancel`;
-      const resp = await doFetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-          [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+      const resp = await doFetch(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
+            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
+            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+          },
+          body: JSON.stringify(req.requestBody),
         },
-        body: JSON.stringify(req.requestBody),
-      });
+        true,
+      );
       if (!resp.ok) {
-        await throwHttpError(resp);
+        await throwHttpError(resp, true);
       }
-      const body = (await resp.json()) as CancelInvocationResponse;
-      if (!body || typeof body.invocation_id !== "string") {
-        throw new RuntimeHttpClientError("protocol", "Runtime cancelInvocation 响应结构非法");
+      const body = await readJson(resp, true);
+      if (!isCancelInvocationResponse(body) || body.invocation_id !== req.invocationId) {
+        throw new RuntimeHttpClientError(
+          "protocol",
+          "Runtime cancelInvocation 响应结构非法",
+          undefined,
+          undefined,
+          { dispatchPossiblyStarted: true },
+        );
       }
       return body;
     },
 
     async resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
       const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/resume`;
-      const resp = await doFetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-          [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+      const resp = await doFetch(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
+            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
+            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+          },
+          body: JSON.stringify(req.requestBody),
         },
-        body: JSON.stringify(req.requestBody),
-      });
+        true,
+      );
       if (!resp.ok) {
-        await throwHttpError(resp);
+        await throwHttpError(resp, true);
       }
-      const body = (await resp.json()) as ResumeInvocationResponse;
-      if (!body || typeof body.invocation_id !== "string") {
-        throw new RuntimeHttpClientError("protocol", "Runtime resumeInvocation 响应结构非法");
+      const body = await readJson(resp, true);
+      if (!isResumeInvocationResponse(body) || body.invocation_id !== req.invocationId) {
+        throw new RuntimeHttpClientError(
+          "protocol",
+          "Runtime resumeInvocation 响应结构非法",
+          undefined,
+          undefined,
+          { dispatchPossiblyStarted: true },
+        );
       }
       return body;
     },
 
     async steerInvocation(req: SteerInvocationRequest): Promise<SteerInvocationResponse> {
       const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/steer`;
-      const resp = await doFetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-          [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+      const resp = await doFetch(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
+            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
+            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
+          },
+          body: JSON.stringify(req.requestBody),
         },
-        body: JSON.stringify(req.requestBody),
-      });
+        true,
+      );
       if (!resp.ok) {
-        await throwHttpError(resp);
+        await throwHttpError(resp, true);
       }
-      const body = (await resp.json()) as SteerInvocationResponse;
-      if (!body || typeof body.invocation_id !== "string") {
-        throw new RuntimeHttpClientError("protocol", "Runtime steerInvocation 响应结构非法");
+      const body = await readJson(resp, true);
+      if (!isSteerInvocationResponse(body) || body.invocation_id !== req.invocationId) {
+        throw new RuntimeHttpClientError(
+          "protocol",
+          "Runtime steerInvocation 响应结构非法",
+          undefined,
+          undefined,
+          { dispatchPossiblyStarted: true },
+        );
       }
       return body;
     },
   };
+}
+
+function classifyNetworkFailure(
+  error: unknown,
+): "RUNTIME_CONNECT_FAILED" | "RUNTIME_DNS_FAILED" | "RUNTIME_TLS_FAILED" {
+  const cause = isRecord(error) ? error.cause : null;
+  const code = isRecord(cause) && typeof cause.code === "string" ? cause.code : "";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "RUNTIME_DNS_FAILED";
+  if (/CERT|TLS|SSL/.test(code)) return "RUNTIME_TLS_FAILED";
+  return "RUNTIME_CONNECT_FAILED";
+}
+
+export function isRuntimeCapabilitiesResponse(
+  value: unknown,
+): value is RuntimeCapabilitiesResponse {
+  if (!isRecord(value) || !Array.isArray(value.protocol_versions)) return false;
+  if (!value.protocol_versions.every((item) => typeof item === "string")) return false;
+  if (!isRecord(value.features) || !isRecord(value.limits)) return false;
+  const features = value.features;
+  if (
+    ![
+      "event_stream",
+      "cancel",
+      "resume",
+      "steer",
+      "dynamic_tools",
+      "user_action",
+      "filesystem_checkpoint",
+    ].every((key) => typeof features[key] === "boolean") ||
+    !Array.isArray(features.workspace_types) ||
+    !features.workspace_types.every((item) => typeof item === "string")
+  ) {
+    return false;
+  }
+  return (
+    typeof value.limits.max_invocation_seconds === "number" &&
+    Number.isFinite(value.limits.max_invocation_seconds) &&
+    typeof value.limits.max_event_bytes === "number" &&
+    Number.isFinite(value.limits.max_event_bytes)
+  );
+}
+
+function isStartInvocationResponse(value: unknown): value is StartInvocationResponse {
+  return (
+    isRecord(value) &&
+    typeof value.invocation_id === "string" &&
+    typeof value.accepted === "boolean" &&
+    Number.isInteger(value.attempt_no) &&
+    typeof value.runtime_session_ref === "string" &&
+    value.runtime_session_ref.length > 0 &&
+    typeof value.runtime_execution_ref === "string" &&
+    value.runtime_execution_ref.length > 0 &&
+    isRuntimeCapabilitiesResponse(value.capabilities)
+  );
+}
+
+function isCancelInvocationResponse(value: unknown): value is CancelInvocationResponse {
+  return (
+    isRecord(value) &&
+    typeof value.invocation_id === "string" &&
+    typeof value.cancelled === "boolean" &&
+    Number.isInteger(value.attempt_no)
+  );
+}
+
+function isResumeInvocationResponse(value: unknown): value is ResumeInvocationResponse {
+  return (
+    isRecord(value) &&
+    typeof value.invocation_id === "string" &&
+    typeof value.resumed === "boolean" &&
+    Number.isInteger(value.attempt_no) &&
+    (value.requires_redispatch === undefined || typeof value.requires_redispatch === "boolean")
+  );
+}
+
+function isSteerInvocationResponse(value: unknown): value is SteerInvocationResponse {
+  return (
+    isRecord(value) &&
+    typeof value.invocation_id === "string" &&
+    typeof value.steered === "boolean" &&
+    Number.isInteger(value.attempt_no)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 // ─── Mock 实现 ────────────────────────────────────────────

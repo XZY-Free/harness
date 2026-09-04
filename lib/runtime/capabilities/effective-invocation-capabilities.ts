@@ -14,6 +14,10 @@
  */
 import type { RuntimeRevisionRow } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import {
+  type RuntimeCapabilitiesResponse,
+  isRuntimeCapabilitiesResponse,
+} from "@/lib/runtime/runtime-client";
 
 /** Invocation 级 effective 能力（至少统一表达  五项）。 */
 export interface EffectiveInvocationCapabilities {
@@ -73,6 +77,7 @@ interface ExternalCapabilitiesProjection {
     features?: {
       cancel?: string;
       resume?: string;
+      steer?: string;
       input_required?: string;
       streaming_transport?: string;
     };
@@ -117,7 +122,7 @@ export function resolveRuntimeLevelCapabilities(
     measured = {
       cancel: pass(features.cancel),
       resume: pass(features.resume),
-      steer: false,
+      steer: pass(features.steer),
       user_action: pass(features.input_required),
       streaming: pass(features.streaming_transport),
     };
@@ -140,6 +145,50 @@ export function resolveRuntimeLevelCapabilities(
   };
 }
 
+/** 把已通过 Runtime Protocol schema 的 session 能力快照投影为控制能力。 */
+export function resolveSessionRuntimeCapabilities(value: unknown): RuntimeLevelCapabilities {
+  if (!isRuntimeCapabilitiesResponse(value)) {
+    return NO_CAPABILITIES;
+  }
+  return {
+    cancel: value.features.cancel,
+    resume: value.features.resume,
+    steer: value.features.steer,
+    user_action: value.features.user_action,
+    streaming: value.features.event_stream,
+  };
+}
+
+/** 发布时 measured 能力与 start 响应必须一致；不一致时不能建立会话事实。 */
+export function runtimeCapabilitiesMatchPublishedRevision(
+  revision: Pick<RuntimeRevisionRow, "protocolType" | "runtimeCapabilitiesJson">,
+  observed: RuntimeCapabilitiesResponse,
+): boolean {
+  // Hosted 的发布事实是旧有 string[] capability catalog，并非完整 probe 快照；
+  // 会话能力仍持久化并参与 effective 交集，但不能对不等形状做伪精确比较。
+  if (Array.isArray(revision.runtimeCapabilitiesJson)) return true;
+  const measuredFeatures = (
+    revision.runtimeCapabilitiesJson as ExternalCapabilitiesProjection | null
+  )?.measured?.features;
+  if (
+    !measuredFeatures ||
+    !["cancel", "resume", "steer", "input_required", "streaming_transport"].every(
+      (name) => typeof measuredFeatures[name as keyof typeof measuredFeatures] === "string",
+    )
+  ) {
+    return false;
+  }
+  const published = resolveRuntimeLevelCapabilities(revision);
+  const session = resolveSessionRuntimeCapabilities(observed);
+  return (
+    published.cancel === session.cancel &&
+    published.resume === session.resume &&
+    published.steer === session.steer &&
+    published.user_action === session.user_action &&
+    published.streaming === session.streaming
+  );
+}
+
 /**
  * 按精确 Binding 事实派生 Invocation 级 effective 能力。
  *
@@ -150,10 +199,23 @@ export function resolveRuntimeLevelCapabilities(
 export async function resolveEffectiveInvocationCapabilities(params: {
   tenantId: string;
   binding: EffectiveCapabilityBindingEvidence;
+  /** startInvocation 返回并持久化在 RuntimeSessionBinding 的能力快照。 */
+  sessionCapabilitiesJson?: unknown;
 }): Promise<EffectiveInvocationCapabilities> {
   const runtimeRevision = await getRuntimeRevisionById(params.binding.runtimeRevisionId);
   if (!runtimeRevision) {
     return NO_CAPABILITIES;
   }
-  return resolveRuntimeLevelCapabilities(runtimeRevision);
+  const published = resolveRuntimeLevelCapabilities(runtimeRevision);
+  if (params.sessionCapabilitiesJson === undefined) {
+    return published;
+  }
+  const session = resolveSessionRuntimeCapabilities(params.sessionCapabilitiesJson);
+  return {
+    cancel: published.cancel && session.cancel,
+    resume: published.resume && session.resume,
+    steer: published.steer && session.steer,
+    user_action: published.user_action && session.user_action,
+    streaming: published.streaming && session.streaming,
+  };
 }

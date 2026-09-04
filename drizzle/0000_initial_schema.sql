@@ -1559,6 +1559,7 @@ CREATE TABLE `RuntimeSessionBinding` (
 	`threadId` varchar(36),
 	`jobId` varchar(36),
 	`externalSessionRef` varchar(256) NOT NULL,
+	`runtimeCapabilitiesJson` json NOT NULL,
 	`bindingState` enum('active','closed','lost') NOT NULL DEFAULT 'active',
 	`createdAt` datetime(3) NOT NULL,
 	`lastUsedAt` datetime(3) NOT NULL,

@@ -36,6 +36,7 @@ import {
   buildRuntimeStartRequestForInvocation,
   invocationAttemptIdempotencyKey,
 } from "@/lib/runtime/application/build-runtime-start-request";
+import { runtimeCapabilitiesMatchPublishedRevision } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import type { RuntimeEndpointResolution } from "@/lib/runtime/dispatcher";
 import {
   InvocationNotFoundError,
@@ -45,6 +46,7 @@ import {
 } from "@/lib/runtime/errors";
 import { getAttemptById, updateAttemptState } from "@/lib/runtime/invocation-attempt-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
 import {
@@ -52,7 +54,7 @@ import {
   recordAttemptDispatchTransientFailure,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { TransientDispatchErrorCode } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
-import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
+import type { RuntimeHttpClient, StartInvocationResponse } from "@/lib/runtime/runtime-client";
 import {
   createSessionBinding,
   getSessionBindingByExternalRef,
@@ -219,6 +221,23 @@ export async function dispatchQueuedInvocationAttempt(
       idempotencyKey,
       requestBody,
     });
+    const runtimeRevision = await getRuntimeRevisionById(binding.runtimeRevisionId);
+    if (
+      !runtimeRevision ||
+      !runtimeCapabilitiesMatchPublishedRevision(runtimeRevision, response.capabilities)
+    ) {
+      throw new RuntimeHttpClientError(
+        "protocol",
+        "Runtime startInvocation 返回的 capabilities 与已发布能力事实不一致",
+        undefined,
+        undefined,
+        {
+          stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+          retryable: false,
+          dispatchPossiblyStarted: true,
+        },
+      );
+    }
 
     // 8. 成功：创建/复用 SessionBinding + 标记旧 binding lost + 事务内推进状态 + 写 Event
     return await applyAttemptStartAccepted({
@@ -229,6 +248,7 @@ export async function dispatchQueuedInvocationAttempt(
       response: {
         runtime_session_ref: response.runtime_session_ref,
         runtime_execution_ref: response.runtime_execution_ref,
+        capabilities: response.capabilities,
       },
       producerSequenceStart,
       actorType,
@@ -368,7 +388,10 @@ async function applyAttemptStartAccepted(params: {
   invocation: Invocation;
   attempt: InvocationAttempt;
   runtimeRevisionId: string;
-  response: { runtime_session_ref: string; runtime_execution_ref: string };
+  response: Pick<
+    StartInvocationResponse,
+    "runtime_session_ref" | "runtime_execution_ref" | "capabilities"
+  >;
   producerSequenceStart: number;
   actorType: ThreadEventActorType;
   now: Date;
@@ -386,6 +409,7 @@ async function applyAttemptStartAccepted(params: {
       threadId: invocation.threadId ?? null,
       jobId: invocation.jobId ?? null,
       externalSessionRef: response.runtime_session_ref,
+      runtimeCapabilities: response.capabilities,
     });
     sessionBindingCreated = true;
   } catch (err) {

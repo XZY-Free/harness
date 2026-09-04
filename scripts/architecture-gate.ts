@@ -12,6 +12,7 @@ import {
   checkAgentInvokeAuthorizationGate,
   checkAgentRevisionAuthorityGate,
   checkDispatchRecoveryAuthorityGate,
+  checkExternalRuntimeTransportGate,
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
   collectDeprecatedArchitectureViolations,
@@ -167,6 +168,12 @@ function checkFinalClosureBoundaries(): void {
   const result = checkFinalClosureBoundaryGate(productionDocuments(), schemaFiles, audit.tests);
   if (result.passed) pass("Topic 01 最终封版边界闭合");
   else fail(`Topic 01 最终封版边界违规：\n  ${result.failures.join("\n  ")}`);
+}
+
+function checkExternalRuntimeTransport(): void {
+  const result = checkExternalRuntimeTransportGate(productionDocuments());
+  if (result.passed) pass("External Runtime 双维度 HTTP Transport 边界闭合");
+  else fail(`External Runtime Transport 违规：\n  ${result.failures.join("\n  ")}`);
 }
 
 function checkRetiredNaming(): void {
@@ -365,6 +372,7 @@ function main(): void {
   checkAgentRevisionAuthority();
   checkExecutionBoundaryRules();
   checkAgentExecutionAuthority();
+  checkExternalRuntimeTransport();
   checkFinalClosureBoundaries();
   if (failures > 0) process.exitCode = 1;
 }

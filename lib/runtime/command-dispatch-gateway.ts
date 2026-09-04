@@ -19,8 +19,11 @@ import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-ou
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { type RuntimeHttpClient, createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
+import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
+import { getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
+import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 import { eq } from "drizzle-orm";
 
 const GATEWAY_ENDPOINTS = {
@@ -82,39 +85,53 @@ async function resolveTransport(
   endpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
 }> {
   const isExternal = context.runtimeRevision.runtimeEvidenceKind === "external_endpoint";
-  const runtimeClient = isExternal
-    ? createHttpRuntimeClient()
-    : createInProcessHostedRuntimeClient({
+  const endpoint = isExternal ? context.runtimeRevision.endpointRef : "in-process://hosted";
+  const auth = isExternal
+    ? await resolveOutboundRuntimeAuth({
         tenantId,
-        applicationService: hostedApplicationServiceForTest ?? hostedRuntimeApplicationService,
-      });
+        identityMode: context.runtimeRevision.identityMode,
+        credentialRefId: context.runtimeRevision.credentialRefId,
+      })
+    : {
+        mode: "workload_token" as const,
+        token: issueWorkloadToken({
+          type: "runtime",
+          tenantId,
+          invocationId: context.invocation.id,
+          runtimeRevisionId: context.binding.runtimeRevisionId,
+          audience: "runtime",
+          expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+        }),
+      };
+  const resolver = createRuntimeTransportResolver({
+    factories: {
+      harness_runtime_protocol: {
+        hosted_artifact: () =>
+          createInProcessHostedRuntimeClient({
+            tenantId,
+            applicationService: hostedApplicationServiceForTest ?? hostedRuntimeApplicationService,
+          }),
+        external_endpoint: ({ endpoint: externalEndpoint, auth: externalAuth }) =>
+          createHttpHarnessRuntimeTransport({ endpoint: externalEndpoint, auth: externalAuth }),
+      },
+    },
+  });
+  const runtimeClient = await resolver({
+    protocolType: context.runtimeRevision.protocolType,
+    runtimeEvidenceKind: context.runtimeRevision.runtimeEvidenceKind,
+    endpoint,
+    auth,
+  });
   return {
     runtimeClient,
     endpointResolver: async (binding) => {
-      const auth = isExternal
-        ? await resolveOutboundRuntimeAuth({
-            tenantId,
-            identityMode: context.runtimeRevision.identityMode,
-            credentialRefId: context.runtimeRevision.credentialRefId,
-          })
-        : {
-            mode: "workload_token" as const,
-            token: issueWorkloadToken({
-              type: "runtime",
-              tenantId,
-              invocationId: context.invocation.id,
-              runtimeRevisionId: binding.runtimeRevisionId,
-              audience: "runtime",
-              expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-            }),
-          };
       const gatewayExpiresAt = Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway;
       const frozenGovernance = await loadFrozenGovernanceConfig(
         tenantId,
         binding.governanceConfigRevisionId,
       );
       return {
-        runtimeEndpoint: isExternal ? context.runtimeRevision.endpointRef : "in-process://hosted",
+        runtimeEndpoint: endpoint,
         auth,
         gatewayEndpoints: GATEWAY_ENDPOINTS,
         governanceConfig: {
@@ -153,6 +170,10 @@ async function dispatchCommand(params: {
   const capabilities = await resolveEffectiveInvocationCapabilities({
     tenantId: params.tenantId,
     binding: context.binding,
+    sessionCapabilitiesJson: context.invocation.runtimeSessionBindingId
+      ? ((await getSessionBindingById(params.tenantId, context.invocation.runtimeSessionBindingId))
+          ?.runtimeCapabilitiesJson ?? null)
+      : null,
   });
   const supported =
     params.expectedType === "interrupt"

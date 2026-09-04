@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -11,6 +15,8 @@ import {
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { requestInterrupt } from "@/lib/conversations/interrupt-queries";
+import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regenerate-queries";
+import { queueSteer } from "@/lib/conversations/steer-queries";
 import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
@@ -19,20 +25,32 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { executionBindingTable } from "@/lib/persistence/schema/executions";
+import { invocationCommandTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
 } from "@/lib/routes/application/deployment-route-service";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
-import { dispatchInterruptCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
+import {
+  dispatchInterruptCommandToRuntime,
+  dispatchResumeCommandToRuntime,
+  dispatchSteerCommandToRuntime,
+} from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
+import { getAttemptsByInvocation } from "@/lib/runtime/invocation-attempt-queries";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { getSessionBindingById } from "@/lib/runtime/session-binding-queries";
+import { createHttpRuntimeConformanceAdapterForTest } from "@/lib/runtime/test-support/http-runtime-conformance-adapter";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
-import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
+import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
+import {
+  publishExternalRuntimeRevisionForTest,
+  publishRuntimeRevisionForTest,
+} from "@/lib/test-support/publish-runtime-revision-for-test";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,9 +58,120 @@ beforeEach(async () => {
   await resetDatabase(db);
 });
 
-afterEach(() => {
-  // 无外部状态污染
+const externalServers: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  for (const close of externalServers.splice(0)) await close();
 });
+
+const EXTERNAL_CAPABILITIES = {
+  protocol_versions: ["2"],
+  features: {
+    event_stream: true,
+    cancel: true,
+    resume: true,
+    steer: true,
+    dynamic_tools: false,
+    user_action: true,
+    workspace_types: ["cloud"],
+    filesystem_checkpoint: false,
+  },
+  limits: { max_invocation_seconds: 600, max_event_bytes: 1_048_576 },
+};
+
+function externalCapabilityProjection(capabilities = EXTERNAL_CAPABILITIES) {
+  return {
+    declared: {},
+    measured: {
+      features: {
+        streaming_transport: capabilities.features.event_stream ? "pass" : "not_applicable",
+        input_required: capabilities.features.user_action ? "pass" : "not_applicable",
+        resume: capabilities.features.resume ? "pass" : "not_applicable",
+        cancel: capabilities.features.cancel ? "pass" : "not_applicable",
+        steer: capabilities.features.steer ? "pass" : "not_applicable",
+      },
+    },
+    effective: {},
+  };
+}
+
+interface ExternalRequest {
+  method: string;
+  url: string;
+  authorization?: string;
+  body: Record<string, unknown> | null;
+}
+
+async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) {
+  const requests: ExternalRequest[] = [];
+  let startFailureStatus: number | null = null;
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const raw = Buffer.concat(chunks).toString("utf8");
+    const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+    requests.push({
+      method: request.method ?? "",
+      url: request.url ?? "",
+      authorization: request.headers.authorization,
+      body,
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.url?.startsWith("/runtime/v1/capabilities")) {
+      response.end(JSON.stringify(capabilities));
+      return;
+    }
+    const invocationId =
+      request.url === "/runtime/v1/invocations"
+        ? String(body?.invocation_id ?? "")
+        : (request.url?.split("/")[4] ?? "");
+    if (request.url === "/runtime/v1/invocations") {
+      if (startFailureStatus !== null) {
+        response.statusCode = startFailureStatus;
+        response.end(
+          JSON.stringify({ error: { code: "RUNTIME_UNAVAILABLE", message: "temporarily busy" } }),
+        );
+        return;
+      }
+      response.end(
+        JSON.stringify({
+          invocation_id: invocationId,
+          accepted: true,
+          attempt_no: 1,
+          runtime_session_ref: `external-session:${invocationId}`,
+          runtime_execution_ref: `external-execution:${invocationId}`,
+          capabilities,
+        }),
+      );
+      return;
+    }
+    response.end(
+      JSON.stringify({
+        invocation_id: invocationId,
+        attempt_no: 1,
+        ...(request.url?.endsWith("/cancel")
+          ? { cancelled: true }
+          : request.url?.endsWith("/resume")
+            ? { resumed: true, requires_redispatch: false }
+            : { steered: true }),
+      }),
+    );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as AddressInfo;
+  externalServers.push(async () => {
+    server.close();
+    await once(server, "close");
+  });
+  return {
+    endpoint: `http://127.0.0.1:${address.port}`,
+    requests,
+    setStartFailureStatus(status: number | null) {
+      startFailureStatus = status;
+    },
+  };
+}
 
 // ─── 辅助：InMemoryManagedArtifactStore ────────────────────
 
@@ -250,7 +379,371 @@ async function seedReadyEmployeeTurn(suffix: string) {
   return { tenantId: tenant.id, ownerId: owner.id, thread, turn };
 }
 
+async function seedReadyExternalEmployeeTurn(suffix: string, capabilities = EXTERNAL_CAPABILITIES) {
+  const server = await startExternalRuntimeServer(capabilities);
+  const tenant = await ensureDefaultTenant();
+  const owner = await upsertUserIdentity({
+    tenantId: tenant.id,
+    externalSubject: `external-turn-owner-${suffix}`,
+    email: `external-turn-owner-${suffix}@example.com`,
+    displayName: "External Turn Owner",
+  });
+  const runtime = await createRuntime({
+    tenantId: tenant.id,
+    runtimeKey: `external-runtime-${suffix}`,
+    displayName: `External Runtime ${suffix}`,
+    runtimeKind: "external",
+    ownerUserId: owner.id,
+    lifecycleState: "enabled",
+  });
+  const revision = await createDraftRuntimeRevision({
+    tenantId: tenant.id,
+    runtimeId: runtime.id,
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
+    runtimeEvidenceKind: "external_endpoint",
+    endpointRef: server.endpoint,
+    runtimeArtifactRef: null,
+    runtimeCapabilitiesJson: externalCapabilityProjection(capabilities),
+    identityMode: "none",
+    networkZone: "external",
+    configHash: computeArtifactDigest(`external-config-${suffix}`),
+    createdBy: owner.id,
+  });
+  const transport = createHttpHarnessRuntimeTransport({
+    endpoint: server.endpoint,
+    auth: { mode: "none" },
+  });
+  await publishExternalRuntimeRevisionForTest({
+    tenantId: tenant.id,
+    revisionId: revision.id,
+    runtimeExpectedVersionNo: runtime.versionNo,
+    runtimeAdapter: createHttpRuntimeConformanceAdapterForTest({
+      transport,
+      endpoint: server.endpoint,
+      auth: { mode: "none" },
+    }),
+  });
+  const routeSet = await createRouteSet({
+    tenantId: tenant.id,
+    target: { kind: "runtime" },
+    routeScopeKey: "default",
+    routeScopeJson: { networkZone: "external" },
+  });
+  await activateSingleRouteForTest({
+    tenantId: tenant.id,
+    routeSetId: routeSet.id,
+    routeSetExpectedVersionNo: 1,
+    target: { kind: "runtime", runtimeRevisionId: revision.id },
+    trafficWeight: MAX_TRAFFIC_WEIGHT,
+    priorityNo: 1,
+    actor: buildActor(tenant.id, "external-deploy-bot"),
+  });
+  const { thread } = await createThread({
+    tenantId: tenant.id,
+    ownerUserId: owner.id,
+    actorId: owner.id,
+  });
+  const { turn } = await acceptUserMessageTurn({
+    tenantId: tenant.id,
+    threadId: thread.id,
+    ownerUserId: owner.id,
+    content: { text: "由外部 Runtime 执行" },
+    actorId: owner.id,
+  });
+  server.requests.length = 0;
+  return { server, tenantId: tenant.id, ownerId: owner.id, thread, turn };
+}
+
+async function createExternalResumeCommand(params: {
+  threadId: string;
+  turnId: string;
+  invocationId: string;
+}) {
+  const id = randomUUID();
+  const now = new Date();
+  const commandPayload = { resume_payload: { answer: "继续" }, turn_id: params.turnId };
+  await db.insert(invocationCommandTable).values({
+    id,
+    invocationId: params.invocationId,
+    threadId: params.threadId,
+    turnId: params.turnId,
+    commandType: "resume",
+    commandPayloadJson: commandPayload,
+    commandPayloadHash: computeInvocationCommandPayloadHash(commandPayload),
+    commandState: "queued",
+    idempotencyKey: `external-resume:${id}`,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return id;
+}
+
 describe("dispatchEmployeeTurn", () => {
+  it("external_endpoint 真实发送 HTTP 并持久化会话能力，不启动 Hosted Loop", async () => {
+    const { server, tenantId, ownerId, thread, turn } =
+      await seedReadyExternalEmployeeTurn("http-start");
+    const hostedDecision = vi.fn();
+    const result = await dispatchEmployeeTurn({
+      tenantId,
+      threadId: thread.id,
+      turnId: turn.id,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
+      decisionPort: { decideNextAction: hostedDecision },
+    });
+    await result.completion;
+
+    expect(result.dispatched).toBe(true);
+    expect(hostedDecision).not.toHaveBeenCalled();
+    expect(server.requests).toHaveLength(1);
+    expect(server.requests[0]).toMatchObject({
+      method: "POST",
+      url: "/runtime/v1/invocations",
+      authorization: undefined,
+    });
+    expect(server.requests[0]?.body).not.toHaveProperty("tenantId");
+    expect(server.requests[0]?.body).not.toHaveProperty("userId");
+    expect(server.requests[0]?.body).not.toHaveProperty("execution_subject");
+
+    const updatedTurn = await getTurnById(tenantId, turn.id);
+    const invocation = await getInvocationById(
+      tenantId,
+      updatedTurn?.latestInvocationId ?? "missing",
+    );
+    expect(invocation).toMatchObject({
+      executionState: "running",
+      runtimeExecutionRef: `external-execution:${invocation?.id}`,
+    });
+    const session = await getSessionBindingById(
+      tenantId,
+      invocation?.runtimeSessionBindingId ?? "missing",
+    );
+    expect(session).toMatchObject({
+      externalSessionRef: `external-session:${invocation?.id}`,
+      runtimeCapabilitiesJson: EXTERNAL_CAPABILITIES,
+    });
+  });
+
+  it("External start 暂态失败只排入 durable retry，不 fallback Hosted", async () => {
+    const { server, tenantId, ownerId, thread, turn } =
+      await seedReadyExternalEmployeeTurn("http-transient");
+    server.setStartFailureStatus(503);
+    const hostedDecision = vi.fn();
+    const result = await dispatchEmployeeTurn({
+      tenantId,
+      threadId: thread.id,
+      turnId: turn.id,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
+      decisionPort: { decideNextAction: hostedDecision },
+    });
+    await result.completion;
+
+    expect(hostedDecision).not.toHaveBeenCalled();
+    expect(server.requests.map((request) => request.url)).toEqual(["/runtime/v1/invocations"]);
+    const updatedTurn = await getTurnById(tenantId, turn.id);
+    const invocationId = updatedTurn?.latestInvocationId;
+    if (!invocationId) throw new Error("暂态失败缺少 Invocation");
+    expect((await getInvocationById(tenantId, invocationId))?.executionState).toBe("queued");
+    expect(await getAttemptsByInvocation(invocationId)).toEqual([
+      expect.objectContaining({
+        attemptState: "queued",
+        dispatchAttemptCount: 1,
+        lastTransientErrorCode: "runtime_unavailable",
+        nextDispatchAt: expect.any(Date),
+      }),
+    ]);
+  });
+
+  it("External start capabilities 与发布事实不一致时 fail closed", async () => {
+    const capabilities = {
+      ...EXTERNAL_CAPABILITIES,
+      features: { ...EXTERNAL_CAPABILITIES.features },
+    };
+    const fixture = await seedReadyExternalEmployeeTurn("capability-mismatch", capabilities);
+    capabilities.features.cancel = false;
+    const hostedDecision = vi.fn();
+    await expect(
+      dispatchEmployeeTurn({
+        tenantId: fixture.tenantId,
+        threadId: fixture.thread.id,
+        turnId: fixture.turn.id,
+        executionSubject: {
+          tenantId: fixture.tenantId,
+          subjectType: "user",
+          subjectId: fixture.ownerId,
+        },
+        decisionPort: { decideNextAction: hostedDecision },
+      }),
+    ).rejects.toMatchObject({
+      name: "RuntimeHttpClientError",
+      stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+      retryable: false,
+      dispatchPossiblyStarted: true,
+    });
+    expect(hostedDecision).not.toHaveBeenCalled();
+    expect(fixture.server.requests.map((request) => request.url)).toEqual([
+      "/runtime/v1/invocations",
+    ]);
+  });
+
+  it("External cancel 通过共享 command gateway 真实发送 HTTP", async () => {
+    const cancelFixture = await seedReadyExternalEmployeeTurn("http-cancel");
+    await dispatchEmployeeTurn({
+      tenantId: cancelFixture.tenantId,
+      threadId: cancelFixture.thread.id,
+      turnId: cancelFixture.turn.id,
+      executionSubject: {
+        tenantId: cancelFixture.tenantId,
+        subjectType: "user",
+        subjectId: cancelFixture.ownerId,
+      },
+    });
+    cancelFixture.server.requests.length = 0;
+    const interrupt = await requestInterrupt({
+      tenantId: cancelFixture.tenantId,
+      ownerUserId: cancelFixture.ownerId,
+      turnId: cancelFixture.turn.id,
+      reasonCode: "user_cancel",
+      idempotencyKey: "external-cancel-command",
+    });
+    const cancel = await dispatchInterruptCommandToRuntime({
+      tenantId: cancelFixture.tenantId,
+      commandId: interrupt.command.id,
+      actorId: cancelFixture.ownerId,
+    });
+    expect(cancel).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    expect(cancelFixture.server.requests.map((request) => request.url)).toEqual([
+      expect.stringMatching(/^\/runtime\/v1\/invocations\/[^/]+\/cancel$/),
+    ]);
+  });
+
+  it("External steer 通过共享 command gateway 真实发送 HTTP", async () => {
+    const steerFixture = await seedReadyExternalEmployeeTurn("http-steer");
+    await dispatchEmployeeTurn({
+      tenantId: steerFixture.tenantId,
+      threadId: steerFixture.thread.id,
+      turnId: steerFixture.turn.id,
+      executionSubject: {
+        tenantId: steerFixture.tenantId,
+        subjectType: "user",
+        subjectId: steerFixture.ownerId,
+      },
+    });
+    await db
+      .update(turnTable)
+      .set({ turnState: "running" })
+      .where(eq(turnTable.id, steerFixture.turn.id));
+    steerFixture.server.requests.length = 0;
+    const steerCommand = await queueSteer({
+      tenantId: steerFixture.tenantId,
+      ownerUserId: steerFixture.ownerId,
+      turnId: steerFixture.turn.id,
+      guidanceText: "先核对余额",
+      idempotencyKey: "external-steer-command",
+    });
+    const steer = await dispatchSteerCommandToRuntime({
+      tenantId: steerFixture.tenantId,
+      commandId: steerCommand.command.id,
+      actorId: steerFixture.ownerId,
+    });
+    expect(steer).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    expect(steerFixture.server.requests.map((request) => request.url)).toEqual([
+      expect.stringMatching(/^\/runtime\/v1\/invocations\/[^/]+\/steer$/),
+    ]);
+  });
+
+  it("External resume 读取持久化 effective capability 后真实发送 HTTP", async () => {
+    const fixture = await seedReadyExternalEmployeeTurn("http-resume");
+    await dispatchEmployeeTurn({
+      tenantId: fixture.tenantId,
+      threadId: fixture.thread.id,
+      turnId: fixture.turn.id,
+      executionSubject: {
+        tenantId: fixture.tenantId,
+        subjectType: "user",
+        subjectId: fixture.ownerId,
+      },
+    });
+    const turn = await getTurnById(fixture.tenantId, fixture.turn.id);
+    const invocationId = turn?.activeInvocationId;
+    if (!invocationId) throw new Error("External start 未绑定 active Invocation");
+    await db
+      .update(invocationTable)
+      .set({ executionState: "waiting_user", updatedAt: new Date() })
+      .where(eq(invocationTable.id, invocationId));
+    await db
+      .update(turnTable)
+      .set({ turnState: "waiting_user" })
+      .where(eq(turnTable.id, fixture.turn.id));
+    const commandId = await createExternalResumeCommand({
+      threadId: fixture.thread.id,
+      turnId: fixture.turn.id,
+      invocationId,
+    });
+    fixture.server.requests.length = 0;
+    const resume = await dispatchResumeCommandToRuntime({
+      tenantId: fixture.tenantId,
+      commandId,
+      actorId: fixture.ownerId,
+    });
+    expect(resume).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    expect(fixture.server.requests.map((request) => request.url)).toEqual([
+      `/runtime/v1/invocations/${invocationId}/resume`,
+    ]);
+  });
+
+  it("External session 声明 resume=false 时 fail closed，网络请求为零", async () => {
+    const capabilities = {
+      ...EXTERNAL_CAPABILITIES,
+      features: { ...EXTERNAL_CAPABILITIES.features, resume: false },
+    };
+    const fixture = await seedReadyExternalEmployeeTurn("resume-unsupported", capabilities);
+    await dispatchEmployeeTurn({
+      tenantId: fixture.tenantId,
+      threadId: fixture.thread.id,
+      turnId: fixture.turn.id,
+      executionSubject: {
+        tenantId: fixture.tenantId,
+        subjectType: "user",
+        subjectId: fixture.ownerId,
+      },
+    });
+    const turn = await getTurnById(fixture.tenantId, fixture.turn.id);
+    const invocationId = turn?.activeInvocationId;
+    if (!invocationId) throw new Error("External start 未绑定 active Invocation");
+    await db
+      .update(invocationTable)
+      .set({ executionState: "waiting_user", updatedAt: new Date() })
+      .where(eq(invocationTable.id, invocationId));
+    await db
+      .update(turnTable)
+      .set({ turnState: "waiting_user" })
+      .where(eq(turnTable.id, fixture.turn.id));
+    const commandId = await createExternalResumeCommand({
+      threadId: fixture.thread.id,
+      turnId: fixture.turn.id,
+      invocationId,
+    });
+    fixture.server.requests.length = 0;
+    await expect(
+      dispatchResumeCommandToRuntime({
+        tenantId: fixture.tenantId,
+        commandId,
+        actorId: fixture.ownerId,
+      }),
+    ).resolves.toEqual({ dispatched: false, reason: "unsupported_capability" });
+    expect(fixture.server.requests).toHaveLength(0);
+  });
+
   it("接纳的 Turn 会经内置 Hosted Runtime 生成并持久化真实 Agent 回复", async () => {
     const { tenantId, ownerId, thread, turn } = await seedReadyEmployeeTurn("v1");
     const deltas: string[] = [];

@@ -29,6 +29,7 @@ import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hos
 import type { InProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 
 /** 使用统一解析入口 — Projection 是唯一数据源。 */
@@ -164,27 +165,32 @@ export async function dispatchEmployeeTurn(params: {
 
   const resolveTransport = createRuntimeTransportResolver({
     factories: {
-      harness_runtime_protocol: () =>
-        createInProcessHostedRuntimeClient({
-          tenantId: params.tenantId,
-          applicationService:
-            params.decisionPort || params.finalResponsePort || params.actionExecutors
-              ? createConfiguredHostedRuntimeApplicationService({
-                  decisionPort:
-                    params.decisionPort ??
-                    configuredDecisionPort(params.modelRef ?? aiConfig.chatModel),
-                  finalResponsePort:
-                    params.finalResponsePort ??
-                    configuredFinalResponsePort(params.modelRef ?? aiConfig.chatModel),
-                  actionExecutors: params.actionExecutors,
-                  modelRef: params.modelRef,
-                })
-              : hostedRuntimeApplicationService,
-        }),
+      harness_runtime_protocol: {
+        hosted_artifact: () =>
+          createInProcessHostedRuntimeClient({
+            tenantId: params.tenantId,
+            applicationService:
+              params.decisionPort || params.finalResponsePort || params.actionExecutors
+                ? createConfiguredHostedRuntimeApplicationService({
+                    decisionPort:
+                      params.decisionPort ??
+                      configuredDecisionPort(params.modelRef ?? aiConfig.chatModel),
+                    finalResponsePort:
+                      params.finalResponsePort ??
+                      configuredFinalResponsePort(params.modelRef ?? aiConfig.chatModel),
+                    actionExecutors: params.actionExecutors,
+                    modelRef: params.modelRef,
+                  })
+                : hostedRuntimeApplicationService,
+          }),
+        external_endpoint: ({ endpoint, auth }) =>
+          createHttpHarnessRuntimeTransport({ endpoint, auth }),
+      },
     },
   });
   const transport = await resolveTransport({
     protocolType: runtimeRevision.protocolType,
+    runtimeEvidenceKind: runtimeRevision.runtimeEvidenceKind,
     endpoint: managedEndpoint,
     auth: await resolveOutboundAuth(),
   });
@@ -246,10 +252,10 @@ export async function dispatchEmployeeTurn(params: {
   }
   // Hosted Transport 需要显式启动 Agent Loop；External Harness Runtime Transport
   // 的事件流由 Transport 内部消费并经归一化 ingress 进入。
-  const hostedClient = transport as Partial<InProcessHostedRuntimeClient>;
-  if (typeof hostedClient.launchAcceptedInvocation !== "function") {
+  if (isExternalEndpoint) {
     return { dispatched: true, completion: Promise.resolve() };
   }
+  const hostedClient = transport as InProcessHostedRuntimeClient;
   const completion = hostedClient.launchAcceptedInvocation(result.invocation.id);
   void completion.catch((error) => {
     logger.error("[runtime] Hosted Runtime 执行失败", {

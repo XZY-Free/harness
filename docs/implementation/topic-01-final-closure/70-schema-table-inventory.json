@@ -888,7 +888,9 @@
         "lib/capability/tool-queries.ts"
       ],
       "productionReaders": [
-        "lib/capability/tool-queries.ts"
+        "lib/capability/application/apply-tool-call.ts",
+        "lib/capability/tool-queries.ts",
+        "lib/persistence/schema/tool-execution.ts"
       ],
       "lifecycle": "创建→显式更新/状态迁移→终止或软删除；清理由领域 retention 执行",
       "authorityStatement": "外部连接资产",
@@ -904,6 +906,8 @@
       "evidence": [
         "lib/persistence/schema/tool.ts#connectionTable",
         "lib/capability/tool-queries.ts",
+        "lib/capability/application/apply-tool-call.ts",
+        "lib/persistence/schema/tool-execution.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"
@@ -951,11 +955,13 @@
       "tenantBoundary": "经父记录外键或不可变绑定继承 tenant；读取前由父 Authority 校验租户",
       "productionWriters": [
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
+        "lib/capability/tool-execution-worker.ts",
         "lib/control-plane/events/outbox-relay-worker.ts",
         "lib/control-plane/events/seed-event-deliveries.ts",
         "lib/conversations/user-action-resolve-queries.ts"
       ],
       "productionReaders": [
+        "lib/capability/tool-execution-worker.ts",
         "lib/control-plane/events/outbox-relay-worker.ts"
       ],
       "lifecycle": "创建后追加/终态推进，业务事实不原地改写；按领域保留策略清理",
@@ -971,6 +977,7 @@
       "evidence": [
         "lib/control-plane/events/control-plane-event-delivery.ts#controlPlaneEventDelivery",
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
+        "lib/capability/tool-execution-worker.ts",
         "lib/control-plane/events/outbox-relay-worker.ts",
         "lib/control-plane/events/seed-event-deliveries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
@@ -991,6 +998,7 @@
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
         "lib/artifacts/persistence/mysql-artifact-attestation-store.ts",
+        "lib/capability/tool-execution-worker.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/routes/persistence/mysql-route-set-activation-store.ts",
         "lib/runtime/persistence/mysql-runtime-conformance-run-store.ts",
@@ -998,6 +1006,7 @@
         "lib/runtime/persistence/mysql-runtime-withdrawal-store.ts"
       ],
       "productionReaders": [
+        "lib/capability/tool-execution-worker.ts",
         "lib/control-plane/events/outbox-relay-worker.ts"
       ],
       "lifecycle": "创建后追加/终态推进，业务事实不原地改写；按领域保留策略清理",
@@ -1016,6 +1025,7 @@
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
         "lib/artifacts/persistence/mysql-artifact-attestation-store.ts",
+        "lib/capability/tool-execution-worker.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/routes/persistence/mysql-route-set-activation-store.ts",
         "lib/runtime/persistence/mysql-runtime-conformance-run-store.ts",
@@ -1040,9 +1050,11 @@
       ],
       "productionReaders": [
         "app/admin/api/v1/credential-refs/route.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/capability/tool-queries.ts",
         "lib/identity/resolve-outbound-credential.ts",
         "lib/persistence/schema/permission.ts",
+        "lib/persistence/schema/tool-execution.ts",
         "lib/runtime/credentials/resolve-outbound-runtime-auth.ts"
       ],
       "lifecycle": "创建→显式更新/状态迁移→终止或软删除；清理由领域 retention 执行",
@@ -1062,8 +1074,10 @@
         "lib/agents/calls/test/agent-call-execution-fixtures.ts",
         "lib/capability/tool-queries.ts",
         "app/admin/api/v1/credential-refs/route.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/identity/resolve-outbound-credential.ts",
         "lib/persistence/schema/permission.ts",
+        "lib/persistence/schema/tool-execution.ts",
         "lib/runtime/credentials/resolve-outbound-runtime-auth.ts",
         "drizzle/0000_initial_schema.sql"
       ],
@@ -1304,10 +1318,14 @@
       "domainOwner": "effect",
       "tenantBoundary": "tenantId 直接隔离；所有生产查询必须携带 tenantId",
       "productionWriters": [
-        "lib/capability/effect-queries.ts"
+        "lib/capability/effect-queries.ts",
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts"
       ],
       "productionReaders": [
-        "lib/capability/effect-queries.ts"
+        "lib/capability/effect-queries.ts",
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts"
       ],
       "lifecycle": "创建后追加/终态推进，业务事实不原地改写；按领域保留策略清理",
       "authorityStatement": "工具副作用事实",
@@ -1324,6 +1342,8 @@
       "evidence": [
         "lib/persistence/schema/effect.ts#effectRecordTable",
         "lib/capability/effect-queries.ts",
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"
@@ -3715,6 +3735,7 @@
         "lib/persistence/schema/skill-sync.ts",
         "lib/persistence/schema/skill.ts",
         "lib/persistence/schema/tool-call.ts",
+        "lib/persistence/schema/tool-execution.ts",
         "lib/persistence/schema/tool.ts",
         "lib/persistence/schema/trace.ts",
         "lib/persistence/schema/usage.ts",
@@ -3804,6 +3825,7 @@
         "lib/persistence/schema/skill-sync.ts",
         "lib/persistence/schema/skill.ts",
         "lib/persistence/schema/tool-call.ts",
+        "lib/persistence/schema/tool-execution.ts",
         "lib/persistence/schema/tool.ts",
         "lib/persistence/schema/trace.ts",
         "lib/persistence/schema/usage.ts",
@@ -3971,6 +3993,8 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/runtime/application/production-resume-harness-invocation.ts",
+        "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts"
       ],
       "productionReaders": [
@@ -3981,7 +4005,10 @@
         "lib/identity/recovery-consistency-checker.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/observability/harness-execution-trace.ts",
-        "lib/runtime/event-ingress-queries.ts"
+        "lib/runtime/application/production-resume-harness-invocation.ts",
+        "lib/runtime/command-dispatcher.ts",
+        "lib/runtime/event-ingress-queries.ts",
+        "lib/runtime/harness-loop/mysql-recovery-port.ts"
       ],
       "lifecycle": "创建→显式更新/状态迁移→终止或软删除；清理由领域 retention 执行",
       "authorityStatement": "conversation 领域的 ThreadItem 事实",
@@ -4003,9 +4030,12 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/runtime/application/production-resume-harness-invocation.ts",
+        "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/runtime/harness-loop/mysql-recovery-port.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"
@@ -4099,6 +4129,7 @@
         "lib/capability/tool-queries.ts"
       ],
       "productionReaders": [
+        "lib/capability/application/apply-tool-call.ts",
         "lib/capability/tool-queries.ts",
         "lib/catalog/projector.ts"
       ],
@@ -4117,6 +4148,7 @@
       "evidence": [
         "lib/persistence/schema/tool.ts#toolTable",
         "lib/capability/tool-queries.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/catalog/projector.ts",
         "drizzle/0000_initial_schema.sql"
       ],
@@ -4132,14 +4164,18 @@
       "tenantBoundary": "tenantId 直接隔离；所有生产查询必须携带 tenantId",
       "productionWriters": [
         "lib/capability/effect-queries.ts",
-        "lib/capability/tool-call-queries.ts"
+        "lib/capability/tool-call-queries.ts",
+        "lib/capability/tool-execution-queries.ts"
       ],
       "productionReaders": [
         "lib/capability/effect-queries.ts",
         "lib/capability/tool-call-queries.ts",
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/observability/harness-execution-trace.ts",
-        "lib/permission/permission-queries.ts"
+        "lib/permission/permission-queries.ts",
+        "lib/persistence/schema/tool-execution.ts"
       ],
       "lifecycle": "创建→显式更新/状态迁移→终止或软删除；清理由领域 retention 执行",
       "authorityStatement": "一次受治理工具调用状态与脱敏参数/结果引用",
@@ -4158,9 +4194,12 @@
         "lib/persistence/schema/tool-call.ts#toolCallTable",
         "lib/capability/effect-queries.ts",
         "lib/capability/tool-call-queries.ts",
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/permission-queries.ts",
+        "lib/persistence/schema/tool-execution.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"
@@ -4226,6 +4265,9 @@
         "ToolExecutionBinding_toolCall_uq: UNIQUE(`toolCallId`)",
         "ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_toolCallId_ToolCall_id_fk` FOREIGN KEY (`toolCallId`) REFERENCES `ToolCall`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_toolProviderId_ToolProvider_id_fk` FOREIGN KEY (`toolProviderId`) REFERENCES `ToolProvider`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_connectionId_Connection_id_fk` FOREIGN KEY (`connectionId`) REFERENCES `Connection`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_credentialRefId_CredentialRef_id_fk` FOREIGN KEY (`credentialRefId`) REFERENCES `CredentialRef`(`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `ToolExecutionBinding_tenant_provider_idx` ON `ToolExecutionBinding` (`tenantId`,`toolProviderId`)"
       ],
       "decision": "keep",
@@ -4250,8 +4292,10 @@
         "lib/capability/tool-queries.ts"
       ],
       "productionReaders": [
+        "lib/capability/application/apply-tool-call.ts",
         "lib/capability/tool-queries.ts",
-        "lib/catalog/projector.ts"
+        "lib/catalog/projector.ts",
+        "lib/persistence/schema/tool-execution.ts"
       ],
       "lifecycle": "创建→显式更新/状态迁移→终止或软删除；清理由领域 retention 执行",
       "authorityStatement": "工具提供方资产",
@@ -4268,7 +4312,9 @@
       "evidence": [
         "lib/persistence/schema/tool.ts#toolProviderTable",
         "lib/capability/tool-queries.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/catalog/projector.ts",
+        "lib/persistence/schema/tool-execution.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"
@@ -4285,6 +4331,8 @@
         "lib/capability/tool-queries.ts"
       ],
       "productionReaders": [
+        "lib/capability/application/apply-tool-call.ts",
+        "lib/capability/tool-execution-worker.ts",
         "lib/capability/tool-queries.ts"
       ],
       "lifecycle": "创建后追加/终态推进，业务事实不原地改写；按领域保留策略清理",
@@ -4301,6 +4349,8 @@
       "evidence": [
         "lib/persistence/schema/tool.ts#toolSchemaRevisionTable",
         "lib/capability/tool-queries.ts",
+        "lib/capability/application/apply-tool-call.ts",
+        "lib/capability/tool-execution-worker.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"
@@ -4316,6 +4366,7 @@
       "productionWriters": [
         "app/gateway/v1/tool-calls/route.ts",
         "lib/agents/calls/test/agent-call-execution-fixtures.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
@@ -4328,6 +4379,7 @@
       "productionReaders": [
         "app/gateway/v1/tool-calls/route.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/interrupt-queries.ts",
         "lib/conversations/regenerate-queries.ts",
@@ -4358,6 +4410,7 @@
         "lib/persistence/schema/conversation.ts#turnTable",
         "app/gateway/v1/tool-calls/route.ts",
         "lib/agents/calls/test/agent-call-execution-fixtures.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",

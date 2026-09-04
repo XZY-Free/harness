@@ -150,7 +150,31 @@ export class RuntimeSessionBindingConflictError extends Error {
  * - http：Runtime 返回非 2xx 状态码（按错误码映射）。
  * - protocol：响应体结构非法（不可重试）。
  */
+export type RuntimeHttpStableErrorCode =
+  | "RUNTIME_CONNECT_FAILED"
+  | "RUNTIME_DNS_FAILED"
+  | "RUNTIME_TIMEOUT"
+  | "RUNTIME_TLS_FAILED"
+  | "RUNTIME_AUTH_REJECTED"
+  | "RUNTIME_ROUTE_NOT_FOUND"
+  | "RUNTIME_CONFLICT"
+  | "RUNTIME_RATE_LIMITED"
+  | "RUNTIME_UNAVAILABLE"
+  | "RUNTIME_INVALID_JSON"
+  | "RUNTIME_PROTOCOL_SCHEMA_MISMATCH"
+  | "RUNTIME_CAPABILITY_MISMATCH";
+
+export interface RuntimeHttpClientErrorOptions {
+  stableCode?: RuntimeHttpStableErrorCode;
+  retryable?: boolean;
+  dispatchPossiblyStarted?: boolean;
+}
+
 export class RuntimeHttpClientError extends Error {
+  public readonly stableCode: RuntimeHttpStableErrorCode;
+  public readonly retryable: boolean;
+  public readonly dispatchPossiblyStarted: boolean;
+
   constructor(
     public readonly kind: "network" | "http" | "protocol",
     message: string,
@@ -158,10 +182,29 @@ export class RuntimeHttpClientError extends Error {
     public readonly httpStatus?: number,
     /** Runtime 稳定错误码（kind=http 时填，如 IDEMPOTENCY_CONFLICT / RUNTIME_UNAVAILABLE）。 */
     public readonly runtimeErrorCode?: string,
+    options: RuntimeHttpClientErrorOptions = {},
   ) {
     super(message);
     this.name = "RuntimeHttpClientError";
+    this.stableCode = options.stableCode ?? inferRuntimeHttpStableCode(kind, httpStatus);
+    this.retryable =
+      options.retryable ??
+      (kind === "network" || httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500));
+    this.dispatchPossiblyStarted = options.dispatchPossiblyStarted ?? false;
   }
+}
+
+function inferRuntimeHttpStableCode(
+  kind: "network" | "http" | "protocol",
+  httpStatus?: number,
+): RuntimeHttpStableErrorCode {
+  if (kind === "network") return "RUNTIME_CONNECT_FAILED";
+  if (kind === "protocol") return "RUNTIME_PROTOCOL_SCHEMA_MISMATCH";
+  if (httpStatus === 401 || httpStatus === 403) return "RUNTIME_AUTH_REJECTED";
+  if (httpStatus === 404) return "RUNTIME_ROUTE_NOT_FOUND";
+  if (httpStatus === 409) return "RUNTIME_CONFLICT";
+  if (httpStatus === 429) return "RUNTIME_RATE_LIMITED";
+  return "RUNTIME_UNAVAILABLE";
 }
 
 // ─── RuntimeEventIngress 错误 ──────────────────

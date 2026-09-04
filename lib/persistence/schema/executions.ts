@@ -439,6 +439,8 @@ export const runtimeSessionBindingTable = mysqlTable(
     jobId: varchar("jobId", { length: 36 }),
     /** Runtime 维护的会话引用；平台仅持久化，不解析其内容。 */
     externalSessionRef: varchar("externalSessionRef", { length: 256 }).notNull(),
+    /** startInvocation 返回并经协议 schema 校验的实际 Runtime 能力快照。 */
+    runtimeCapabilitiesJson: json("runtimeCapabilitiesJson").$type<unknown>().notNull(),
     bindingState: mysqlEnum("bindingState", RUNTIME_SESSION_BINDING_STATES)
       .notNull()
       .default("active"),

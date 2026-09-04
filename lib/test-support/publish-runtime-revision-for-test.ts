@@ -17,7 +17,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
-import { createHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
+import { type RuntimeAdapter, createHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import {
@@ -120,8 +120,6 @@ export async function runPublicationConformanceForTest(params: {
   runtimeConfigDigest: string;
   protocolContractRevision: string;
 }): Promise<RuntimeConformanceReport> {
-  const startedAt = new Date();
-
   // 1. 创建真实测试 Adapter（in-process Hosted 参考实现）。
   //    注入进程内捕获型 EventBatchSink：接收并保留真实候选事件，不黑洞、不伪造 ack。
   const capturing = createCapturingEventBatchSink();
@@ -136,11 +134,28 @@ export async function runPublicationConformanceForTest(params: {
     modelRef: "conformance-test-model",
   });
 
-  // 2. 运行正式 Publication runner。
+  return runPublicationConformanceWithAdapterForTest({
+    ...params,
+    runtimeAdapter: adapter,
+    testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
+  });
+}
+
+/** 对调用方提供的真实 Adapter 运行同一正式套件并生成可签名报告。 */
+export async function runPublicationConformanceWithAdapterForTest(params: {
+  tenantId: string;
+  runtimeRevisionId: string;
+  runtimeTargetDigest: string;
+  runtimeConfigDigest: string;
+  protocolContractRevision: string;
+  runtimeAdapter: RuntimeAdapter;
+  testEnvironmentRevision: string;
+}): Promise<RuntimeConformanceReport> {
+  const startedAt = new Date();
   const caseResults = await runPublicationConformanceSuite({
     tenantId: params.tenantId,
     runtimeRevisionId: params.runtimeRevisionId,
-    runtimeAdapter: adapter,
+    runtimeAdapter: params.runtimeAdapter,
   });
 
   const runnerArtifactDigest = await computeRunnerArtifactDigest();
@@ -149,7 +164,7 @@ export async function runPublicationConformanceForTest(params: {
   // evidenceManifestDigest 用 domain 唯一权威函数 canonical 绑定 revision 身份 + 全部 case 证据。
   const evidenceManifestDigest = computeEvidenceManifestDigest({
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
-    testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
+    testEnvironmentRevision: params.testEnvironmentRevision,
     runtimeRevisionId: params.runtimeRevisionId,
     runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
@@ -171,7 +186,7 @@ export async function runPublicationConformanceForTest(params: {
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest,
     runnerIdentity: RUNNER_IDENTITY,
-    testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
+    testEnvironmentRevision: params.testEnvironmentRevision,
     startedAt: startedAt.toISOString(),
     completedAt: new Date().toISOString(),
     overallResult: allPassed ? "passed" : "failed",
@@ -184,6 +199,69 @@ export async function runPublicationConformanceForTest(params: {
       evidence: result.evidence,
     })),
   };
+}
+
+/** External Runtime 测试装配：真实 Adapter conformance + DSSE + 正式发布服务。 */
+export async function publishExternalRuntimeRevisionForTest(params: {
+  tenantId: string;
+  revisionId: string;
+  runtimeExpectedVersionNo: number;
+  runtimeAdapter: RuntimeAdapter;
+  testEnvironmentRevision?: string;
+}) {
+  const revision = await getRuntimeRevisionById(params.revisionId);
+  if (!revision || revision.runtimeEvidenceKind !== "external_endpoint") {
+    throw new Error(`测试 External RuntimeRevision 不存在或证据类型错误: ${params.revisionId}`);
+  }
+  const report = await runPublicationConformanceWithAdapterForTest({
+    tenantId: params.tenantId,
+    runtimeRevisionId: revision.id,
+    runtimeTargetDigest: revision.runtimeTargetDigest,
+    runtimeConfigDigest: revision.configHash,
+    protocolContractRevision: revision.protocolContractRevision,
+    runtimeAdapter: params.runtimeAdapter,
+    testEnvironmentRevision: params.testEnvironmentRevision ?? "black-box-http-runtime@1",
+  });
+  assertPublicationConformancePassed(report);
+  const dsseEnvelope = buildDsseConformanceEnvelope(report, TEST_RUNNER_KEY);
+  await createRecordRuntimeConformanceRun({
+    store: mysqlRuntimeConformanceRunStore,
+    verifier: createDSSEConformanceVerifier({
+      runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
+        {
+          keyId: TEST_RUNNER_KEY.keyid,
+          publicKey: TEST_RUNNER_KEY.publicKeyBase64,
+          runnerIdentity: RUNNER_IDENTITY,
+          tenantScope: null,
+          validFrom: "2020-01-01T00:00:00.000Z",
+          validUntil: null,
+          revokedAt: null,
+        },
+      ]),
+    }),
+  })({
+    tenantId: params.tenantId,
+    runtimeRevisionId: revision.id,
+    dsseEnvelope,
+    idempotencyKey: `runtime-conformance:${report.runId}`,
+    requestId: `test-run:${report.runId}`,
+    actor: { actorType: "system", actorId: RUNNER_IDENTITY },
+  });
+  const publication = await createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore })({
+    tenantId: params.tenantId,
+    revisionId: revision.id,
+    runtimeExpectedVersionNo: params.runtimeExpectedVersionNo,
+    conformanceRunId: report.runId,
+    attestationId: null,
+    actor: {
+      tenantId: params.tenantId,
+      actorType: "system",
+      actorId: RUNNER_IDENTITY,
+    },
+    requestId: `test-publish:${revision.id}`,
+    idempotencyKey: `test-publish:${revision.id}`,
+  });
+  return { ...publication, conformanceRunId: report.runId };
 }
 
 /** 真实 MySQL + DSSE 的测试装配：先记录可信 Run，再通过正式发布服务发布。 */

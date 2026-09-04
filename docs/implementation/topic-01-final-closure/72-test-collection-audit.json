@@ -9,13 +9,13 @@
   "counts": {
     "unit": 272,
     "db": 108,
-    "integration": 9,
+    "integration": 10,
     "contract": 24,
     "e2e-web": 3,
     "e2e-desktop": 1,
     "e2e-cross-client": 1
   },
-  "total": 418,
+  "total": 419,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -4201,6 +4201,17 @@
       "file": "lib/runtime/transient-event-bus.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/transport/http-harness-runtime-transport.integration.test.ts",
+      "group": "integration",
+      "command": "pnpm vitest run --project integration",
       "needsDB": false,
       "serial": false,
       "inFullAcceptance": true,

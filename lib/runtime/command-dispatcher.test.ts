@@ -116,6 +116,7 @@ import {
   type StartInvocationResponse,
   type SteerInvocationResponse,
   createMockRuntimeClient,
+  defaultRuntimeCapabilities,
 } from "@/lib/runtime/runtime-client";
 import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
 import { createConformanceHostedApplicationService } from "@/lib/runtime/test-support/conformance-hosted-application-service";
@@ -2190,6 +2191,7 @@ async function attachRemoteRefsToInvocation(
     runtimeRevisionId: ctx.runtimeRevision.id,
     threadId: ctx.threadId,
     externalSessionRef,
+    runtimeCapabilities: defaultRuntimeCapabilities(),
   });
   const taskId = `task-${binding.id.slice(0, 8)}`;
   await db
@@ -2219,6 +2221,7 @@ describe("Batch 10 命令调度生产网关", () => {
     // unsupported_capability 分支由专项 05 用例覆盖）。
     await enableContractCancelOnSnapshot(ctx);
     const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await attachRemoteRefsToInvocation(ctx, running.invocationId, "hosted-session-cancel");
 
     const interruptResult = await requestInterrupt({
       tenantId: ctx.tenantId,
@@ -2246,6 +2249,7 @@ describe("Batch 10 命令调度生产网关", () => {
   it("hosted steer 在返回前确认 guidance，重复 dispatch 不会重复注入", async () => {
     const ctx = await seedFullCommandContext("harness_runtime_protocol");
     const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await attachRemoteRefsToInvocation(ctx, running.invocationId, "hosted-session-steer");
     const steer = await queueSteer({
       tenantId: ctx.tenantId,
       ownerUserId: ctx.ownerId,

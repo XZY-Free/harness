@@ -26,34 +26,60 @@ function fakeTransport(name: string): RuntimeTransport {
 }
 
 describe("createRuntimeTransportResolver（04 §3）", () => {
-  it("harness_runtime_protocol → 对应工厂（protocolType 决定 Transport）", async () => {
+  it("同一 harness_runtime_protocol 按 runtimeEvidenceKind 分流 Hosted 与 External", async () => {
     const created: string[] = [];
     const resolve = createRuntimeTransportResolver({
       factories: {
-        harness_runtime_protocol: () => {
-          created.push("hosted");
-          return fakeTransport("hosted");
+        harness_runtime_protocol: {
+          hosted_artifact: () => {
+            created.push("hosted");
+            return fakeTransport("hosted");
+          },
+          external_endpoint: () => {
+            created.push("external");
+            return fakeTransport("external");
+          },
         },
       },
     });
     const hosted = await resolve({
       protocolType: "harness_runtime_protocol",
+      runtimeEvidenceKind: "hosted_artifact",
       endpoint: "in-process://hosted",
       auth: { mode: "workload_token", token: "t" },
     });
-    expect(created).toEqual(["hosted"]);
+    const external = await resolve({
+      protocolType: "harness_runtime_protocol",
+      runtimeEvidenceKind: "external_endpoint",
+      endpoint: "https://runtime.example",
+      auth: { mode: "none" },
+    });
+    expect(created).toEqual(["hosted", "external"]);
     expect(await hosted.probeCapabilities("", { mode: "none" })).toBeDefined();
+    expect((await external.startInvocation({} as never)).invocation_id).toBe("external");
   });
 
   it("未知 protocolType → fail-closed（无回退默认 Transport）", async () => {
     const resolve = createRuntimeTransportResolver({
-      factories: { harness_runtime_protocol: () => fakeTransport("hosted") },
+      factories: {
+        harness_runtime_protocol: { hosted_artifact: () => fakeTransport("hosted") },
+      },
     });
     await expect(
-      resolve({ protocolType: "agentkit", endpoint: "https://x", auth: { mode: "none" } }),
+      resolve({
+        protocolType: "agentkit",
+        runtimeEvidenceKind: "external_endpoint",
+        endpoint: "https://x",
+        auth: { mode: "none" },
+      }),
     ).rejects.toThrow(UnsupportedRuntimeProtocolError);
     await expect(
-      resolve({ protocolType: "langgraph", endpoint: "https://x", auth: { mode: "none" } }),
+      resolve({
+        protocolType: "harness_runtime_protocol",
+        runtimeEvidenceKind: "external_endpoint",
+        endpoint: "https://x",
+        auth: { mode: "none" },
+      }),
     ).rejects.toThrow(UnsupportedRuntimeProtocolError);
   });
 
@@ -61,14 +87,17 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
     const seen: Array<{ endpoint: string; auth: { mode: string; token?: string } }> = [];
     const resolve = createRuntimeTransportResolver({
       factories: {
-        harness_runtime_protocol: (input) => {
-          seen.push(input);
-          return fakeTransport("hosted");
+        harness_runtime_protocol: {
+          hosted_artifact: (input) => {
+            seen.push(input);
+            return fakeTransport("hosted");
+          },
         },
       },
     });
     await resolve({
       protocolType: "harness_runtime_protocol",
+      runtimeEvidenceKind: "hosted_artifact",
       endpoint: "in-process://hosted",
       auth: { mode: "workload_token", token: "tok" },
     });

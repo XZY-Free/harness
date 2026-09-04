@@ -28,6 +28,10 @@ import {
   RuntimeSessionBindingConflictError,
   RuntimeSessionBindingNotFoundError,
 } from "@/lib/runtime/errors";
+import {
+  type RuntimeCapabilitiesResponse,
+  isRuntimeCapabilitiesResponse,
+} from "@/lib/runtime/runtime-client";
 import { and, desc, eq } from "drizzle-orm";
 
 /** createSessionBinding 入参。 */
@@ -40,6 +44,8 @@ export interface CreateSessionBindingParams {
   jobId?: string | null;
   /** Runtime 颁发的外部会话引用。 */
   externalSessionRef: string;
+  /** startInvocation 返回且已通过 Runtime Protocol schema 校验的能力快照。 */
+  runtimeCapabilities: RuntimeCapabilitiesResponse;
 }
 
 /**
@@ -60,6 +66,9 @@ export async function createSessionBinding(
   const hasJob = params.jobId !== null && params.jobId !== undefined;
   if (hasThread === hasJob) {
     throw new Error("createSessionBinding: threadId/jobId 必须恰有一个非空");
+  }
+  if (!isRuntimeCapabilitiesResponse(params.runtimeCapabilities)) {
+    throw new Error("createSessionBinding: runtimeCapabilities 不符合 Runtime Protocol schema");
   }
 
   // 2. 检查同 runtimeRevisionId+externalSessionRef 是否已存在
@@ -87,6 +96,7 @@ export async function createSessionBinding(
     threadId: params.threadId ?? null,
     jobId: params.jobId ?? null,
     externalSessionRef: params.externalSessionRef,
+    runtimeCapabilitiesJson: params.runtimeCapabilities,
     bindingState: "active",
   });
 

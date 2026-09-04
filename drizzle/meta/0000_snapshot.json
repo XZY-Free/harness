@@ -12907,6 +12907,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "runtimeCapabilitiesJson": {
+          "name": "runtimeCapabilitiesJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "bindingState": {
           "name": "bindingState",
           "type": "enum('active','closed','lost')",

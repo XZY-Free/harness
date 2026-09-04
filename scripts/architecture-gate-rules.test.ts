@@ -7,6 +7,7 @@ import {
   checkAgentInvokeAuthorizationGate,
   checkAgentRevisionAuthorityGate,
   checkDispatchRecoveryAuthorityGate,
+  checkExternalRuntimeTransportGate,
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
   collectDeprecatedArchitectureViolations,
@@ -108,6 +109,57 @@ describe("source history and retired dependency gates", () => {
       "lib/runtime/old-bridge.ts",
       "lib/agents/calls/old.ts",
     ]);
+  });
+});
+
+describe("checkExternalRuntimeTransportGate", () => {
+  const compliant = (): SourceDocument[] => [
+    doc(
+      "lib/runtime/transport/runtime-transport-resolver.ts",
+      "const factory = params.factories[input.protocolType]?.[input.runtimeEvidenceKind];",
+    ),
+    doc(
+      "lib/runtime/transport/http-harness-runtime-transport.ts",
+      "probeCapabilities: client.probe; startInvocation: req => client.start({ ...req, runtimeEndpoint: endpoint, auth: params.auth }); cancelInvocation: req => client.cancel({ ...req, runtimeEndpoint: endpoint, auth: params.auth }); resumeInvocation: req => client.resume({ ...req, runtimeEndpoint: endpoint, auth: params.auth }); steerInvocation: req => client.steer({ ...req, runtimeEndpoint: endpoint, auth: params.auth });",
+    ),
+    doc(
+      "lib/runtime/employee-turn-dispatcher.ts",
+      "createRuntimeTransportResolver({ external_endpoint: ({ endpoint, auth }) => createHttpHarnessRuntimeTransport({ endpoint, auth }) });",
+    ),
+    doc(
+      "lib/runtime/command-dispatch-gateway.ts",
+      "createRuntimeTransportResolver({ external_endpoint: ({ endpoint, auth }) => createHttpHarnessRuntimeTransport({ endpoint, auth }) }); resolveEffectiveInvocationCapabilities({ sessionCapabilitiesJson });",
+    ),
+    doc(
+      "lib/persistence/schema/executions.ts",
+      'runtimeCapabilitiesJson: json("runtimeCapabilitiesJson").notNull()',
+    ),
+  ];
+
+  it("双维度 resolver、HTTP 五方法与 durable capabilities 同时存在时通过", () => {
+    expect(checkExternalRuntimeTransportGate(compliant())).toEqual({ passed: true, failures: [] });
+  });
+
+  it("单维度 resolver 与方法探测会失败", () => {
+    const documents = compliant().map((item) =>
+      item.path === "lib/runtime/transport/runtime-transport-resolver.ts"
+        ? doc(item.path, "const factory = params.factories[input.protocolType];")
+        : item.path === "lib/runtime/employee-turn-dispatcher.ts"
+          ? doc(
+              item.path,
+              "createRuntimeTransportResolver({}); if (typeof transport.launchAcceptedInvocation === 'function') {}",
+            )
+          : item,
+    );
+    const result = checkExternalRuntimeTransportGate(documents);
+    expect(result.passed).toBe(false);
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("双维度"),
+        expect.stringContaining("Employee Turn"),
+        expect.stringContaining("方法探测"),
+      ]),
+    );
   });
 });
 

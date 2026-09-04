@@ -70,6 +70,7 @@ import {
   buildRuntimeStartRequestForInvocation,
   invocationAttemptIdempotencyKey,
 } from "@/lib/runtime/application/build-runtime-start-request";
+import { runtimeCapabilitiesMatchPublishedRevision } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import {
   DispatchTurnStateError,
@@ -84,6 +85,7 @@ import {
   getInvocationById,
   updateInvocationState,
 } from "@/lib/runtime/invocation-queries";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 import {
   type ExecutionPlan,
@@ -671,6 +673,24 @@ async function dispatchToRuntime(params: {
     throw err;
   }
 
+  const runtimeRevision = await getRuntimeRevisionById(params.runtimeRevisionId);
+  if (
+    !runtimeRevision ||
+    !runtimeCapabilitiesMatchPublishedRevision(runtimeRevision, response.capabilities)
+  ) {
+    throw new RuntimeHttpClientError(
+      "protocol",
+      "Runtime startInvocation 返回的 capabilities 与已发布能力事实不一致",
+      undefined,
+      undefined,
+      {
+        stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+        retryable: false,
+        dispatchPossiblyStarted: true,
+      },
+    );
+  }
+
   // 5. 成功：持久化 runtime_session_ref
   let sessionBinding: RuntimeSessionBinding | undefined;
   let sessionBindingCreated = false;
@@ -680,6 +700,7 @@ async function dispatchToRuntime(params: {
       runtimeRevisionId: params.runtimeRevisionId,
       threadId: params.threadId,
       externalSessionRef: response.runtime_session_ref,
+      runtimeCapabilities: response.capabilities,
     });
     sessionBindingCreated = true;
   } catch (err) {

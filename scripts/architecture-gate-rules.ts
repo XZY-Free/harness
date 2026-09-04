@@ -1079,6 +1079,66 @@ export interface FinalClosureBoundaryGateResult {
   failures: string[];
 }
 
+/** External Harness Runtime 必须经双维度 resolver 进入黑盒 HTTP transport。 */
+export function checkExternalRuntimeTransportGate(
+  documents: readonly SourceDocument[],
+): FinalClosureBoundaryGateResult {
+  const failures: string[] = [];
+  const source = (path: string) =>
+    stripComments(documents.find((document) => document.path === path)?.source ?? "");
+  const resolver = source("lib/runtime/transport/runtime-transport-resolver.ts");
+  const httpTransport = source("lib/runtime/transport/http-harness-runtime-transport.ts");
+  const employee = source("lib/runtime/employee-turn-dispatcher.ts");
+  const command = source("lib/runtime/command-dispatch-gateway.ts");
+  const sessionSchema = source("lib/persistence/schema/executions.ts");
+
+  if (
+    !resolver.includes("runtimeEvidenceKind") ||
+    !resolver.includes("params.factories[input.protocolType]?.[input.runtimeEvidenceKind]")
+  ) {
+    failures.push("RuntimeTransportResolver 未按 protocolType + runtimeEvidenceKind 双维度解析");
+  }
+  if (
+    ![
+      "probeCapabilities",
+      "startInvocation",
+      "cancelInvocation",
+      "resumeInvocation",
+      "steerInvocation",
+    ].every((method) => httpTransport.includes(`${method}:`)) ||
+    !httpTransport.includes("runtimeEndpoint: endpoint") ||
+    !httpTransport.includes("auth: params.auth")
+  ) {
+    failures.push("HttpHarnessRuntimeTransport 未完整绑定 endpoint/auth 与五个 canonical 方法");
+  }
+  for (const [label, runtimeSource] of [
+    ["Employee Turn", employee],
+    ["Command Gateway", command],
+  ] as const) {
+    if (
+      !runtimeSource.includes("createRuntimeTransportResolver") ||
+      !/external_endpoint\s*:\s*\([^)]*\)\s*=>\s*\n?\s*createHttpHarnessRuntimeTransport/.test(
+        runtimeSource,
+      )
+    ) {
+      failures.push(`${label} 未通过共享 resolver 选择 External HTTP transport`);
+    }
+    if (/typeof[^\n]{0,160}launchAcceptedInvocation/.test(runtimeSource)) {
+      failures.push(`${label} 仍用 launchAcceptedInvocation 方法探测 transport 类型`);
+    }
+  }
+  if (
+    !sessionSchema.includes('runtimeCapabilitiesJson: json("runtimeCapabilitiesJson")') ||
+    !command.includes("sessionCapabilitiesJson")
+  ) {
+    failures.push(
+      "External start capabilities 未成为 RuntimeSessionBinding/effective capability 事实",
+    );
+  }
+
+  return { passed: failures.length === 0, failures: [...new Set(failures)] };
+}
+
 /**
  * 最终封版边界：只覆盖 Topic 01 冻结项，不扩张为全仓风格检查。
  */

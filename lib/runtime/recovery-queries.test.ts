@@ -70,6 +70,7 @@ import {
   getLatestProducerSequence,
   markInvocationLost,
 } from "@/lib/runtime/recovery-queries";
+import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import { createSessionBinding, getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { eq } from "drizzle-orm";
@@ -368,6 +369,7 @@ async function seedInvocation(params: {
       runtimeRevisionId: params.runtimeRevisionId,
       threadId: params.threadId,
       externalSessionRef: `ext-session-${invocation.id}`,
+      runtimeCapabilities: defaultRuntimeCapabilities(),
     });
     await db
       .update(invocationTable)

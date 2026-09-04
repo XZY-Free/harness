@@ -34,6 +34,7 @@ import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { eq } from "drizzle-orm";
@@ -188,6 +189,7 @@ async function attachA2ABinding(params: {
     runtimeRevisionId,
     threadId: params.threadId,
     externalSessionRef: contextId,
+    runtimeCapabilities: defaultRuntimeCapabilities(),
   });
   await db
     .update(invocationTable)
