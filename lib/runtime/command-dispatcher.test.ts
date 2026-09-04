@@ -104,6 +104,7 @@ import {
   RuntimeHttpClientError,
 } from "@/lib/runtime/errors";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
@@ -1530,13 +1531,32 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
     // 未注入 mock 时返回 null → 503 RUNTIME_UNAVAILABLE。这里注入带 mock sink 的
     // Hosted 参考 Adapter，使 cancel/resume/steer 返回 ack（不调用真实平台）。
     const sink: EventBatchSink = async () => {};
-    setRouteHostedAdapter(
-      createHostedAdapter({
-        platformEndpoint: "https://platform.internal",
-        platformAuthToken: "test-token",
-        eventBatchSink: sink,
-      }),
-    );
+    const adapter = createHostedAdapter({
+      platformEndpoint: "https://platform.internal",
+      platformAuthToken: "test-token",
+      eventBatchSink: sink,
+      ...createDirectResponsePorts(async () => "测试完成"),
+    });
+    await adapter.startInvocation({
+      invocationId: running.invocationId,
+      tenantId: ctx.tenantId,
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      inputItems: [{ type: "user_message", content: { text: "测试恢复" } }],
+      gatewayEndpoints: {
+        events: "https://gateway.internal/events",
+        cancel: "https://gateway.internal/cancel",
+        resume: "https://gateway.internal/resume",
+        steer: "https://gateway.internal/steer",
+        tools: "https://gateway.internal/tools",
+        tool_calls: "https://gateway.internal/tool-calls",
+        user_action_requests: "https://gateway.internal/user-action-requests",
+        capability_actions: "https://gateway.internal/capability-actions",
+      },
+      authToken: "test-token",
+    });
+    await adapter.getLastLoopPromise?.();
+    setRouteHostedAdapter(adapter);
   });
 
   afterEach(() => {

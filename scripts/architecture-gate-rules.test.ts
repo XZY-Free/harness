@@ -114,7 +114,10 @@ describe("source history and retired dependency gates", () => {
 describe("Topic 01 final closure boundary gate", () => {
   const compliant = (): SourceDocument[] => [
     doc("lib/persistence/schema/example.ts", 'export const example = mysqlTable("Example", {});'),
-    doc("lib/db/client.ts", 'import * as schema from "@/lib/persistence/schema"; drizzle(pool, { schema });'),
+    doc(
+      "lib/db/client.ts",
+      'import * as schema from "@/lib/persistence/schema"; drizzle(pool, { schema });',
+    ),
     doc(
       "lib/runtime/harness-loop/platform-action-executors.ts",
       'return { "tool.call": createToolActionExecutor({}) };',
@@ -161,12 +164,18 @@ describe("Topic 01 final closure boundary gate", () => {
     const docs = [
       ...compliant(),
       doc("lib/other/schema.ts", 'mysqlTable("Other", {})'),
-      doc("lib/agents/calls/persistence/bypass.ts", "db.update(agentCallTable).set({ state: 'completed' })"),
+      doc(
+        "lib/agents/calls/persistence/bypass.ts",
+        "db.update(agentCallTable).set({ state: 'completed' })",
+      ),
     ].map((item) =>
       item.path === "app/gateway/v1/capability-actions/route.ts"
         ? doc(item.path, "executionSubject = { subjectId: 'fixed' }")
         : item.path === "lib/runtime/adapters/hosted-adapter.ts"
-          ? doc(item.path, "async handleResume() { return { resume_state: 'accepted' }; } async handleSteer() {}")
+          ? doc(
+              item.path,
+              "async handleResume() { return { resume_state: 'accepted' }; } async handleSteer() {}",
+            )
           : item,
     );
     const result = checkFinalClosureBoundaryGate(

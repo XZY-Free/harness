@@ -156,9 +156,14 @@ async function main(): Promise<void> {
         throw new Error("Fresh DB AgentCall.logicalCallKey 缺失或可空");
       }
       for (const removed of ["agentRevisionId", "externalContextRef", "externalTaskRef"]) {
-        if (column("AgentCall", removed)) throw new Error(`Fresh DB AgentCall 重复 Authority 未删除：${removed}`);
+        if (column("AgentCall", removed))
+          throw new Error(`Fresh DB AgentCall 重复 Authority 未删除：${removed}`);
       }
-      if (!String(column("AgentCallEventIngress", "ingressState")?.COLUMN_TYPE ?? "").includes("rejected")) {
+      if (
+        !String(column("AgentCallEventIngress", "ingressState")?.COLUMN_TYPE ?? "").includes(
+          "rejected",
+        )
+      ) {
         throw new Error("Fresh DB Ingress 缺少 rejected 持久状态");
       }
       for (const leaseColumn of ["lockedBy", "lockExpiresAt", "attemptCount", "nextAttemptAt"]) {
@@ -172,10 +177,19 @@ async function main(): Promise<void> {
       const [deliveryIndexes] = await connection.query<mysql.RowDataPacket[]>(
         "SHOW INDEX FROM ControlPlaneEventDelivery",
       );
-      if (!outboxIndexes.some((row) => row.Key_name === "ControlPlaneOutboxEvent_eventKey_uq" && row.Non_unique === 0)) {
+      if (
+        !outboxIndexes.some(
+          (row) => row.Key_name === "ControlPlaneOutboxEvent_eventKey_uq" && row.Non_unique === 0,
+        )
+      ) {
         throw new Error("Fresh DB Outbox eventKey 唯一约束缺失");
       }
-      if (!deliveryIndexes.some((row) => row.Key_name === "ControlPlaneEventDelivery_event_consumer_uq" && row.Non_unique === 0)) {
+      if (
+        !deliveryIndexes.some(
+          (row) =>
+            row.Key_name === "ControlPlaneEventDelivery_event_consumer_uq" && row.Non_unique === 0,
+        )
+      ) {
         throw new Error("Fresh DB Continuation event+consumer 唯一约束缺失");
       }
       const [seedRows] = await connection.query<mysql.RowDataPacket[]>(

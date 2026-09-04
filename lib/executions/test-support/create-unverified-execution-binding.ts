@@ -27,6 +27,8 @@ import {
 import { eq } from "drizzle-orm";
 import { testCapabilityCatalogBindingFields } from "./test-capability-catalog";
 
+type TestCapabilityCatalogBindingFields = ReturnType<typeof testCapabilityCatalogBindingFields>;
+
 /** 旧状态机测试显式写入的完整、不可空 Binding 证据。 */
 export const TEST_EXECUTION_BINDING_EVIDENCE: ExecutionBindingControlPlaneEvidence = {
   routeRevisionId: "test-route-revision",
@@ -73,6 +75,8 @@ export interface CreateExecutionBindingParams {
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
   projectionVersionNo: number;
   executionSubject?: ExecutionSubject;
+  /** 需要验证特定能力目录的测试可显式覆盖默认空目录。 */
+  capabilityCatalogFields?: TestCapabilityCatalogBindingFields;
 }
 
 /** computeBindingConfigHash 入参（与 CreateExecutionBindingParams 字段一致，便于规范化）。 */
@@ -171,7 +175,7 @@ export async function createExecutionBinding(
 
   // 3. INSERT ExecutionBinding（invocationId 为主键，1:1）
   await db.insert(executionBindingTable).values({
-    ...testCapabilityCatalogBindingFields(params.invocationId),
+    ...(params.capabilityCatalogFields ?? testCapabilityCatalogBindingFields(params.invocationId)),
     ...(params.executionSubject
       ? freezeTrustedExecutionSubject(params.executionSubject, params.tenantId)
       : {}),

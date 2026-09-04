@@ -49,6 +49,7 @@ import {
   dispatchInvocationForTurn,
 } from "@/lib/runtime/dispatcher";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
+import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
@@ -163,6 +164,18 @@ async function seedTenantAndOwner() {
 
 function buildActor(tenantId: string, actorId: string): AuditActor {
   return { tenantId, actorType: "service", actorId };
+}
+
+function emptyCapabilityCatalog(invocationId: string) {
+  return buildCapabilityCatalogSnapshot({
+    invocationId,
+    preferredAgentId: null,
+    agentCandidate: null,
+    tools: [],
+    knowledgeSources: [],
+    sourceRefs: ["runtime-startup-test:empty-capability-catalog"],
+    now: new Date("2026-09-04T00:00:00.000Z"),
+  }).snapshot;
 }
 
 // ─── 辅助：创建 verified attestation ───────────────────────
@@ -923,7 +936,7 @@ describe("S05-C02 GET /runtime/v1/capabilities", () => {
     const token = issueWorkloadToken({
       type: "runtime",
       tenantId: "test-tenant",
-      invocationId: "test-inv",
+      invocationId: "inv-test-001",
       runtimeRevisionId: "test-rr",
       audience: "runtime",
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
@@ -1018,7 +1031,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     const token = issueWorkloadToken({
       type: "runtime",
       tenantId: "test-tenant",
-      invocationId: "test-inv",
+      invocationId: "inv-test-001",
       runtimeRevisionId: "test-rr",
       audience: "runtime",
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
@@ -1027,6 +1040,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     const body = {
       protocol_version: RUNTIME_PROTOCOL_VERSION,
       invocation_id: "inv-test-001",
+      capability_catalog: emptyCapabilityCatalog("inv-test-001"),
       turn_context: null,
       job_context: null,
       input_items: [{ type: "user_message", content: { text: "test" } }],
@@ -1249,6 +1263,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
         body: JSON.stringify({
           protocol_version: RUNTIME_PROTOCOL_VERSION,
           invocation_id: "inv-actual-adapter",
+          capability_catalog: emptyCapabilityCatalog("inv-actual-adapter"),
           turn_context: { thread_id: "thread-1", turn_id: "turn-1" },
           job_context: null,
           input_items: [{ type: "user_message", content: { text: "真实当前输入" } }],

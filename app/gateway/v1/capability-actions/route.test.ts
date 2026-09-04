@@ -25,6 +25,10 @@ import {
   governanceConfigRevisionTable,
   governanceConfigSetTable,
 } from "@/lib/persistence/schema/governance-config";
+import {
+  type CapabilityCatalogAgent,
+  buildCapabilityCatalogSnapshot,
+} from "@/lib/runtime/harness-loop/capability-catalog";
 import { and, asc, eq, like } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST } from "./route";
@@ -48,6 +52,7 @@ afterEach(async () => {
 async function seedRunningTurn(
   preferredAgentId: string | null = null,
   harnessLoopLimits?: { maxLoopSteps?: number },
+  agentCandidate?: CapabilityCatalogAgent,
 ) {
   const threadId = randomUUID();
   const turnId = randomUUID();
@@ -126,16 +131,73 @@ async function seedRunningTurn(
     governanceConfigDigest: governanceDigest,
     controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
     projectionVersionNo: 1,
+    ...(preferredAgentId
+      ? {
+          capabilityCatalogFields: capabilityCatalogFields(
+            invocationId,
+            preferredAgentId,
+            agentCandidate ?? testAgentCandidate(preferredAgentId),
+          ),
+        }
+      : {}),
   });
   return { threadId, turnId, invocationId };
 }
 
-function token(invocationId: string, tenantId = TENANT): string {
+function testAgentCandidate(agentId: string): CapabilityCatalogAgent {
+  return {
+    agentId,
+    agentRevisionId: "test-agent-revision",
+    routeRevisionId: "test-agent-route-revision",
+    contractSnapshotId: "test-agent-contract-snapshot",
+    contractDigest: `sha256:${"7".repeat(64)}`,
+    publicationRecordId: "test-agent-publication",
+    displayName: "测试 Agent",
+    description: "测试能力目录 Agent",
+    applicableScenarios: [],
+    excludedScenarios: [],
+    contractSummary: "测试合同",
+    contextRequirements: [],
+  };
+}
+
+function capabilityCatalogFields(
+  invocationId: string,
+  preferredAgentId: string,
+  agentCandidate: CapabilityCatalogAgent,
+) {
+  const catalog = buildCapabilityCatalogSnapshot({
+    invocationId,
+    preferredAgentId,
+    agentCandidate,
+    tools: [],
+    knowledgeSources: [],
+    sourceRefs: [`test-agent:${preferredAgentId}`],
+    now: new Date("2026-09-04T00:00:00.000Z"),
+  });
+  return {
+    capabilityCatalogJson: catalog.snapshot,
+    capabilityCatalogDigest: catalog.digest,
+    capabilityCatalogVersion: catalog.version,
+    capabilityCatalogSourceRefs: catalog.sourceRefs,
+    capabilityCatalogCreatedAt: catalog.createdAt,
+    executionSubjectType: "user" as const,
+    executionSubjectId: "test-user",
+    executionSubjectSource: "authenticated_user" as const,
+    executionSubjectFrozenAt: new Date("2026-09-04T00:00:00.000Z"),
+  };
+}
+
+function token(
+  invocationId: string,
+  tenantId = TENANT,
+  runtimeRevisionId = "runtime-revision-test",
+): string {
   return issueWorkloadToken({
     type: "gateway",
     tenantId,
     invocationId,
-    runtimeRevisionId: "runtime-revision-test",
+    runtimeRevisionId,
     audience: "gateway",
     expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
   });
@@ -146,11 +208,12 @@ function request(
   action: unknown,
   producerSequenceStart = 1,
   tenantId = TENANT,
+  runtimeRevisionId = "runtime-revision-test",
 ): Request {
   return new Request("http://localhost/gateway/v1/capability-actions", {
     method: "POST",
     headers: {
-      authorization: `Bearer ${token(invocationId, tenantId)}`,
+      authorization: `Bearer ${token(invocationId, tenantId, runtimeRevisionId)}`,
       "content-type": "application/json",
       "idempotency-key": `${invocationId}:${(action as { actionId?: string })?.actionId ?? ""}`,
     },
@@ -318,6 +381,20 @@ describe("POST /gateway/v1/capability-actions", () => {
       .where(eq(capabilityUseTable.invocationId, scenario.parentInvocationId));
     scenario.provider.reset();
     scenario.provider.setScenario("long_running");
+    const agentCandidate: CapabilityCatalogAgent = {
+      agentId: scenario.agentId,
+      agentRevisionId: scenario.agentRevisionId,
+      routeRevisionId: scenario.binding.routeRevisionId,
+      contractSnapshotId: scenario.agentContractSnapshotId,
+      contractDigest: scenario.agentContractDigest,
+      publicationRecordId: scenario.agentPublicationRecordId,
+      displayName: "Execution Test Agent",
+      description: "AgentCall execution scenario",
+      applicableScenarios: [],
+      excludedScenarios: [],
+      contractSummary: "AgentCall execution contract",
+      contextRequirements: ["execution_subject"],
+    };
     await createExecutionBinding({
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
@@ -329,6 +406,11 @@ describe("POST /gateway/v1/capability-actions", () => {
       governanceConfigDigest: scenario.binding.governanceConfigDigest,
       controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
       projectionVersionNo: 1,
+      capabilityCatalogFields: capabilityCatalogFields(
+        scenario.parentInvocationId,
+        scenario.agentId,
+        agentCandidate,
+      ),
     });
     const action = {
       actionId: "agent-external-pending",
@@ -343,7 +425,15 @@ describe("POST /gateway/v1/capability-actions", () => {
       },
     };
 
-    const response = await POST(request(scenario.parentInvocationId, action, 1, scenario.tenantId));
+    const response = await POST(
+      request(
+        scenario.parentInvocationId,
+        action,
+        1,
+        scenario.tenantId,
+        "external-runtime-revision-test",
+      ),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -363,7 +453,7 @@ describe("POST /gateway/v1/capability-actions", () => {
     expect(call).toMatchObject({
       sourceType: "harness_planned",
       sourceRef: action.actionId,
-      logicalCallKey: `${scenario.parentInvocationId}:${action.actionId}:${scenario.agentId}`,
+      logicalCallKey: `harness-action:${action.actionId}:agent:${scenario.agentId}`,
     });
     const events = await db
       .select({ type: runtimeEventIngressTable.candidateType })

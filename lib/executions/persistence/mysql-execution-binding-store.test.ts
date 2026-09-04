@@ -10,8 +10,8 @@ import {
   validateFrozenPublicationAuthority,
   validateFrozenPublicationEvidenceDigest,
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
-import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
+import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import {
   PUBLICATION_CONFORMANCE_CASES,
   PUBLICATION_CONFORMANCE_SUITE_REVISION,

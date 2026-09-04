@@ -226,7 +226,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
   it("同请求并发最终化只创建一个 Call", async () => {
     const scenario = await seed();
     const actionId = `concurrent:${randomUUID()}`;
-    const logicalCallKey = `${scenario.parentInvocationId}:${actionId}:${scenario.agentId}`;
+    const logicalCallKey = `harness-action:${actionId}:agent:${scenario.agentId}`;
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     const [left, right] = await Promise.all([
       create(commandFor(scenario, { actionId })),

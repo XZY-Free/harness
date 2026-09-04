@@ -426,7 +426,7 @@ async function testResumeCapabilityConsistency(
     };
   }
 
-  const resumeParams = buildResumeParams();
+  const resumeParams = buildResumeParams(ctx.tenantId, ctx.runtimeRevisionId);
   let result: ResumeResult;
   try {
     result = await ctx.runtimeAdapter.handleResume(resumeParams);
@@ -617,9 +617,11 @@ function buildCancelParams(): CancelParams {
 }
 
 /** 构造 handleResume 测试参数（非 checkpoint 恢复）。 */
-function buildResumeParams(): ResumeParams {
+function buildResumeParams(tenantId: string, runtimeRevisionId: string): ResumeParams {
   return {
-    invocationId: "conformance-test-resume-invocation",
+    // resume 必须命中本套件 dispatch-acknowledgement 已真实登记的同一 Invocation；
+    // 使用陌生 id 只能证明 Runtime 会 fail-closed，不能证明恢复能力。
+    invocationId: `conformance-test-invocation-${tenantId}-${runtimeRevisionId}`,
     resumePayload: { type: "conformance-test-resume" },
   };
 }

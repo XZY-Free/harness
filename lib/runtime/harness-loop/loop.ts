@@ -2,8 +2,8 @@ import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { ZodError } from "zod";
 import { parseHarnessNextAction } from "./action-schema";
 import {
-  capabilityCatalogModelView,
   type CapabilityCatalogSnapshot,
+  capabilityCatalogModelView,
   validateHarnessActionAgainstCatalog,
 } from "./capability-catalog";
 import {

@@ -100,6 +100,18 @@ function publicSubjectOf(
   return undefined;
 }
 
+async function mysqlCall(scenario: ExecutionScenario) {
+  const [call] = await db
+    .select()
+    .from(agentCallTable)
+    .where(
+      and(eq(agentCallTable.id, scenario.callId), eq(agentCallTable.tenantId, scenario.tenantId)),
+    )
+    .limit(1);
+  if (!call) throw new Error("测试 AgentCall 不存在");
+  return call;
+}
+
 beforeEach(async () => {
   await resetDatabase(db);
   trackedEnvVars.clear();
@@ -450,17 +462,15 @@ describe("startAgentCall 执行域启动", () => {
     }
   });
 
-  it("网络失败分类：dead/401/403/503/畸形流 → call failed/lost，父 running，无 runtime session 变更", async () => {
-    // dead endpoint：binding 冻结到一个无人监听端口 → 连接拒绝，call failed/lost。
+  it("远端正式 started 前的 dead/401/403/503/畸形流只结束 Attempt，Call 保持 queued 等待恢复", async () => {
+    // dead endpoint：binding 冻结到一个无人监听端口 → 连接拒绝，只结束当前 Attempt。
     const dead = await seedAgentCallExecutionScenario({
       mutateBinding: (b) => ({ ...b, endpointRef: "http://127.0.0.1:1" }),
     });
     trackedEnvVars.add(dead.credentialEnvVar);
-    const deadResult = await startAgentCall(startParams(dead));
-    expect(["failed", "lost"]).toContain(deadResult.state);
-    expect(deadResult.id).toBe(dead.callId);
-    const deadTerminal = await waitForCallTerminal(dead.callId, dead.tenantId);
-    expect(["failed", "lost"]).toContain(deadTerminal.state);
+    await expect(startAgentCall(startParams(dead))).rejects.toThrow();
+    expect((await mysqlCall(dead)).state).toBe("queued");
+    expect((await loadAttempt(dead.callId, dead.tenantId))?.attemptState).toBe("failed");
     const [deadParent] = await db
       .select()
       .from(invocationTable)
@@ -474,13 +484,13 @@ describe("startAgentCall 执行域启动", () => {
     expect(deadSessions.length).toBe(0);
     await dead.provider.close();
 
-    // 401/403：provider 要求匹配 Bearer，而 binding 用错 token → 认证失败，call failed，无 session。
+    // 401/403：provider 要求匹配 Bearer，而 binding 用错 token → 认证失败，只结束 Attempt。
     const auth = await seedAgentCallExecutionScenario();
     trackedEnvVars.add(auth.credentialEnvVar);
     auth.provider.setExpectedBearerToken(`wrong-${auth.credentialToken}`);
-    await startAgentCall(startParams(auth)).catch(() => {});
-    const authTerminal = await waitForCallTerminal(auth.callId, auth.tenantId);
-    expect(authTerminal.state).toBe("failed");
+    await expect(startAgentCall(startParams(auth))).rejects.toThrow();
+    expect((await mysqlCall(auth)).state).toBe("queued");
+    expect((await loadAttempt(auth.callId, auth.tenantId))?.attemptState).toBe("failed");
     const authSessions = await db
       .select()
       .from(agentSessionBindingTable)
@@ -492,9 +502,9 @@ describe("startAgentCall 执行域启动", () => {
     const flaky = await seedAgentCallExecutionScenario();
     trackedEnvVars.add(flaky.credentialEnvVar);
     flaky.provider.setFlaky(1);
-    await startAgentCall(startParams(flaky)).catch(() => {});
-    const flakyTerminal = await waitForCallTerminal(flaky.callId, flaky.tenantId);
-    expect(["failed", "lost"]).toContain(flakyTerminal.state);
+    await expect(startAgentCall(startParams(flaky))).rejects.toThrow();
+    expect((await mysqlCall(flaky)).state).toBe("queued");
+    expect((await loadAttempt(flaky.callId, flaky.tenantId))?.attemptState).toBe("failed");
     const [flakyParent] = await db
       .select()
       .from(invocationTable)
@@ -503,12 +513,12 @@ describe("startAgentCall 执行域启动", () => {
     expect(flakyParent?.executionState).toBe("running");
     await flaky.provider.close();
 
-    // 畸形 SSE 流 → protocol parse 失败 → call failed/lost，父不变，无 session。
+    // 畸形 SSE 流 → protocol parse 失败，只结束 Attempt，父不变，无 session。
     const malformed = await seedAgentCallExecutionScenario({ providerScenario: "malformed" });
     trackedEnvVars.add(malformed.credentialEnvVar);
-    await startAgentCall(startParams(malformed)).catch(() => {});
-    const malformedTerminal = await waitForCallTerminal(malformed.callId, malformed.tenantId);
-    expect(["failed", "lost"]).toContain(malformedTerminal.state);
+    await expect(startAgentCall(startParams(malformed))).rejects.toThrow();
+    expect((await mysqlCall(malformed)).state).toBe("queued");
+    expect((await loadAttempt(malformed.callId, malformed.tenantId))?.attemptState).toBe("failed");
     const [malformedParent] = await db
       .select()
       .from(invocationTable)

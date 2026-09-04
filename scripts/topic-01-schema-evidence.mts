@@ -105,7 +105,10 @@ const PRODUCTION_SOURCES = ["app", "components", "desktop", "hooks", "lib", "scr
   .flatMap((root) => sourceFiles(resolve(ROOT, root)))
   .filter((path) => !path.includes(".test.") && !path.includes("/test-support/"));
 
-function currentDirectReferences(symbol: string, declarationFile: string): {
+function currentDirectReferences(
+  symbol: string,
+  declarationFile: string,
+): {
   writers: string[];
   readers: string[];
 } {
@@ -116,9 +119,12 @@ function currentDirectReferences(symbol: string, declarationFile: string): {
     if (path === declarationFile) continue;
     const source = readFileSync(absolutePath, "utf8");
     if (!new RegExp(`\\b${symbol}\\b`).test(source)) continue;
-    if (new RegExp(`\\.(?:insert|update|delete)\\(\\s*${symbol}\\b`).test(source)) writers.push(path);
+    if (new RegExp(`\\.(?:insert|update|delete)\\(\\s*${symbol}\\b`).test(source))
+      writers.push(path);
     if (
-      new RegExp(`\\.(?:from|join|leftJoin|rightJoin|innerJoin|fullJoin)\\(\\s*${symbol}\\b`).test(source) ||
+      new RegExp(`\\.(?:from|join|leftJoin|rightJoin|innerJoin|fullJoin)\\(\\s*${symbol}\\b`).test(
+        source,
+      ) ||
       new RegExp(`\\b${symbol}\\.[A-Za-z_]`).test(source)
     ) {
       readers.push(path);
@@ -132,8 +138,9 @@ function constraintsFor(tableName: string, sql: string): string[] {
   const start = sql.indexOf(marker);
   const end = start < 0 ? -1 : sql.indexOf("\n);", start);
   const create = start < 0 || end < 0 ? "" : sql.slice(start + marker.length, end);
-  const local = Array.from(create.matchAll(/CONSTRAINT `([^`]+)` ([^\n]+)/g), (match) =>
-    `${match[1]}: ${match[2].trim()}`,
+  const local = Array.from(
+    create.matchAll(/CONSTRAINT `([^`]+)` ([^\n]+)/g),
+    (match) => `${match[1]}: ${match[2].trim()}`,
   );
   const external = sql
     .split("\n")
@@ -152,7 +159,8 @@ function tenantBoundaryFor(tableName: string, sql: string): string {
   const end = start < 0 ? -1 : sql.indexOf("\n);", start);
   const definition = start < 0 || end < 0 ? "" : sql.slice(start, end);
   if (definition.includes("`tenantId`")) return "tenantId 直接隔离；所有生产查询必须携带 tenantId";
-  if (definition.includes("`tenant_id`")) return "tenant_id 直接隔离；所有生产查询必须携带 tenant_id";
+  if (definition.includes("`tenant_id`"))
+    return "tenant_id 直接隔离；所有生产查询必须携带 tenant_id";
   return "经父记录外键或不可变绑定继承 tenant；读取前由父 Authority 校验租户";
 }
 
@@ -189,7 +197,9 @@ function build() {
   const runtime = runtimeNames();
   const migration = migrationNames(sql);
   const byName = new Map(
-    previous.tables.filter((record) => record.exportedByRoot).map((record) => [record.physicalTableName, record]),
+    previous.tables
+      .filter((record) => record.exportedByRoot)
+      .map((record) => [record.physicalTableName, record]),
   );
   const tables: InventoryRecord[] = canonical.map((name) => {
     const old = byName.get(name);
@@ -226,7 +236,9 @@ function build() {
           `${old.declarationFile}#${old.declarationSymbol}`,
           ...writers,
           ...readers,
-          ...old.evidence.filter((path) => existsSync(resolve(ROOT, path.split("#", 1)[0] as string))),
+          ...old.evidence.filter((path) =>
+            existsSync(resolve(ROOT, path.split("#", 1)[0] as string)),
+          ),
           "drizzle/0000_initial_schema.sql",
         ]),
       ],
@@ -287,12 +299,7 @@ function markdown(inventory: ReturnType<typeof build>["inventory"]): string {
         `| ${table.physicalTableName} | ${table.domainOwner} | ${table.schemaDeclaration} | ${table.productionWriters.join("<br>")} | ${table.productionReaders.join("<br>")} | ${table.authorityStatement} |`,
     )
     .join("\n");
-  return `# Topic 01 最终 Schema 逐表证据\n\n` +
-    `Canonical = ${inventory.counts.canonical}\n\nRuntime-loaded = ${inventory.counts.runtimeLoaded}\n\nMigration = ${inventory.counts.migration}\n\nFresh DB = ${inventory.counts.freshDbPlanned}\n\n` +
-    `当前开发数据库未观察：Batch 00 已确认项目开发端口没有 MySQL 服务，本批按约束未连接数据库；这不等同于 0 张表。框架元数据 \`__drizzle_migrations\` 单独排除。\n\n` +
-    `旧 123 基线中 \`MemoryIndex\`、\`WorkspaceMergeConflict\`、\`WorkspaceOverlay\` 均无生产读写或 Worker，已从 Root、Runtime 与 clean migration 同步删除，最终为 120 张。\n\n` +
-    `完整生命周期、租户边界、约束、保留策略和证据见同目录机器清单。\n\n` +
-    `| 表 | 领域 | Schema 声明 | 生产写入者 | 生产读取者 | 唯一事实 |\n|---|---|---|---|---|---|\n${rows}\n`;
+  return `# Topic 01 最终 Schema 逐表证据\n\nCanonical = ${inventory.counts.canonical}\n\nRuntime-loaded = ${inventory.counts.runtimeLoaded}\n\nMigration = ${inventory.counts.migration}\n\nFresh DB = ${inventory.counts.freshDbPlanned}\n\n当前开发数据库未观察：Batch 00 已确认项目开发端口没有 MySQL 服务，本批按约束未连接数据库；这不等同于 0 张表。框架元数据 \`__drizzle_migrations\` 单独排除。\n\n旧 123 基线中 \`MemoryIndex\`、\`WorkspaceMergeConflict\`、\`WorkspaceOverlay\` 均无生产读写或 Worker，已从 Root、Runtime 与 clean migration 同步删除，最终为 120 张。\n\n完整生命周期、租户边界、约束、保留策略和证据见同目录机器清单。\n\n| 表 | 领域 | Schema 声明 | 生产写入者 | 生产读取者 | 唯一事实 |\n|---|---|---|---|---|---|\n${rows}\n`;
 }
 
 function validate(built: ReturnType<typeof build>): void {
@@ -304,22 +311,31 @@ function validate(built: ReturnType<typeof build>): void {
   }
   const names = inventory.tables.map((table) => table.physicalTableName);
   if (new Set(names).size !== names.length) throw new Error("inventory 存在重复表名");
-  if (JSON.stringify(names) !== JSON.stringify(canonical)) throw new Error("Canonical 表未被唯一覆盖");
-  if (JSON.stringify(runtime) !== JSON.stringify(canonical)) throw new Error("Runtime-loaded 与 Canonical 不一致");
-  if (JSON.stringify(migration) !== JSON.stringify(canonical)) throw new Error("Migration 与 Canonical 不一致");
-  if (manifest.counts.freshDbPlanned !== canonical.length) throw new Error("Fresh DB 计划与 Canonical 不一致");
+  if (JSON.stringify(names) !== JSON.stringify(canonical))
+    throw new Error("Canonical 表未被唯一覆盖");
+  if (JSON.stringify(runtime) !== JSON.stringify(canonical))
+    throw new Error("Runtime-loaded 与 Canonical 不一致");
+  if (JSON.stringify(migration) !== JSON.stringify(canonical))
+    throw new Error("Migration 与 Canonical 不一致");
+  if (manifest.counts.freshDbPlanned !== canonical.length)
+    throw new Error("Fresh DB 计划与 Canonical 不一致");
   for (const table of inventory.tables) {
     for (const field of REQUIRED_FIELDS) {
       if (!(field in table)) throw new Error(`${table.physicalTableName} 缺少 ${field}`);
     }
-    if (table.productionWriters.length === 0) throw new Error(`${table.physicalTableName} writers 为空`);
-    if (table.productionReaders.length === 0) throw new Error(`${table.physicalTableName} readers 为空`);
+    if (table.productionWriters.length === 0)
+      throw new Error(`${table.physicalTableName} writers 为空`);
+    if (table.productionReaders.length === 0)
+      throw new Error(`${table.physicalTableName} readers 为空`);
     if (table.decision !== "keep") throw new Error(`${table.physicalTableName} decision 非 keep`);
   }
   if (!process.argv.includes("--write")) {
-    if (readFileSync(INVENTORY_PATH, "utf8") !== stable(inventory)) throw new Error("70 inventory 未更新");
-    if (readFileSync(MANIFEST_PATH, "utf8") !== stable(manifest)) throw new Error("71 manifest 未更新");
-    if (readFileSync(INVENTORY_MD_PATH, "utf8") !== markdown(inventory)) throw new Error("70 markdown 未更新");
+    if (readFileSync(INVENTORY_PATH, "utf8") !== stable(inventory))
+      throw new Error("70 inventory 未更新");
+    if (readFileSync(MANIFEST_PATH, "utf8") !== stable(manifest))
+      throw new Error("71 manifest 未更新");
+    if (readFileSync(INVENTORY_MD_PATH, "utf8") !== markdown(inventory))
+      throw new Error("70 markdown 未更新");
   }
 }
 

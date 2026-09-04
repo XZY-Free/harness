@@ -131,10 +131,14 @@ const result = {
   artifactChecksums: {
     planSha256: sha256(readFileSync(PLAN_PATH)),
     schemaManifestSha256: sha256(
-      readFileSync(resolve(ROOT, "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json")),
+      readFileSync(
+        resolve(ROOT, "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json"),
+      ),
     ),
     testAuditSha256: sha256(
-      readFileSync(resolve(ROOT, "docs/implementation/topic-01-final-closure/72-test-collection-audit.json")),
+      readFileSync(
+        resolve(ROOT, "docs/implementation/topic-01-final-closure/72-test-collection-audit.json"),
+      ),
     ),
   },
   previousRuns:
@@ -145,7 +149,8 @@ const result = {
             startedAt: previousResult.startedAt,
             finishedAt: previousResult.finishedAt,
             status: previousResult.status,
-            failedStage: previousResult.stages?.find((stage) => stage.status === "failed")?.id ?? null,
+            failedStage:
+              previousResult.stages?.find((stage) => stage.status === "failed")?.id ?? null,
           },
         ]
       : [],
@@ -176,7 +181,11 @@ for (const stage of stages) {
     const [executable, ...commandArgs] = command;
     const commandStarted = Date.now();
     const commandStartedAt = new Date(commandStarted).toISOString();
-    const run = spawnSync(executable, commandArgs, { cwd: ROOT, stdio: "inherit", env: process.env });
+    const run = spawnSync(executable, commandArgs, {
+      cwd: ROOT,
+      stdio: "inherit",
+      env: process.env,
+    });
     const commandRecord = {
       command,
       startedAt: commandStartedAt,
@@ -185,7 +194,10 @@ for (const stage of stages) {
       exitCode: run.status,
       signal: run.signal,
     };
-    stageResult.commands.push({ ...commandRecord, recordChecksum: sha256(JSON.stringify(commandRecord)) });
+    stageResult.commands.push({
+      ...commandRecord,
+      recordChecksum: sha256(JSON.stringify(commandRecord)),
+    });
     if (run.status !== 0) {
       stageResult.status = "failed";
       stageResult.finishedAt = new Date().toISOString();
@@ -206,7 +218,10 @@ for (const stage of stages) {
 }
 result.status = "passed";
 result.fullLocalAcceptance = "passed";
-result.acceptanceIdResults = result.acceptanceIdResults.map((item) => ({ ...item, result: "passed" }));
+result.acceptanceIdResults = result.acceptanceIdResults.map((item) => ({
+  ...item,
+  result: "passed",
+}));
 result.finishedAt = new Date().toISOString();
 result.durationMs = Date.now() - Date.parse(startedAt);
 persist();

@@ -169,8 +169,8 @@ describe("computeContentHash", () => {
 // ─── isKnownAuditActionType / assertAuditActionTypeKnown（纯逻辑）───
 
 describe("isKnownAuditActionType", () => {
-  it("目录中所有动作类型均已知（包含 Studio 写操作，共 49 种）", () => {
-    expect(AUDIT_ACTION_TYPES.length).toBe(50);
+  it("目录中所有动作类型均已知（包含 continuation dead-letter，共 51 种）", () => {
+    expect(AUDIT_ACTION_TYPES.length).toBe(51);
     for (const actionType of AUDIT_ACTION_TYPES) {
       expect(isKnownAuditActionType(actionType)).toBe(true);
     }

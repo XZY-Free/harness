@@ -235,8 +235,13 @@ describe("仓内 A2A Provider 黑盒 E2E（AgentCall 协议层，真实 wire）"
     const { transport, batches } = freshTransport();
     await transport.startCall(startParams());
     await waitForEvents(batches, 2);
-    const failed = batches.flatMap((b) => b.events).find((e) => e.type === "call.failed");
-    expect((failed?.payload as Record<string, unknown>).error_code).toBe("REMOTE_TASK_FAILED");
+    const failedEvents = batches.flatMap((b) => b.events);
+    expect(failedEvents.map((event) => event.type)).toEqual(["call.started", "call.failed"]);
+    expect(failedEvents.map((event) => event.producer_sequence)).toEqual([1, 2]);
+    const failed = failedEvents.find((e) => e.type === "call.failed");
+    expect((failed?.payload as Record<string, unknown>).error).toMatchObject({
+      code: "REMOTE_TASK_FAILED",
+    });
 
     provider.setScenario("rejected");
     await expect(freshTransport().transport.startCall(startParams())).rejects.toMatchObject({

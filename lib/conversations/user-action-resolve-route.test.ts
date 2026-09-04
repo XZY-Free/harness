@@ -7,7 +7,8 @@
  * - A2A acknowledged → 200（mode=remote, command_state=acknowledged）；
  * - A2A 网络/503 → 202（pending_retry，不虚报完成）；
  * - A2A 明确拒绝 → 422 + Invocation lost（UAR 已提交事实不回滚）；
- * - hosted/非远端协议 → 200（mode=local_runtime，不伪造 A2A ack）；
+ * - 普通 Runtime UAR 的 hosted/非远端协议 → 200（mode=local_runtime，不伪造 A2A ack）；
+ * - purpose=a2a_input_required 的 Agent UAR 由 durable continuation 恢复，不走 Runtime command；
  * - 响应只保留一个 Authority（resume_dispatch），无 stale resume_command_state；
  * - 同 Idempotency-Key 同 body 重放返回同一结果，零重复远端调用。
  *
@@ -108,7 +109,7 @@ async function seedWaitingInputOnThread(params: {
     toolCallId: null,
     itemId: null,
     requestType: "input",
-    purpose: "a2a_input_required",
+    purpose: "runtime_input_required",
     requestState: "pending",
     promptJson: { kind: "user_action.requested", prompt: "请提供请假信息" },
     inputSchemaJson: {
@@ -292,7 +293,7 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
       toolCallId: null,
       itemId: null,
       requestType: "input",
-      purpose: "a2a_input_required",
+      purpose: "runtime_input_required",
       requestState: "pending",
       promptJson: { kind: "user_action.requested", prompt: "请提供请假信息" },
       inputSchemaJson: {

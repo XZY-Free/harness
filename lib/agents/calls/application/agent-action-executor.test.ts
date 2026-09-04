@@ -20,6 +20,7 @@ import { invocationTable } from "@/lib/persistence/schema/executions";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -248,6 +249,13 @@ describe("AgentActionExecutor", () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     expect(waitingCall).toMatchObject({ state: "waiting_user", errorCode: null });
+    await createProductionInvocationContinuationWorker(
+      "agent-action-executor-input-required-test",
+    ).pollOnce();
+    const requestsAfterContinuation = await db.select().from(userActionRequestTable);
+    projectedRequest = requestsAfterContinuation.find(
+      (request) => (request.promptJson as Record<string, unknown>).agent_call_id === callId,
+    );
     expect(projectedRequest).toBeTruthy();
     const replay = await execute(action, context);
 

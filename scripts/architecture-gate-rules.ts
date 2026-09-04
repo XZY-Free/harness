@@ -1056,7 +1056,8 @@ export function checkFinalClosureBoundaryGate(
   testCollection: readonly FinalClosureTestEntry[],
 ): FinalClosureBoundaryGateResult {
   const failures: string[] = [];
-  const source = (path: string) => documents.find((document) => document.path === path)?.source ?? "";
+  const source = (path: string) =>
+    documents.find((document) => document.path === path)?.source ?? "";
 
   for (const document of documents) {
     if (document.path.includes(".test.") || document.path.includes("/test-support/")) continue;
@@ -1096,10 +1097,14 @@ export function checkFinalClosureBoundaryGate(
 
   const runtimeClient = stripComments(source("lib/runtime/runtime-client.ts"));
   const requestStart = runtimeClient.indexOf("export interface StartInvocationRequestBody");
-  const requestEnd = runtimeClient.indexOf("export interface StartInvocationResponse", requestStart);
-  const requestBody = requestStart >= 0 && requestEnd > requestStart
-    ? runtimeClient.slice(requestStart, requestEnd)
-    : "";
+  const requestEnd = runtimeClient.indexOf(
+    "export interface StartInvocationResponse",
+    requestStart,
+  );
+  const requestBody =
+    requestStart >= 0 && requestEnd > requestStart
+      ? runtimeClient.slice(requestStart, requestEnd)
+      : "";
   if (/\b(?:subjectId|subject_id|executionSubject|execution_subject)\s*[?:]/.test(requestBody)) {
     failures.push("Runtime Start 请求体重新成为 Subject Authority");
   }
@@ -1107,7 +1112,8 @@ export function checkFinalClosureBoundaryGate(
   const agentCallSchema = stripComments(source("lib/persistence/schema/agent-calls.ts"));
   const callStart = agentCallSchema.indexOf("export const agentCallTable");
   const callEnd = agentCallSchema.indexOf("export const agentCallBindingTable", callStart);
-  const callBlock = callStart >= 0 && callEnd > callStart ? agentCallSchema.slice(callStart, callEnd) : "";
+  const callBlock =
+    callStart >= 0 && callEnd > callStart ? agentCallSchema.slice(callStart, callEnd) : "";
   if (/\b(?:agentRevisionId|externalContextRef|externalTaskRef)\s*:/.test(callBlock)) {
     failures.push("AgentCall 主表重新加入 revision/context/task Authority");
   }
@@ -1117,7 +1123,10 @@ export function checkFinalClosureBoundaryGate(
     "lib/conversations/user-action-resolve-queries.ts",
   ]) {
     const producer = stripComments(source(producerPath));
-    if (!producer.includes("controlPlaneOutboxEvent") || !producer.includes("controlPlaneEventDelivery")) {
+    if (
+      !producer.includes("controlPlaneOutboxEvent") ||
+      !producer.includes("controlPlaneEventDelivery")
+    ) {
       failures.push(`Continuation 生产端未写 durable Outbox：${producerPath}`);
     }
   }
@@ -1125,8 +1134,12 @@ export function checkFinalClosureBoundaryGate(
   const hosted = stripComments(source("lib/runtime/adapters/hosted-adapter.ts"));
   const resumeStart = hosted.indexOf("async handleResume(");
   const resumeEnd = hosted.indexOf("async handleSteer(", resumeStart);
-  const resumeBlock = resumeStart >= 0 && resumeEnd > resumeStart ? hosted.slice(resumeStart, resumeEnd) : "";
-  if (!resumeBlock.includes("new HostedHarnessLoop(") || !resumeBlock.includes("await runPromise")) {
+  const resumeBlock =
+    resumeStart >= 0 && resumeEnd > resumeStart ? hosted.slice(resumeStart, resumeEnd) : "";
+  if (
+    !resumeBlock.includes("new HostedHarnessLoop(") ||
+    !resumeBlock.includes("await runPromise")
+  ) {
     failures.push("Hosted Resume 退化为只 ACK");
   }
 

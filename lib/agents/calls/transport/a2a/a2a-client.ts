@@ -371,6 +371,7 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
       let firstError: JsonRpcResponse["error"] | null = null;
       let streamDone = false;
       const stopped = false;
+      let startedObserved = false;
       // 背景失败上报 per-call（非 transport 全局）：多个独立 call 互不抑制。
       let backgroundFailureReported = false;
       const reportBackgroundFailure = async (
@@ -389,6 +390,46 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
       };
       // correlation 已确立后，后续事件 taskId/contextId 失配 → correlation_lost，停止消费。
       let correlationBroken = false;
+
+      /**
+       * A2A 允许首个正式 Task 状态直接为 completed/failed/canceled/input-required。
+       * 该状态已经证明远端创建了 task；先归一化同一事实为 call.started，再应用后续状态，
+       * 不放宽 AgentCall 状态机的 queued→terminal 禁令。
+       */
+      const mapStartUpdate = (
+        update: Parameters<typeof mapAgentCallUpdate>[2],
+      ): AgentCallCandidateEvent[] => {
+        const mapsToStarted =
+          update.kind === "artifact-update" ||
+          update.status.state === "submitted" ||
+          update.status.state === "working";
+        const prependStarted = !startedObserved && !mapsToStarted;
+        const mapped = mapAgentCallUpdate(
+          req.callId,
+          nextSequence + (prependStarted ? 1 : 0),
+          update,
+          artifacts,
+        );
+        if (mapsToStarted) startedObserved = true;
+        if (!prependStarted) return mapped;
+        startedObserved = true;
+        return [
+          {
+            producer_event_id: `a2a:${req.callId}:${nextSequence}`,
+            producer_sequence: nextSequence,
+            schema_version: 1,
+            occurred_at: new Date().toISOString(),
+            type: "call.started",
+            payload: {
+              source: "a2a",
+              task_id: update.taskId,
+              context_id: update.contextId,
+              task_state: update.kind === "status-update" ? update.status.state : "working",
+            },
+          },
+          ...mapped,
+        ];
+      };
 
       // 每次 reader.read 都以 streamTimeoutMs 上界竞速；超时取消 reader 并抛错。
       // 用可清理 timer：read 先完成即 clear，避免残留计时器造成额外延迟。
@@ -439,8 +480,10 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
                     type: "call.failed",
                     payload: {
                       source: "a2a",
-                      error_code: "REMOTE_TASK_FAILED",
-                      error_summary: parsed.error.message ?? "A2A stream error",
+                      error: {
+                        code: "REMOTE_TASK_FAILED",
+                        message: parsed.error.message ?? "A2A stream error",
+                      },
                     },
                   },
                 ],
@@ -486,20 +529,15 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
                   typeof task.status === "object" &&
                   typeof task.status.state === "string"
                 ) {
-                  const events = mapAgentCallUpdate(
-                    req.callId,
-                    nextSequence,
-                    {
-                      kind: "status-update",
-                      taskId,
-                      contextId,
-                      status: task.status as {
-                        state: A2ATaskState;
-                        message?: A2AMessage | null;
-                      },
+                  const events = mapStartUpdate({
+                    kind: "status-update",
+                    taskId,
+                    contextId,
+                    status: task.status as {
+                      state: A2ATaskState;
+                      message?: A2AMessage | null;
                     },
-                    artifacts,
-                  );
+                  });
                   pendingBatches.push({ events, start: nextSequence });
                   nextSequence += events.length;
                 }
@@ -523,7 +561,7 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
           }
           taskId = parsed.taskId;
           contextId = parsed.contextId ?? contextId;
-          const events = mapAgentCallUpdate(req.callId, nextSequence, parsed, artifacts);
+          const events = mapStartUpdate(parsed);
           pendingBatches.push({ events, start: nextSequence });
           nextSequence += events.length;
         }

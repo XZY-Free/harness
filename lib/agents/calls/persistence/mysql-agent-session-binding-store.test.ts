@@ -3,7 +3,7 @@
  *
  * 目标不变量：
  * 1. A2A contextId 属于 AgentSessionBinding.externalContextRef（冻结映射）。
- * 2. create 幂等：UNIQUE(agentRevisionId, routeRevisionId, externalContextRef) 冲突返回已存在。
+ * 2. create 幂等：UNIQUE(tenantId, externalContextRef) 且完整 Authority 一致时返回已存在。
  * 3. getByContext 按 (tenantId, agentId, externalContextRef) 精确查找，跨租户隔离。
  * 4. close 仅 active→closed；markLost 仅 active→lost；非 active 抛 AgentSessionBindingStateError。
  */
@@ -51,7 +51,7 @@ describe("mysqlAgentSessionBindingStore", () => {
     expect(s.closedAt).toBeNull();
   });
 
-  it("create 幂等：UNIQUE(agentRevisionId, routeRevisionId, externalContextRef) 返回已存在", async () => {
+  it("create 幂等：同 tenant/context 且完整 Authority 一致时返回已存在", async () => {
     const tenantId = await seedTenant();
     const a = await mysqlAgentSessionBindingStore.create(inputFor(tenantId));
     const b = await mysqlAgentSessionBindingStore.create(inputFor(tenantId));
@@ -134,16 +134,24 @@ describe("mysqlAgentSessionBindingStore", () => {
     ).rejects.toBeInstanceOf(AgentSessionBindingStateError);
   });
 
-  it("同 Agent 不同 RouteRevision 各自独立会话（隔离匹配维度）", async () => {
+  it("同 tenant/context 不同 RouteRevision 稳定拒绝关联冲突", async () => {
     const tenantId = await seedTenant();
     const a = await mysqlAgentSessionBindingStore.create(
       inputFor(tenantId, { externalContextRef: "ctx" }),
     );
-    const b = await mysqlAgentSessionBindingStore.create({
-      ...inputFor(tenantId, { externalContextRef: "ctx" }),
-      routeRevisionId: "route-rev-2",
-    });
-    expect(a.id).not.toBe(b.id);
+    await expect(
+      mysqlAgentSessionBindingStore.create({
+        ...inputFor(tenantId, { externalContextRef: "ctx" }),
+        routeRevisionId: "route-rev-2",
+      }),
+    ).rejects.toThrow("AgentSessionBinding 关联冲突");
+    expect(
+      await db
+        .select()
+        .from(agentSessionBindingTable)
+        .where(eq(agentSessionBindingTable.tenantId, tenantId)),
+    ).toHaveLength(1);
+    expect(a.routeRevisionId).toBe("route-rev-1");
   });
 
   it("跨租户 create：异租户同 (agentRevision, routeRevision, externalContextRef) 不得复用已有会话", async () => {

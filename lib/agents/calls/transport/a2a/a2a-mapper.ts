@@ -243,8 +243,10 @@ export function mapAgentCallUpdate(
             source: "a2a",
             task_id: taskId,
             context_id: contextId,
-            error_code: "REMOTE_TASK_FAILED",
-            error_summary: a2aMessageText(update.status.message) ?? "A2A task failed",
+            error: {
+              code: "REMOTE_TASK_FAILED",
+              message: a2aMessageText(update.status.message) ?? "A2A task failed",
+            },
           },
         },
       ];
@@ -270,8 +272,10 @@ export function mapAgentCallUpdate(
             source: "a2a",
             task_id: taskId,
             context_id: contextId,
-            error_code: "REMOTE_TASK_REJECTED",
-            error_summary: a2aMessageText(update.status.message) ?? "A2A task rejected",
+            error: {
+              code: "REMOTE_TASK_REJECTED",
+              message: a2aMessageText(update.status.message) ?? "A2A task rejected",
+            },
           },
         },
       ];
@@ -284,8 +288,10 @@ export function mapAgentCallUpdate(
             source: "a2a",
             task_id: taskId,
             context_id: contextId,
-            error_code: "REMOTE_AUTH_REQUIRED",
-            error_summary: "A2A task requires additional authentication",
+            error: {
+              code: "REMOTE_AUTH_REQUIRED",
+              message: "A2A task requires additional authentication",
+            },
           },
         },
       ];

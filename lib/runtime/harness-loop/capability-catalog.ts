@@ -98,16 +98,13 @@ export function buildCapabilityCatalogSnapshot(input: {
     createdAt: createdAt.toISOString(),
     sourceRefs: uniqueSorted(input.sourceRefs),
     agents:
-      input.preferredAgentId &&
-      input.agentCandidate?.agentId === input.preferredAgentId
+      input.preferredAgentId && input.agentCandidate?.agentId === input.preferredAgentId
         ? [clone(input.agentCandidate)]
         : [],
     tools: [...input.tools]
       .map(clone)
       .sort((a, b) =>
-        `${a.toolId}\u0000${a.operationId}`.localeCompare(
-          `${b.toolId}\u0000${b.operationId}`,
-        ),
+        `${a.toolId}\u0000${a.operationId}`.localeCompare(`${b.toolId}\u0000${b.operationId}`),
       ),
     knowledgeSources: [...input.knowledgeSources]
       .map(clone)
@@ -205,8 +202,7 @@ export function validateHarnessActionAgainstCatalog(
   if (action.actionType === "tool.call") {
     const tool = snapshot.tools.find(
       (entry) =>
-        entry.toolId === action.payload.toolId &&
-        entry.operationId === action.payload.operationId,
+        entry.toolId === action.payload.toolId && entry.operationId === action.payload.operationId,
     );
     if (!tool) {
       throw new CapabilityActionValidationError(
@@ -224,10 +220,7 @@ export function validateHarnessActionAgainstCatalog(
       }
     } catch (error) {
       if (error instanceof CapabilityActionValidationError) throw error;
-      throw new CapabilityActionValidationError(
-        "TOOL_SCHEMA_INVALID",
-        "冻结 Tool Schema 无法编译",
-      );
+      throw new CapabilityActionValidationError("TOOL_SCHEMA_INVALID", "冻结 Tool Schema 无法编译");
     }
     return { tool };
   }

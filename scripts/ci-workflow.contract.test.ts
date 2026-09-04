@@ -6,10 +6,7 @@ const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
   scripts: Record<string, string>;
 };
 const plan = JSON.parse(
-  readFileSync(
-    "docs/implementation/topic-01-final-closure/73-verification-plan.json",
-    "utf8",
-  ),
+  readFileSync("docs/implementation/topic-01-final-closure/73-verification-plan.json", "utf8"),
 ) as { stages: Array<{ id: string }> };
 
 describe("final CI workflow contract", () => {

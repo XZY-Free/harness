@@ -12,41 +12,35 @@ import { describe, expect, it } from "vitest";
  * - 正式测试路径 lib/capability/skill-studio-queries.test.ts；
  * - 旧 lib/db/studio-queries.test.ts 与 lib/policy/config.test.ts 及
  *   LEGACY_B1_DB_TESTS 标识符全部消失；
- * - db project 明确 include 正式路径（串行真实 MySQL），
- *   unit project 明确 exclude 同一路径（不重复运行）。
+ * - 机器清单把正式路径唯一归入 db project（串行真实 MySQL）。
  *
- * 语义化检查：读取 vitest.config.ts 源码做稳定的模块路径断言，
- * 去空白后按 project 块定位 include/exclude，不依赖行号/排版。
+ * 语义化检查：配置必须消费机器清单，归属结论直接读取同一份清单，
+ * 不再解析 vitest.config.ts 的排版细节。
  */
 
 const ROOT = process.cwd();
 const CONFIG_PATH = join(ROOT, "vitest.config.ts");
+const AUDIT_PATH = join(
+  ROOT,
+  "docs/implementation/topic-01-final-closure/72-test-collection-audit.json",
+);
 const LEGACY_DB_TEST = "lib/db/studio-queries.test.ts";
 const LEGACY_POLICY_TEST = "lib/policy/config.test.ts";
 const CANONICAL_DB_TEST = "lib/capability/skill-studio-queries.test.ts";
 const LEGACY_IDENTIFIER = "LEGACY_B1_DB_TESTS";
+
+type CollectionEntry = { file: string; group: string; needsDB: boolean; serial: boolean };
 
 /** 去除全部空白，使排版差异不影响语义判断。 */
 function normalize(source: string): string {
   return source.replace(/\s+/g, "");
 }
 
-/** 返回从 startMarker 起、到 endMarker 前的子串；任一缺失返回 null。 */
-function sliceBetween(source: string, startMarker: string, endMarker: string): string | null {
-  const start = source.indexOf(startMarker);
-  if (start === -1) return null;
-  const end = endMarker ? source.indexOf(endMarker, start) : source.length;
-  if (end === -1) return null;
-  return source.slice(start + startMarker.length, end);
-}
-
-/** 读取 project 块内的数组属性；配置不存在该属性时返回 null。 */
-function readArrayProperty(source: string, property: string): string | null {
-  return source.match(new RegExp(`${property}:\\[(.*?)\\]`))?.[1] ?? null;
-}
-
 describe("Topic01 legacy vitest exclusion cleanup contract", () => {
   const config = normalize(readFileSync(CONFIG_PATH, "utf8"));
+  const audit = JSON.parse(readFileSync(AUDIT_PATH, "utf8")) as {
+    tests: CollectionEntry[];
+  };
 
   it("vitest.config.ts 不再包含 LEGACY_B1_DB_TESTS 标识符", () => {
     expect(
@@ -78,36 +72,16 @@ describe("Topic01 legacy vitest exclusion cleanup contract", () => {
     ).toBe(true);
   });
 
-  it("db project 明确 include 正式路径（串行真实 MySQL），unit project 明确排除同一路径", () => {
-    // 按 project 块切分：db 块从 name:"db" 到 name:"unit"，unit 块到配置末尾。
-    const dbBlock = sliceBetween(config, `name:"db"`, `name:"unit"`);
-    const unitBlock = sliceBetween(config, `name:"unit"`, "");
-
-    expect(dbBlock, "vitest.config.ts 必须存在 db project 块").not.toBeNull();
-    expect(unitBlock, "vitest.config.ts 必须存在 unit project 块").not.toBeNull();
-    if (!dbBlock || !unitBlock) return;
-
-    // db 块：include 段必须包含正式路径；若存在 exclude 段则不得包含它。
-    const dbInclude = readArrayProperty(dbBlock, "include");
-    const dbExclude = readArrayProperty(dbBlock, "exclude");
-    expect(dbInclude, "db project 必须有 include 段").not.toBeNull();
-    expect(
-      dbInclude,
-      "db project 的 include 必须纳入正式 lib/capability/skill-studio-queries.test.ts（真实 MySQL 串行）",
-    ).toContain(CANONICAL_DB_TEST);
-    if (dbExclude !== null) {
-      expect(
-        dbExclude,
-        "db project 的 exclude 不得排除正式测试路径（必须真实串行运行）",
-      ).not.toContain(CANONICAL_DB_TEST);
-    }
-
-    // unit 块：exclude 段必须包含正式路径（避免在 unit 并发里重复 resetDatabase）。
-    const unitExclude = readArrayProperty(unitBlock, "exclude");
-    expect(unitExclude, "unit project 必须有 exclude 段").not.toBeNull();
-    expect(
-      unitExclude,
-      "unit project 的 exclude 必须排除正式 lib/capability/skill-studio-queries.test.ts（防重复运行）",
-    ).toContain(CANONICAL_DB_TEST);
+  it("机器清单把正式路径唯一归入串行真实 MySQL db project", () => {
+    expect(config).toContain("72-test-collection-audit.json");
+    const entries = audit.tests.filter((test) => test.file === CANONICAL_DB_TEST);
+    expect(entries).toEqual([
+      expect.objectContaining({
+        file: CANONICAL_DB_TEST,
+        group: "db",
+        needsDB: true,
+        serial: true,
+      }),
+    ]);
   });
 });

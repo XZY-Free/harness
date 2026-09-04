@@ -73,7 +73,8 @@ function build() {
     .sort();
   const tests = files.map((file) => {
     const source = readFileSync(resolve(ROOT, file), "utf8");
-    const needsDB = (file.startsWith("e2e/") && file.includes(".spec.")) || needsDatabase(file, source);
+    const needsDB =
+      (file.startsWith("e2e/") && file.includes(".spec.")) || needsDatabase(file, source);
     const group = groupFor(file, source, needsDB);
     return {
       file,
@@ -87,7 +88,9 @@ function build() {
       batchAcceptanceIds: ["topic01-final-acceptance"],
     };
   });
-  const counts = Object.fromEntries(GROUPS.map((group) => [group, tests.filter((test) => test.group === group).length]));
+  const counts = Object.fromEntries(
+    GROUPS.map((group) => [group, tests.filter((test) => test.group === group).length]),
+  );
   return {
     generatedAt: "2026-09-04",
     authority: "scripts/topic-01-test-collection-audit.mjs",
@@ -109,7 +112,8 @@ function stable(value) {
 function validate(audit) {
   const paths = audit.tests.map((test) => test.file);
   const duplicatePaths = paths.filter((path, index) => paths.indexOf(path) !== index);
-  if (duplicatePaths.length > 0) throw new Error(`测试重复收集：${[...new Set(duplicatePaths)].join(", ")}`);
+  if (duplicatePaths.length > 0)
+    throw new Error(`测试重复收集：${[...new Set(duplicatePaths)].join(", ")}`);
   for (const test of audit.tests) {
     if (!GROUPS.includes(test.group)) throw new Error(`${test.file} 分组非法：${test.group}`);
     if (

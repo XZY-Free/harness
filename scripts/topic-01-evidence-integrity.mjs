@@ -18,7 +18,7 @@ const required = [
   "71-final-schema-manifest.json",
   "72-test-collection-audit.json",
   "73-verification-plan.json",
-  "91-final-review-checklist.md"
+  "91-final-review-checklist.md",
 ];
 const base = "docs/implementation/topic-01-final-closure";
 const missing = required.filter((file) => !existsSync(`${base}/${file}`));

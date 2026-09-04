@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
-import collectionAudit from "./docs/implementation/topic-01-final-closure/72-test-collection-audit.json";
 import { defineConfig } from "vitest/config";
+import collectionAudit from "./docs/implementation/topic-01-final-closure/72-test-collection-audit.json";
 
 const alias = { "@": resolve(__dirname, ".") };
 type VitestGroup = "unit" | "db" | "integration" | "contract";
