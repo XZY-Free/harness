@@ -8,9 +8,9 @@
   },
   "counts": {
     "unit": 271,
-    "db": 107,
+    "db": 106,
     "integration": 9,
-    "contract": 22,
+    "contract": 23,
     "e2e-web": 3,
     "e2e-desktop": 1,
     "e2e-cross-client": 1
@@ -4518,10 +4518,10 @@
     },
     {
       "file": "scripts/topic-01-legacy-test-ownership.contract.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
