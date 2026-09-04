@@ -58,7 +58,7 @@ export async function coordinateAgentInputRequired(
         eq(agentCallEventIngressTable.callId, callId),
         eq(agentCallEventIngressTable.tenantId, tenantId),
         eq(agentCallEventIngressTable.candidateType, "call.input_required"),
-        eq(agentCallEventIngressTable.ingressState, "mapped"),
+        eq(agentCallEventIngressTable.ingressState, "applied"),
       ),
     )
     .orderBy(desc(agentCallEventIngressTable.producerSequence))

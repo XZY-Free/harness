@@ -6,7 +6,7 @@
  * 2. 严格区分同 canonical request replay 与同 key 语义冲突。
  * 3. 原子插入 AgentCall + AgentCallBinding + 初始 Attempt(1) + CapabilityUse。
  *
- * 状态转移（updateState）：CAS on versionNo，from/to 由 domain 状态机约束。
+ * AgentCall 状态转换只由 apply-agent-call-transition 持有，本 Store 不公开任意 updateState。
  */
 import {
   type AgentCall,
@@ -25,7 +25,6 @@ import {
 import type {
   AgentCallStore,
   StoreAgentCallInput,
-  UpdateAgentCallStateInput,
 } from "@/lib/agents/calls/persistence/agent-call-store";
 import { lockAndValidateAgentCallAuthority } from "@/lib/agents/calls/persistence/finalize-agent-call-authority";
 import { recordCapabilityUseInSession } from "@/lib/capability/capability-use-queries";
@@ -89,52 +88,6 @@ export function createMysqlAgentCallStore(
         }
         const call = await doCreate(tx, input, dependencies.recordCapabilityUse);
         return { call, binding: input.bindingCandidate, status: "created" };
-      }),
-
-    updateState: (input) =>
-      db.transaction(async (tx) => {
-        const [row] = await tx
-          .select()
-          .from(agentCallTable)
-          .where(
-            and(
-              eq(agentCallTable.id, input.callId),
-              eq(agentCallTable.tenantId, input.tenantId),
-              eq(agentCallTable.state, input.from),
-            ),
-          )
-          .limit(1)
-          .for("update");
-        if (!row) {
-          // from 不匹配 → 已发生并发转移或跨租户不可见。
-          throw new AgentCallStateConcurrencyError(input.callId, input.from);
-        }
-        if (isAgentCallTerminal(row.state)) {
-          throw new AgentCallStateConcurrencyError(input.callId, input.from);
-        }
-        const updated = {
-          state: input.to,
-          versionNo: row.versionNo + 1,
-          ...(input.lifecycle?.startedAt ? { startedAt: input.lifecycle.startedAt } : {}),
-          ...(input.lifecycle?.waitingAt ? { waitingAt: input.lifecycle.waitingAt } : {}),
-          ...(input.lifecycle?.finishedAt ? { finishedAt: input.lifecycle.finishedAt } : {}),
-          ...(input.agentSessionBindingId !== undefined
-            ? { agentSessionBindingId: input.agentSessionBindingId }
-            : {}),
-          ...(input.resultText !== undefined ? { resultText: input.resultText } : {}),
-          ...(input.resultJson !== undefined ? { resultJson: input.resultJson } : {}),
-          ...(input.resultDigest !== undefined ? { resultDigest: input.resultDigest } : {}),
-          ...(input.errorCode !== undefined ? { errorCode: input.errorCode } : {}),
-          ...(input.errorSummary !== undefined ? { errorSummary: input.errorSummary } : {}),
-        };
-        await tx.update(agentCallTable).set(updated).where(eq(agentCallTable.id, input.callId));
-        const [after] = await tx
-          .select()
-          .from(agentCallTable)
-          .where(eq(agentCallTable.id, input.callId))
-          .limit(1);
-        if (!after) throw new Error("AgentCall 状态转移后无法回读");
-        return toAgentCallWithSession(tx, after);
       }),
 
     getById: async ({ callId, tenantId }) => {
@@ -416,7 +369,8 @@ export function createMysqlAgentCallStore(
           return { status: "terminal", attempt, call } as const;
         }
 
-        // 赢得认领：唯一发 HTTP 者。requestDigest + running + outbound=1。
+        // 赢得认领：唯一发 HTTP 者。Attempt 进入 running；AgentCall 必须等待正式
+        // call.started 才能进入 running，禁止 claim 伪造远端 started 事实。
         await tx
           .update(agentCallAttemptTable)
           .set({
@@ -427,31 +381,18 @@ export function createMysqlAgentCallStore(
             updatedAt: now,
           })
           .where(eq(agentCallAttemptTable.id, attemptRow.id));
-        // call queued→running（含 startedAt）；若已是 running 则不动 versionNo。
-        const updatedCall = await doClaimCallRunning(tx, callRow, now);
-
         const [afterAttempt] = await tx
           .select()
           .from(agentCallAttemptTable)
           .where(eq(agentCallAttemptTable.id, attemptRow.id))
           .limit(1);
         if (!afterAttempt) throw new Error("AgentCallAttempt claim 后无法回读");
-        return { status: "owner", attempt: toAttempt(afterAttempt), call: updatedCall } as const;
+        return { status: "owner", attempt: toAttempt(afterAttempt), call } as const;
       }),
   };
 }
 
 export const mysqlAgentCallStore: AgentCallStore = createMysqlAgentCallStore();
-
-export class AgentCallStateConcurrencyError extends Error {
-  constructor(
-    public readonly callId: string,
-    public readonly expectedFrom: AgentCallState,
-  ) {
-    super(`AgentCall ${callId} 状态转移并发冲突（期望 from=${expectedFrom}）`);
-    this.name = "AgentCallStateConcurrencyError";
-  }
-}
 
 export class AgentCallIdempotencyConflictError extends Error {
   readonly code = "AGENT_CALL_IDEMPOTENCY_CONFLICT";
@@ -480,27 +421,6 @@ export class AgentCallAttemptConflictError extends Error {
 }
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/** claim owner 使 call 进入 running（queued→running CAS；已 running 则仅回读，不重复 bump versionNo）。 */
-async function doClaimCallRunning(
-  tx: Transaction,
-  callRow: typeof agentCallTable.$inferSelect,
-  now: Date,
-): Promise<AgentCall> {
-  if (callRow.state === "queued") {
-    await tx
-      .update(agentCallTable)
-      .set({ state: "running", startedAt: now, versionNo: callRow.versionNo + 1 })
-      .where(eq(agentCallTable.id, callRow.id));
-  }
-  const [after] = await tx
-    .select()
-    .from(agentCallTable)
-    .where(eq(agentCallTable.id, callRow.id))
-    .limit(1);
-  if (!after) throw new Error("AgentCall claim 后无法回读");
-  return toAgentCallWithSession(tx, after);
-}
 
 async function doCreate(
   tx: Transaction,

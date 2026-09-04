@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
 import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { computeAgentCallBindingHash } from "@/lib/agents/calls/domain/agent-call-binding";
 import {
-  AgentCallStateConcurrencyError,
   createMysqlAgentCallStore,
   mysqlAgentCallStore,
 } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
@@ -468,23 +468,34 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
 describe("AgentCall 后续状态与 Attempt", () => {
   it("状态 CAS、Attempt 幂等与 parent 隔离保持不变", async () => {
     const scenario = await seed();
-    const running = await mysqlAgentCallStore.updateState({
+    const running = await transitionAgentCall({
       callId: scenario.callId,
       tenantId: scenario.tenantId,
-      from: "queued",
-      to: "running",
+      input: "call.started",
+      authority: "agent_event",
+      event: {
+        producer_event_id: "store-test-started",
+        producer_sequence: 1,
+        type: "call.started",
+        payload: { task_id: "store-test-task", context_id: "store-test-context" },
+      },
       now: NOW,
     });
-    expect(running.state).toBe("running");
-    await expect(
-      mysqlAgentCallStore.updateState({
-        callId: scenario.callId,
-        tenantId: scenario.tenantId,
-        from: "queued",
-        to: "running",
-        now: NOW,
-      }),
-    ).rejects.toBeInstanceOf(AgentCallStateConcurrencyError);
+    expect(running.finalState).toBe("running");
+    const replay = await transitionAgentCall({
+      callId: scenario.callId,
+      tenantId: scenario.tenantId,
+      input: "call.started",
+      authority: "agent_event",
+      event: {
+        producer_event_id: "store-test-started",
+        producer_sequence: 1,
+        type: "call.started",
+        payload: { task_id: "store-test-task", context_id: "store-test-context" },
+      },
+      now: NOW,
+    });
+    expect(replay.outcome).toBe("applied");
     await mysqlAgentCallStore.finishAttempt({
       callId: scenario.callId,
       tenantId: scenario.tenantId,

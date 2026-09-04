@@ -8,11 +8,7 @@
  * - recordOutbound：记录一次 outbound（Attempt.dispatchAttemptCount++）。
  * - 查询按 tenantId 过滤（跨租户隔离）。
  */
-import type {
-  AgentCall,
-  AgentCallSourceType,
-  AgentCallState,
-} from "@/lib/agents/calls/domain/agent-call";
+import type { AgentCall, AgentCallSourceType } from "@/lib/agents/calls/domain/agent-call";
 import type { AgentCallAttempt } from "@/lib/agents/calls/domain/agent-call-attempt";
 import type { AgentCallTransportChannel } from "@/lib/agents/calls/domain/agent-call-attempt";
 import type {
@@ -36,22 +32,6 @@ export interface StoreAgentCallInput {
   createdAt: Date;
 }
 
-export interface UpdateAgentCallStateInput {
-  callId: string;
-  tenantId: string;
-  from: AgentCallState;
-  to: AgentCallState;
-  now: Date;
-  /** 进入终态时填 finishedAt；waiting_user 填 waitingAt；running 填 startedAt。 */
-  lifecycle?: Partial<Pick<AgentCall, "startedAt" | "waitingAt" | "finishedAt">>;
-  agentSessionBindingId?: string | null;
-  resultText?: string | null;
-  resultJson?: unknown;
-  resultDigest?: string | null;
-  errorCode?: string | null;
-  errorSummary?: string | null;
-}
-
 /**
  * 当前 Attempt claim 结果。
  * - owner：本调用赢得认领（唯一会 record outbound / 发 HTTP 的调用方）。
@@ -72,8 +52,6 @@ export interface AgentCallStore {
     binding: AgentCallBindingConfigInput;
     status: "created" | "replayed";
   }>;
-  /** 原子状态转移（CAS on versionNo）。非法转移由 domain 层校验后调用。 */
-  updateState(input: UpdateAgentCallStateInput): Promise<AgentCall>;
   getById(params: { callId: string; tenantId: string }): Promise<AgentCall | null>;
   getByLogicalCallKey(params: {
     parentInvocationId: string;
@@ -129,7 +107,7 @@ export interface AgentCallStore {
    * 原子认领当前唯一活动 Attempt；禁止默认读取 Attempt 1。
    *
    * 语义：requestDigest IS NULL → owner（唯一发 HTTP 者，dispatchAttemptCount 置 1，
-   * attempt 转 running，call queued→running）；requestDigest 已存在 → 同 digest=idempotent、
+   * attempt 转 running，AgentCall 仍等待正式 call.started）；requestDigest 已存在 → 同 digest=idempotent、
    * 异 digest=conflict；call/attempt 已终态 → terminal。跨并发 start 用行锁串行化。
    */
   claimCurrentAttempt(params: {

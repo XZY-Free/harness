@@ -53,21 +53,19 @@ export type AgentCallSourceType = (typeof AGENT_CALL_SOURCE_TYPES)[number];
  * 合法状态转移：
  * - queued → running：开始执行。
  * - running → waiting_user：远端 input-required，等待用户。
- * - waiting_user → running：用户补充后 resume。
- * - running / waiting_user → completed：成功完成。
- * - running / waiting_user → failed：失败。
- * - queued / running / waiting_user → cancelled：取消。
- * - running / waiting_user → lost：心跳/事件超时。
+ * - waiting_user → running：正式用户回答被远端接受后 resume。
+ * - running → completed / failed / cancelled。
+ * - waiting_user → cancelled。
  *
  * 禁止：
  * - 任何终态再转移。
  * - queued 直接 → completed/failed（必须先 running，防止未调用就声称完成）。
- * - waiting_user 直接 → failed/lost 之外不经 running。
+ * - waiting_user 除正式恢复和取消外，不得直接进入其它状态。
  */
 export const AGENT_CALL_TRANSITIONS: Readonly<Record<AgentCallState, readonly AgentCallState[]>> = {
-  queued: ["running", "cancelled"],
-  running: ["waiting_user", "completed", "failed", "cancelled", "lost"],
-  waiting_user: ["running", "completed", "failed", "cancelled", "lost"],
+  queued: ["running"],
+  running: ["waiting_user", "completed", "failed", "cancelled"],
+  waiting_user: ["running", "cancelled"],
   completed: [],
   failed: [],
   cancelled: [],

@@ -64,6 +64,7 @@ describe("ControlPlaneEvent Envelope", () => {
       "route_set.activated",
       "policy.revision.published",
       "policy.revision.withdrawn",
+      "agent_call.continuation.requested",
     ];
     for (const t of knownTypes) {
       expect(EVENT_PAYLOAD_SCHEMAS[t]).toBeDefined();
@@ -88,6 +89,7 @@ describe("ControlPlaneEvent Envelope", () => {
       "route_set.activated",
       "policy.revision.published",
       "policy.revision.withdrawn",
+      "agent_call.continuation.requested",
     ];
     for (const t of knownTypes) {
       expect(EVENT_AGGREGATE_TYPES[t]).toBeDefined();

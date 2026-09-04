@@ -22,6 +22,11 @@ export interface RegisteredConsumer {
  */
 export const CONTROL_PLANE_CONSUMERS: RegisteredConsumer[] = [
   {
+    name: "invocation_continuation",
+    subscribedEventTypes: ["agent_call.continuation.requested"],
+    maxAttempts: 10,
+  },
+  {
     name: "route_projection",
     subscribedEventTypes: [
       "route.activated",

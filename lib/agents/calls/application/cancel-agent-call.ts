@@ -16,9 +16,8 @@
  */
 import { agentCallStore } from "@/lib/agents/calls/application/agent-call-events-common";
 import { synthesizeAgentCallTerminalEvent } from "@/lib/agents/calls/application/agent-call-events-common";
+import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
 import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
-import { assertAgentCallTransition } from "@/lib/agents/calls/domain/agent-call";
-import { AgentCallStateConcurrencyError } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
   createAgentCallTransport,
   loadAgentCallContract,
@@ -139,24 +138,25 @@ export async function cancelAgentCall(
     return { call: afterTransport, remoteCancellation: "already_terminal" };
   }
 
-  // 9. 无回传事件的协议 ack：由 cancel 应用 Authority 转为 cancelled。
-  assertAgentCallTransition(callId, afterTransport.state, "cancelled");
-  try {
-    await agentCallStore.updateState({
-      callId,
-      tenantId,
-      from: afterTransport.state,
-      to: "cancelled",
-      now: new Date(),
-      lifecycle: { finishedAt: new Date() },
-    });
-  } catch (error) {
-    if (!(error instanceof AgentCallStateConcurrencyError)) throw error;
+  // 9. 无回传事件的协议 ack：仍通过唯一转换入口，由本地取消权威推进并原子产出 Continuation。
+  const transition = await transitionAgentCall({
+    callId,
+    tenantId,
+    input: "call.cancelled",
+    authority: "local_cancel",
+  });
+  if (transition.outcome === "rejected") {
     const raced = await agentCallStore.getById({ callId, tenantId });
-    if (raced?.state === "cancelled") {
-      return { call: raced, remoteCancellation: "cancelled" };
+    if (raced && isTerminal(raced.state)) {
+      return {
+        call: raced,
+        remoteCancellation: raced.state === "cancelled" ? "cancelled" : "already_terminal",
+      };
     }
-    throw error;
+    throw new AgentCallCancelError(
+      `AgentCall 取消转换被拒绝：${transition.reasonCode ?? "unknown"}`,
+      "state_invalid",
+    );
   }
 
   const updated = await agentCallStore.getById({ callId, tenantId });

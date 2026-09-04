@@ -134,6 +134,13 @@ export const PolicyRevisionWithdrawnPayload = z.object({
   reason: z.string(),
 });
 
+export const AgentCallContinuationRequestedPayload = z.object({
+  parent_invocation_id: id,
+  agent_call_id: id,
+  source_version: z.number().int().positive(),
+  kind: z.enum(["coordinate_user_input", "resume_parent", "resume_agent_or_parent"]),
+});
+
 // ─── 事件类型 → Payload Schema 映射 ─────────────────────────
 
 /**
@@ -158,6 +165,7 @@ export const EVENT_PAYLOAD_SCHEMAS: Record<ControlPlaneEventType, z.ZodType> = {
   "route_set.activated": RouteSetActivatedPayload,
   "policy.revision.published": PolicyRevisionPublishedPayload,
   "policy.revision.withdrawn": PolicyRevisionWithdrawnPayload,
+  "agent_call.continuation.requested": AgentCallContinuationRequestedPayload,
 };
 
 // ─── 事件类型 → 聚合根类型 映射 ──────────────────────────────
@@ -182,6 +190,7 @@ export const EVENT_AGGREGATE_TYPES: Record<ControlPlaneEventType, string> = {
   "route_set.activated": "route_set",
   "policy.revision.published": "policy_revision",
   "policy.revision.withdrawn": "policy_revision",
+  "agent_call.continuation.requested": "agent_call",
 };
 
 // ─── Payload 验证 ─────────────────────────────────────────────

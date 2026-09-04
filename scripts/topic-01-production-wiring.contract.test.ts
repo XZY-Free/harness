@@ -50,4 +50,17 @@ describe("Topic 01 production wiring", () => {
       'executionSubjectFromServiceIdentity(principal.tenantId, "gateway")',
     );
   });
+
+  it("AgentCall ingress、取消与用户恢复共用唯一状态转换入口", () => {
+    const ingress = source("lib/agents/calls/application/ingest-agent-call-events.ts");
+    const transition = source("lib/agents/calls/persistence/apply-agent-call-transition.ts");
+    const cancel = source("lib/agents/calls/application/cancel-agent-call.ts");
+    const resume = source("lib/agents/calls/application/resume-agent-call.ts");
+    expect(ingress).toContain("applyAgentCallEvent");
+    expect(cancel).toContain("transitionAgentCall");
+    expect(resume).toContain("transitionAgentCall");
+    expect(transition).toContain("controlPlaneOutboxEvent");
+    expect(transition).toContain("beforeVersionNo");
+    expect(transition).toContain("afterVersionNo");
+  });
 });

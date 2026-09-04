@@ -4,7 +4,7 @@
  * 职责：对 Agent transport 回传的事件做幂等接收与归一化，防止重复处理。
  *
  * 幂等键：
- * - UNIQUE(callId, producerEventId)：Agent 稳定事件 id 唯一。
+ * - UNIQUE(tenantId, producerSource, producerEventId)：Agent 稳定事件 id 唯一。
  * - UNIQUE(callId, producerSequence)：Agent 连续序号唯一。
  * - 相同 producerEventId/producerSequence 但 payloadHash 不同 → 直接拒绝（hash 冲突）。
  *
@@ -13,7 +13,12 @@
  *   AgentCall event → 直接写顶层 Invocation/Turn 终态。
  */
 
-export const AGENT_CALL_EVENT_INGRESS_STATES = ["accepted", "mapped", "rejected"] as const;
+export const AGENT_CALL_EVENT_INGRESS_STATES = [
+  "applied",
+  "idempotent",
+  "rejected",
+  "failed_retryable",
+] as const;
 export type AgentCallEventIngressState = (typeof AGENT_CALL_EVENT_INGRESS_STATES)[number];
 
 /**
@@ -39,6 +44,7 @@ export interface AgentCallEventIngress {
   id: string;
   callId: string;
   tenantId: string;
+  producerSource: string;
   /** Agent 稳定事件 id（幂等键 1）。 */
   producerEventId: string;
   /** Agent 连续序号（幂等键 2，整个 AgentCall 内连续）。 */
@@ -51,6 +57,8 @@ export interface AgentCallEventIngress {
   payloadJson: unknown;
   ingressState: AgentCallEventIngressState;
   receivedAt: Date;
-  mappedAt: Date | null;
-  rejectedReason: string | null;
+  reasonCode: string | null;
+  beforeVersionNo: number;
+  afterVersionNo: number;
+  processedAt: Date;
 }

@@ -70,7 +70,9 @@ export type ControlPlaneEventType =
   | "route_set.activated"
   // Policy
   | "policy.revision.published"
-  | "policy.revision.withdrawn";
+  | "policy.revision.withdrawn"
+  // AgentCall continuation
+  | "agent_call.continuation.requested";
 
 /** 聚合根类型。 */
 export type AggregateType =
@@ -82,7 +84,8 @@ export type AggregateType =
   | "artifact_attestation"
   | "deployment_route"
   | "route_set"
-  | "policy_revision";
+  | "policy_revision"
+  | "agent_call";
 
 /** 当前冻结的 Schema 版本。 */
 export const EVENT_SCHEMA_VERSION = "1.0" as const;

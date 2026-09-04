@@ -8,17 +8,18 @@
  *   绝不触碰 parent Invocation / RuntimeSessionBinding / RuntimeEventIngress。
  * - 原子 current Attempt claim：同 call+同 input 并发只有一个 owner 会 record outbound/发 HTTP；
  *   其它 waiter 返回同一 durable AgentCall。不同 input 在 claim 已存在时稳定冲突。
- * - 初始 endpoint/auth/503/protocol 错误在 claim 后归一化为子域 call.failed/call.lost 终态。
+ * - started 前的 endpoint/auth/503/protocol 错误只结束当前 Attempt，不伪造 queued→failed；
+ *   后续由恢复 Worker 判断是否创建新 Attempt。
  * - 不实现 resume/cancel。
  */
 import { createHash } from "node:crypto";
+import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
 import { type AgentCall, isAgentCallTerminal } from "@/lib/agents/calls/domain/agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
 import {
   type AgentBackgroundFailureHandler,
-  type AgentCallCandidateEvent,
   type AgentCallEventSink,
   type AgentCallTransportAuth,
   AgentTransportError,
@@ -33,10 +34,7 @@ import {
   buildInvocationContextBundle,
 } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import { externalAgentContextPolicyFilter } from "@/lib/context/enrichment/external-agent-context-policy";
-import { db } from "@/lib/db/client";
 import { resolveOutboundCredential } from "@/lib/identity/resolve-outbound-credential";
-import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
-import { and, eq, max } from "drizzle-orm";
 
 /** startAgentCall 冻结 API 入参。 */
 export interface StartAgentCallCommand {
@@ -147,21 +145,7 @@ function computeRequestDigest(callId: string, tenantId: string, input: string): 
   return canonicalSha256({ callId, tenantId, input: input.trim() });
 }
 
-/** 该 call durable ingress 的 max producer_sequence + 1（避免序列冲突）。 */
-async function nextProducerSequence(callId: string, tenantId: string): Promise<number> {
-  const [row] = await db
-    .select({ m: max(agentCallEventIngressTable.producerSequence) })
-    .from(agentCallEventIngressTable)
-    .where(
-      and(
-        eq(agentCallEventIngressTable.callId, callId),
-        eq(agentCallEventIngressTable.tenantId, tenantId),
-      ),
-    );
-  return Number(row?.m ?? 0) + 1;
-}
-
-/** 合成子域终态事件（call.failed / call.lost）并经 ingress 原子落库。 */
+/** 本地 transport failure 仍经唯一转换入口，不伪造成供应方 ingress 事件。 */
 async function synthesizeTerminalEvent(
   callId: string,
   tenantId: string,
@@ -169,15 +153,14 @@ async function synthesizeTerminalEvent(
   code: string,
   summary: string,
 ): Promise<void> {
-  const sequence = await nextProducerSequence(callId, tenantId);
-  const event: AgentCallCandidateEvent = {
-    producer_event_id: `a2a:${callId}:${type}:${sequence}`,
-    producer_sequence: sequence,
-    schema_version: 1,
-    type,
-    payload: { source: "a2a", error: { code, message: summary } },
-  };
-  await ingestAgentCallEvents({ tenantId, callId, events: [event] });
+  await transitionAgentCall({
+    tenantId,
+    callId,
+    input: type,
+    authority: "local_failure",
+    errorCode: code,
+    errorSummary: summary,
+  });
 }
 
 /** 从 binding 冻结 snapshot 读取调用上下文合同。 */

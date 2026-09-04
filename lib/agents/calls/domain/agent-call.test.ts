@@ -43,9 +43,9 @@ describe("AgentCall 状态机", () => {
     assertAgentCallTransition("c1", "running", "waiting_user");
     assertAgentCallTransition("c1", "waiting_user", "running");
     assertAgentCallTransition("c1", "running", "completed");
-    assertAgentCallTransition("c1", "waiting_user", "failed");
-    assertAgentCallTransition("c1", "queued", "cancelled");
-    assertAgentCallTransition("c1", "running", "lost");
+    assertAgentCallTransition("c1", "running", "failed");
+    assertAgentCallTransition("c1", "running", "cancelled");
+    assertAgentCallTransition("c1", "waiting_user", "cancelled");
   });
 
   it("终态不可再转移", () => {
@@ -71,8 +71,10 @@ describe("AgentCall 状态机", () => {
     );
   });
 
-  it("waiting_user → completed 合法（用户补充后可直接完成）", () => {
-    expect(() => assertAgentCallTransition("c1", "waiting_user", "completed")).not.toThrow();
+  it("waiting_user 必须先由正式用户回答恢复，不能直接完成", () => {
+    expect(() => assertAgentCallTransition("c1", "waiting_user", "completed")).toThrow(
+      AgentCallStateTransitionError,
+    );
   });
 
   it("queued → lost 非法（未运行不可 lost）", () => {

@@ -1,41 +1,47 @@
 import {
   type IngestAgentCallEventsInput,
   type IngestAgentCallEventsResult,
-  applyAgentCallEvents,
+  applyAgentCallEvent,
 } from "@/lib/agents/calls/persistence/apply-agent-call-events";
 /**
  * ingestAgentCallEvents — AgentCallEventIngress 原子应用服务。
  *
- * 包装 applyAgentCallEvents：一个 caller-owned MySQL 事务内原子应用整批 Agent
- * transport 候选事件到 AgentCall 子生命周期。
- *
- * applyAgentCallEvents 事务绝不触碰 Parent；事务提交后，只有 input-required 由显式
- * 应用协调器经 RuntimeEventIngress 创建 UAR 并推进 Parent/Turn waiting_user。
- * A2A mapper 仍无 Parent 生命周期写权限。
+ * 批次仅作传输优化；每个候选事件独立开启事务并重新读取 AgentCall version。
+ * 状态、Ingress 结果和 Continuation producer 在单事件事务中提交，不在这里同步执行父 Loop。
  */
 import { db } from "@/lib/db/client";
-import { logger } from "@/lib/logger";
-import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 
 export type { IngestAgentCallEventsInput, IngestAgentCallEventsResult };
 
 export async function ingestAgentCallEvents(
   input: IngestAgentCallEventsInput,
 ): Promise<IngestAgentCallEventsResult> {
-  const result = await db.transaction(async (tx) => {
-    return applyAgentCallEvents(tx, input);
-  });
-  if (result.finalState === "waiting_user") {
-    try {
-      await coordinateAgentInputRequired(input.tenantId, input.callId);
-    } catch (error) {
-      // child waiting_user 已 durable 提交，不能因 Parent 协调暂时失败伪造 child failed。
-      // Harness recovery 重放同一 AgentCall 时会再次执行幂等协调。
-      logger.warn("Agent input-required Parent 协调暂时失败，等待 Harness recovery", {
-        callId: input.callId,
-        error: error instanceof Error ? error.message : "unknown",
-      });
-    }
+  const results = [];
+  for (const event of input.events) {
+    results.push(
+      await db.transaction((tx) =>
+        applyAgentCallEvent(tx, {
+          tenantId: input.tenantId,
+          callId: input.callId,
+          event,
+        }),
+      ),
+    );
   }
-  return result;
+  const last = results.at(-1);
+  if (!last) throw new Error("AgentCall ingress 批次不得为空");
+  const applied = results.filter((result) => result.outcome === "applied").length;
+  const idempotent = results.filter((result) => result.outcome === "idempotent").length;
+  const rejected = results.filter((result) => result.outcome === "rejected").length;
+  const failedRetryable = results.filter((result) => result.outcome === "failed_retryable").length;
+  return {
+    applied,
+    idempotent,
+    rejected,
+    failedRetryable,
+    accepted: applied,
+    duplicate: idempotent,
+    finalState: last.finalState,
+    results,
+  };
 }

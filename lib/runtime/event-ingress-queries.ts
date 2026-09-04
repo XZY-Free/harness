@@ -875,7 +875,7 @@ async function mapUserActionRequested(
           eq(agentCallEventIngressTable.callId, payload.agent_call_id),
           eq(agentCallEventIngressTable.tenantId, ctx.tenantId),
           eq(agentCallEventIngressTable.candidateType, "call.input_required"),
-          eq(agentCallEventIngressTable.ingressState, "mapped"),
+          eq(agentCallEventIngressTable.ingressState, "applied"),
         ),
       )
       .limit(1);

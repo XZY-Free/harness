@@ -19,7 +19,8 @@
  * - AgentCallBinding 只有 create，没有 update（证据不可变）。
  * - AgentCallAttempt UNIQUE(callId, attemptNo)。
  * - AgentSessionBinding UNIQUE(tenantId, externalContextRef)。
- * - AgentCallEventIngress UNIQUE(callId, producerEventId) / UNIQUE(callId, producerSequence)。
+ * - AgentCallEventIngress UNIQUE(tenantId, producerSource, producerEventId) /
+ *   UNIQUE(callId, producerSequence)。
  */
 import { randomUUID } from "node:crypto";
 import { invocationTable } from "@/lib/persistence/schema/executions";
@@ -331,11 +332,17 @@ export type NewAgentSessionBinding = InferInsertModel<typeof agentSessionBinding
 
 /**
  * AgentCallEventIngress 状态。
- * - accepted：候选事件已接收，尚未归一化到 AgentCall state。
- * - mapped：已归一化到 AgentCall state。
- * - rejected：因 hash 冲突等不可修复原因被拒绝。
+ * - applied：引起合法状态或映射变化。
+ * - idempotent：事实一致且没有新变化。
+ * - rejected：违反状态、映射、身份或协议规则。
+ * - failed_retryable：事务外临时依赖失败，等待可靠接入重试。
  */
-export const AGENT_CALL_EVENT_INGRESS_STATES = ["accepted", "mapped", "rejected"] as const;
+export const AGENT_CALL_EVENT_INGRESS_STATES = [
+  "applied",
+  "idempotent",
+  "rejected",
+  "failed_retryable",
+] as const;
 export type AgentCallEventIngressState = (typeof AGENT_CALL_EVENT_INGRESS_STATES)[number];
 
 // ─── AgentCall Candidate Event Type ───────────────────────
@@ -365,7 +372,7 @@ export type AgentCallCandidateEventType = (typeof AGENT_CALL_CANDIDATE_EVENT_TYP
  * AgentCallEventIngress 表：AgentCall 回传候选事件的持久批次账本。
  *
  * 关键约束：
- * - UNIQUE(callId, producerEventId)：Agent 稳定事件 id 唯一（幂等键 1）。
+ * - UNIQUE(tenantId, producerSource, producerEventId)：供应方事件 id 唯一（幂等键 1）。
  * - UNIQUE(callId, producerSequence)：Agent 连续序号唯一（幂等键 2）。
  * - 相同 producerEventId/producerSequence 但 payloadHash 不同 → 直接拒绝（hash 冲突）。
  * - AgentCall 事件归一化到 AgentCall state，由 Harness Loop 决定顶层 Invocation 走向。
@@ -381,6 +388,8 @@ export const agentCallEventIngressTable = mysqlTable(
       .notNull()
       .references(() => agentCallTable.id),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
+    /** 供应方身份范围：stable Agent + 协议。 */
+    producerSource: varchar("producerSource", { length: 192 }).notNull(),
     /** Agent 稳定事件 id（幂等键 1）。 */
     producerEventId: varchar("producerEventId", { length: 128 }).notNull(),
     /** Agent 连续序号（幂等键 2，整个 AgentCall 内连续）。 */
@@ -391,18 +400,20 @@ export const agentCallEventIngressTable = mysqlTable(
     payloadHash: varchar("payloadHash", { length: 128 }).notNull(),
     /** 短期保存原候选负载，或对象引用；可为 null 用于诊断采样。 */
     payloadJson: json("payloadJson"),
-    ingressState: mysqlEnum("ingressState", AGENT_CALL_EVENT_INGRESS_STATES)
-      .notNull()
-      .default("accepted"),
+    ingressState: mysqlEnum("ingressState", AGENT_CALL_EVENT_INGRESS_STATES).notNull(),
     receivedAt: datetime("receivedAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),
-    mappedAt: datetime("mappedAt", { mode: "date", fsp: 3 }),
-    rejectedReason: varchar("rejectedReason", { length: 256 }),
+    /** 稳定、可查询的处理原因码；不保存供应方原始异常文本。 */
+    reasonCode: varchar("reasonCode", { length: 128 }),
+    beforeVersionNo: bigint("beforeVersionNo", { mode: "number" }).notNull(),
+    afterVersionNo: bigint("afterVersionNo", { mode: "number" }).notNull(),
+    processedAt: datetime("processedAt", { mode: "date", fsp: 3 }).notNull(),
   },
   (t) => ({
-    callProducerEventUq: uniqueIndex("AgentCallEventIngress_call_producer_event_uq").on(
-      t.callId,
+    producerEventUq: uniqueIndex("AgentCallEventIngress_producer_event_uq").on(
+      t.tenantId,
+      t.producerSource,
       t.producerEventId,
     ),
     callProducerSeqUq: uniqueIndex("AgentCallEventIngress_call_producer_seq_uq").on(

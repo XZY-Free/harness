@@ -22,6 +22,7 @@ import {
   nextAgentCallProducerSequence,
   synthesizeAgentCallTerminalEvent,
 } from "@/lib/agents/calls/application/agent-call-events-common";
+import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
 import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
 import {
@@ -133,7 +134,13 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
   const auth = await resolveAgentCallOutboundAuth(tenantId, binding);
 
   // 7. 构造 transport（事件只走 AgentCallEventIngress；background 只合成子域 lost）。
+  let responseAccepted = false;
+  const bufferedEvents: Parameters<AgentCallEventSink>[0][] = [];
   const eventSink: AgentCallEventSink = async (batch) => {
+    if (!responseAccepted) {
+      bufferedEvents.push(batch);
+      return;
+    }
     await ingestAgentCallEvents({ tenantId, callId, events: batch.events });
   };
   const onBackgroundFailure: AgentBackgroundFailureHandler = async (report) => {
@@ -177,8 +184,25 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
     throw err;
   }
 
-  // 9. 状态由 AgentCallEventIngress（transport.resumeCall 内部 eventSink）驱动
-  //    （waiting_user → running/completed），本服务不手动改终态（与 startAgentCall 一致）。
+  // 9. 只有远端接受用户回答后，正式命令才可 waiting_user → running。
+  const transition = await transitionAgentCall({
+    tenantId,
+    callId,
+    input: "user_response_accepted",
+    authority: "user_response",
+  });
+  if (transition.outcome === "rejected") {
+    throw new AgentCallResumeError(
+      `AgentCall resume 转换被拒绝：${transition.reasonCode ?? "unknown"}`,
+      "state_invalid",
+    );
+  }
+  responseAccepted = true;
+  for (const batch of bufferedEvents) {
+    await ingestAgentCallEvents({ tenantId, callId, events: batch.events });
+  }
+
+  // 10. 远端后续事件继续逐条进入 AgentCallEventIngress。
   const updated = await agentCallStore.getById({ callId, tenantId });
   if (!updated) throw new AgentCallResumeError("AgentCall 读取失败", "call_not_found");
   return updated;
