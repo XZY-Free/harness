@@ -6,7 +6,7 @@ export interface ResumeAgentCallFromUserActionParams {
   tenantId: string;
   request: UserActionRequest;
   responseRedactedJson: unknown;
-  executionSubject: ExecutionSubject | null;
+  executionSubject: ExecutionSubject;
 }
 
 /** UserAction resolve 后恢复其冻结的 AgentCall；缺少正式关联时视为普通 Runtime UAR。 */

@@ -42,6 +42,12 @@ const action = {
   },
 };
 
+const executionSubject = {
+  tenantId: "tenant-1",
+  subjectType: "user" as const,
+  subjectId: "employee-42",
+};
+
 describe("production tool.call executor", () => {
   it("使用稳定逻辑幂等键调用 ToolCall 应用服务，并把 pending 交回 Harness", async () => {
     const executeToolCall = vi.fn(async () => ({
@@ -53,6 +59,7 @@ describe("production tool.call executor", () => {
     }));
     const executor = createToolActionExecutor({
       tenantId: "tenant-1",
+      executionSubject,
       capabilityCatalog: catalog,
       executeToolCall,
     });
@@ -71,6 +78,7 @@ describe("production tool.call executor", () => {
     });
     expect(executeToolCall).toHaveBeenCalledWith(
       expect.objectContaining({
+        executionSubject,
         operationId: "inv-tool:action-9:tool-mail:send-email",
         toolSchemaRevisionId: "schema-7",
         schemaHash: `sha256:${"7".repeat(64)}`,
@@ -81,6 +89,7 @@ describe("production tool.call executor", () => {
   it("把成功和失败结果转换为结构化 Observation，不结束父 Invocation", async () => {
     const success = createToolActionExecutor({
       tenantId: "tenant-1",
+      executionSubject,
       capabilityCatalog: catalog,
       executeToolCall: async () => ({
         toolCallId: "call-success",
@@ -92,6 +101,7 @@ describe("production tool.call executor", () => {
     });
     const failure = createToolActionExecutor({
       tenantId: "tenant-1",
+      executionSubject,
       capabilityCatalog: catalog,
       executeToolCall: async () => ({
         toolCallId: "call-failed",
@@ -103,6 +113,7 @@ describe("production tool.call executor", () => {
     });
     const context = {
       tenantId: "tenant-1",
+      executionSubject,
       invocationId: "inv-tool",
       threadId: "thread-1",
       turnId: "turn-1",
@@ -125,6 +136,7 @@ describe("production tool.call executor", () => {
     requiringConfirmation.tools[0]!.confirmation = "required";
     const executor = createToolActionExecutor({
       tenantId: "tenant-1",
+      executionSubject,
       capabilityCatalog: requiringConfirmation,
       executeToolCall,
     });

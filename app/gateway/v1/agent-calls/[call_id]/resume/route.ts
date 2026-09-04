@@ -21,6 +21,7 @@ import {
   AgentCallResumeError,
   resumeAgentCall,
 } from "@/lib/agents/calls/application/resume-agent-call";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
@@ -34,7 +35,10 @@ import {
   getRequestId,
   resourceNotFound,
 } from "@/lib/http";
-import { executionSubjectFromServiceIdentity } from "@/lib/runtime/transport/execution-subject";
+import {
+  type ExecutionSubject,
+  recoverTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +88,21 @@ export async function POST(request: Request): Promise<Response> {
     return gatewaySchemaInvalidTable(requestId, "请求体非法：text 必填非空");
   }
 
+  const binding = await getExecutionBindingByInvocation(claims.tenantId, claims.invocationId);
+  if (!binding) {
+    return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "ExecutionBinding 不存在", {
+      requestId,
+    });
+  }
+  let executionSubject: ExecutionSubject;
+  try {
+    executionSubject = recoverTrustedExecutionSubject(binding, claims.tenantId);
+  } catch {
+    return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "可信执行主体不可恢复", {
+      requestId,
+    });
+  }
+
   // 4. resume（复用 SAME AgentCall / context）。
   try {
     const updated = await resumeAgentCall({
@@ -92,7 +111,7 @@ export async function POST(request: Request): Promise<Response> {
       text: body.text,
       contextEnvironment: {
         tenantId: claims.tenantId,
-        executionSubject: executionSubjectFromServiceIdentity(claims.tenantId, "gateway"),
+        executionSubject,
         now: new Date(),
         timezone: "Asia/Shanghai",
         locale: "zh-CN",

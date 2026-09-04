@@ -1,17 +1,19 @@
 import { createHash } from "node:crypto";
 import {
-  executeHarnessToolCall,
   type ExecuteHarnessToolCallInput,
   type HarnessToolCallResult,
+  executeHarnessToolCall,
 } from "@/lib/capability/application/execute-harness-tool-call";
-import type { HarnessActionExecutors } from "./loop";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import {
   type CapabilityCatalogSnapshot,
   validateHarnessActionAgainstCatalog,
 } from "./capability-catalog";
+import type { HarnessActionExecutors } from "./loop";
 
 export function createToolActionExecutor(params: {
   tenantId: string;
+  executionSubject: ExecutionSubject;
   capabilityCatalog: CapabilityCatalogSnapshot;
   executeToolCall?: (input: ExecuteHarnessToolCallInput) => Promise<HarnessToolCallResult>;
 }): NonNullable<HarnessActionExecutors["tool.call"]> {
@@ -19,6 +21,12 @@ export function createToolActionExecutor(params: {
   return async (action, context) => {
     if (context.tenantId !== params.tenantId) {
       throw new Error("TOOL_ACTION_TENANT_MISMATCH");
+    }
+    if (
+      params.executionSubject.tenantId !== params.tenantId ||
+      !params.executionSubject.subjectId
+    ) {
+      throw new Error("TOOL_ACTION_SUBJECT_INVALID");
     }
     const { tool } = validateHarnessActionAgainstCatalog(action, params.capabilityCatalog);
     if (!tool) throw new Error("TOOL_ACTION_NOT_ALLOWED");
@@ -50,13 +58,19 @@ export function createToolActionExecutor(params: {
     }
     const result = await executeToolCall({
       tenantId: params.tenantId,
+      executionSubject: params.executionSubject,
       invocationId: context.invocationId,
       threadId: context.threadId,
       turnId: context.turnId,
       toolId: tool.toolId,
       toolSchemaRevisionId: tool.schemaRevisionId,
       schemaHash: tool.schemaHash,
-      operationId: logicalOperationId(context.invocationId, action.actionId, tool.toolId, tool.operationId),
+      operationId: logicalOperationId(
+        context.invocationId,
+        action.actionId,
+        tool.toolId,
+        tool.operationId,
+      ),
       arguments: action.payload.arguments,
     });
     const authorityRef = `tool-call:${result.toolCallId}`;
@@ -82,7 +96,7 @@ export function createToolActionExecutor(params: {
         summary:
           result.state === "succeeded"
             ? `${tool.displayName} 执行完成`
-            : result.errorSummary ?? `${tool.displayName} 执行未成功`,
+            : (result.errorSummary ?? `${tool.displayName} 执行未成功`),
         sourceRefs: [authorityRef],
         data: {
           state: result.state,

@@ -33,7 +33,6 @@ import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
-import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import { ExecutionBindingAlreadyExistsError as StableExecutionBindingAlreadyExistsError } from "@/lib/executions/domain/execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
@@ -43,6 +42,7 @@ import {
   computeBindingConfigHash,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
@@ -881,6 +881,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       routeResolver,
     });
 
@@ -903,6 +904,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
 
     expect(result.dispatched).toBe(true);
@@ -956,6 +958,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       routeResolver: async (command) => {
         const outcome = await realResolver(command);
         if (outcome.status !== "resolved") return outcome;
@@ -997,6 +1000,7 @@ describe("Dispatcher 调度", () => {
       dispatchInvocationForTurn({
         tenantId: ctx.tenantId,
         turnId: ctx.turnId,
+        executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
         routeResolver: async () => staleOutcome,
       }),
     ).rejects.toThrow(/ExecutionBinding.*控制面证据/);
@@ -1094,6 +1098,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
     const invocationId = result.invocation?.id;
     if (!invocationId || !result.binding) throw new Error("测试 Binding 未创建");
@@ -1150,6 +1155,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId,
       turnId: turn.id,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
     });
 
     expect(result.dispatched).toBe(false);
@@ -1166,6 +1172,7 @@ describe("Dispatcher 调度", () => {
     await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
 
     // 再次调度（Turn 已是 queued）
@@ -1173,6 +1180,7 @@ describe("Dispatcher 调度", () => {
       dispatchInvocationForTurn({
         tenantId: ctx.tenantId,
         turnId: ctx.turnId,
+        executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       }),
     ).rejects.toThrow(DispatchTurnStateError);
   });
@@ -1184,6 +1192,7 @@ describe("Dispatcher 调度", () => {
       dispatchInvocationForTurn({
         tenantId: ctx.tenantId,
         turnId: "nonexistent-turn-id",
+        executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       }),
     ).rejects.toThrow(DispatchTurnStateError);
   });
@@ -1195,6 +1204,11 @@ describe("Dispatcher 调度", () => {
       dispatchInvocationForTurn({
         tenantId: "11111111-1111-4111-8111-111111111111",
         turnId: ctx.turnId,
+        executionSubject: {
+          tenantId: "11111111-1111-4111-8111-111111111111",
+          subjectType: "user",
+          subjectId: ctx.ownerId,
+        },
       }),
     ).rejects.toThrow(DispatchTurnStateError);
   });
@@ -1256,6 +1270,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId,
       turnId: turn.id,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
       selectedModelRef: "gpt-4o",
     });
 

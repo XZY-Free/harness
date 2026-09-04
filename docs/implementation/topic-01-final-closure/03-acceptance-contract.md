@@ -8,7 +8,7 @@
 | ARC-02 | `lib/runtime/harness-loop/platform-action-executors.ts` | Hosted / External shared executor → `agent-action-executor` | `scripts/topic-01-production-wiring.contract.test.ts` | `10-batch-01-evidence.md` | batch_01_pass_pending_final |
 | ARC-03 | 待 Batch 07 回填 | 待回填 | TS-UX-01、TS-UX-02 | 待回填 | pending |
 | ARC-04 | 待 Batch 07 回填 | 待回填 | TS-UX-01 | 待回填 | pending |
-| ARC-05 | 待 Batch 02、05、07 回填 | 待回填 | TS-ARC-03 | 待回填 | pending |
+| ARC-05 | `dispatcher.ts` keeps Runtime binding separate from AgentCall route authority | Turn API / Harness Loop | Batch 02 contract test; TS-ARC-03 pending Batch 05/07 | `20-batch-02-evidence.md` | batch_02_pass_pending_batch_05_07 |
 | ARC-06 | 待 Batch 04、05、07 回填 | 待回填 | TS-ARC-04、TS-CONT-01 | 待回填 | pending |
 | ARC-07 | 待 Batch 05、07 回填 | 待回填 | TS-CONT-02、TS-CONT-03 | 待回填 | pending |
 | ARC-08 | 待 Batch 07 回填 | 待回填 | TS-UX-01、TS-UX-03 | 待回填 | pending |
@@ -20,17 +20,17 @@
 | CAP-06 | `validateHarnessActionAgainstCatalog` | Harness Loop 与 Capability Gateway 在执行前调用 | `harness-action-validation.unit.test.ts` | `10-batch-01-evidence.md` | pass |
 | CAP-07 | `platform-action-executors.ts` | 共享生产工厂正式注册 `tool.call` | Tool executor 与生产接线合同 | `10-batch-01-evidence.md` | pass |
 | CAP-08 | `tool-action-executor.ts`、`execute-harness-tool-call.ts` | `tool.call` → 既有 ToolCall create/state 服务 | Tool executor 与生产接线合同 | `10-batch-01-evidence.md` | pass |
-| CAP-09 | 冻结 Operation、Schema、确认政策与逻辑幂等键 | Tool executor；可信 Subject 持久恢复待 Batch 02 | `tool-executor.integration.test.ts` | `10-batch-01-evidence.md` | batch_01_pass_pending_batch_02 |
+| CAP-09 | Frozen operation/schema/confirmation/idempotency plus Binding subject | Harness Tool executor → ToolCall service | `tool-executor.integration.test.ts`; Batch 02 subject tests | `10-batch-01-evidence.md`, `20-batch-02-evidence.md` | pass |
 | CAP-10 | Runtime Start 下发同一快照；Hosted/External 共用校验器与工厂 | In-process Hosted / Runtime API / Capability Gateway | `topic-01-production-wiring.contract.test.ts`；E2E 待 Batch 07 | `10-batch-01-evidence.md` | batch_01_pass_pending_final |
-| SUB-01 | 待 Batch 02 回填 | 待回填 | TS-SUB-01 | 待回填 | pending |
-| SUB-02 | 待 Batch 02 回填 | 待回填 | TS-SUB-02 | 待回填 | pending |
-| SUB-03 | 待 Batch 02 回填 | 待回填 | TS-SUB-03 | 待回填 | pending |
-| SUB-04 | 待 Batch 02 回填 | 待回填 | TS-SUB-04 | 待回填 | pending |
-| SUB-05 | 待 Batch 02 回填 | 待回填 | TS-SUB-05 | 待回填 | pending |
-| SUB-06 | 待 Batch 02、05 回填 | 待回填 | TS-SUB-06、TS-CONT-04 | 待回填 | pending |
-| SUB-07 | 待 Batch 02 回填 | 待回填 | TS-SUB-07 | 待回填 | pending |
-| SUB-08 | 待 Batch 02 回填 | 待回填 | TS-SUB-08 | 待回填 | pending |
-| SUB-09 | 待 Batch 02、07 回填 | 待回填 | TS-SUB-09 | 待回填 | pending |
+| SUB-01 | ExecutionBinding subject fields and migration | Dispatcher → Binding Repository | `trusted-execution-subject.db.test.ts` | `20-batch-02-evidence.md` | pass |
+| SUB-02 | `freezeTrustedExecutionSubject` | `dispatchInvocationForTurn` before Invocation creation | `runtime-dispatch-subject.integration.test.ts` | `20-batch-02-evidence.md` | pass |
+| SUB-03 | Start builder has no subject input; capability body is strict | External Runtime → Capability Gateway | `external-runtime-subject.integration.test.ts`; wiring contract | `20-batch-02-evidence.md` | pass |
+| SUB-04 | `recoverTrustedExecutionSubject` | Workload Token → Binding → executor | `external-runtime-subject.integration.test.ts` | `20-batch-02-evidence.md` | pass |
+| SUB-05 | shared platform action executor | Hosted / External use Binding subject | `topic-01-production-wiring.contract.test.ts` | `20-batch-02-evidence.md` | pass |
+| SUB-06 | Retry/Hosted/Command/User Action/Agent Resume recover Binding subject | recovery services and workers | Batch 02 tests; Continuation pending Batch 05 | `20-batch-02-evidence.md` | batch_02_pass_pending_batch_05 |
+| SUB-07 | Gateway token tenant/invocation isolation | `resolveGatewayPrincipal` + tenant-scoped Binding | `external-runtime-subject.integration.test.ts` | `20-batch-02-evidence.md` | pass |
+| SUB-08 | `capability.action.execute` audit | Capability Gateway → Canonical AuditEvent | `external-runtime-subject.integration.test.ts` | `20-batch-02-evidence.md` | pass |
+| SUB-09 | Hosted and External recover the same Binding subject | Hosted launcher / External Gateway | Batch 02 integration; HR Agent E2E pending Batch 07 | `20-batch-02-evidence.md` | batch_02_pass_pending_batch_07 |
 | DATA-01 | 待 Batch 03 回填 | 待回填 | TS-DATA-01 | 待回填 | pending |
 | DATA-02 | 待 Batch 03 回填 | 待回填 | TS-DATA-02 | 待回填 | pending |
 | DATA-03 | 待 Batch 03 回填 | 待回填 | TS-DATA-03 | 待回填 | pending |

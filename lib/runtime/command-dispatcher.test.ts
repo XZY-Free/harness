@@ -465,6 +465,7 @@ async function seedRunningInvocationWithRunningTurn(
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
+    executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
   });
 
   const invocation = result.invocation;
@@ -1985,6 +1986,7 @@ async function seedBaseHarnessRunningInvocation(
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
+    executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
   });
   if (!result.dispatched) {
     throw new Error(`基础 Harness 调度失败：reason=${result.reason ?? "unknown"}`);

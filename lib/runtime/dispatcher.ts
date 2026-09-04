@@ -76,8 +76,8 @@ import {
   RuntimeHttpClientError,
   RuntimeSessionBindingConflictError,
 } from "@/lib/runtime/errors";
-import { createAttempt } from "@/lib/runtime/invocation-attempt-queries";
 import { buildProductionCapabilityCatalog } from "@/lib/runtime/harness-loop/build-production-capability-catalog";
+import { createAttempt } from "@/lib/runtime/invocation-attempt-queries";
 import {
   type CreateInvocationParams,
   createInvocation,
@@ -105,7 +105,10 @@ import {
   getSessionBindingsByThread,
   updateLastUsedAt,
 } from "@/lib/runtime/session-binding-queries";
-import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import {
+  type ExecutionSubject,
+  freezeTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
 import { and, eq } from "drizzle-orm";
 
@@ -230,12 +233,16 @@ export async function dispatchInvocationForTurn(params: {
   runtimeIdempotencyKey?: string;
   /**
    * ExecutionSubject：可信调用主体。必须由服务端认证 Principal 生成，
-   * 禁止从请求体透传 caller 自报 subject。不传则不发送该字段。
+   * 禁止从请求体透传 caller 自报 subject；只冻结到 Binding，不进入 Runtime Start。
    */
-  executionSubject?: ExecutionSubject;
+  executionSubject: ExecutionSubject;
 }): Promise<DispatchResult> {
   const routeScopeKey = params.routeScopeKey ?? DEFAULT_ROUTE_SCOPE_KEY;
   const actorType: ThreadEventActorType = params.actorType ?? "system";
+  const frozenExecutionSubject = freezeTrustedExecutionSubject(
+    params.executionSubject,
+    params.tenantId,
+  );
 
   // 1. 读取 Turn（跨租户隔离）
   const turn = await getTurnById(params.tenantId, params.turnId);
@@ -314,12 +321,11 @@ export async function dispatchInvocationForTurn(params: {
     tenantId: params.tenantId,
     invocationId: invocation.id,
     threadId: thread.id,
-    preferredAgentId:
-      turn.agentUseMode === "preferred" ? (turn.preferredAgentId ?? null) : null,
+    preferredAgentId: turn.agentUseMode === "preferred" ? (turn.preferredAgentId ?? null) : null,
     runtimeRevisionId: plan.runtimeRevisionId,
     policyRevisionId: bindingGovernance.policyRevisionId,
     policyRulesDigest: bindingGovernance.policyRulesDigest,
-    executionSubject: params.executionSubject ?? null,
+    executionSubject: params.executionSubject,
     resolveRoute: params.routeResolver ?? defaultRouteResolver,
     routeScopeKey,
   });
@@ -345,6 +351,7 @@ export async function dispatchInvocationForTurn(params: {
     capabilityCatalogVersion: capabilityCatalog.version,
     capabilityCatalogSourceRefs: capabilityCatalog.sourceRefs,
     capabilityCatalogCreatedAt: capabilityCatalog.createdAt,
+    ...frozenExecutionSubject,
     /** Projection 版本号，用于 Binding 版本一致性校验。 */
     projectionVersionNo,
     controlPlaneEvidence: {
@@ -388,7 +395,6 @@ export async function dispatchInvocationForTurn(params: {
       actorType,
       actorId: params.actorId ?? null,
       correlationId: params.correlationId ?? null,
-      executionSubject: params.executionSubject,
     });
   }
 
@@ -548,8 +554,6 @@ async function dispatchToRuntime(params: {
   actorType: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
-  /** 服务端 Principal 生成的可信调用主体；可选（内部测试/基础路径）。 */
-  executionSubject?: ExecutionSubject;
 }): Promise<RuntimeDispatchResult> {
   // 1. 解析 runtimeEndpoint + auth + gatewayEndpoints + governanceConfig + gatewayAccess
   const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
@@ -577,7 +581,6 @@ async function dispatchToRuntime(params: {
     gatewayEndpoints,
     governanceConfig,
     gatewayAccess,
-    executionSubject: params.executionSubject ?? null,
     correlationId: params.correlationId ?? null,
     attempt: {
       attemptNo: params.attempt.attemptNo,
@@ -844,6 +847,7 @@ async function handleIdempotencyConflict(params: {
 export async function dispatchAcceptedTurn(params: {
   tenantId: string;
   threadId: string;
+  executionSubject: ExecutionSubject;
   routeScopeKey?: string;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
@@ -864,6 +868,7 @@ export async function dispatchAcceptedTurn(params: {
       actorType: params.actorType,
       actorId: params.actorId,
       correlationId: params.correlationId,
+      executionSubject: params.executionSubject,
     });
     results.push(result);
   }

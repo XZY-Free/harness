@@ -15,6 +15,13 @@
       "when": 1788496313340,
       "tag": "0001_quick_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788497441325,
+      "tag": "0002_careless_spacker_dave",
+      "breakpoints": true
     }
   ]
 }

@@ -20,8 +20,12 @@ import type { ExecutionBindingControlPlaneEvidence } from "@/lib/executions/doma
 import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
 import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import { ExecutionBindingAlreadyExistsError } from "@/lib/runtime/errors";
-import { testCapabilityCatalogBindingFields } from "./test-capability-catalog";
+import {
+  type ExecutionSubject,
+  freezeTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 import { eq } from "drizzle-orm";
+import { testCapabilityCatalogBindingFields } from "./test-capability-catalog";
 
 /** 旧状态机测试显式写入的完整、不可空 Binding 证据。 */
 export const TEST_EXECUTION_BINDING_EVIDENCE: ExecutionBindingControlPlaneEvidence = {
@@ -68,6 +72,7 @@ export interface CreateExecutionBindingParams {
   environmentDefinitionRevisionId?: string | null;
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
   projectionVersionNo: number;
+  executionSubject?: ExecutionSubject;
 }
 
 /** computeBindingConfigHash 入参（与 CreateExecutionBindingParams 字段一致，便于规范化）。 */
@@ -167,6 +172,9 @@ export async function createExecutionBinding(
   // 3. INSERT ExecutionBinding（invocationId 为主键，1:1）
   await db.insert(executionBindingTable).values({
     ...testCapabilityCatalogBindingFields(params.invocationId),
+    ...(params.executionSubject
+      ? freezeTrustedExecutionSubject(params.executionSubject, params.tenantId)
+      : {}),
     invocationId: params.invocationId,
     tenantId: params.tenantId,
     runtimeRevisionId: params.runtimeRevisionId,

@@ -1,6 +1,7 @@
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
@@ -14,6 +15,7 @@ import {
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { HARNESS_NEXT_ACTION_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
+import { computeCapabilityCatalogDigest } from "@/lib/runtime/harness-loop/capability-catalog";
 import type {
   HarnessActionExecutors,
   HarnessDecisionPort,
@@ -27,6 +29,7 @@ import { collectModelText } from "@/lib/runtime/model-text-stream";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 import { generateObject, streamText } from "ai";
 
@@ -119,7 +122,7 @@ export async function dispatchEmployeeTurn(params: {
    * ExecutionSubject：由调用方（服务端 route 层）从认证 Principal 生成。
    * 禁止从 Turn JSON / 请求体接受 caller 自报 subject；本层不做校验兜底。
    */
-  executionSubject?: ExecutionSubject;
+  executionSubject: ExecutionSubject;
 }): Promise<EmployeeTurnDispatchResult> {
   const thread = await getThreadById(params.tenantId, params.threadId);
   if (!thread) {
@@ -211,13 +214,22 @@ export async function dispatchEmployeeTurn(params: {
             configuredFinalResponsePort(params.modelRef ?? aiConfig.chatModel),
           tenantId: params.tenantId,
           actionExecutors: params.actionExecutors,
-          actionExecutorFactory: (capabilityCatalog) =>
-            createPlatformHarnessActionExecutors({
+          actionExecutorFactory: async (capabilityCatalog, invocationId) => {
+            const binding = await getExecutionBindingByInvocation(params.tenantId, invocationId);
+            if (!binding) throw new Error("HOSTED_EXECUTION_BINDING_MISSING");
+            const executionSubject = recoverTrustedExecutionSubject(binding, params.tenantId);
+            if (
+              binding.capabilityCatalogDigest !== computeCapabilityCatalogDigest(capabilityCatalog)
+            ) {
+              throw new Error("HOSTED_CAPABILITY_CATALOG_MISMATCH");
+            }
+            return createPlatformHarnessActionExecutors({
               tenantId: params.tenantId,
-              executionSubject: params.executionSubject ?? null,
+              executionSubject,
               resolveRoute,
               capabilityCatalog,
-            }),
+            });
+          },
           recoveryPort: createMySqlHarnessLoopRecoveryPort(params.tenantId),
           ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
             await ingressEventBatch({
@@ -282,6 +294,7 @@ export async function dispatchEmployeeTurn(params: {
             type: "gateway",
             tenantId: binding.tenantId,
             invocationId: binding.invocationId,
+            runtimeRevisionId: binding.runtimeRevisionId,
             audience: "gateway",
             expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
           }),

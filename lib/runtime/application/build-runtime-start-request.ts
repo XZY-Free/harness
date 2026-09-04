@@ -21,6 +21,10 @@
 import { issueContextHandle } from "@/lib/context/context-handle";
 import { getItemById } from "@/lib/conversations/thread-item-queries";
 import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
+import {
+  type CapabilityCatalogSnapshot,
+  verifyCapabilityCatalogSnapshot,
+} from "@/lib/runtime/harness-loop/capability-catalog";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
 import type {
@@ -29,11 +33,6 @@ import type {
   GovernanceConfigRef,
   StartInvocationRequestBody,
 } from "@/lib/runtime/runtime-client";
-import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
-import {
-  verifyCapabilityCatalogSnapshot,
-  type CapabilityCatalogSnapshot,
-} from "@/lib/runtime/harness-loop/capability-catalog";
 
 /** builder 入参。 */
 export interface BuildRuntimeStartRequestInput {
@@ -51,8 +50,6 @@ export interface BuildRuntimeStartRequestInput {
   gatewayEndpoints: GatewayEndpoints;
   governanceConfig: GovernanceConfigRef;
   gatewayAccess: GatewayAccess;
-  /** 可信调用主体；null/省略 = 不发送 execution_subject context。 */
-  executionSubject?: ExecutionSubject | null;
   correlationId?: string | null;
   /** Attempt 维度信息（attempt_no=1 且无 retry_reason 时即初始调度形态）。 */
   attempt: {

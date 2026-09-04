@@ -10,11 +10,18 @@ import {
 } from "@/lib/gateway/route-helpers";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { apiError, apiSuccess, getRequestId } from "@/lib/http";
+import { recordAuditEvent } from "@/lib/identity/audit";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { type RuntimeCandidateEvent, ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { HARNESS_NEXT_ACTION_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
+import {
+  CapabilityActionValidationError,
+  type CapabilityCatalogSnapshot,
+  validateHarnessActionAgainstCatalog,
+  verifyCapabilityCatalogSnapshot,
+} from "@/lib/runtime/harness-loop/capability-catalog";
 import {
   DEFAULT_HARNESS_LOOP_LIMITS,
   type HarnessActionExecutionContext,
@@ -22,14 +29,12 @@ import {
 } from "@/lib/runtime/harness-loop/loop";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
-import {
-  CapabilityActionValidationError,
-  verifyCapabilityCatalogSnapshot,
-  validateHarnessActionAgainstCatalog,
-} from "@/lib/runtime/harness-loop/capability-catalog";
 import type { HarnessNextAction } from "@/lib/runtime/harness-loop/types";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
-import { executionSubjectFromServiceIdentity } from "@/lib/runtime/transport/execution-subject";
+import {
+  type ExecutionSubject,
+  recoverTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 
 export const dynamic = "force-dynamic";
 
@@ -107,22 +112,50 @@ export async function POST(request: Request): Promise<Response> {
   if (!turn) {
     return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "Turn 不存在", { requestId });
   }
-  if (
-    body.action.actionType === "agent.call" &&
-    (turn.agentUseMode !== "preferred" || turn.preferredAgentId !== body.action.payload.agentId)
-  ) {
-    return apiError("AGENT_ACTION_NOT_ALLOWED", "agent.call 目标不属于本 Turn preferred Agent", {
-      requestId,
-    });
-  }
-
   const binding = await getExecutionBindingByInvocation(principal.tenantId, principal.invocationId);
   if (!binding) {
     return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "ExecutionBinding 不存在", {
       requestId,
     });
   }
-  let capabilityCatalog;
+  let executionSubject: ExecutionSubject;
+  try {
+    executionSubject = recoverTrustedExecutionSubject(binding, principal.tenantId);
+  } catch {
+    return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "可信执行主体不可恢复", {
+      requestId,
+    });
+  }
+  if (!principal.runtimeRevisionId || principal.runtimeRevisionId !== binding.runtimeRevisionId) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "RUNTIME_TARGET_MISMATCH",
+    });
+    return apiError("AUTHENTICATION_REQUIRED", "Gateway Token 与 Runtime Target 不一致", {
+      requestId,
+    });
+  }
+  if (
+    body.action.actionType === "agent.call" &&
+    (turn.agentUseMode !== "preferred" || turn.preferredAgentId !== body.action.payload.agentId)
+  ) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "AGENT_ACTION_NOT_ALLOWED",
+    });
+    return apiError("AGENT_ACTION_NOT_ALLOWED", "agent.call 目标不属于本 Turn preferred Agent", {
+      requestId,
+    });
+  }
+  let capabilityCatalog: CapabilityCatalogSnapshot;
   try {
     capabilityCatalog = verifyCapabilityCatalogSnapshot(
       binding.capabilityCatalogJson,
@@ -139,13 +172,25 @@ export async function POST(request: Request): Promise<Response> {
             : error.code === "AGENT_ACTION_NOT_ALLOWED"
               ? "AGENT_ACTION_NOT_ALLOWED"
               : "CAPABILITY_NOT_ALLOWED";
+      await auditCapabilityAction({
+        principal,
+        executionSubject,
+        action: body.action,
+        requestId,
+        outcome: "failed",
+        reason: code,
+      });
       return apiError(code, error.message, { requestId });
     }
-    return apiError(
-      "HARNESS_LOOP_STATE_RECOVERY_FAILED",
-      "冻结能力目录不可验证",
-      { requestId },
-    );
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "HARNESS_LOOP_STATE_RECOVERY_FAILED",
+    });
+    return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "冻结能力目录不可验证", { requestId });
   }
   let frozenGovernance: Awaited<ReturnType<typeof loadFrozenGovernanceConfig>>;
   try {
@@ -154,11 +199,27 @@ export async function POST(request: Request): Promise<Response> {
       binding.governanceConfigRevisionId,
     );
   } catch {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "GOVERNANCE_CONFIG_UNAVAILABLE",
+    });
     return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "冻结 Governance 配置不可用", {
       requestId,
     });
   }
   if (frozenGovernance.configDigest !== binding.governanceConfigDigest) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "GOVERNANCE_DIGEST_MISMATCH",
+    });
     return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "冻结 Governance digest 不一致", {
       requestId,
     });
@@ -182,6 +243,14 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
     if (existing.state === "completed" && existing.observation) {
+      await auditCapabilityAction({
+        principal,
+        executionSubject,
+        action: body.action,
+        requestId,
+        outcome: "succeeded",
+        reason: "idempotent_replay",
+      });
       return apiSuccess({
         action_id: existing.actionId,
         state: "completed",
@@ -191,21 +260,53 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
     if (existing.state === "failed") {
+      await auditCapabilityAction({
+        principal,
+        executionSubject,
+        action: body.action,
+        requestId,
+        outcome: "failed",
+        reason: "ACTION_ALREADY_FAILED",
+      });
       return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "已失败 action 不可自动重放", {
         requestId,
       });
     }
   } else if (body.action.stepNo !== snapshot.actionHistory.length + 1) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "ACTION_STEP_DISCONTINUITY",
+    });
     return apiError("HARNESS_ACTION_SCHEMA_INVALID", "action.stepNo 与持久行动历史不连续", {
       requestId,
     });
   }
   if (!existing && body.producerSequenceStart !== snapshot.nextProducerSequence) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "EVENT_SEQUENCE_GAP",
+    });
     return apiError("EVENT_SEQUENCE_GAP", "producer_sequence_start 与持久账本不连续", {
       requestId,
     });
   }
   if (body.action.stepNo > limits.maxLoopSteps) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "HARNESS_LOOP_STEP_LIMIT_EXCEEDED",
+    });
     return apiError("HARNESS_LOOP_STEP_LIMIT_EXCEEDED", "Harness Loop 步骤预算耗尽", {
       requestId,
     });
@@ -222,6 +323,14 @@ export async function POST(request: Request): Promise<Response> {
           ? limits.maxKnowledgeSearches
           : null;
   if (!existing && typeLimit !== null && actionTypeCount >= typeLimit) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: "HARNESS_LOOP_STEP_LIMIT_EXCEEDED",
+    });
     return apiError("HARNESS_LOOP_STEP_LIMIT_EXCEEDED", `${body.action.actionType} 预算耗尽`, {
       requestId,
     });
@@ -242,13 +351,21 @@ export async function POST(request: Request): Promise<Response> {
       consecutive += 1;
     }
     if (consecutive >= limits.maxConsecutiveSameAction) {
+      await auditCapabilityAction({
+        principal,
+        executionSubject,
+        action: body.action,
+        requestId,
+        outcome: "failed",
+        reason: "HARNESS_LOOP_REPEATED_ACTION",
+      });
       return apiError("HARNESS_LOOP_REPEATED_ACTION", "连续相同行动超过预算", { requestId });
     }
   }
 
   const executors = createPlatformHarnessActionExecutors({
     tenantId: principal.tenantId,
-    executionSubject: executionSubjectFromServiceIdentity(principal.tenantId, "gateway"),
+    executionSubject,
     resolveRoute,
     capabilityCatalog,
   });
@@ -282,6 +399,14 @@ export async function POST(request: Request): Promise<Response> {
       events: [
         actionEvent(body.action, digest, "failed", failedSequence, { error_code: errorCode }),
       ],
+    });
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: errorCode,
     });
     return apiError(errorCode, `${body.action.actionType} 执行器未注册`, { requestId });
   }
@@ -327,11 +452,27 @@ export async function POST(request: Request): Promise<Response> {
         }),
       ],
     });
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "failed",
+      reason: errorCode,
+    });
     return apiError(errorCode, error instanceof Error ? error.message : String(error), {
       requestId,
     });
   }
   if (execution.pending) {
+    await auditCapabilityAction({
+      principal,
+      executionSubject,
+      action: body.action,
+      requestId,
+      outcome: "succeeded",
+      reason: "pending",
+    });
     return apiSuccess({
       action_id: body.action.actionId,
       state: "started",
@@ -354,6 +495,13 @@ export async function POST(request: Request): Promise<Response> {
       }),
     ],
   });
+  await auditCapabilityAction({
+    principal,
+    executionSubject,
+    action: body.action,
+    requestId,
+    outcome: "succeeded",
+  });
   return apiSuccess({
     action_id: body.action.actionId,
     state: "completed",
@@ -361,6 +509,46 @@ export async function POST(request: Request): Promise<Response> {
     authority_ref: execution.authorityRef ?? null,
     waiting_for_user: execution.waitingForUser ?? null,
     next_producer_sequence: completedSequence + 1,
+  });
+}
+
+async function auditCapabilityAction(params: {
+  principal: GatewayPrincipal;
+  executionSubject: ExecutionSubject;
+  action: Exclude<HarnessNextAction, { actionType: "respond" }>;
+  requestId: string;
+  outcome: "succeeded" | "failed";
+  reason?: string;
+}): Promise<void> {
+  await recordAuditEvent({
+    actor: {
+      tenantId: params.principal.tenantId,
+      actorType: "workload",
+      actorId: `gateway:${params.principal.invocationId}`,
+    },
+    actionType: "capability.action.execute",
+    targetType: params.action.actionType,
+    targetId: targetRef(params.action),
+    outcome: params.outcome,
+    reason: params.reason ?? null,
+    requestId: params.requestId,
+    metadataRedacted: {
+      parent_invocation_id: params.principal.invocationId,
+      caller_workload: {
+        type: params.principal.type,
+        audience: params.principal.audience,
+        runtime_revision_id: params.principal.runtimeRevisionId ?? null,
+      },
+      effective_subject: {
+        type: params.executionSubject.subjectType,
+        id: params.executionSubject.subjectId,
+      },
+      capability: {
+        kind: params.action.actionType,
+        id: targetRef(params.action),
+        action_id: params.action.actionId,
+      },
+    },
   });
 }
 

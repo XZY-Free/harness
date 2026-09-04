@@ -172,6 +172,10 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         capabilityCatalogVersion: input.capabilityCatalogVersion,
         capabilityCatalogSourceRefs: input.capabilityCatalogSourceRefs,
         capabilityCatalogCreatedAt: input.capabilityCatalogCreatedAt,
+        executionSubjectType: input.executionSubjectType,
+        executionSubjectId: input.executionSubjectId,
+        executionSubjectSource: input.executionSubjectSource,
+        executionSubjectFrozenAt: input.executionSubjectFrozenAt,
         configHash: input.configHash,
         boundAt: input.boundAt,
       });
@@ -1147,6 +1151,8 @@ export function toExecutionBinding(
     !!row.capabilityCatalogVersion &&
     Array.isArray(row.capabilityCatalogSourceRefs) &&
     !!row.capabilityCatalogCreatedAt &&
+    !!row.executionSubjectId &&
+    !!row.executionSubjectFrozenAt &&
     Number.isInteger(row.projectionVersionNo) &&
     row.projectionVersionNo >= 0;
   if (!runtimeFieldsComplete) {
@@ -1173,6 +1179,10 @@ export function toExecutionBinding(
     capabilityCatalogVersion: row.capabilityCatalogVersion,
     capabilityCatalogSourceRefs: [...row.capabilityCatalogSourceRefs],
     capabilityCatalogCreatedAt: row.capabilityCatalogCreatedAt,
+    executionSubjectType: row.executionSubjectType,
+    executionSubjectId: row.executionSubjectId,
+    executionSubjectSource: row.executionSubjectSource,
+    executionSubjectFrozenAt: row.executionSubjectFrozenAt,
     routeRevisionId: row.routeRevisionId,
     routeActivationId: row.routeActivationId,
     routeContentDigest: row.routeContentDigest,

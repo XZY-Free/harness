@@ -97,6 +97,8 @@ export const AUDIT_ACTION_TYPES = [
   "permission_rule.deleted",
   "thread.purged",
   "approval.resolved",
+  // Runtime 跨边界能力调用：caller workload 与 effective subject 同时进入脱敏元数据。
+  "capability.action.execute",
 ] as const;
 export type AuditActionType = (typeof AUDIT_ACTION_TYPES)[number];
 

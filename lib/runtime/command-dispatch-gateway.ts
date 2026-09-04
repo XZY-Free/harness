@@ -17,6 +17,7 @@ import { invocationCommandTable } from "@/lib/persistence/schema/conversation";
 import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import type { CommandDispatchResult } from "@/lib/runtime/command-dispatcher";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { eq } from "drizzle-orm";
 
 /**
@@ -44,7 +45,8 @@ async function loadCommandContext(tenantId: string, commandId: string) {
   if (!invocation) return null;
   const binding = await getExecutionBindingByInvocation(tenantId, command.invocationId);
   if (!binding) return null;
-  return { command, invocation, binding };
+  const executionSubject = recoverTrustedExecutionSubject(binding, tenantId);
+  return { command, invocation, binding, executionSubject };
 }
 
 /**

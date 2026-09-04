@@ -1,7 +1,8 @@
 import {
-  getCurrentToolSchemaRevision,
-  listTools,
-} from "@/lib/capability/tool-queries";
+  AgentActionUnavailableError,
+  resolveAgentActionBinding,
+} from "@/lib/agents/calls/application/resolve-agent-call-binding";
+import { getCurrentToolSchemaRevision, listTools } from "@/lib/capability/tool-queries";
 import { listKnowledgeBases } from "@/lib/context/knowledge-queries";
 import { db } from "@/lib/db/client";
 import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
@@ -14,17 +15,13 @@ import {
   agentTable,
 } from "@/lib/persistence/schema/agents";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
-import {
-  AgentActionUnavailableError,
-  resolveAgentActionBinding,
-} from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { and, asc, eq } from "drizzle-orm";
 import {
-  buildCapabilityCatalogSnapshot,
   type BuiltCapabilityCatalog,
   type CapabilityCatalogAgent,
   type CapabilityCatalogTool,
+  buildCapabilityCatalogSnapshot,
 } from "./capability-catalog";
 
 export async function buildProductionCapabilityCatalog(input: {
@@ -35,12 +32,12 @@ export async function buildProductionCapabilityCatalog(input: {
   runtimeRevisionId: string;
   policyRevisionId: string;
   policyRulesDigest: string;
-  executionSubject: ExecutionSubject | null;
+  executionSubject: ExecutionSubject;
   resolveRoute: RouteResolver;
   routeScopeKey?: string;
   now?: Date;
 }): Promise<BuiltCapabilityCatalog> {
-  if (input.executionSubject && input.executionSubject.tenantId !== input.tenantId) {
+  if (input.executionSubject.tenantId !== input.tenantId || !input.executionSubject.subjectId) {
     throw new Error("CAPABILITY_CATALOG_SUBJECT_TENANT_MISMATCH");
   }
   const unavailableFacts: string[] = [];
@@ -50,10 +47,12 @@ export async function buildProductionCapabilityCatalog(input: {
   ];
   const agentCandidate = await loadPreferredAgent(input, sourceRefs, unavailableFacts);
   const tools = await loadAuthorizedTools(input, sourceRefs);
-  const knowledgeSources = (await listKnowledgeBases(input.tenantId, {
-    lifecycleStates: ["active"],
-    limit: 500,
-  })).map((base) => {
+  const knowledgeSources = (
+    await listKnowledgeBases(input.tenantId, {
+      lifecycleStates: ["active"],
+      limit: 500,
+    })
+  ).map((base) => {
     sourceRefs.push(`knowledge-base:${base.id}:version:${base.versionNo}`);
     return {
       sourceRef: `knowledge-base:${base.id}`,
@@ -91,9 +90,7 @@ async function loadPreferredAgent(
     });
   } catch (error) {
     if (error instanceof AgentActionUnavailableError) {
-      unavailableFacts.push(
-        `preferred_agent_unavailable:${input.preferredAgentId}:${error.code}`,
-      );
+      unavailableFacts.push(`preferred_agent_unavailable:${input.preferredAgentId}:${error.code}`);
       return null;
     }
     throw error;
@@ -142,10 +139,7 @@ async function loadPreferredAgent(
     const examples = Array.isArray(capability.examples)
       ? capability.examples.filter((entry): entry is string => typeof entry === "string")
       : [];
-    return [
-      capability.descriptionZhCn ?? capability.nameZhCn,
-      ...examples,
-    ].filter(Boolean);
+    return [capability.descriptionZhCn ?? capability.nameZhCn, ...examples].filter(Boolean);
   });
   const hrLike = /(^|[-_])hr($|[-_])|人力|人事/i.test(
     `${header.agent.agentKey} ${header.agent.displayName}`,
@@ -160,22 +154,16 @@ async function loadPreferredAgent(
     displayName: header.agent.displayName,
     description: header.agent.description ?? "",
     applicableScenarios,
-    excludedScenarios: [
-      ...(hrLike ? ["普通寒暄"] : []),
-      "合同 capabilities 未声明的业务场景",
-    ],
+    excludedScenarios: [...(hrLike ? ["普通寒暄"] : []), "合同 capabilities 未声明的业务场景"],
     contractSummary: [
       ...capabilities.map(
-        (capability) =>
-          `${capability.nameZhCn}：${capability.descriptionZhCn ?? "按合同输出"}`,
+        (capability) => `${capability.nameZhCn}：${capability.descriptionZhCn ?? "按合同输出"}`,
       ),
       header.snapshot.resultNotesZhCn ?? "",
     ]
       .filter(Boolean)
       .join("；"),
-    contextRequirements: contexts.map(
-      (context) => `${context.key}:${context.necessity}`,
-    ),
+    contextRequirements: contexts.map((context) => `${context.key}:${context.necessity}`),
   };
 }
 

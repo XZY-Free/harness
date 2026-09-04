@@ -1,5 +1,6 @@
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
+import { db } from "@/lib/db/client";
 /**
  * dispatchQueuedInvocationAttempt：执行已有 queued InvocationAttempt 的正式 dispatch。
  *
@@ -20,7 +21,6 @@ import { getTurnById } from "@/lib/conversations/turn-queries";
  * - 网络调用在 DB transaction 之外。
  * - 不再调用 redispatchInvocation 创建第二个 Attempt（Worker 只领取同一 Attempt）。
  */
-import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
 import { threadTable } from "@/lib/persistence/schema/conversation";
@@ -59,10 +59,9 @@ import {
   markSessionBindingLost,
   updateLastUsedAt,
 } from "@/lib/runtime/session-binding-queries";
-import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
-import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
+import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 /** 允许重调度的非终态 Invocation 状态（唯一事实源；redispatch-queries 从此处 re-export）。 */
 export const REDISPATCH_ALLOWED_STATES: readonly InvocationExecutionState[] = [
@@ -84,8 +83,6 @@ export interface DispatchQueuedAttemptParams {
   correlationId?: string | null;
   /** Runtime 调用幂等键（默认 invocation-attempt:<attemptId>，稳定不换）。 */
   runtimeIdempotencyKey?: string | null;
-  /** 可信调用主体；undefined = 从 Thread owner 解析（Job 模式为 null）。 */
-  executionSubject?: ExecutionSubject | null;
   /** 可注入时钟。 */
   now?: Date;
 }
@@ -121,24 +118,6 @@ export type DispatchQueuedAttemptResult =
       attempt: InvocationAttempt;
       errorCode: string;
     };
-
-/**
- * 从持久化 Authority 解析 trusted ExecutionSubject（Thread owner；Job 模式 null）。
- * 与 command-dispatch-gateway resolveResumeExecutionSubject 同一来源语义。
- */
-export async function resolveInvocationExecutionSubject(params: {
-  tenantId: string;
-  invocation: Invocation;
-}): Promise<ExecutionSubject | null> {
-  if (!params.invocation.threadId) return null;
-  const [thread] = await db
-    .select({ tenantId: threadTable.tenantId, ownerUserId: threadTable.ownerUserId })
-    .from(threadTable)
-    .where(eq(threadTable.id, params.invocation.threadId))
-    .limit(1);
-  if (!thread || thread.tenantId !== params.tenantId) return null;
-  return executionSubjectFromUserIdentity(params.tenantId, thread.ownerUserId);
-}
 
 /**
  * 执行一个 queued InvocationAttempt 的 dispatch。
@@ -183,6 +162,7 @@ export async function dispatchQueuedInvocationAttempt(
   if (!binding) {
     throw new InvocationNotFoundError(invocation.id);
   }
+  recoverTrustedExecutionSubject(binding, params.tenantId);
 
   // 4. Retry 从原 Turn 事实重建相同 preferred directive，不读取 Thread 或后续 Turn。
   let capabilityDirectives:
@@ -208,10 +188,6 @@ export async function dispatchQueuedInvocationAttempt(
   // 6. 解析 endpoint + 构建请求（Context 不在 retry 时丢失）
   const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(binding);
-  const executionSubject =
-    params.executionSubject !== undefined
-      ? params.executionSubject
-      : await resolveInvocationExecutionSubject({ tenantId: params.tenantId, invocation });
   const { requestBody } = await buildRuntimeStartRequestForInvocation({
     tenantId: params.tenantId,
     invocation,
@@ -221,7 +197,6 @@ export async function dispatchQueuedInvocationAttempt(
     gatewayEndpoints,
     governanceConfig,
     gatewayAccess,
-    executionSubject,
     correlationId: params.correlationId ?? null,
     attempt: {
       attemptNo: attempt.attemptNo,

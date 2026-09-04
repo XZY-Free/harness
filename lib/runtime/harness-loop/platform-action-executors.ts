@@ -1,22 +1,27 @@
 import { createAgentActionExecutor } from "@/lib/agents/calls/application/agent-action-executor";
 import { searchKnowledgeEvidence } from "@/lib/context/knowledge-queries";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
-import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
-import type { HarnessActionExecutors } from "./loop";
+import {
+  type ExecutionSubject,
+  assertTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 import type { CapabilityCatalogSnapshot } from "./capability-catalog";
+import type { HarnessActionExecutors } from "./loop";
 import { createToolActionExecutor } from "./tool-action-executor";
 
 /** 平台内置 Action Executor；Hosted 进程内与 Gateway HTTP 共用。 */
 export function createPlatformHarnessActionExecutors(params: {
   tenantId: string;
-  executionSubject: ExecutionSubject | null;
+  executionSubject: ExecutionSubject;
   resolveRoute: RouteResolver;
   capabilityCatalog: CapabilityCatalogSnapshot;
 }): HarnessActionExecutors {
+  assertTrustedExecutionSubject(params.executionSubject, params.tenantId);
   return {
     "agent.call": createAgentActionExecutor(params),
     "tool.call": createToolActionExecutor({
       tenantId: params.tenantId,
+      executionSubject: params.executionSubject,
       capabilityCatalog: params.capabilityCatalog,
     }),
     "knowledge.search": async (action) => {

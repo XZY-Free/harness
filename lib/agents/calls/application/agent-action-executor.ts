@@ -16,10 +16,10 @@ import {
 import { OutboundCredentialError } from "@/lib/identity/resolve-outbound-credential";
 import { logger } from "@/lib/logger";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
+import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import type { HarnessActionExecutors } from "@/lib/runtime/harness-loop/loop";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
-import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 
 export class AgentActionExecutionError extends Error {
   constructor(
@@ -33,7 +33,7 @@ export class AgentActionExecutionError extends Error {
 
 export interface CreateAgentActionExecutorParams {
   tenantId: string;
-  executionSubject: ExecutionSubject | null;
+  executionSubject: ExecutionSubject;
   resolveRoute: RouteResolver;
   routeScopeKey?: string;
   capabilityCatalog?: CapabilityCatalogSnapshot;

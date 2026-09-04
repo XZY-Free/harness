@@ -55,6 +55,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt — capability 前置门禁（0
     const dispatch = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
     expect(dispatch.invocation).not.toBeNull();
 
@@ -76,6 +77,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt — capability 前置门禁（0
     const dispatch = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
     expect(dispatch.invocation).not.toBeNull();
     await revokeRuntimeCancel(ctx.runtimeRevision.id);

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { RouteEvidence } from "@/lib/routes/domain/route-resolution-policy";
+import type { FrozenExecutionSubjectFields } from "@/lib/runtime/transport/execution-subject";
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 
@@ -22,7 +23,7 @@ export interface ExecutionBindingControlPlaneEvidence extends ExecutionBindingRu
   resolutionInputDigest: string;
 }
 
-export interface ExecutionBindingConfigInput {
+export interface ExecutionBindingConfigInput extends FrozenExecutionSubjectFields {
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;
@@ -91,6 +92,17 @@ export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigI
     Number.isNaN(input.capabilityCatalogCreatedAt.getTime())
   ) {
     throw new ExecutionBindingEvidenceError("能力目录冻结字段不完整");
+  }
+  if (
+    !input.executionSubjectId ||
+    (input.executionSubjectType === "user" &&
+      input.executionSubjectSource !== "authenticated_user") ||
+    (input.executionSubjectType === "service" &&
+      input.executionSubjectSource !== "trusted_service") ||
+    !(input.executionSubjectFrozenAt instanceof Date) ||
+    Number.isNaN(input.executionSubjectFrozenAt.getTime())
+  ) {
+    throw new ExecutionBindingEvidenceError("可信执行主体冻结字段不完整或不一致");
   }
   const canonical = JSON.stringify(
     sortKeys({

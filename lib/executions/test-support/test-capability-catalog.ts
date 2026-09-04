@@ -17,5 +17,9 @@ export function testCapabilityCatalogBindingFields(invocationId: string) {
     capabilityCatalogVersion: catalog.version,
     capabilityCatalogSourceRefs: catalog.sourceRefs,
     capabilityCatalogCreatedAt: catalog.createdAt,
+    executionSubjectType: "user" as const,
+    executionSubjectId: "test-user",
+    executionSubjectSource: "authenticated_user" as const,
+    executionSubjectFrozenAt: new Date("2026-09-04T00:00:00.000Z"),
   };
 }

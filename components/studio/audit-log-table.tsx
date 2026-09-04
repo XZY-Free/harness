@@ -56,6 +56,7 @@ const ACTION_LABEL: Record<AuditActionType, string> = {
   "permission_rule.deleted": "权限规则删除",
   "thread.purged": "会话清理",
   "approval.resolved": "审批处理",
+  "capability.action.execute": "运行能力调用",
 };
 
 function actionLabel(actionType: string): string {

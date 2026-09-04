@@ -343,6 +343,7 @@ async function seedRunningInvocation(ctx: FullIngressContext): Promise<Dispatche
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
+    executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
   });
 
   const invocation = result.invocation;

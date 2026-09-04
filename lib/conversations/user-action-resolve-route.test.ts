@@ -269,6 +269,7 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
     const dispatch = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
     const invocation = dispatch.invocation;
     if (!invocation) throw new Error("调度失败：未创建 Invocation");

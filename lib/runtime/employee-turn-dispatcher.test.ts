@@ -261,6 +261,7 @@ describe("dispatchEmployeeTurn", () => {
       tenantId,
       threadId: thread.id,
       turnId: turn.id,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
       modelRef: "test-model",
       // 顶层恒为 base harness route；modelRef 作为 Thread 模型事实进入 Binding。
       decisionPort: {

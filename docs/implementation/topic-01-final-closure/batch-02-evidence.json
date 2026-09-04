@@ -1,0 +1,57 @@
+{
+  "batch": "02",
+  "startSha": "abe0eaabc4a536445ad4907248164697ef75de32",
+  "endSha": "SELF_COMMIT",
+  "commitTitle": "fix(runtime): preserve trusted execution subject",
+  "startedAt": "2026-09-04T04:48:00Z",
+  "finishedAt": "2026-09-04T05:16:59Z",
+  "acceptanceIds": {
+    "SUB-01": "pass",
+    "SUB-02": "pass",
+    "SUB-03": "pass",
+    "SUB-04": "pass",
+    "SUB-05": "pass",
+    "SUB-06": "batch_02_pass_pending_batch_05",
+    "SUB-07": "pass",
+    "SUB-08": "pass",
+    "SUB-09": "batch_02_pass_pending_batch_07",
+    "CAP-09": "pass",
+    "ARC-05": "batch_02_pass_pending_batch_05_07"
+  },
+  "migration": {
+    "file": "drizzle/0002_careless_spacker_dave.sql",
+    "strategy": "nullable_then_authoritative_user_backfill_then_not_null",
+    "unresolvedRowsFailClosed": true,
+    "localDatasetStatus": "configured_local_database_absent_from_batch_00"
+  },
+  "targetedCommands": [
+    {
+      "command": "pnpm vitest run <Batch 02 five exact files>",
+      "testFiles": 5,
+      "testCount": 22,
+      "exitCode": 0,
+      "result": "pass"
+    },
+    {
+      "command": "pnpm typecheck",
+      "testFiles": 0,
+      "testCount": 0,
+      "exitCode": 0,
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "testFiles": 0,
+      "testCount": 0,
+      "exitCode": 0,
+      "result": "pass"
+    }
+  ],
+  "fullTestsRun": false,
+  "freshDbFullRun": false,
+  "allE2eRun": false,
+  "allBuildsRun": false,
+  "githubFullCiRun": false,
+  "hrAgentStartedLocally": false,
+  "result": "pass"
+}

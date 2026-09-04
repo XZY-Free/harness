@@ -43,6 +43,7 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
  */
 import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolve-queries";
 import { db } from "@/lib/db/client";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -66,7 +67,10 @@ import type { UserActionResolution } from "@/lib/persistence/schema/user-action-
 import { dispatchResumeCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { InvocationAlreadyTerminalError } from "@/lib/runtime/errors";
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
-import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
+import {
+  type ExecutionSubject,
+  recoverTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -324,18 +328,32 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       });
     }
 
-    const agentResume =
-      body.resolution === "submit"
-        ? await resumeAgentCallFromUserAction({
-            tenantId: principal.tenantId,
-            request: result.request,
-            responseRedactedJson: body.response_redacted,
-            executionSubject: executionSubjectFromUserIdentity(
-              principal.tenantId,
-              principal.userIdentityId,
-            ),
-          })
-        : { resumed: false as const };
+    let agentResume: Awaited<ReturnType<typeof resumeAgentCallFromUserAction>> = { resumed: false };
+    if (body.resolution === "submit") {
+      const binding = await getExecutionBindingByInvocation(
+        principal.tenantId,
+        result.invocation.id,
+      );
+      if (!binding) {
+        return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "ExecutionBinding 不存在", {
+          requestId,
+        });
+      }
+      let executionSubject: ExecutionSubject;
+      try {
+        executionSubject = recoverTrustedExecutionSubject(binding, principal.tenantId);
+      } catch {
+        return apiError("HARNESS_LOOP_STATE_RECOVERY_FAILED", "可信执行主体不可恢复", {
+          requestId,
+        });
+      }
+      agentResume = await resumeAgentCallFromUserAction({
+        tenantId: principal.tenantId,
+        request: result.request,
+        responseRedactedJson: body.response_redacted,
+        executionSubject,
+      });
+    }
 
     const responseBody = {
       thread_id: result.thread.id,

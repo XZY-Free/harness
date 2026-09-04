@@ -135,6 +135,7 @@ function token(invocationId: string, tenantId = TENANT): string {
     type: "gateway",
     tenantId,
     invocationId,
+    runtimeRevisionId: "runtime-revision-test",
     audience: "gateway",
     expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
   });

@@ -207,6 +207,17 @@ export const executionBindingTable = mysqlTable(
       mode: "date",
       fsp: 3,
     }).notNull(),
+    /** 父 Invocation 的可信业务主体；tenant 复用本行 tenantId，不复制第二份。 */
+    executionSubjectType: mysqlEnum("executionSubjectType", ["user", "service"]).notNull(),
+    executionSubjectId: varchar("executionSubjectId", { length: 128 }).notNull(),
+    executionSubjectSource: mysqlEnum("executionSubjectSource", [
+      "authenticated_user",
+      "trusted_service",
+    ]).notNull(),
+    executionSubjectFrozenAt: datetime("executionSubjectFrozenAt", {
+      mode: "date",
+      fsp: 3,
+    }).notNull(),
     configHash: varchar("configHash", { length: 128 }).notNull(),
     boundAt: datetime("boundAt", { mode: "date", fsp: 3 })
       .notNull()

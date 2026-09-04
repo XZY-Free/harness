@@ -664,6 +664,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -713,6 +714,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: turn.id,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -734,6 +736,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -757,6 +760,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -771,6 +775,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
 
     expect(result.dispatched).toBe(true);
@@ -787,6 +792,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -811,6 +817,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });

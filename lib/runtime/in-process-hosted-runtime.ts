@@ -7,13 +7,13 @@ import {
   hostedAdapterCapabilities,
 } from "@/lib/runtime/adapters/hosted-adapter";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import type {
   HarnessActionExecutors,
   HarnessDecisionPort,
   HarnessFinalResponsePort,
   HarnessLoopRecoveryPort,
 } from "@/lib/runtime/harness-loop/loop";
-import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import type {
   CancelInvocationRequest,
   CancelInvocationResponse,
@@ -48,7 +48,10 @@ export function createInProcessHostedRuntimeClient(params: {
   /** 平台租户 id（Harness Loop 调 AgentCall 时作用域）。 */
   tenantId?: string;
   actionExecutors?: HarnessActionExecutors;
-  actionExecutorFactory?: (catalog: CapabilityCatalogSnapshot) => HarnessActionExecutors;
+  actionExecutorFactory?: (
+    catalog: CapabilityCatalogSnapshot,
+    invocationId: string,
+  ) => HarnessActionExecutors | Promise<HarnessActionExecutors>;
   recoveryPort?: HarnessLoopRecoveryPort;
   ingressEventBatch: (params: {
     invocationId: string;
@@ -104,7 +107,10 @@ export function createInProcessHostedRuntimeClient(params: {
           actionExecutors:
             params.actionExecutors ??
             (invocation.request.requestBody.capability_catalog
-              ? params.actionExecutorFactory?.(invocation.request.requestBody.capability_catalog)
+              ? await params.actionExecutorFactory?.(
+                  invocation.request.requestBody.capability_catalog,
+                  invocationId,
+                )
               : undefined),
           recoveryPort: params.recoveryPort,
           eventBatchSink: params.ingressEventBatch,

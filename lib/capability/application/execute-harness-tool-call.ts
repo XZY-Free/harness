@@ -1,15 +1,11 @@
 import { redactArguments } from "@/lib/capability/redact-arguments";
-import {
-  createToolCall,
-  updateToolCallState,
-} from "@/lib/capability/tool-call-queries";
-import {
-  getToolById,
-  getToolSchemaRevisionById,
-} from "@/lib/capability/tool-queries";
+import { createToolCall, updateToolCallState } from "@/lib/capability/tool-call-queries";
+import { getToolById, getToolSchemaRevisionById } from "@/lib/capability/tool-queries";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
 export interface ExecuteHarnessToolCallInput {
   tenantId: string;
+  executionSubject: ExecutionSubject;
   invocationId: string;
   threadId: string;
   turnId: string;
@@ -22,7 +18,14 @@ export interface ExecuteHarnessToolCallInput {
 
 export interface HarnessToolCallResult {
   toolCallId: string;
-  state: "proposed" | "paused" | "running" | "succeeded" | "failed" | "cancelled" | "unknown_effect";
+  state:
+    | "proposed"
+    | "paused"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+    | "unknown_effect";
   resultSummary: unknown;
   errorCode: string | null;
   errorSummary: string | null;
@@ -38,6 +41,9 @@ export interface HarnessToolCallResult {
 export async function executeHarnessToolCall(
   input: ExecuteHarnessToolCallInput,
 ): Promise<HarnessToolCallResult> {
+  if (input.executionSubject.tenantId !== input.tenantId || !input.executionSubject.subjectId) {
+    throw new Error("TOOL_EXECUTION_SUBJECT_INVALID");
+  }
   const tool = await getToolById({ tenantId: input.tenantId, toolId: input.toolId });
   if (!tool || tool.lifecycleState !== "enabled") {
     throw new Error("TOOL_CAPABILITY_REVOKED");

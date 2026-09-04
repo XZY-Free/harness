@@ -31,4 +31,23 @@ describe("Topic 01 production wiring", () => {
       loop.indexOf("this.executeAction(historyEntry"),
     );
   });
+
+  it("identity wiring freezes once and recovers from ExecutionBinding without gateway fallback", () => {
+    const dispatcher = source("lib/runtime/dispatcher.ts");
+    const retry = source("lib/runtime/retry/dispatch-queued-invocation-attempt.ts");
+    const hosted = source("lib/runtime/employee-turn-dispatcher.ts");
+    const external = source("app/gateway/v1/capability-actions/route.ts");
+    const startBuilder = source("lib/runtime/application/build-runtime-start-request.ts");
+    const agentResume = source("app/gateway/v1/agent-calls/[call_id]/resume/route.ts");
+
+    expect(dispatcher).toContain("freezeTrustedExecutionSubject");
+    expect(retry).toContain("recoverTrustedExecutionSubject(binding");
+    expect(hosted).toContain("recoverTrustedExecutionSubject(binding");
+    expect(external).toContain("recoverTrustedExecutionSubject(binding");
+    expect(agentResume).toContain("recoverTrustedExecutionSubject(binding");
+    expect(startBuilder).not.toContain("executionSubject");
+    expect(`${external}\n${agentResume}`).not.toContain(
+      'executionSubjectFromServiceIdentity(principal.tenantId, "gateway")',
+    );
+  });
 });
