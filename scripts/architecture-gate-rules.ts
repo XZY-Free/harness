@@ -835,27 +835,59 @@ export function checkDispatchRecoveryAuthorityGate(
     }
   }
 
-  // Resume dispatched=false 显式 switch
+  // Resume dispatched=false 显式 switch；Hosted local transport 必须真实 dispatch。
   const resolveRoute = docOrFail(
     documents,
     "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
     failures,
   );
   if (resolveRoute) {
-    for (const reason of ["protocol_not_remote", "unsupported_capability", "command_not_found"]) {
+    for (const reason of ["unsupported_capability", "command_not_found"]) {
       if (!resolveRoute.source.includes(reason)) {
         failures.push(`resolve route 缺少 ${reason} 显式分支`);
       }
     }
-    const source = stripComments(resolveRoute.source);
-    if (/!gatewayResult\.dispatched[\s\S]{0,200}local_runtime/.test(source)) {
-      // 唯一 local_runtime 语义只允许 protocol_not_remote 分支
-      const m = /if\s*\(\s*gatewayResult\.reason\s*===\s*["']protocol_not_remote["']\s*\)/.test(
-        source,
-      );
-      const blindLocal = /else\s*\{[^}]{0,400}mode:\s*["']local_runtime["']/.test(source);
-      if (!m || blindLocal) {
-        failures.push("resolve route 存在非 protocol_not_remote 的 local_runtime 兜底分支");
+    if (/protocol_not_remote|local_runtime/.test(stripComments(resolveRoute.source))) {
+      failures.push("resolve route 仍把 Hosted 当作不调度的 local_runtime 成功");
+    }
+  }
+
+  const commandGateway = docOrFail(documents, "lib/runtime/command-dispatch-gateway.ts", failures);
+  if (commandGateway) {
+    const source = stripComments(commandGateway.source);
+    if (source.includes("protocol_not_remote")) {
+      failures.push("command gateway 仍包含 protocol_not_remote Hosted 语义");
+    }
+    for (const required of [
+      "createInProcessHostedRuntimeClient",
+      "hostedRuntimeApplicationService",
+      "dispatchCancelCommand",
+      "dispatchResumeCommand",
+      "dispatchSteerCommand",
+    ]) {
+      if (!source.includes(required)) failures.push(`command gateway 缺少 ${required} 生产接线`);
+    }
+  }
+  const inProcess = docOrFail(documents, "lib/runtime/in-process-hosted-runtime.ts", failures);
+  if (
+    inProcess &&
+    /pending\s*=\s*new Map|PendingInvocation|unsupported\s*</.test(inProcess.source)
+  ) {
+    failures.push("InProcessHostedRuntimeClient 仍以内存 pending/unsupported 承载控制语义");
+  }
+  const hostedAdapter = docOrFail(documents, "lib/runtime/adapters/hosted-adapter.ts", failures);
+  if (hostedAdapter?.source.includes("loopParamsByInvocation")) {
+    failures.push("HostedAdapter 仍以 loopParamsByInvocation 作为 resume Authority");
+  }
+  const recoveryPort = docOrFail(
+    documents,
+    "lib/runtime/harness-loop/mysql-recovery-port.ts",
+    failures,
+  );
+  if (recoveryPort) {
+    for (const required of ["harnessActionId", "responseRedactedJson", "user_guidance"]) {
+      if (!recoveryPort.source.includes(required)) {
+        failures.push(`MySQL Harness recovery 缺少 ${required} durable input`);
       }
     }
   }
@@ -1219,9 +1251,16 @@ export function checkFinalClosureBoundaryGate(
   const resumeEnd = hosted.indexOf("async handleSteer(", resumeStart);
   const resumeBlock =
     resumeStart >= 0 && resumeEnd > resumeStart ? hosted.slice(resumeStart, resumeEnd) : "";
+  const hostedApplication = stripComments(
+    source("lib/runtime/application/production-resume-harness-invocation.ts"),
+  );
   if (
-    !resumeBlock.includes("new HostedHarnessLoop(") ||
-    !resumeBlock.includes("await runPromise")
+    !resumeBlock.includes("applicationService.resume(") ||
+    !hostedApplication.includes("new HostedHarnessLoop(") ||
+    !hostedApplication.includes("const running = loop.run()") ||
+    !hostedApplication.includes("return await running") ||
+    !hostedApplication.includes("acquireLease: tryAcquireInvocationExecutionLease") ||
+    !hostedApplication.includes("cancelActiveAgentCalls(")
   ) {
     failures.push("Hosted Resume 退化为只 ACK");
   }

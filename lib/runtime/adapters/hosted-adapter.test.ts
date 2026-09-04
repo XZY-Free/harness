@@ -52,6 +52,7 @@ import {
   hostedAdapterCapabilities,
   setRouteHostedAdapter,
 } from "@/lib/runtime/adapters/hosted-adapter";
+import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { DEFAULT_ROUTE_SCOPE_KEY, dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
@@ -61,7 +62,7 @@ import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── 全局 setup/teardown ──────────────────────────────────
 
@@ -137,6 +138,23 @@ function mockAdapterParams(sink: EventBatchSink): CreateHostedAdapterParams {
     eventBatchSink: sink,
     ...createDirectResponsePorts((view) => `测试执行器回复：${view.objective}`),
     modelRef: "test-model",
+  };
+}
+
+function mockApplicationService(): HostedRuntimeApplicationService {
+  return {
+    start: vi.fn(async ({ invocationId }) => ({
+      status: "resumed" as const,
+      invocationId,
+      runtime: "hosted" as const,
+    })),
+    resume: vi.fn(async ({ invocationId }) => ({
+      status: "resumed" as const,
+      invocationId,
+      runtime: "hosted" as const,
+    })),
+    cancel: vi.fn(async () => undefined),
+    steer: vi.fn(async () => undefined),
   };
 }
 
@@ -417,7 +435,11 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
 describe("S05-C05 HostedAdapter 命令处理", () => {
   it("handleCancel 返回 cancel_state=accepted + already_completed_effects_preserved=true", async () => {
     const mock = createMockSink();
-    const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
+    const applicationService = mockApplicationService();
+    const adapter = createHostedAdapter({
+      ...mockAdapterParams(mock.sink),
+      applicationService,
+    });
 
     const result = await adapter.handleCancel({
       invocationId: "inv-cancel-001",
@@ -428,9 +450,10 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
 
     expect(result.cancel_state).toBe("accepted");
     expect(result.already_completed_effects_preserved).toBe(true);
+    expect(applicationService.cancel).toHaveBeenCalledOnce();
   });
 
-  it("handleResume 对未登记 Invocation fail closed", async () => {
+  it("handleResume 未配置正式应用服务时 fail closed", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -440,12 +463,16 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
         resumePayload: { action: "confirm" },
         authToken: mockAuthToken(),
       }),
-    ).rejects.toMatchObject({ code: "HARNESS_LOOP_STATE_RECOVERY_FAILED" });
+    ).rejects.toMatchObject({ code: "HOSTED_CONTROL_SERVICE_UNAVAILABLE" });
   });
 
   it("handleSteer 返回 steer_state=accepted + applies_at=next_safe_point + generation_interrupted=false", async () => {
     const mock = createMockSink();
-    const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
+    const applicationService = mockApplicationService();
+    const adapter = createHostedAdapter({
+      ...mockAdapterParams(mock.sink),
+      applicationService,
+    });
 
     const result = await adapter.handleSteer({
       invocationId: "inv-steer-001",
@@ -456,26 +483,16 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
     expect(result.steer_state).toBe("accepted");
     expect(result.applies_at).toBe("next_safe_point");
     expect(result.generation_interrupted).toBe(false);
+    expect(applicationService.steer).toHaveBeenCalledOnce();
   });
 
-  it("handleCancel 异步回传 execution.cancelled 事件（fire-and-forget）", async () => {
-    // 使用 deferred promise 等待异步事件回传
-    let resolveCancel: (() => void) | undefined;
-    const cancelSent = new Promise<void>((resolve) => {
-      resolveCancel = resolve;
+  it("handleCancel 等待正式应用服务完成，不自行伪造 cancelled 事件", async () => {
+    const mock = createMockSink();
+    const applicationService = mockApplicationService();
+    const adapter = createHostedAdapter({
+      ...mockAdapterParams(mock.sink),
+      applicationService,
     });
-
-    const events: RuntimeCandidateEvent[] = [];
-    const sink: EventBatchSink = async ({ events: batch }) => {
-      events.push(...batch);
-      if (batch.some((e) => e.type === "execution.cancelled")) {
-        resolveCancel?.();
-      }
-    };
-
-    const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    // handleCancel 立即返回，execution.cancelled 异步发送
     const result = await adapter.handleCancel({
       invocationId: "inv-cancel-async-001",
       reason: "user_cancel",
@@ -484,14 +501,8 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
     });
 
     expect(result.cancel_state).toBe("accepted");
-
-    // 等待异步事件回传
-    await cancelSent;
-
-    const cancelEvent = events.find((e) => e.type === "execution.cancelled");
-    expect(cancelEvent).toBeDefined();
-    expect(cancelEvent?.payload.cancelled_by).toBe("test-user");
-    expect(cancelEvent?.payload.reason).toBe("user_cancel");
+    expect(applicationService.cancel).toHaveBeenCalledOnce();
+    expect(mock.events).toEqual([]);
   });
 });
 

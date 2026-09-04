@@ -86,6 +86,7 @@ import {
 import {
   dispatchInterruptCommandToRuntime,
   dispatchResumeCommandToRuntime,
+  dispatchSteerCommandToRuntime,
 } from "@/lib/runtime/command-dispatch-gateway";
 import {
   type CommandDispatchResult,
@@ -117,6 +118,7 @@ import {
   createMockRuntimeClient,
 } from "@/lib/runtime/runtime-client";
 import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
+import { createConformanceHostedApplicationService } from "@/lib/runtime/test-support/conformance-hosted-application-service";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { and, eq } from "drizzle-orm";
@@ -819,8 +821,9 @@ describe("S05-C04 dispatchSteerCommand", () => {
     });
 
     expect(result.commandState).toBe("acknowledged");
-    // 幂等复用不写新事件
-    expect(result.events).toHaveLength(0);
+    // Runtime 已处理过命令时，平台仍需补齐唯一的本地 ack 投影，供 recovery 消费。
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]?.eventType).toBe("turn.steered");
 
     const cmdRow = await getCommandRow(steerResult.command.id);
     expect(cmdRow?.commandState).toBe("acknowledged");
@@ -1535,6 +1538,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
       platformEndpoint: "https://platform.internal",
       platformAuthToken: "test-token",
       eventBatchSink: sink,
+      applicationService: createConformanceHostedApplicationService({ eventBatchSink: sink }),
       ...createDirectResponsePorts(async () => "测试完成"),
     });
     await adapter.startInvocation({
@@ -2209,7 +2213,7 @@ describe("Batch 10 命令调度生产网关", () => {
     expect(result).toEqual({ dispatched: false, reason: "command_not_found" });
   });
 
-  it("hosted 协议（harness_runtime_protocol）：protocol_not_remote，命令保持 queued 由既有状态机吸收", async () => {
+  it("hosted 协议通过 local transport 真正取消并确认命令", async () => {
     const ctx = await seedFullCommandContext("harness_runtime_protocol");
     // 05 §3：合同声明 cancel=true，使本用例聚焦协议分流（合同 cancel=false 的
     // unsupported_capability 分支由专项 05 用例覆盖）。
@@ -2229,9 +2233,62 @@ describe("Batch 10 命令调度生产网关", () => {
       tenantId: ctx.tenantId,
       commandId: interruptResult.command.id,
     });
-    expect(result).toEqual({ dispatched: false, reason: "protocol_not_remote" });
-    // hosted in-process 协议无远端端点可调，命令保持 queued 等待状态机处理（04 §10）。
-    expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("queued");
+    expect(result).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("acknowledged");
+    expect((await getInvocationById(ctx.tenantId, running.invocationId))?.executionState).toBe(
+      "cancelled",
+    );
+  });
+
+  it("hosted steer 在返回前确认 guidance，重复 dispatch 不会重复注入", async () => {
+    const ctx = await seedFullCommandContext("harness_runtime_protocol");
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    const steer = await queueSteer({
+      tenantId: ctx.tenantId,
+      ownerUserId: ctx.ownerId,
+      turnId: ctx.turnId,
+      guidanceText: "改为后天下午",
+      idempotencyKey: "gw-steer-1",
+    });
+
+    const result = await dispatchSteerCommandToRuntime({
+      tenantId: ctx.tenantId,
+      commandId: steer.command.id,
+    });
+    expect(result).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    const [guidance] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, steer.guidanceItemId))
+      .limit(1);
+    expect(guidance).toMatchObject({
+      invocationId: running.invocationId,
+      itemState: "completed",
+    });
+
+    await expect(
+      dispatchSteerCommandToRuntime({
+        tenantId: ctx.tenantId,
+        commandId: steer.command.id,
+      }),
+    ).rejects.toBeInstanceOf(CommandAlreadyDispatchedError);
+    const completed = await db
+      .select({ id: threadItemTable.id })
+      .from(threadItemTable)
+      .where(
+        and(
+          eq(threadItemTable.invocationId, running.invocationId),
+          eq(threadItemTable.itemType, "user_guidance"),
+          eq(threadItemTable.itemState, "completed"),
+        ),
+      );
+    expect(completed).toHaveLength(1);
   });
 
   // 说明：原"05 §8 Binding effective cancel=false → unsupported_capability"用例的前提是

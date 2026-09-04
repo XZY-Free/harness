@@ -19,6 +19,8 @@ export interface HarnessExecutionLease {
   id: string;
 }
 
+export type HarnessResumeSourceType = "hosted_start" | "user_action" | "agent_call" | "tool_call";
+
 export interface ResumeHarnessInvocationDependencies {
   loadInvocation(tenantId: string, invocationId: string): Promise<Invocation | null>;
   loadBinding(tenantId: string, invocationId: string): Promise<ExecutionBinding | null>;
@@ -33,6 +35,8 @@ export interface ResumeHarnessInvocationDependencies {
     leaseId: string;
   }): Promise<void>;
   renewLease(params: { invocationId: string; leaseId: string }): Promise<boolean>;
+  /** 测试可缩短；生产默认 30 秒，短于 60 秒 lease TTL。 */
+  leaseHeartbeatIntervalMs?: number;
   runHosted(params: {
     tenantId: string;
     invocation: Invocation;
@@ -40,6 +44,7 @@ export interface ResumeHarnessInvocationDependencies {
     runtimeRevision: RuntimeRevisionRow;
     subject: ExecutionSubject;
     capabilityCatalog: CapabilityCatalogSnapshot;
+    abortSignal: AbortSignal;
   }): Promise<HostedHarnessLoopResult>;
   resumeExternal(params: {
     tenantId: string;
@@ -48,7 +53,7 @@ export interface ResumeHarnessInvocationDependencies {
     runtimeRevision: RuntimeRevisionRow;
     subject: ExecutionSubject;
     capabilityCatalog: CapabilityCatalogSnapshot;
-    sourceType: "agent_call" | "tool_call";
+    sourceType: HarnessResumeSourceType;
     agentCallId: string;
     sourceVersion: number;
   }): Promise<{ resumed: boolean }>;
@@ -73,7 +78,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
   return async (input: {
     tenantId: string;
     invocationId: string;
-    sourceType?: "agent_call" | "tool_call";
+    sourceType?: HarnessResumeSourceType;
     agentCallId: string;
     sourceVersion: number;
   }): Promise<ResumeHarnessInvocationResult> => {
@@ -154,11 +159,34 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
         "父 Invocation 当前由另一执行器持有",
       );
     }
+    const leaseController = new AbortController();
+    let heartbeatInFlight: Promise<void> | null = null;
     const renewTimer = setInterval(() => {
-      void dependencies
+      if (heartbeatInFlight || leaseController.signal.aborted) return;
+      heartbeatInFlight = dependencies
         .renewLease({ invocationId: invocation.id, leaseId: lease.id })
-        .catch(() => undefined);
-    }, 30_000);
+        .then((renewed) => {
+          if (!renewed) {
+            leaseController.abort(
+              new InvocationContinuationRetryableError(
+                "INVOCATION_EXECUTION_LEASE_LOST",
+                "父 Invocation 执行租约已丢失",
+              ),
+            );
+          }
+        })
+        .catch(() => {
+          leaseController.abort(
+            new InvocationContinuationRetryableError(
+              "INVOCATION_EXECUTION_LEASE_LOST",
+              "父 Invocation 执行租约续约失败",
+            ),
+          );
+        })
+        .finally(() => {
+          heartbeatInFlight = null;
+        });
+    }, dependencies.leaseHeartbeatIntervalMs ?? 30_000);
     try {
       if (binding.runtimeEvidenceKind === "external_endpoint") {
         const result = await dependencies.resumeExternal({
@@ -187,6 +215,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
         runtimeRevision,
         subject,
         capabilityCatalog,
+        abortSignal: leaseController.signal,
       });
       return {
         status: "resumed",
@@ -198,6 +227,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
       };
     } finally {
       clearInterval(renewTimer);
+      await heartbeatInFlight;
       await dependencies.releaseLease({ invocationId: invocation.id, leaseId: lease.id });
     }
   };

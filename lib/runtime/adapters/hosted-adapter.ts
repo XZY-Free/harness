@@ -23,6 +23,7 @@
  * - Agent Loop 6 步：理解—查看索引—按需加载—行动—验证—继续/完成。
  */
 import { randomUUID } from "node:crypto";
+import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import {
@@ -354,6 +355,8 @@ export interface HostedHarnessLoopParams {
   transientEventBatchSink?: TransientEventBatchSink;
   /** 实际执行本轮的模型标识。 */
   modelRef?: string;
+  /** live Hosted runner 的取消信号；durable cancel 由应用服务触发。 */
+  abortSignal?: AbortSignal;
   /** 关联标识（X-Request-Id / traceparent）。 */
   correlationId?: string | null;
 }
@@ -362,6 +365,8 @@ export interface HostedHarnessLoopParams {
 export interface HostedHarnessLoopResult {
   /** 是否成功完成（execution.completed 已发送或被平台视为终态）。 */
   completed: boolean;
+  /** 是否在安全边界收到取消。 */
+  cancelled?: boolean;
   /** 已提交 action 的子调用仍在 durable 执行。 */
   pending?: boolean;
   /** Agent 回复文本（response.completed payload.text）。 */
@@ -477,6 +482,7 @@ export class HostedHarnessLoop {
           }
         : undefined,
       modelRef: this.params.modelRef ?? "unknown",
+      abortSignal: this.params.abortSignal,
       eventWriter: {
         write: (type, payload) => this.sendEvent(ingressClient, type, payload),
       },
@@ -503,6 +509,7 @@ export class HostedHarnessLoop {
     const result = await loop.run();
     return {
       completed: result.completed,
+      cancelled: result.cancelled,
       pending: result.pending,
       waitingForUser: result.waitingForUser,
       responseText: result.responseText,
@@ -537,16 +544,10 @@ export class HostedHarnessLoop {
 
 // ─── Adapter 内部状态 ─────────────────────────────────────
 
-/** Adapter 实例内部状态（跟踪 producer_sequence 连续性 + loop promise）。 */
+/** Adapter 实例只保留测试可等待的 live Promise，不保存恢复 Authority。 */
 interface AdapterState {
-  /** 下一个可用的 producer_sequence（整个 Invocation 内连续递增）。 */
-  nextSequence: number;
   /** 最后一次 startInvocation 触发的 loop.run() Promise（测试 await）。 */
   lastLoopPromise: Promise<HostedHarnessLoopResult> | null;
-  /** 最后一次创建的 HostedHarnessLoop 实例（诊断用）。 */
-  lastLoop: HostedHarnessLoop | null;
-  /** 按 Invocation 保存冻结的 Loop 参数，resume 必须重建同一个执行而非只 ACK。 */
-  loopParamsByInvocation: Map<string, HostedHarnessLoopParams>;
 }
 
 // ─── createHostedAdapter 工厂 ─────────────────────────────
@@ -559,6 +560,8 @@ export interface CreateHostedAdapterParams {
   platformEndpoint: string;
   /** 平台颁发的 Workload Token（HTTP sink 用）。 */
   platformAuthToken: string;
+  /** Hosted 应用服务的租户作用域。 */
+  tenantId?: string;
   /** 可注入的事件回传 Sink（测试用；不传则用 HTTP 默认实现）。 */
   eventBatchSink?: EventBatchSink;
   /** 可注入的 transient 事件回传 Sink。 */
@@ -569,6 +572,8 @@ export interface CreateHostedAdapterParams {
   recoveryPort?: HarnessLoopRecoveryPort;
   /** 实际执行本轮的模型标识。 */
   modelRef?: string;
+  /** 控制命令必须进入只依赖 durable identity 的正式应用服务。 */
+  applicationService?: HostedRuntimeApplicationService;
 }
 
 /**
@@ -584,21 +589,13 @@ export interface CreateHostedAdapterParams {
 export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeAdapter {
   const refPrefix = "hosted";
   const state: AdapterState = {
-    nextSequence: 1,
     lastLoopPromise: null,
-    lastLoop: null,
-    loopParamsByInvocation: new Map(),
   };
 
   // 包装 eventBatchSink 以跟踪 producer_sequence 连续性
   const injectedSink = params.eventBatchSink;
   const trackedSink: EventBatchSink | undefined = injectedSink
     ? async (sinkParams) => {
-        // 更新 nextSequence 为本批次最后一个事件的 sequence + 1
-        const lastEvent = sinkParams.events[sinkParams.events.length - 1];
-        if (lastEvent) {
-          state.nextSequence = lastEvent.producer_sequence + 1;
-        }
         await injectedSink(sinkParams);
       }
     : undefined;
@@ -620,50 +617,6 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
       };
     }
     return createHttpEventIngressClient({ gatewayEndpoints, authToken });
-  }
-
-  /**
-   * 发送单个候选事件（handleCancel 等命令处理用）。
-   * 使用 Adapter 跟踪的 nextSequence，保证连续性。
-   */
-  async function sendSingleEvent(
-    invocationId: string,
-    type: string,
-    payload: Record<string, unknown>,
-    gatewayEndpoints?: GatewayEndpoints,
-    authToken?: string,
-  ): Promise<void> {
-    const seq = state.nextSequence;
-    const event: RuntimeCandidateEvent = {
-      producer_event_id: `${refPrefix}-${type}-${randomUUID()}`,
-      producer_sequence: seq,
-      type,
-      schema_version: 1,
-      occurred_at: new Date().toISOString(),
-      payload,
-    };
-    state.nextSequence = seq + 1;
-
-    if (trackedSink) {
-      await trackedSink({
-        invocationId,
-        events: [event],
-        producerSequenceStart: seq,
-      });
-      return;
-    }
-
-    // HTTP 模式：从命令参数构造 ingress client
-    if (gatewayEndpoints && authToken) {
-      const client = createHttpEventIngressClient({ gatewayEndpoints, authToken });
-      await client.postEventBatch(invocationId, [event], seq);
-      return;
-    }
-
-    // 无 sink 且无 HTTP 参数：记录错误但不抛出（命令 ack 不依赖事件回传成功）
-    console.error(
-      `[HostedAdapter] sendSingleEvent(${type}) 无可用 sink：invocationId=${invocationId}`,
-    );
   }
 
   return {
@@ -708,10 +661,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           modelRef: params.modelRef,
           correlationId: startParams.correlationId,
         };
-        state.loopParamsByInvocation.set(startParams.invocationId, loopParams);
-
         const loop = new HostedHarnessLoop(loopParams);
-        state.lastLoop = loop;
         const runPromise = loop.run();
         state.lastLoopPromise = runPromise;
 
@@ -733,20 +683,17 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
     },
 
     async handleCancel(cancelParams: CancelParams): Promise<CancelResult> {
-      // 异步发送 execution.cancelled 事件（不阻塞 ack 响应）
-      void sendSingleEvent(
-        cancelParams.invocationId,
-        "execution.cancelled",
-        {
-          cancelled_by: cancelParams.cancelledBy ?? "system",
-          reason: cancelParams.reason ?? "user_cancel",
-        },
-        cancelParams.gatewayEndpoints,
-        cancelParams.authToken,
-      ).catch((err) => {
-        console.error(
-          `[HostedAdapter] execution.cancelled 回传失败：${err instanceof Error ? err.message : String(err)}`,
+      if (!params.applicationService) {
+        throw new HarnessLoopError(
+          "HOSTED_CONTROL_SERVICE_UNAVAILABLE",
+          "Hosted cancel 未配置正式应用服务",
         );
+      }
+      await params.applicationService.cancel({
+        tenantId: params.tenantId ?? "",
+        invocationId: cancelParams.invocationId,
+        idempotencyKey: `hosted-cancel:${cancelParams.invocationId}`,
+        reason: cancelParams.reason,
       });
 
       return {
@@ -756,24 +703,18 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
     },
 
     async handleResume(resumeParams): Promise<ResumeResult> {
-      const loopParams = state.loopParamsByInvocation.get(resumeParams.invocationId);
-      if (!loopParams) {
+      if (!params.applicationService) {
         throw new HarnessLoopError(
-          "HARNESS_LOOP_STATE_RECOVERY_FAILED",
-          `Hosted Runtime 无法恢复未登记的 Invocation：${resumeParams.invocationId}`,
+          "HOSTED_CONTROL_SERVICE_UNAVAILABLE",
+          "Hosted resume 未配置正式应用服务",
         );
       }
-      const loop = new HostedHarnessLoop({
-        ...loopParams,
-        ...(resumeParams.gatewayEndpoints
-          ? { gatewayEndpoints: resumeParams.gatewayEndpoints }
-          : {}),
-        ...(resumeParams.authToken ? { authToken: resumeParams.authToken } : {}),
+      await params.applicationService.resume({
+        tenantId: params.tenantId ?? "",
+        invocationId: resumeParams.invocationId,
+        idempotencyKey: `hosted-resume:${resumeParams.invocationId}`,
+        resumePayload: resumeParams.resumePayload,
       });
-      state.lastLoop = loop;
-      const runPromise = loop.run();
-      state.lastLoopPromise = runPromise;
-      await runPromise;
       return {
         resume_state: "accepted",
         runtime_execution_ref: `${refPrefix}-exec-resume-${randomUUID()}`,
@@ -781,8 +722,19 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
       };
     },
 
-    async handleSteer(): Promise<SteerResult> {
-      // Hosted 参考实现：Steer 在下一个安全点应用，不打断当前生成
+    async handleSteer(steerParams): Promise<SteerResult> {
+      if (!params.applicationService) {
+        throw new HarnessLoopError(
+          "HOSTED_CONTROL_SERVICE_UNAVAILABLE",
+          "Hosted steer 未配置正式应用服务",
+        );
+      }
+      await params.applicationService.steer({
+        tenantId: params.tenantId ?? "",
+        invocationId: steerParams.invocationId,
+        idempotencyKey: `hosted-steer:${steerParams.invocationId}`,
+        steerPayload: steerParams.steerPayload,
+      });
       return {
         steer_state: "accepted",
         applies_at: "next_safe_point",

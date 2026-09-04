@@ -1,4 +1,3 @@
-import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
@@ -9,34 +8,28 @@ import { type RouteResolver, createResolveRoute } from "@/lib/routes/application
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import {
+  createConfiguredHostedRuntimeApplicationService,
+  hostedRuntimeApplicationService,
+} from "@/lib/runtime/application/production-resume-harness-invocation";
+import {
   type RuntimeTransportAuth,
   resolveOutboundRuntimeAuth,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
-import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
-import { HARNESS_NEXT_ACTION_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
-import { computeCapabilityCatalogDigest } from "@/lib/runtime/harness-loop/capability-catalog";
+import {
+  configuredDecisionPort,
+  configuredFinalResponsePort,
+} from "@/lib/runtime/harness-loop/configured-model-ports";
 import type {
   HarnessActionExecutors,
   HarnessDecisionPort,
   HarnessFinalResponsePort,
 } from "@/lib/runtime/harness-loop/loop";
-import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
-import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import type { InProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
-import { collectModelText } from "@/lib/runtime/model-text-stream";
-import {
-  releaseInvocationExecutionLease,
-  renewInvocationExecutionLease,
-  tryAcquireInvocationExecutionLease,
-} from "@/lib/runtime/persistence/invocation-execution-lease";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
-import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
-import { generateObject, streamText } from "ai";
 
 /** 使用统一解析入口 — Projection 是唯一数据源。 */
 const configuredResolver = createConfiguredRouteResolver({
@@ -64,45 +57,6 @@ export interface EmployeeTurnDispatchResult {
     | "agent_revision_not_found";
   /** Agent Loop 的后台执行；HTTP 路由不等待它，测试可等待。 */
   completion: Promise<void>;
-}
-
-export function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
-  return {
-    async decideNextAction(view) {
-      if (!aiConfig.apiKey) {
-        throw new Error("LLM_API_KEY 未配置");
-      }
-      const { object } = await generateObject({
-        model: getChatModel(modelRef),
-        schema: HARNESS_NEXT_ACTION_SCHEMA,
-        prompt: [
-          "你是 SnowHarness 的行动决策器。每步只返回一个符合 Schema 的行动，不输出正文或隐藏推理。",
-          "只有 observations 足以支持回答时才返回 respond；用户 preferred Agent 只是候选，不表示必须调用。",
-          JSON.stringify(view),
-        ].join("\n\n"),
-      });
-      return object;
-    },
-  };
-}
-
-export function configuredFinalResponsePort(modelRef: string): HarnessFinalResponsePort {
-  return {
-    async generateFinalResponse(view, emitDelta) {
-      if (!aiConfig.apiKey) {
-        throw new Error("LLM_API_KEY 未配置");
-      }
-      const result = streamText({
-        model: getChatModel(modelRef),
-        prompt: [
-          "根据当前用户目标与已完成 observations 生成最终可见回答。不得声称执行过 actionHistory 中不存在或未 completed 的行动。",
-          JSON.stringify(view),
-        ].join("\n\n"),
-        maxOutputTokens: aiConfig.maxOutputTokens || undefined,
-      });
-      return collectModelText(result.fullStream, emitDelta);
-    },
-  };
 }
 
 /**
@@ -212,52 +166,20 @@ export async function dispatchEmployeeTurn(params: {
     factories: {
       harness_runtime_protocol: () =>
         createInProcessHostedRuntimeClient({
-          decisionPort:
-            params.decisionPort ?? configuredDecisionPort(params.modelRef ?? aiConfig.chatModel),
-          finalResponsePort:
-            params.finalResponsePort ??
-            configuredFinalResponsePort(params.modelRef ?? aiConfig.chatModel),
           tenantId: params.tenantId,
-          actionExecutors: params.actionExecutors,
-          actionExecutorFactory: async (capabilityCatalog, invocationId) => {
-            const binding = await getExecutionBindingByInvocation(params.tenantId, invocationId);
-            if (!binding) throw new Error("HOSTED_EXECUTION_BINDING_MISSING");
-            const executionSubject = recoverTrustedExecutionSubject(binding, params.tenantId);
-            if (
-              binding.capabilityCatalogDigest !== computeCapabilityCatalogDigest(capabilityCatalog)
-            ) {
-              throw new Error("HOSTED_CAPABILITY_CATALOG_MISMATCH");
-            }
-            return createPlatformHarnessActionExecutors({
-              tenantId: params.tenantId,
-              executionSubject,
-              resolveRoute,
-              capabilityCatalog,
-              transportChannel: "hosted",
-            });
-          },
-          recoveryPort: createMySqlHarnessLoopRecoveryPort(params.tenantId),
-          ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
-            await ingressEventBatch({
-              tenantId: params.tenantId,
-              invocationId,
-              events,
-              producerSequenceStart,
-            });
-          },
-          ingressTransientEventBatch: async ({ invocationId, events, transientSequenceStart }) => {
-            await ingressTransientBatch({
-              tenantId: params.tenantId,
-              invocationId,
-              events,
-              transientSequenceStart,
-            });
-          },
-          executionLease: {
-            acquire: tryAcquireInvocationExecutionLease,
-            renew: renewInvocationExecutionLease,
-            release: releaseInvocationExecutionLease,
-          },
+          applicationService:
+            params.decisionPort || params.finalResponsePort || params.actionExecutors
+              ? createConfiguredHostedRuntimeApplicationService({
+                  decisionPort:
+                    params.decisionPort ??
+                    configuredDecisionPort(params.modelRef ?? aiConfig.chatModel),
+                  finalResponsePort:
+                    params.finalResponsePort ??
+                    configuredFinalResponsePort(params.modelRef ?? aiConfig.chatModel),
+                  actionExecutors: params.actionExecutors,
+                  modelRef: params.modelRef,
+                })
+              : hostedRuntimeApplicationService,
         }),
     },
   });
@@ -328,10 +250,7 @@ export async function dispatchEmployeeTurn(params: {
   if (typeof hostedClient.launchAcceptedInvocation !== "function") {
     return { dispatched: true, completion: Promise.resolve() };
   }
-  const completion = hostedClient.launchAcceptedInvocation(
-    result.invocation.id,
-    result.binding.modelId,
-  );
+  const completion = hostedClient.launchAcceptedInvocation(result.invocation.id);
   void completion.catch((error) => {
     logger.error("[runtime] Hosted Runtime 执行失败", {
       turnId: params.turnId,

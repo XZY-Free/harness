@@ -913,6 +913,12 @@ async function mapUserActionRequested(
   if (!isUserActionRequestType(requestTypeRaw)) {
     throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
   }
+  if (
+    requestTypeRaw === "input" &&
+    (typeof payload.action_id !== "string" || payload.action_id.length === 0)
+  ) {
+    throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+  }
 
   // 1. 创建 user_action Item Projection（pending）。
   const itemSeq = await allocateItemSequence(tx, ctx.threadId);
@@ -940,6 +946,10 @@ async function mapUserActionRequested(
       threadId: ctx.threadId,
       turnId: ctx.turnId,
       invocationId: ctx.invocation.id,
+      harnessActionId:
+        typeof payload.action_id === "string" && payload.action_id.length > 0
+          ? payload.action_id
+          : null,
       itemId: item.id,
       requestType: requestTypeRaw,
       purpose,

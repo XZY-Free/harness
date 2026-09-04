@@ -122,6 +122,8 @@ export const userActionRequestTable = mysqlTable(
     turnId: varchar("turnId", { length: 36 }).notNull(),
     /** 所属 Invocation，必须为 Turn Invocation（逻辑外键 → Invocation.id）。 */
     invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    /** 发起本请求的 Harness action id；generic request_user_input 必填。 */
+    harnessActionId: varchar("harnessActionId", { length: 64 }),
     /** 引发请求的 ToolCall（可空；逻辑外键 → ToolCall.id）。 */
     toolCallId: varchar("toolCallId", { length: 36 }),
     /** 员工可见 ThreadItem 投影外键（可空但唯一；逻辑外键 → ThreadItem.id）。 */
@@ -175,6 +177,10 @@ export const userActionRequestTable = mysqlTable(
       t.tenantId,
       t.invocationId,
       t.requestState,
+    ),
+    invocationHarnessActionUq: uniqueIndex("UserActionRequest_invocation_harnessAction_uq").on(
+      t.invocationId,
+      t.harnessActionId,
     ),
     tenantToolCallIdx: index("UserActionRequest_tenant_toolCall_idx").on(t.tenantId, t.toolCallId),
     tenantStateExpiresIdx: index("UserActionRequest_tenant_state_expires_idx").on(

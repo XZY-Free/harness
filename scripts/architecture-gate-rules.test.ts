@@ -162,7 +162,11 @@ describe("Topic 01 final closure boundary gate", () => {
     ),
     doc(
       "lib/runtime/adapters/hosted-adapter.ts",
-      "async handleResume() { const loop = new HostedHarnessLoop({}); const runPromise = loop.run(); await runPromise; } async handleSteer() {}",
+      "async handleResume() { await applicationService.resume({ invocationId }); } async handleSteer() {}",
+    ),
+    doc(
+      "lib/runtime/application/production-resume-harness-invocation.ts",
+      "acquireLease: tryAcquireInvocationExecutionLease; const loop = new HostedHarnessLoop({}); const running = loop.run(); return await running; cancelActiveAgentCalls({});",
     ),
   ];
 
@@ -1109,6 +1113,10 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
     attemptService: "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
     recovery: "lib/runtime/recovery-queries.ts",
     resolveRoute: "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+    commandGateway: "lib/runtime/command-dispatch-gateway.ts",
+    inProcess: "lib/runtime/in-process-hosted-runtime.ts",
+    hostedAdapter: "lib/runtime/adapters/hosted-adapter.ts",
+    recoveryPort: "lib/runtime/harness-loop/mysql-recovery-port.ts",
     transport: "lib/agents/calls/transport/a2a/a2a-client.ts",
     parser: "lib/agents/domain/public-agent-contract.ts",
   };
@@ -1125,11 +1133,17 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
       doc(
         PATHS.resolveRoute,
         [
-          'if (gatewayResult.reason === "protocol_not_remote") { mode: "local_runtime" }',
           'if (gatewayResult.reason === "unsupported_capability") { return 422; }',
           'if (gatewayResult.reason === "command_not_found") { return 409; }',
         ].join("\n"),
       ),
+      doc(
+        PATHS.commandGateway,
+        "createInProcessHostedRuntimeClient hostedRuntimeApplicationService dispatchCancelCommand dispatchResumeCommand dispatchSteerCommand",
+      ),
+      doc(PATHS.inProcess, "applicationService.start({ invocationId });"),
+      doc(PATHS.hostedAdapter, "applicationService.resume({ invocationId });"),
+      doc(PATHS.recoveryPort, "harnessActionId responseRedactedJson user_guidance"),
       doc(
         PATHS.transport,
         "runtime_session_ref: contextId, capabilities: { features: { cancel: params.capabilities.cancel, resume: params.capabilities.resume, user_action: params.capabilities.user_action ?? false } }",
@@ -1171,10 +1185,7 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
   it("缺 command_not_found 显式分支 → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === PATHS.resolveRoute
-        ? doc(
-            d.path,
-            'if (gatewayResult.reason === "protocol_not_remote") {} if (gatewayResult.reason === "unsupported_capability") {}',
-          )
+        ? doc(d.path, 'if (gatewayResult.reason === "unsupported_capability") {}')
         : d,
     );
     const result = checkDispatchRecoveryAuthorityGate(docs);

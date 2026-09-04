@@ -1,19 +1,6 @@
 import { randomUUID } from "node:crypto";
-import {
-  type RuntimeAdapter,
-  type StartInvocationParams,
-  type TransientEventBatchSink,
-  createHostedAdapter,
-  hostedAdapterCapabilities,
-} from "@/lib/runtime/adapters/hosted-adapter";
-import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
-import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
-import type {
-  HarnessActionExecutors,
-  HarnessDecisionPort,
-  HarnessFinalResponsePort,
-  HarnessLoopRecoveryPort,
-} from "@/lib/runtime/harness-loop/loop";
+import { hostedAdapterCapabilities } from "@/lib/runtime/adapters/hosted-adapter";
+import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import type {
   CancelInvocationRequest,
   CancelInvocationResponse,
@@ -27,52 +14,19 @@ import type {
   SteerInvocationResponse,
 } from "@/lib/runtime/runtime-client";
 
-interface PendingInvocation {
-  readonly request: StartInvocationRequest;
-  readonly response: StartInvocationResponse;
-}
-
 export interface InProcessHostedRuntimeClient extends RuntimeHttpClient {
-  /**
-   * 在平台已把 Invocation 持久化为 running 后启动 Agent Loop，避免终态事件抢在
-   * invocation.started 之前落库。
-   */
-  launchAcceptedInvocation(invocationId: string, modelRef: string): Promise<void>;
+  /** 平台已把 Invocation 持久化为 running 后，仅凭 id 从 DB 重建并启动。 */
+  launchAcceptedInvocation(invocationId: string): Promise<void>;
   /** 最近一次启动任务，供集成测试等待异步 Agent Loop 完成。 */
   getLastLaunchPromise(): Promise<void> | null;
 }
 
+/** Hosted local transport。请求内容不作为 restart/recovery Authority。 */
 export function createInProcessHostedRuntimeClient(params: {
-  decisionPort: HarnessDecisionPort;
-  finalResponsePort: HarnessFinalResponsePort;
-  /** 平台租户 id（Harness Loop 调 AgentCall 时作用域）。 */
-  tenantId?: string;
-  actionExecutors?: HarnessActionExecutors;
-  actionExecutorFactory?: (
-    catalog: CapabilityCatalogSnapshot,
-    invocationId: string,
-  ) => HarnessActionExecutors | Promise<HarnessActionExecutors>;
-  recoveryPort?: HarnessLoopRecoveryPort;
-  ingressEventBatch: (params: {
-    invocationId: string;
-    events: RuntimeCandidateEvent[];
-    producerSequenceStart: number;
-  }) => Promise<void>;
-  ingressTransientEventBatch?: TransientEventBatchSink;
-  executionLease?: {
-    acquire(input: { tenantId: string; invocationId: string; ownerRef: string }): Promise<{
-      id: string;
-    } | null>;
-    renew(input: { invocationId: string; leaseId: string }): Promise<boolean>;
-    release(input: { invocationId: string; leaseId: string }): Promise<void>;
-  };
+  tenantId: string;
+  applicationService: HostedRuntimeApplicationService;
 }): InProcessHostedRuntimeClient {
-  const pending = new Map<string, PendingInvocation>();
   let lastLaunchPromise: Promise<void> | null = null;
-
-  function unsupported<T>(operation: string): Promise<T> {
-    return Promise.reject(new Error(`InProcessHostedRuntime 不支持 ${operation}`));
-  }
 
   return {
     async probeCapabilities(): Promise<RuntimeCapabilitiesResponse> {
@@ -80,7 +34,10 @@ export function createInProcessHostedRuntimeClient(params: {
     },
 
     async startInvocation(request: StartInvocationRequest): Promise<StartInvocationResponse> {
-      const response: StartInvocationResponse = {
+      if (request.auth.mode !== "workload_token") {
+        throw new Error(`InProcessHostedRuntime 收到非法 auth mode（${request.auth.mode}）`);
+      }
+      return {
         invocation_id: request.requestBody.invocation_id,
         accepted: true,
         attempt_no: request.requestBody.attempt?.attempt_no ?? 1,
@@ -88,88 +45,16 @@ export function createInProcessHostedRuntimeClient(params: {
         runtime_execution_ref: `hosted-exec-${randomUUID()}`,
         capabilities: hostedAdapterCapabilities(),
       };
-      pending.set(request.requestBody.invocation_id, { request, response });
-      return response;
     },
 
-    launchAcceptedInvocation(invocationId: string, modelRef: string): Promise<void> {
-      lastLaunchPromise = (async () => {
-        const invocation = pending.get(invocationId);
-        if (!invocation) return;
-        pending.delete(invocationId);
-        const tenantId = params.tenantId ?? "";
-        const lease = params.executionLease
-          ? await params.executionLease.acquire({
-              tenantId,
-              invocationId,
-              ownerRef: `hosted-start:${invocationId}`,
-            })
-          : null;
-        if (params.executionLease && !lease) {
-          throw new Error(`Invocation ${invocationId} 执行租约被占用`);
-        }
-        const renewTimer =
-          params.executionLease && lease
-            ? setInterval(() => {
-                void params.executionLease
-                  ?.renew({ invocationId, leaseId: lease.id })
-                  .catch(() => undefined);
-              }, 30_000)
-            : null;
-
-        try {
-          // Hosted Runtime 只接受内部 Workload Token。
-          if (invocation.request.auth.mode !== "workload_token") {
-            throw new Error(
-              `InProcessHostedRuntime 收到非法 auth mode（${invocation.request.auth.mode}）`,
-            );
-          }
-          const platformAuthToken = invocation.request.auth.token;
-          const adapter: RuntimeAdapter = createHostedAdapter({
-            platformEndpoint: "in-process://platform",
-            platformAuthToken,
-            modelRef,
-            decisionPort: params.decisionPort,
-            finalResponsePort: params.finalResponsePort,
-            actionExecutors:
-              params.actionExecutors ??
-              (invocation.request.requestBody.capability_catalog
-                ? await params.actionExecutorFactory?.(
-                    invocation.request.requestBody.capability_catalog,
-                    invocationId,
-                  )
-                : undefined),
-            recoveryPort: params.recoveryPort,
-            eventBatchSink: params.ingressEventBatch,
-            transientEventBatchSink: params.ingressTransientEventBatch,
-          });
-          const turnContext = invocation.request.requestBody.turn_context;
-          const started = await adapter.startInvocation({
-            invocationId,
-            tenantId: params.tenantId,
-            threadId: turnContext?.thread_id ?? null,
-            turnId: turnContext?.turn_id ?? null,
-            capabilityDirectives: invocation.request.requestBody.capability_directives,
-            capabilityCatalog: invocation.request.requestBody.capability_catalog,
-            inputItems: invocation.request.requestBody.input_items,
-            contextHandle: invocation.request.requestBody.context_handle,
-            gatewayEndpoints: invocation.request.requestBody.gateway_endpoints,
-            workspace: invocation.request.requestBody.workspace ?? null,
-            executionLimits: invocation.request.requestBody.execution_limits,
-            traceContext: invocation.request.requestBody.trace_context,
-            authToken: platformAuthToken,
-          } satisfies StartInvocationParams);
-          if (!started.accepted) {
-            throw new Error(`InProcessHostedRuntime 拒绝 Invocation: ${invocationId}`);
-          }
-          await adapter.getLastLoopPromise?.();
-        } finally {
-          if (renewTimer) clearInterval(renewTimer);
-          if (params.executionLease && lease) {
-            await params.executionLease.release({ invocationId, leaseId: lease.id });
-          }
-        }
-      })();
+    launchAcceptedInvocation(invocationId: string): Promise<void> {
+      lastLaunchPromise = params.applicationService
+        .start({
+          tenantId: params.tenantId,
+          invocationId,
+          idempotencyKey: `hosted-start:${invocationId}`,
+        })
+        .then(() => undefined);
       return lastLaunchPromise;
     },
 
@@ -177,14 +62,47 @@ export function createInProcessHostedRuntimeClient(params: {
       return lastLaunchPromise;
     },
 
-    cancelInvocation(_request: CancelInvocationRequest): Promise<CancelInvocationResponse> {
-      return unsupported("取消 Invocation");
+    async cancelInvocation(request: CancelInvocationRequest): Promise<CancelInvocationResponse> {
+      await params.applicationService.cancel({
+        tenantId: params.tenantId,
+        invocationId: request.invocationId,
+        idempotencyKey: request.idempotencyKey,
+        reason: request.requestBody.reason,
+      });
+      return {
+        invocation_id: request.invocationId,
+        cancelled: true,
+        attempt_no: 1,
+      };
     },
-    resumeInvocation(_request: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
-      return unsupported("恢复 Invocation");
+
+    async resumeInvocation(request: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
+      const result = await params.applicationService.resume({
+        tenantId: params.tenantId,
+        invocationId: request.invocationId,
+        idempotencyKey: request.idempotencyKey,
+        resumePayload: request.requestBody.resume_payload,
+      });
+      return {
+        invocation_id: request.invocationId,
+        resumed: result.status !== "handled_noop",
+        attempt_no: 1,
+        requires_redispatch: false,
+      };
     },
-    steerInvocation(_request: SteerInvocationRequest): Promise<SteerInvocationResponse> {
-      return unsupported("引导 Invocation");
+
+    async steerInvocation(request: SteerInvocationRequest): Promise<SteerInvocationResponse> {
+      await params.applicationService.steer({
+        tenantId: params.tenantId,
+        invocationId: request.invocationId,
+        idempotencyKey: request.idempotencyKey,
+        steerPayload: request.requestBody.steer_payload,
+      });
+      return {
+        invocation_id: request.invocationId,
+        steered: true,
+        attempt_no: 1,
+      };
     },
   };
 }

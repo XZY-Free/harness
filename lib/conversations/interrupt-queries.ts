@@ -125,8 +125,8 @@ export async function requestInterrupt(params: {
       throw new TurnStateConflictError(params.turnId, turn.turnState, "interrupt");
     }
 
-    // 3. 创建 InvocationCommand（command_type=interrupt, state=queued）
-    // invocation_id 为空（Runtime 拉取后才绑定；本阶段 Runtime 未接入）
+    // 3. 创建 InvocationCommand（command_type=interrupt, state=queued）。
+    // 活动 Turn 必须绑定同一个 Invocation，Hosted local transport 才能执行真实取消。
     const commandPayload: Record<string, unknown> = {
       reason_code: params.reasonCode,
       preserve_pending_inputs: preservePendingInputs,
@@ -135,7 +135,7 @@ export async function requestInterrupt(params: {
 
     await tx.insert(invocationCommandTable).values({
       id: commandId,
-      invocationId: null, // queued 状态 invocation_id 可空
+      invocationId: turn.activeInvocationId,
       threadId: thread.id,
       turnId: turn.id,
       commandType: "interrupt",

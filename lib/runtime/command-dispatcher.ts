@@ -43,6 +43,7 @@ import type {
 } from "@/lib/persistence/schema/conversation";
 import {
   invocationCommandTable,
+  threadItemTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
@@ -427,7 +428,9 @@ async function executeSteerDispatch(
   try {
     await params.runtimeClient.steerInvocation(request);
   } catch (err) {
-    return handleRuntimeError(err, loaded, params);
+    if (!isRuntimeIdempotencyConflict(err)) {
+      return handleRuntimeError(err, loaded, params);
+    }
   }
 
   // 5. 成功：事务内 CAS dispatched → acknowledged + 写 turn.steered Event
@@ -435,6 +438,41 @@ async function executeSteerDispatch(
   const steerAckIdempotencyKey = `steer-ack-${loaded.command.id}`;
   const events = await db.transaction(async (tx) => {
     await transitionCommandToAcknowledged(tx, loaded.command.id);
+
+    const guidanceItemId = steerPayload.guidance_item_id;
+    if (typeof guidanceItemId !== "string" || !guidanceItemId) {
+      throw new CommandInvocationNotFoundError(loaded.invocation.id);
+    }
+    const completedGuidance = await tx
+      .update(threadItemTable)
+      .set({ itemState: "completed", updatedAt: new Date() })
+      .where(
+        and(
+          eq(threadItemTable.id, guidanceItemId),
+          eq(threadItemTable.threadId, loaded.command.threadId),
+          eq(threadItemTable.invocationId, loaded.invocation.id),
+          eq(threadItemTable.itemType, "user_guidance"),
+          eq(threadItemTable.itemState, "pending"),
+        ),
+      );
+    if (completedGuidance[0].affectedRows !== 1) {
+      const [alreadyCompleted] = await tx
+        .select({ id: threadItemTable.id })
+        .from(threadItemTable)
+        .where(
+          and(
+            eq(threadItemTable.id, guidanceItemId),
+            eq(threadItemTable.threadId, loaded.command.threadId),
+            eq(threadItemTable.invocationId, loaded.invocation.id),
+            eq(threadItemTable.itemType, "user_guidance"),
+            eq(threadItemTable.itemState, "completed"),
+          ),
+        )
+        .limit(1);
+      if (!alreadyCompleted) {
+        throw new CommandInvocationNotFoundError(loaded.invocation.id);
+      }
+    }
 
     // 写 turn.steered Event（Steer 不创建第二个 Turn，只标记已引导）
     if (loaded.invocation.threadId && loaded.command.turnId) {
@@ -1168,6 +1206,15 @@ async function handleResumeRequiresRedispatch(
  * - kind=http + 409 IDEMPOTENCY_CONFLICT → 标记 acknowledged（幂等复用）。
  * - 其他 → 标记 failed（Runtime 拒绝，不伪造成功）。
  */
+function isRuntimeIdempotencyConflict(error: unknown): boolean {
+  return (
+    error instanceof RuntimeHttpClientError &&
+    error.kind === "http" &&
+    error.httpStatus === 409 &&
+    error.runtimeErrorCode === "IDEMPOTENCY_CONFLICT"
+  );
+}
+
 async function handleRuntimeError(
   err: unknown,
   loaded: LoadedCommand,

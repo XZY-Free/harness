@@ -16504,6 +16504,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "harnessActionId": {
+          "name": "harnessActionId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "toolCallId": {
           "name": "toolCallId",
           "type": "varchar(36)",
@@ -16645,6 +16652,14 @@
           "name": "UserActionRequest_item_id_uq",
           "columns": [
             "itemId"
+          ],
+          "isUnique": true
+        },
+        "UserActionRequest_invocation_harnessAction_uq": {
+          "name": "UserActionRequest_invocation_harnessAction_uq",
+          "columns": [
+            "invocationId",
+            "harnessActionId"
           ],
           "isUnique": true
         },

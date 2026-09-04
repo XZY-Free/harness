@@ -7,7 +7,7 @@
  * - A2A acknowledged → 200（mode=remote, command_state=acknowledged）；
  * - A2A 网络/503 → 202（pending_retry，不虚报完成）；
  * - A2A 明确拒绝 → 422 + Invocation lost（UAR 已提交事实不回滚）；
- * - 普通 Runtime UAR 的 hosted/非远端协议 → 200（mode=local_runtime，不伪造 A2A ack）；
+ * - 普通 Runtime UAR 的 Hosted local transport → 真实 dispatch 后返回 runtime 状态；
  * - purpose=a2a_input_required 的 Agent UAR 由 durable continuation 恢复，不走 Runtime command；
  * - 响应只保留一个 Authority（resume_dispatch），无 stale resume_command_state；
  * - 同 Idempotency-Key 同 body 重放返回同一结果，零重复远端调用。
@@ -29,8 +29,11 @@ import { invocationCommandTable, turnTable } from "@/lib/persistence/schema/conv
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { createConfiguredHostedRuntimeApplicationService } from "@/lib/runtime/application/production-resume-harness-invocation";
+import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { eq } from "drizzle-orm";
@@ -43,12 +46,14 @@ let provider: A2ATestProvider;
 beforeEach(async () => {
   process.env.SNOW_AUTH_MODE = "dev";
   await resetDatabase(db);
+  setCommandGatewayHostedApplicationServiceForTest(null);
   provider = await startA2ATestProvider("completed");
   provider.setResumeResponseShape("task");
 });
 
 afterEach(async () => {
   await provider.close();
+  setCommandGatewayHostedApplicationServiceForTest(null);
   process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
 });
 
@@ -265,7 +270,31 @@ async function callResolve(
 // ─── 用例 ─────────────────────────────────────────────────
 
 describe("POST resolve — Resume 调度真值（03 专项）", () => {
-  it("hosted 协议（非 A2A）→ 200 mode=local_runtime，不伪造 A2A ack", async () => {
+  it("hosted 协议通过 local transport 完成真实 resume dispatch", async () => {
+    const decisionViews: Array<{ observations: unknown[] }> = [];
+    setCommandGatewayHostedApplicationServiceForTest(
+      createConfiguredHostedRuntimeApplicationService({
+        decisionPort: {
+          async decideNextAction(view) {
+            decisionViews.push(view);
+            return {
+              actionId: "respond-after-user-input",
+              stepNo: 1,
+              actionType: "respond",
+              purposeCode: "answer_ready",
+              shortPurpose: "按用户补充信息回答",
+              payload: { evidenceRefs: [] },
+            };
+          },
+        },
+        finalResponsePort: {
+          async generateFinalResponse() {
+            return "已根据补充信息完成";
+          },
+        },
+        modelRef: "test-model",
+      }),
+    );
     const ctx = await seedDispatchableTurn();
     const dispatch = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
@@ -290,6 +319,7 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
       threadId: ctx.threadId,
       turnId: ctx.turnId,
       invocationId: invocation.id,
+      harnessActionId: "action-request-input-route-1",
       toolCallId: null,
       itemId: null,
       requestType: "input",
@@ -309,8 +339,21 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
     const response = await callResolve(ctx.threadId, requestId, "idem-resolve-hosted-1");
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.resume_dispatch).toMatchObject({ mode: "local_runtime" });
+    expect(body.resume_dispatch).toMatchObject({ mode: "runtime", command_state: "acknowledged" });
     expect("resume_command_state" in body).toBe(false);
+    expect((await getInvocationById(ctx.tenantId, invocation.id))?.executionState).toBe(
+      "completed",
+    );
+    expect(decisionViews).toHaveLength(1);
+    expect(decisionViews[0]?.observations).toContainEqual(
+      expect.objectContaining({
+        observationType: "user_input",
+        data: expect.objectContaining({
+          harnessActionId: "action-request-input-route-1",
+          response: { text: "年休假，明天一天" },
+        }),
+      }),
+    );
   });
 });
 
@@ -322,26 +365,45 @@ describe("POST resolve — dispatched=false 显式 switch（04 专项 P1-4）", 
   it("unsupported_capability（effective resume=false）→ 422 UNSUPPORTED_CAPABILITY + Invocation lost；不恢复 pending", async () => {
     const ctx = await seedDispatchableTurn();
     const { threadId, turnId, tenantId, ownerId } = ctx;
-    const { invocationId, requestId } = await seedWaitingInputOnThread({
+    const dispatch = await dispatchInvocationForTurn({
       tenantId,
-      ownerId,
+      turnId,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
+    });
+    const invocationId = dispatch.invocation?.id;
+    if (!invocationId || !dispatch.binding) throw new Error("调度失败：未创建 Invocation/Binding");
+    await db
+      .update(invocationTable)
+      .set({ executionState: "waiting_user" })
+      .where(eq(invocationTable.id, invocationId));
+    await db.update(turnTable).set({ turnState: "waiting_user" }).where(eq(turnTable.id, turnId));
+    const requestId = randomUUID();
+    await db.insert(userActionRequestTable).values({
+      id: requestId,
+      tenantId,
       threadId,
       turnId,
+      invocationId,
+      requestType: "input",
+      purpose: "runtime_input_required",
+      requestState: "pending",
+      promptJson: { prompt: "请提供请假信息" },
+      inputSchemaJson: {
+        type: "object",
+        additionalProperties: false,
+        required: ["text"],
+        properties: { text: { type: "string", minLength: 1, maxLength: 20_000 } },
+      },
     });
-    // Binding 有效，但 RuntimeRevision measured resume=fail → effective resume=false
-    await attachA2ABinding({ tenantId, invocationId, threadId, endpoint: provider.endpoint });
+    // Binding 有效，但 Runtime capability 形状损坏 → fail-closed effective resume=false。
     const [rev] = await db
       .select()
       .from(runtimeRevisionTable)
-      .where(eq(runtimeRevisionTable.endpointRef, provider.endpoint))
+      .where(eq(runtimeRevisionTable.id, dispatch.binding.runtimeRevisionId))
       .limit(1);
-    const caps = rev?.runtimeCapabilitiesJson as {
-      measured: { features: Record<string, string> };
-    };
-    caps.measured.features.resume = "fail";
     await db
       .update(runtimeRevisionTable)
-      .set({ runtimeCapabilitiesJson: caps })
+      .set({ runtimeCapabilitiesJson: {} })
       .where(eq(runtimeRevisionTable.id, rev?.id ?? ""));
 
     const response = await callResolve(threadId, requestId, "idem-resolve-unsupported-1");

@@ -1978,6 +1978,7 @@ CREATE TABLE `UserActionRequest` (
 	`threadId` varchar(36) NOT NULL,
 	`turnId` varchar(36) NOT NULL,
 	`invocationId` varchar(36) NOT NULL,
+	`harnessActionId` varchar(64),
 	`toolCallId` varchar(36),
 	`itemId` varchar(36),
 	`requestType` enum('confirmation','auth','grant','input') NOT NULL,
@@ -1999,6 +2000,7 @@ CREATE TABLE `UserActionRequest` (
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `UserActionRequest_id` PRIMARY KEY(`id`),
 	CONSTRAINT `UserActionRequest_item_id_uq` UNIQUE(`itemId`),
+	CONSTRAINT `UserActionRequest_invocation_harnessAction_uq` UNIQUE(`invocationId`,`harnessActionId`),
 	CONSTRAINT `UserActionRequest_permissionDecision_id_uq` UNIQUE(`permissionDecisionId`)
 );
 --> statement-breakpoint

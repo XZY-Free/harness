@@ -83,6 +83,7 @@ import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
+import { createConformanceHostedApplicationService } from "@/lib/runtime/test-support/conformance-hosted-application-service";
 import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -274,6 +275,7 @@ function mockAdapterParams(sink: EventBatchSink): CreateHostedAdapterParams {
     platformEndpoint: "https://platform.internal",
     platformAuthToken: "test-token",
     eventBatchSink: sink,
+    applicationService: createConformanceHostedApplicationService({ eventBatchSink: sink }),
     ...createDirectResponsePorts((view) => `测试执行器回复：${view.objective}`),
     modelRef: "test-model",
   };

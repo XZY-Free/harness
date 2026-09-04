@@ -2,23 +2,11 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
-import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
-import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
 import { TrustedExecutionSubjectError } from "@/lib/runtime/transport/execution-subject";
 import { beforeEach } from "vitest";
 import { describe, expect, it, vi } from "vitest";
-
-const catalog = buildCapabilityCatalogSnapshot({
-  invocationId: "invocation-subject",
-  preferredAgentId: null,
-  agentCandidate: null,
-  tools: [],
-  knowledgeSources: [],
-  sourceRefs: ["test:subject-recovery"],
-  now: new Date("2026-09-04T02:00:00.000Z"),
-}).snapshot;
 
 describe("runtime dispatch trusted subject", () => {
   beforeEach(async () => {
@@ -36,15 +24,20 @@ describe("runtime dispatch trusted subject", () => {
     expect(await db.select().from(executionBindingTable)).toHaveLength(0);
   });
 
-  it("Hosted launch rebuilds executors asynchronously from invocation authority", async () => {
-    const factory = vi.fn(async (_catalog, invocationId: string) => {
-      expect(invocationId).toBe("invocation-subject");
-      return {};
-    });
+  it("Hosted launch only forwards durable invocation identity to the application service", async () => {
+    const start = vi.fn(async ({ invocationId }: { invocationId: string }) => ({
+      status: "resumed" as const,
+      invocationId,
+      runtime: "hosted" as const,
+    }));
     const client = createInProcessHostedRuntimeClient({
-      ...createDirectResponsePorts(async () => "完成"),
-      actionExecutorFactory: factory,
-      ingressEventBatch: async () => {},
+      tenantId: "tenant-a",
+      applicationService: {
+        start,
+        resume: vi.fn(),
+        cancel: vi.fn(),
+        steer: vi.fn(),
+      },
     });
     await client.startInvocation({
       runtimeEndpoint: "in-process://hosted",
@@ -55,7 +48,6 @@ describe("runtime dispatch trusted subject", () => {
         invocation_id: "invocation-subject",
         turn_context: { thread_id: "thread-a", turn_id: "turn-a" },
         job_context: null,
-        capability_catalog: catalog,
         input_items: [{ type: "user_message", content: { text: "你好" } }],
         context_handle: "context-handle",
         gateway_endpoints: {
@@ -79,7 +71,11 @@ describe("runtime dispatch trusted subject", () => {
       },
     });
 
-    await client.launchAcceptedInvocation("invocation-subject", "test-model");
-    expect(factory).toHaveBeenCalledOnce();
+    await client.launchAcceptedInvocation("invocation-subject");
+    expect(start).toHaveBeenCalledWith({
+      tenantId: "tenant-a",
+      invocationId: "invocation-subject",
+      idempotencyKey: "hosted-start:invocation-subject",
+    });
   });
 });

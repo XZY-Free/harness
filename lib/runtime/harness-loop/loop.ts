@@ -40,13 +40,14 @@ export const DEFAULT_HARNESS_LOOP_LIMITS: HarnessLoopLimits = Object.freeze({
 });
 
 export interface HarnessDecisionPort {
-  decideNextAction(view: HarnessLoopView): Promise<unknown>;
+  decideNextAction(view: HarnessLoopView, abortSignal?: AbortSignal): Promise<unknown>;
 }
 
 export interface HarnessFinalResponsePort {
   generateFinalResponse(
     view: HarnessLoopView,
     emitDelta?: (delta: string) => Promise<void>,
+    abortSignal?: AbortSignal,
   ): Promise<string>;
 }
 
@@ -83,6 +84,7 @@ export interface HarnessActionExecutionContext {
   threadId: string;
   turnId: string;
   actionDigest: string;
+  abortSignal?: AbortSignal;
 }
 
 export interface HarnessActionExecutors {
@@ -133,11 +135,13 @@ export interface HarnessLoopParams {
   recoveryPort?: HarnessLoopRecoveryPort;
   limits?: Partial<HarnessLoopLimits>;
   emitTextDelta?: (delta: string) => Promise<void>;
+  abortSignal?: AbortSignal;
   modelRef: string;
 }
 
 export interface HarnessLoopResult {
   completed: boolean;
+  cancelled?: boolean;
   pending?: boolean;
   waitingForUser?: boolean;
   responseText: string;
@@ -186,6 +190,7 @@ export class HarnessLoop {
         : EMPTY_RECOVERY;
       this.observations = [...recovered.observations];
       this.actionHistory = [...recovered.actionHistory];
+      this.throwIfCancelled();
       if (recovered.invocationState === "waiting_user") {
         return {
           completed: false,
@@ -219,6 +224,8 @@ export class HarnessLoop {
       }
 
       while (true) {
+        await this.refreshDurableState();
+        this.throwIfCancelled();
         const nextStepNo = this.nextStepNo();
         if (nextStepNo > this.limits.maxLoopSteps) {
           throw new HarnessLoopError(
@@ -227,7 +234,17 @@ export class HarnessLoop {
           );
         }
 
-        const rawAction = await this.params.decisionPort.decideNextAction(this.buildView());
+        const beforeDecision = this.durableContextFingerprint();
+        const rawAction = await this.params.decisionPort.decideNextAction(
+          this.buildView(),
+          this.params.abortSignal,
+        );
+        this.throwIfCancelled();
+        await this.refreshDurableState();
+        this.throwIfCancelled();
+        if (this.durableContextFingerprint() !== beforeDecision) {
+          continue;
+        }
         let action: HarnessNextAction;
         try {
           action = parseHarnessNextAction(rawAction);
@@ -264,22 +281,37 @@ export class HarnessLoop {
         if (actionResult) return actionResult;
       }
     } catch (error) {
+      const abortReason = this.params.abortSignal?.reason;
+      const leaseLost = errorCode(abortReason) === "INVOCATION_EXECUTION_LEASE_LOST";
+      if (!leaseLost && (this.params.abortSignal?.aborted || isAbortError(error))) {
+        await this.safeWriteExecutionCancelled();
+        return {
+          completed: false,
+          cancelled: true,
+          responseText: "",
+          observations: [...this.observations],
+          actionHistory: [...this.actionHistory],
+        };
+      }
+      const failure = leaseLost ? abortReason : error;
       const current = this.actionHistory.at(-1);
-      const explicitErrorCode = errorCode(error);
+      const explicitErrorCode = errorCode(failure);
       const loopError =
-        error instanceof HarnessLoopError
-          ? error
+        failure instanceof HarnessLoopError
+          ? failure
           : new HarnessLoopError(
-              current?.actionType === "knowledge.search"
-                ? "KNOWLEDGE_ACTION_FAILED"
-                : current?.actionType === "tool.call"
-                  ? "TOOL_ACTION_FAILED"
-                  : current?.actionType === "agent.call"
-                    ? (explicitErrorCode ?? "AGENT_CALL_FAILED")
-                    : current?.actionType === "respond"
-                      ? "MODEL_EXECUTION_FAILED"
-                      : "HARNESS_ACTION_EXECUTION_FAILED",
-              errorMessage(error),
+              leaseLost && explicitErrorCode
+                ? explicitErrorCode
+                : current?.actionType === "knowledge.search"
+                  ? "KNOWLEDGE_ACTION_FAILED"
+                  : current?.actionType === "tool.call"
+                    ? "TOOL_ACTION_FAILED"
+                    : current?.actionType === "agent.call"
+                      ? (explicitErrorCode ?? "AGENT_CALL_FAILED")
+                      : current?.actionType === "respond"
+                        ? "MODEL_EXECUTION_FAILED"
+                        : "HARNESS_ACTION_EXECUTION_FAILED",
+              errorMessage(failure),
             );
       if (current?.state === "proposed" || current?.state === "started") {
         current.state = "failed";
@@ -327,7 +359,9 @@ export class HarnessLoop {
       threadId: this.params.threadId,
       turnId: this.params.turnId,
       actionDigest: historyEntry.actionDigest,
+      abortSignal: this.params.abortSignal,
     });
+    this.throwIfCancelled();
     if (execution.pending) {
       return {
         completed: false,
@@ -377,7 +411,9 @@ export class HarnessLoop {
     const responseText = await this.params.finalResponsePort.generateFinalResponse(
       this.buildView(),
       this.params.emitTextDelta,
+      this.params.abortSignal,
     );
+    this.throwIfCancelled();
     if (!responseText.trim()) {
       throw new HarnessLoopError("MODEL_EXECUTION_FAILED", "最终正文为空");
     }
@@ -543,7 +579,7 @@ export class HarnessLoop {
           knowledgeSearches: Math.max(0, this.limits.maxKnowledgeSearches - used.knowledgeSearches),
         },
       },
-      control: { cancelled: false, waitingForUser: false },
+      control: { cancelled: this.params.abortSignal?.aborted ?? false, waitingForUser: false },
     };
   }
 
@@ -601,6 +637,81 @@ export class HarnessLoop {
       // 保留原始失败；Event Ingress 不可用由外层 Runtime 监控处理。
     }
   }
+
+  private async refreshDurableState(): Promise<void> {
+    if (!this.params.recoveryPort) return;
+    const recovered = await this.params.recoveryPort.load(this.params.invocationId);
+    const observations = new Map(
+      this.observations.map((observation) => [observationIdentity(observation), observation]),
+    );
+    for (const observation of recovered.observations) {
+      observations.set(observationIdentity(observation), observation);
+    }
+    this.observations = [...observations.values()];
+
+    const history = new Map(this.actionHistory.map((entry) => [entry.actionId, entry]));
+    for (const recoveredEntry of recovered.actionHistory) {
+      const local = history.get(recoveredEntry.actionId);
+      if (!local || shouldUseRecoveredEntry(local, recoveredEntry)) {
+        history.set(recoveredEntry.actionId, recoveredEntry);
+      }
+    }
+    this.actionHistory = [...history.values()].sort((a, b) => a.stepNo - b.stepNo);
+  }
+
+  private durableContextFingerprint(): string {
+    return computeCanonicalDigest({
+      observations: this.observations,
+      actionHistory: this.actionHistory.map((entry) => ({
+        actionId: entry.actionId,
+        state: entry.state,
+        authorityRef: entry.authorityRef ?? null,
+        errorCode: entry.errorCode ?? null,
+      })),
+    });
+  }
+
+  private throwIfCancelled(): void {
+    if (!this.params.abortSignal?.aborted) return;
+    throw this.params.abortSignal.reason instanceof Error
+      ? this.params.abortSignal.reason
+      : new DOMException("Hosted Invocation 已取消", "AbortError");
+  }
+
+  private async safeWriteExecutionCancelled(): Promise<void> {
+    try {
+      await this.params.eventWriter.write("execution.cancelled", {
+        cancelled_by: "hosted_control",
+        reason: "cancel_command",
+      });
+    } catch {
+      // 取消信号已生效；事件回传失败由 durable command retry 处理。
+    }
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function observationIdentity(observation: HarnessObservation): string {
+  return observation.sourceRefs.length > 0
+    ? observation.sourceRefs.slice().sort().join("\u0000")
+    : computeCanonicalDigest(observation);
+}
+
+function shouldUseRecoveredEntry(
+  local: HarnessActionHistoryEntry,
+  recovered: HarnessActionHistoryEntry,
+): boolean {
+  const rank = { proposed: 1, started: 2, completed: 3, failed: 3 } as const;
+  if (rank[recovered.state] !== rank[local.state]) {
+    return rank[recovered.state] > rank[local.state];
+  }
+  return Boolean(recovered.observation) && !local.observation;
 }
 
 function actionTargetRef(action: HarnessNextAction): string | null {

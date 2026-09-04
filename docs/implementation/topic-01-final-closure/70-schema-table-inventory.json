@@ -4428,7 +4428,8 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/permission/user-action-queries.ts",
-        "lib/runtime/continuation/production-invocation-continuation-worker.ts"
+        "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+        "lib/runtime/harness-loop/mysql-recovery-port.ts"
       ],
       "lifecycle": "创建→显式更新/状态迁移→终止或软删除；清理由领域 retention 执行",
       "authorityStatement": "user-action-request 领域的 UserActionRequest 事实",
@@ -4437,6 +4438,7 @@
       "constraints": [
         "UserActionRequest_id: PRIMARY KEY(`id`),",
         "UserActionRequest_item_id_uq: UNIQUE(`itemId`),",
+        "UserActionRequest_invocation_harnessAction_uq: UNIQUE(`invocationId`,`harnessActionId`),",
         "UserActionRequest_permissionDecision_id_uq: UNIQUE(`permissionDecisionId`)",
         "ALTER TABLE `UserActionRequest` ADD CONSTRAINT `UserActionRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `UserActionRequest_tenant_invocation_state_idx` ON `UserActionRequest` (`tenantId`,`invocationId`,`requestState`)",
@@ -4452,6 +4454,7 @@
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+        "lib/runtime/harness-loop/mysql-recovery-port.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"

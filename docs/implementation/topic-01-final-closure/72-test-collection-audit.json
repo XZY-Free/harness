@@ -8,14 +8,14 @@
   },
   "counts": {
     "unit": 272,
-    "db": 107,
+    "db": 108,
     "integration": 9,
     "contract": 24,
     "e2e-web": 3,
     "e2e-desktop": 1,
     "e2e-cross-client": 1
   },
-  "total": 417,
+  "total": 418,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -3884,6 +3884,17 @@
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
       "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/harness-loop/mysql-recovery-port.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"

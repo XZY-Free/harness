@@ -227,7 +227,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       result.request.purpose === "a2a_input_required" &&
       body.resolution === "submit";
     const gatewayResult = durableAgentResume
-      ? ({ dispatched: false, reason: "protocol_not_remote" } as const)
+      ? null
       : await dispatchResumeCommandToRuntime({
           tenantId: principal.tenantId,
           commandId: result.resumeCommand.id,
@@ -235,11 +235,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           correlationId: requestId,
         });
 
-    // 04 专项（P1-4）：dispatched=false 必须显式 switch——只有 protocol_not_remote
-    // 是 local runtime success；unsupported_capability / command_not_found 是真实失败，
-    // 不再一把梭成 local_runtime 200。
     let resumeDispatch: {
-      mode: "remote" | "local_runtime" | "agent_continuation";
+      mode: "runtime" | "agent_continuation";
       command_state: string;
       pending_retry?: boolean;
     };
@@ -249,27 +246,21 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         command_state: "acknowledged",
         pending_retry: true,
       };
-    } else if (gatewayResult.dispatched) {
+    } else if (gatewayResult?.dispatched) {
       if (gatewayResult.command.commandState === "acknowledged") {
-        resumeDispatch = { mode: "remote", command_state: "acknowledged" };
+        resumeDispatch = { mode: "runtime", command_state: "acknowledged" };
       } else if (gatewayResult.command.commandState === "dispatched") {
         // 01 专项完成后 dispatched 已具备 nextDispatchAt + Durable Worker，
         // 202 pending_retry=true 是完整产品事实。
         resumeDispatch = {
-          mode: "remote",
+          mode: "runtime",
           command_state: "dispatched",
           pending_retry: true,
         };
       } else {
-        resumeDispatch = { mode: "remote", command_state: "failed" };
+        resumeDispatch = { mode: "runtime", command_state: "failed" };
       }
-    } else if (gatewayResult.reason === "protocol_not_remote") {
-      // 唯一 local runtime success（hosted in-process 由既有状态机吸收）。
-      resumeDispatch = {
-        mode: "local_runtime",
-        command_state: result.resumeCommand.commandState as string,
-      };
-    } else if (gatewayResult.reason === "unsupported_capability") {
+    } else if (gatewayResult?.reason === "unsupported_capability") {
       // 合同/Runtime 能力不允许 Resume：422；UAR 已 resolved 的事实保持。
       // Invocation 已被 UAR 流程推进 running 但永远不可能 resume → 唯一 Recovery
       // Authority 收口（Turn failed）。
@@ -376,7 +367,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         invocation_id: result.invocation.id,
         resume_command_id: result.resumeCommand.id,
         resume_command_state: "failed",
-        safe_error_code: (gatewayResult.dispatched && gatewayResult.command.errorCode) || "UNKNOWN",
+        safe_error_code:
+          (gatewayResult?.dispatched && gatewayResult.command.errorCode) || "UNKNOWN",
       };
       // 幂等记录完成成 422 响应（同 key 重放返回同一失败结果，
       // 不允许第二次 resolve UAR / 第二次远端调用）。存储体与 apiError wire 完全一致。
@@ -402,7 +394,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     //  A2A dispatched：网络不可达/503，命令进入 retryable dispatched 状态 →
     // 202（补充信息已正式接受，远端恢复尚未确认，等待平台重试；不虚报完成）。
     const httpStatus =
-      resumeDispatch.mode === "remote" && resumeDispatch.command_state === "dispatched" ? 202 : 200;
+      resumeDispatch.mode === "runtime" && resumeDispatch.command_state === "dispatched"
+        ? 202
+        : 200;
 
     await completeRecord({
       recordId,

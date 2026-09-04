@@ -40,6 +40,7 @@ import {
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { createCapturingEventBatchSink } from "@/lib/runtime/test-support/capturing-event-batch-sink";
+import { createConformanceHostedApplicationService } from "@/lib/runtime/test-support/conformance-hosted-application-service";
 
 const TEST_RUNNER_KEY = generateTestRunnerKey("test-publication-runner");
 const RUNNER_IDENTITY = "test/runtime-publication-runner";
@@ -128,6 +129,9 @@ export async function runPublicationConformanceForTest(params: {
     platformEndpoint: "in-process://conformance-test",
     platformAuthToken: "conformance-test-token",
     eventBatchSink: capturing.sink,
+    applicationService: createConformanceHostedApplicationService({
+      eventBatchSink: capturing.sink,
+    }),
     ...createDirectResponsePorts(async (view) => `conformance probe reply: ${view.objective}`),
     modelRef: "conformance-test-model",
   });

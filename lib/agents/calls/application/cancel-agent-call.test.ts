@@ -7,7 +7,9 @@ import {
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { agentCallAttemptTable } from "@/lib/persistence/schema/agent-calls";
+import { agentCallAttemptTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
+import { hostedRuntimeApplicationService } from "@/lib/runtime/application/production-resume-harness-invocation";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -64,15 +66,20 @@ describe("cancelAgentCall 冻结能力真值", () => {
   it("cancel=true 调用 tasks/cancel 并把 AgentCall 置为 cancelled", async () => {
     const scenario = await seed(true);
 
-    const [result] = await cancelActiveAgentCalls({
+    await hostedRuntimeApplicationService.cancel({
       tenantId: scenario.tenantId,
-      parentInvocationId: scenario.parentInvocationId,
+      invocationId: scenario.parentInvocationId,
+      idempotencyKey: `test-cancel:${scenario.parentInvocationId}`,
     });
+    const [call] = await db
+      .select()
+      .from(agentCallTable)
+      .where(eq(agentCallTable.id, scenario.callId));
 
-    expect(result).toMatchObject({
-      remoteCancellation: "cancelled",
-      call: { id: scenario.callId, state: "cancelled" },
-    });
+    expect(call).toMatchObject({ id: scenario.callId, state: "cancelled" });
+    expect(
+      (await getInvocationById(scenario.tenantId, scenario.parentInvocationId))?.executionState,
+    ).toBe("cancelled");
     expect(scenario.provider.rpcMethods).toContain("tasks/cancel");
   });
 

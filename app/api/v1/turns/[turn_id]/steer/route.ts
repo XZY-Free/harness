@@ -46,6 +46,7 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import { dispatchSteerCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -153,6 +154,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       idempotencyKey,
       correlationId: requestId,
     });
+    const gatewayResult = await dispatchSteerCommandToRuntime({
+      tenantId: principal.tenantId,
+      commandId: result.command.id,
+      actorId: principal.userIdentityId,
+      correlationId: requestId,
+    });
 
     const responseBody = {
       turn_id: result.turnId,
@@ -161,7 +168,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       guidance_item_id: result.guidanceItemId,
       command: {
         id: result.command.id,
-        command_state: result.command.commandState,
+        command_state: gatewayResult.dispatched
+          ? gatewayResult.command.commandState
+          : result.command.commandState,
       },
       event_id: result.eventId,
     };

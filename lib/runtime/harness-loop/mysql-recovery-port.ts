@@ -1,6 +1,10 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
+import { db } from "@/lib/db/client";
+import { getUserActionRequestsByInvocation } from "@/lib/permission/user-action-queries";
+import { threadItemTable } from "@/lib/persistence/schema/conversation";
 import { getIngressByInvocation } from "@/lib/runtime/event-ingress-queries";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { and, asc, eq } from "drizzle-orm";
 import { HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA, parseHarnessNextAction } from "./action-schema";
 import {
   HarnessLoopError,
@@ -78,13 +82,55 @@ export function createMySqlHarnessLoopRecoveryPort(tenantId: string): HarnessLoo
         });
       }
       const actionHistory = [...historyByActionId.values()].sort((a, b) => a.stepNo - b.stepNo);
+      const resolvedInputs = (await getUserActionRequestsByInvocation(tenantId, invocationId))
+        .filter(
+          (request) =>
+            request.requestState === "resolved" &&
+            request.requestType === "input" &&
+            request.harnessActionId,
+        )
+        .map((request) => ({
+          observationType: "user_input" as const,
+          summary: request.resolution === "submit" ? "用户已补充所需信息" : "用户已取消补充信息",
+          sourceRefs: [`user-action:${request.id}`],
+          data: {
+            harnessActionId: request.harnessActionId,
+            uarId: request.id,
+            purpose: request.purpose,
+            resolution: request.resolution,
+            response: request.responseRedactedJson,
+          },
+        }));
+      const guidanceItems = await db
+        .select({ id: threadItemTable.id, content: threadItemTable.contentJson })
+        .from(threadItemTable)
+        .where(
+          and(
+            eq(threadItemTable.invocationId, invocationId),
+            eq(threadItemTable.itemType, "user_guidance"),
+            eq(threadItemTable.itemState, "completed"),
+          ),
+        )
+        .orderBy(asc(threadItemTable.itemSequence));
+      const durableInputs = [
+        ...resolvedInputs,
+        ...guidanceItems.map((item) => ({
+          observationType: "user_input" as const,
+          summary: "用户已提供执行引导",
+          sourceRefs: [`guidance-item:${item.id}`],
+          data: { guidanceItemId: item.id, guidance: item.content },
+        })),
+      ];
       return {
         invocationState: invocation.executionState,
         nextProducerSequence: Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1,
         actionHistory,
-        observations: actionHistory.flatMap((entry) =>
-          entry.state === "completed" && entry.observation ? [entry.observation] : [],
-        ),
+        observations: [
+          ...actionHistory.flatMap((entry) =>
+            entry.state === "completed" && entry.observation ? [entry.observation] : [],
+          ),
+          ...durableInputs,
+        ],
       };
     },
   };

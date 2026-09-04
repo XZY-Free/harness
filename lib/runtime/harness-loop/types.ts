@@ -167,8 +167,8 @@ export interface HarnessLoopView {
   actionHistory: HarnessActionHistoryEntry[];
   budget: HarnessLoopBudgetView;
   control: {
-    cancelled: false;
-    waitingForUser: false;
+    cancelled: boolean;
+    waitingForUser: boolean;
   };
 }
 

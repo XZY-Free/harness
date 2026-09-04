@@ -70,6 +70,176 @@ function baseParams(overrides: Record<string, unknown> = {}) {
 }
 
 describe("HarnessLoop", () => {
+  it("live cancel 会中断模型决策并写 cancelled，不再提交 action", async () => {
+    const writer = eventWriter();
+    const controller = new AbortController();
+    const decideNextAction = vi.fn(
+      async (_view: unknown, signal?: AbortSignal): Promise<unknown> =>
+        await new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("cancelled", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    const loop = new HarnessLoop(
+      baseParams({
+        eventWriter: writer,
+        decisionPort: { decideNextAction },
+        abortSignal: controller.signal,
+      }),
+    );
+
+    const running = loop.run();
+    await vi.waitFor(() => expect(decideNextAction).toHaveBeenCalledOnce());
+    controller.abort();
+    const result = await running;
+
+    expect(result).toMatchObject({ completed: false, cancelled: true });
+    expect(writer.events.map((event) => event.type)).toEqual(["execution.cancelled"]);
+  });
+
+  it("执行租约丢失时 fail closed，不冒充用户取消", async () => {
+    const writer = eventWriter();
+    const controller = new AbortController();
+    const decideNextAction = vi.fn(
+      async (_view: unknown, signal?: AbortSignal): Promise<unknown> =>
+        await new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    const loop = new HarnessLoop(
+      baseParams({
+        eventWriter: writer,
+        decisionPort: { decideNextAction },
+        abortSignal: controller.signal,
+      }),
+    );
+
+    const running = loop.run();
+    await vi.waitFor(() => expect(decideNextAction).toHaveBeenCalledOnce());
+    controller.abort(
+      Object.assign(new Error("执行租约已丢失"), {
+        code: "INVOCATION_EXECUTION_LEASE_LOST",
+      }),
+    );
+    const result = await running;
+
+    expect(result).toMatchObject({
+      completed: false,
+      errorCode: "INVOCATION_EXECUTION_LEASE_LOST",
+    });
+    expect(result.cancelled).toBeUndefined();
+    expect(writer.events.map((event) => event.type)).toEqual(["execution.failed"]);
+  });
+
+  it("cancel 保留已确认 Effect，且不会发起下一项 side effect", async () => {
+    const controller = new AbortController();
+    let decisionNo = 0;
+    const tool = vi.fn(async () => ({
+      observation: {
+        observationType: "tool" as const,
+        summary: "请假申请已提交",
+        sourceRefs: ["effect:effect-1"],
+        data: { effectId: "effect-1", effectState: "confirmed_success" },
+      },
+      authorityRef: "effect:effect-1",
+    }));
+    const loop = new HarnessLoop(
+      baseParams({
+        abortSignal: controller.signal,
+        decisionPort: {
+          async decideNextAction(_view: unknown, signal?: AbortSignal) {
+            decisionNo += 1;
+            if (decisionNo === 1) {
+              return {
+                actionId: "tool-1",
+                stepNo: 1,
+                actionType: "tool.call",
+                purposeCode: "submit_leave",
+                shortPurpose: "提交请假申请",
+                payload: { toolId: "leave", operationId: "submit", arguments: {} },
+              };
+            }
+            return await new Promise((_resolve, reject) => {
+              signal?.addEventListener(
+                "abort",
+                () => reject(new DOMException("cancelled", "AbortError")),
+                { once: true },
+              );
+            });
+          },
+        },
+        executors: { "tool.call": tool },
+      }),
+    );
+
+    const running = loop.run();
+    await vi.waitFor(() => expect(decisionNo).toBe(2));
+    controller.abort();
+    const result = await running;
+
+    expect(result.cancelled).toBe(true);
+    expect(tool).toHaveBeenCalledOnce();
+    expect(result.observations).toContainEqual(
+      expect.objectContaining({
+        data: { effectId: "effect-1", effectState: "confirmed_success" },
+      }),
+    );
+  });
+
+  it("模型决策期间到达的 steer 在下一次 decision 中只出现一次", async () => {
+    const views: Array<any> = [];
+    const guidance = {
+      observationType: "user_input" as const,
+      summary: "用户已提供执行引导",
+      sourceRefs: ["guidance-item:item-1"],
+      data: { guidanceItemId: "item-1", guidance: { text: "改为后天下午" } },
+    };
+    let recoveryLoads = 0;
+    const loop = new HarnessLoop(
+      baseParams({
+        recoveryPort: {
+          async load() {
+            recoveryLoads += 1;
+            return {
+              invocationState: "running" as const,
+              nextProducerSequence: 1,
+              observations: recoveryLoads >= 3 ? [guidance] : [],
+              actionHistory: [],
+            };
+          },
+        },
+        decisionPort: {
+          async decideNextAction(view: any) {
+            views.push(view);
+            return {
+              actionId: `action-${views.length}`,
+              stepNo: 1,
+              actionType: "respond",
+              purposeCode: "answer_ready",
+              shortPurpose: "按最新引导回答",
+              payload: { evidenceRefs: [] },
+            };
+          },
+        },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result.completed).toBe(true);
+    expect(views).toHaveLength(2);
+    expect(views[0].observations).toEqual([]);
+    expect(views[1].observations).toEqual([guidance]);
+    expect(result.observations).toEqual([guidance]);
+  });
+
   it("respond 先提交行动，再生成最终正文并完成 Invocation", async () => {
     const writer = eventWriter();
     const generateFinalResponse = vi.fn(finalPort("制度回答").generateFinalResponse);

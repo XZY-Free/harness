@@ -1,138 +1,232 @@
 import { db } from "@/lib/db/client";
-/**
- * 命令调度生产网关（08 §5/§6，）。
- *
- * Interrupt（Cancel）/ Resume 命令入队后的生产接线：按 ExecutionBinding 的
- * RuntimeRevision.protocolType 解析 Transport 并调度到 Runtime。
- *
- * Agent 与 Runtime Authority 分离：A2A 不再是 Harness Runtime 协议。Runtime 只有
- * `harness_runtime_protocol`（hosted in-process），无远端协议端点可调，
- * 命令保持队列由 Turn/Invocation 状态机与 in-process adapter 吸收。
- * 网关因此只保留门禁（command_not_found / unsupported_capability）与
- * protocol_not_remote 的 hosted 语义；A2A 真实远端命令调度属后续批次
- * AgentCall 语义，不在本网关范围。
- */
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
+import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { invocationCommandTable } from "@/lib/persistence/schema/conversation";
+import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
+import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
+import { hostedRuntimeApplicationService } from "@/lib/runtime/application/production-resume-harness-invocation";
 import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
-import type { CommandDispatchResult } from "@/lib/runtime/command-dispatcher";
+import {
+  type CommandDispatchResult,
+  type CommandRuntimeEndpointResolution,
+  dispatchCancelCommand,
+  dispatchResumeCommand,
+  dispatchSteerCommand,
+  retryDispatchedInvocationCommand,
+} from "@/lib/runtime/command-dispatcher";
+import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
+import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { type RuntimeHttpClient, createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
 import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { eq } from "drizzle-orm";
 
-/**
- * 网关调度结果（ 判别联合）：hosted 协议下恒为 protocol_not_remote
- * （命令留在队列由状态机吸收）；command_not_found / unsupported_capability
- * 是真实失败。真正远端调度（A2A）属后续 AgentCall 批次。
- */
+const GATEWAY_ENDPOINTS = {
+  events: "in-process://events",
+  cancel: "in-process://cancel",
+  resume: "in-process://resume",
+  steer: "in-process://steer",
+  tools: "in-process://gateway/v1/tools",
+  tool_calls: "in-process://gateway/v1/tool-calls",
+  user_action_requests: "in-process://gateway/v1/user-action-requests",
+  capability_actions: "in-process://gateway/v1/capability-actions",
+};
+
+let hostedApplicationServiceForTest: HostedRuntimeApplicationService | null = null;
+
+export function setCommandGatewayHostedApplicationServiceForTest(
+  service: HostedRuntimeApplicationService | null,
+): void {
+  hostedApplicationServiceForTest = service;
+}
+
 export type CommandGatewayResult =
   | { dispatched: true; command: CommandDispatchResult }
-  | {
-      dispatched: false;
-      reason: "command_not_found" | "protocol_not_remote" | "unsupported_capability";
-    };
+  | { dispatched: false; reason: "command_not_found" | "unsupported_capability" };
 
-/** 查询命令关联的 Invocation + Binding（跨租户隔离）。 */
 async function loadCommandContext(tenantId: string, commandId: string) {
   const [command] = await db
-    .select({ id: invocationCommandTable.id, invocationId: invocationCommandTable.invocationId })
+    .select({
+      id: invocationCommandTable.id,
+      invocationId: invocationCommandTable.invocationId,
+      commandType: invocationCommandTable.commandType,
+    })
     .from(invocationCommandTable)
     .where(eq(invocationCommandTable.id, commandId))
     .limit(1);
   if (!command?.invocationId) return null;
-  // 租户隔离由 Invocation/Binding 查询保证（命令表本身无租户列）。
   const invocation = await getInvocationById(tenantId, command.invocationId);
   if (!invocation) return null;
   const binding = await getExecutionBindingByInvocation(tenantId, command.invocationId);
   if (!binding) return null;
-  const executionSubject = recoverTrustedExecutionSubject(binding, tenantId);
-  return { command, invocation, binding, executionSubject };
+  recoverTrustedExecutionSubject(binding, tenantId);
+  const runtimeRevision = await getRuntimeRevisionById(binding.runtimeRevisionId);
+  if (
+    !runtimeRevision ||
+    runtimeRevision.protocolType !== "harness_runtime_protocol" ||
+    runtimeRevision.runtimeEvidenceKind !== binding.runtimeEvidenceKind ||
+    runtimeRevision.runtimeTargetDigest !== binding.runtimeTargetDigest
+  ) {
+    return null;
+  }
+  return { command, invocation, binding, runtimeRevision };
 }
 
-/**
- * 调度 Interrupt（Cancel）命令。hosted 协议无远端端点，命令保持队列由
- * 既有状态机吸收（protocol_not_remote）；effective cancel=false → 真实失败。
- * 仅供生产 route 在 requestInterrupt 后调用；幂等由命令状态机保证。
- */
-export async function dispatchInterruptCommandToRuntime(params: {
+async function resolveTransport(
+  tenantId: string,
+  context: NonNullable<Awaited<ReturnType<typeof loadCommandContext>>>,
+): Promise<{
+  runtimeClient: RuntimeHttpClient;
+  endpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
+}> {
+  const isExternal = context.runtimeRevision.runtimeEvidenceKind === "external_endpoint";
+  const runtimeClient = isExternal
+    ? createHttpRuntimeClient()
+    : createInProcessHostedRuntimeClient({
+        tenantId,
+        applicationService: hostedApplicationServiceForTest ?? hostedRuntimeApplicationService,
+      });
+  return {
+    runtimeClient,
+    endpointResolver: async (binding) => {
+      const auth = isExternal
+        ? await resolveOutboundRuntimeAuth({
+            tenantId,
+            identityMode: context.runtimeRevision.identityMode,
+            credentialRefId: context.runtimeRevision.credentialRefId,
+          })
+        : {
+            mode: "workload_token" as const,
+            token: issueWorkloadToken({
+              type: "runtime",
+              tenantId,
+              invocationId: context.invocation.id,
+              runtimeRevisionId: binding.runtimeRevisionId,
+              audience: "runtime",
+              expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+            }),
+          };
+      const gatewayExpiresAt = Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway;
+      const frozenGovernance = await loadFrozenGovernanceConfig(
+        tenantId,
+        binding.governanceConfigRevisionId,
+      );
+      return {
+        runtimeEndpoint: isExternal ? context.runtimeRevision.endpointRef : "in-process://hosted",
+        auth,
+        gatewayEndpoints: GATEWAY_ENDPOINTS,
+        governanceConfig: {
+          revision_id: binding.governanceConfigRevisionId,
+          config_digest: binding.governanceConfigDigest,
+          config: frozenGovernance.config as unknown as Record<string, unknown>,
+        },
+        gatewayAccess: {
+          access_token: issueWorkloadToken({
+            type: "gateway",
+            tenantId,
+            invocationId: context.invocation.id,
+            runtimeRevisionId: binding.runtimeRevisionId,
+            audience: "gateway",
+            expiresAt: gatewayExpiresAt,
+          }),
+          expires_at: new Date(gatewayExpiresAt).toISOString(),
+        },
+      };
+    },
+  };
+}
+
+async function dispatchCommand(params: {
+  tenantId: string;
+  commandId: string;
+  expectedType: "interrupt" | "resume" | "steer";
+  actorId?: string | null;
+  correlationId?: string | null;
+  retry?: boolean;
+}): Promise<CommandGatewayResult> {
+  const context = await loadCommandContext(params.tenantId, params.commandId);
+  if (!context || context.command.commandType !== params.expectedType) {
+    return { dispatched: false, reason: "command_not_found" };
+  }
+  const capabilities = await resolveEffectiveInvocationCapabilities({
+    tenantId: params.tenantId,
+    binding: context.binding,
+  });
+  const supported =
+    params.expectedType === "interrupt"
+      ? capabilities.cancel
+      : params.expectedType === "resume"
+        ? capabilities.resume
+        : capabilities.steer;
+  if (!supported) return { dispatched: false, reason: "unsupported_capability" };
+
+  const transport = await resolveTransport(params.tenantId, context);
+  const common = {
+    tenantId: params.tenantId,
+    commandId: params.commandId,
+    runtimeClient: transport.runtimeClient,
+    runtimeEndpointResolver: transport.endpointResolver,
+    actorType: "user" as const,
+    actorId: params.actorId,
+    correlationId: params.correlationId,
+  };
+  const command = params.retry
+    ? await retryDispatchedInvocationCommand(common)
+    : params.expectedType === "interrupt"
+      ? await dispatchCancelCommand(common)
+      : params.expectedType === "resume"
+        ? await dispatchResumeCommand(common)
+        : await dispatchSteerCommand(common);
+  return { dispatched: true, command };
+}
+
+export function dispatchInterruptCommandToRuntime(params: {
   tenantId: string;
   commandId: string;
   actorId?: string | null;
   correlationId?: string | null;
 }): Promise<CommandGatewayResult> {
-  const ctx = await loadCommandContext(params.tenantId, params.commandId);
-  if (!ctx) return { dispatched: false, reason: "command_not_found" };
-  // 命令网关门禁 —— 依据 Binding 重新检查 effective cancel；
-  // false → 明确返回 unsupported reason（不发送任何网络请求）。
-  const capabilities = await resolveEffectiveInvocationCapabilities({
-    tenantId: params.tenantId,
-    binding: ctx.binding,
-  });
-  if (!capabilities.cancel) {
-    return { dispatched: false, reason: "unsupported_capability" };
-  }
-  // 冻结架构：Runtime 仅 harness_runtime_protocol（in-process hosted），无远端端点。
-  return { dispatched: false, reason: "protocol_not_remote" };
+  return dispatchCommand({ ...params, expectedType: "interrupt" });
 }
 
-/**
- * 调度 Resume 命令。hosted 协议无远端端点，命令保持队列由既有状态机吸收
- * （protocol_not_remote）；effective resume=false → 真实失败。
- * 仅供生产 route 在 UserAction resolve 后调用；幂等由命令状态机保证。
- */
-export async function dispatchResumeCommandToRuntime(params: {
+export function dispatchResumeCommandToRuntime(params: {
   tenantId: string;
   commandId: string;
   actorId?: string | null;
   correlationId?: string | null;
 }): Promise<CommandGatewayResult> {
-  const ctx = await loadCommandContext(params.tenantId, params.commandId);
-  if (!ctx) return { dispatched: false, reason: "command_not_found" };
-  // Resume 沿同一 Effective Capability 模型门禁。
-  const capabilities = await resolveEffectiveInvocationCapabilities({
-    tenantId: params.tenantId,
-    binding: ctx.binding,
-  });
-  if (!capabilities.resume) {
-    return { dispatched: false, reason: "unsupported_capability" };
-  }
-  // 冻结架构：Runtime 仅 harness_runtime_protocol（in-process hosted），无远端端点。
-  return { dispatched: false, reason: "protocol_not_remote" };
+  return dispatchCommand({ ...params, expectedType: "resume" });
 }
 
-/**
- * Durable Retry Worker 命令 lane 网关入口：对已 dispatched 的命令重新发起远端调度。
- *
- * 冻结架构下 hosted 协议无远端端点，恒返回 protocol_not_remote；仍保留命令类型
- * 的 effective capability 门禁（unsupported_capability 是真实失败）。命令不在
- * dispatched 状态（已被并发处理/终态）→ command_not_found 语义的 no-op。
- */
+export function dispatchSteerCommandToRuntime(params: {
+  tenantId: string;
+  commandId: string;
+  actorId?: string | null;
+  correlationId?: string | null;
+}): Promise<CommandGatewayResult> {
+  return dispatchCommand({ ...params, expectedType: "steer" });
+}
+
 export async function retryDispatchedCommandToRuntime(params: {
   tenantId: string;
   commandId: string;
   actorId?: string | null;
   correlationId?: string | null;
 }): Promise<CommandGatewayResult> {
-  const ctx = await loadCommandContext(params.tenantId, params.commandId);
-  if (!ctx) return { dispatched: false, reason: "command_not_found" };
-  const capabilities = await resolveEffectiveInvocationCapabilities({
-    tenantId: params.tenantId,
-    binding: ctx.binding,
+  const context = await loadCommandContext(params.tenantId, params.commandId);
+  if (!context) return { dispatched: false, reason: "command_not_found" };
+  if (
+    context.command.commandType !== "interrupt" &&
+    context.command.commandType !== "resume" &&
+    context.command.commandType !== "steer"
+  ) {
+    return { dispatched: false, reason: "command_not_found" };
+  }
+  return dispatchCommand({
+    ...params,
+    expectedType: context.command.commandType,
+    retry: true,
   });
-  const commandType = await (async () => {
-    const [row] = await db
-      .select({ commandType: invocationCommandTable.commandType })
-      .from(invocationCommandTable)
-      .where(eq(invocationCommandTable.id, params.commandId))
-      .limit(1);
-    return row?.commandType ?? null;
-  })();
-  if (commandType === "interrupt" && !capabilities.cancel) {
-    return { dispatched: false, reason: "unsupported_capability" };
-  }
-  if (commandType === "resume" && !capabilities.resume) {
-    return { dispatched: false, reason: "unsupported_capability" };
-  }
-  // 冻结架构：Runtime 仅 harness_runtime_protocol（in-process hosted），无远端端点。
-  return { dispatched: false, reason: "protocol_not_remote" };
 }

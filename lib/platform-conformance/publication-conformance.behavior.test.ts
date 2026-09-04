@@ -28,6 +28,7 @@ import {
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { createCapturingEventBatchSink } from "@/lib/runtime/test-support/capturing-event-batch-sink";
+import { createConformanceHostedApplicationService } from "@/lib/runtime/test-support/conformance-hosted-application-service";
 import {
   computeRunnerArtifactDigest,
   computeRunnerArtifactDigestFromSources,
@@ -47,6 +48,9 @@ function createConformanceHostedAdapter() {
       platformEndpoint: "in-process://conformance-test",
       platformAuthToken: "conformance-test-token",
       eventBatchSink: capturing.sink,
+      applicationService: createConformanceHostedApplicationService({
+        eventBatchSink: capturing.sink,
+      }),
       ...createDirectResponsePorts(async (view) => `probe: ${view.objective}`),
       modelRef: "conformance-test-model",
     }),

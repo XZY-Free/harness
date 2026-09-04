@@ -187,6 +187,7 @@ export async function queueSteer(params: {
       contentJson: content as unknown as Record<string, unknown>,
       contentHash,
       contextPolicy: "include", // ack 后进入上下文；pending 期间由调用方/投影层过滤
+      invocationId: turn.activeInvocationId,
       createdAt: now,
       updatedAt: now,
     });

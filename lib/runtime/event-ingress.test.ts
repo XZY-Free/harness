@@ -749,6 +749,7 @@ describe("RuntimeEventIngress 核心入库", () => {
       producerSequenceStart: 1,
       events: [
         makeEvent("evt-ua-input", 1, "user_action.requested", {
+          action_id: "action-request-input-1",
           request_type: "input",
           purpose: "a2a_input_required",
           prompt: "请提供请假事由",
@@ -768,6 +769,7 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(uars).toHaveLength(1);
     const uar = uars[0]!;
     expect(uar.requestType).toBe("input");
+    expect(uar.harnessActionId).toBe("action-request-input-1");
     expect(uar.inputSchemaJson).toEqual(inputSchema);
 
     // 回读 ThreadItem Projection：Authority(=UAR) 与 Projection(=Item) 是两行不同 id，
@@ -784,6 +786,7 @@ describe("RuntimeEventIngress 核心入库", () => {
     // RED：Item contentJson 必须携带 request_id，Web :resolve 才能用 Item 找到 Authority。
     const finalContent = {
       kind: "user_action.requested",
+      action_id: "action-request-input-1",
       request_type: "input",
       purpose: "a2a_input_required",
       prompt: "请提供请假事由",

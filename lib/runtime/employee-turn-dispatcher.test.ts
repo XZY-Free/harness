@@ -10,6 +10,7 @@ import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
+import { requestInterrupt } from "@/lib/conversations/interrupt-queries";
 import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
@@ -25,13 +26,15 @@ import {
   createRouteSet,
 } from "@/lib/routes/application/deployment-route-service";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { dispatchInterruptCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeEach(async () => {
   await resetDatabase(db);
@@ -203,55 +206,53 @@ async function seedPublishedRuntimeRevision(
   return { runtime, revision };
 }
 
+async function seedReadyEmployeeTurn(suffix: string) {
+  const tenant = await ensureDefaultTenant();
+  const owner = await upsertUserIdentity({
+    tenantId: tenant.id,
+    externalSubject: `employee-turn-owner-${suffix}`,
+    email: `employee-turn-owner-${suffix}@example.com`,
+    displayName: "Employee Turn Owner",
+  });
+  const runtime = await seedPublishedRuntimeRevision(
+    tenant.id,
+    owner.id,
+    `default-runtime-${suffix}`,
+    suffix,
+  );
+  const routeSet = await createRouteSet({
+    tenantId: tenant.id,
+    target: { kind: "runtime" },
+    routeScopeKey: "default",
+    routeScopeJson: { networkZone: "internal" },
+  });
+  await activateSingleRouteForTest({
+    tenantId: tenant.id,
+    routeSetId: routeSet.id,
+    routeSetExpectedVersionNo: 1,
+    target: { kind: "runtime", runtimeRevisionId: runtime.revision.id },
+    trafficWeight: MAX_TRAFFIC_WEIGHT,
+    priorityNo: 1,
+    actor: buildActor(tenant.id, "deploy-bot-001"),
+  });
+  const { thread } = await createThread({
+    tenantId: tenant.id,
+    ownerUserId: owner.id,
+    actorId: owner.id,
+  });
+  const { turn } = await acceptUserMessageTurn({
+    tenantId: tenant.id,
+    threadId: thread.id,
+    ownerUserId: owner.id,
+    content: { text: "请确认已经接通" },
+    actorId: owner.id,
+  });
+  return { tenantId: tenant.id, ownerId: owner.id, thread, turn };
+}
+
 describe("dispatchEmployeeTurn", () => {
   it("接纳的 Turn 会经内置 Hosted Runtime 生成并持久化真实 Agent 回复", async () => {
-    const tenant = await ensureDefaultTenant();
-    const owner = await upsertUserIdentity({
-      tenantId: tenant.id,
-      externalSubject: "employee-turn-owner",
-      email: "employee-turn-owner@example.com",
-      displayName: "Employee Turn Owner",
-    });
-    const tenantId = tenant.id;
-    const ownerId = owner.id;
-
-    // seed 完整 ready route：Runtime + published Revision、
-    // RouteSet + active base harness Route（顶层恒为 runtime target={kind:"runtime"}，不携带 Agent 字段）。
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "default-runtime",
-      "v1",
-    );
-
-    const routeSet = await createRouteSet({
-      tenantId,
-      target: { kind: "runtime" },
-      routeScopeKey: "default",
-      routeScopeJson: { networkZone: "internal" },
-    });
-    await activateSingleRouteForTest({
-      tenantId,
-      routeSetId: routeSet.id,
-      routeSetExpectedVersionNo: 1,
-      target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
-      trafficWeight: MAX_TRAFFIC_WEIGHT,
-      priorityNo: 1,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-
-    const { thread } = await createThread({
-      tenantId,
-      ownerUserId: ownerId,
-      actorId: ownerId,
-    });
-    const { turn } = await acceptUserMessageTurn({
-      tenantId,
-      threadId: thread.id,
-      ownerUserId: ownerId,
-      content: { text: "请确认已经接通" },
-      actorId: ownerId,
-    });
+    const { tenantId, ownerId, thread, turn } = await seedReadyEmployeeTurn("v1");
     const deltas: string[] = [];
     const unsubscribe = subscribeThreadTransientEvents(thread.id, (event) => {
       if (event.type === "response.delta") deltas.push(event.payload.delta as string);
@@ -302,5 +303,59 @@ describe("dispatchEmployeeTurn", () => {
       text: "真实执行器回复：请确认已经接通",
       model_ref: "test-model",
     });
+  });
+
+  it("live cancel 中断模型执行，确认命令后不再提交新 action", async () => {
+    const { tenantId, ownerId, thread, turn } = await seedReadyEmployeeTurn("cancel-live");
+    let modelStarted = false;
+    const dispatched = await dispatchEmployeeTurn({
+      tenantId,
+      threadId: thread.id,
+      turnId: turn.id,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
+      decisionPort: {
+        async decideNextAction(_view, abortSignal) {
+          modelStarted = true;
+          return await new Promise((_resolve, reject) => {
+            abortSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("cancelled", "AbortError")),
+              { once: true },
+            );
+          });
+        },
+      },
+      finalResponsePort: {
+        async generateFinalResponse() {
+          throw new Error("cancel 后不得生成正文");
+        },
+      },
+    });
+    await vi.waitFor(() => expect(modelStarted).toBe(true));
+    const runningTurn = await getTurnById(tenantId, turn.id);
+    const invocationId = runningTurn?.activeInvocationId;
+    if (!invocationId) throw new Error("缺少 active Invocation");
+    const interrupt = await requestInterrupt({
+      tenantId,
+      ownerUserId: ownerId,
+      turnId: turn.id,
+      reasonCode: "user_cancel",
+      idempotencyKey: "cancel-live-1",
+    });
+    const gateway = await dispatchInterruptCommandToRuntime({
+      tenantId,
+      commandId: interrupt.command.id,
+      actorId: ownerId,
+    });
+    await dispatched.completion;
+
+    expect(gateway).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    expect((await getInvocationById(tenantId, invocationId))?.executionState).toBe("cancelled");
+    expect(await listItemsByThread(tenantId, thread.id)).toEqual([
+      expect.objectContaining({ itemType: "user_message" }),
+    ]);
   });
 });

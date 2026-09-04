@@ -163,6 +163,7 @@ export interface CreateUserActionRequestInput {
   threadId: string;
   turnId: string;
   invocationId: string;
+  harnessActionId?: string | null;
   toolCallId?: string | null;
   itemId?: string | null;
   requestType: UserActionRequestType;
@@ -258,6 +259,7 @@ export async function createUserActionRequest(
     threadId: input.threadId,
     turnId: input.turnId,
     invocationId: input.invocationId,
+    harnessActionId: input.harnessActionId ?? null,
     toolCallId: input.toolCallId ?? null,
     itemId: input.itemId ?? null,
     requestType: input.requestType,
