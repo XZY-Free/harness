@@ -48,6 +48,7 @@ import {
   TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { loadGovernanceConfigFromDB } from "@/lib/governance/governance-repository";
 import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
@@ -78,12 +79,16 @@ import {
   updateInvocationState,
 } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import {
+  createDraftRuntimeRevision,
+  getRuntimeRevisionById,
+} from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
   type RedispatchInvocationParams,
   type RedispatchResult,
   redispatchInvocation,
 } from "@/lib/runtime/redispatch-queries";
+import { createPersistedQueuedInvocationAttemptDispatcher } from "@/lib/runtime/retry/dispatch-persisted-queued-invocation-attempt";
 import { dispatchQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import { claimDueInvocationAttempts } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
@@ -96,6 +101,8 @@ import {
 } from "@/lib/runtime/runtime-client";
 import { createSessionBinding, getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
+import { checkWorkerDatabase } from "@/lib/workers/production-worker-process";
+import { DURABLE_WORKER_ROLES } from "@/lib/workers/production-worker-role";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -352,6 +359,8 @@ async function seedInvocation(params: {
   withSessionBinding?: boolean;
   withPriorAttempt?: boolean;
   lastHeartbeatAt?: Date | null;
+  /** canonical retry service 用真实冻结 Runtime/Governance 事实。 */
+  useProductionFrozenFacts?: boolean;
 }): Promise<SeededInvocation> {
   // Turn 模式（threadId 非空）：创建真实 ThreadItem 作为 triggerItem，
   // 满足 issueContextHandle 的绑定完整性要求（threadId + triggerItemId 均非空）。
@@ -390,9 +399,31 @@ async function seedInvocation(params: {
   const { invocation } = await createInvocation(invocationParams);
 
   // 创建 ExecutionBinding（顶层 Harness Invocation 的不可变绑定，不含 Agent evidence）
+  const runtimeRevision = params.useProductionFrozenFacts
+    ? await getRuntimeRevisionById(params.runtimeRevisionId)
+    : null;
+  const governance = params.useProductionFrozenFacts
+    ? await loadGovernanceConfigFromDB(params.tenantId)
+    : null;
+  if (params.useProductionFrozenFacts && !runtimeRevision) {
+    throw new Error("测试 RuntimeRevision 不存在");
+  }
   const binding = await createExecutionBinding({
     ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
-    controlPlaneEvidence: TEST_EXECUTION_BINDING_REQUIRED_FIELDS.controlPlaneEvidence,
+    governanceConfigRevisionId:
+      governance?.revision.id ?? TEST_EXECUTION_BINDING_REQUIRED_FIELDS.governanceConfigRevisionId,
+    governanceConfigDigest:
+      governance?.configDigest ?? TEST_EXECUTION_BINDING_REQUIRED_FIELDS.governanceConfigDigest,
+    controlPlaneEvidence: runtimeRevision
+      ? {
+          ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS.controlPlaneEvidence,
+          runtimeArtifactId: runtimeRevision.artifactId,
+          runtimeArtifactDigest: runtimeRevision.artifactDigest,
+          runtimeConfigDigest: runtimeRevision.configHash,
+          runtimeEvidenceKind: runtimeRevision.runtimeEvidenceKind,
+          runtimeTargetDigest: runtimeRevision.runtimeTargetDigest,
+        }
+      : TEST_EXECUTION_BINDING_REQUIRED_FIELDS.controlPlaneEvidence,
     invocationId: invocation.id,
     tenantId: params.tenantId,
     runtimeRevisionId: params.runtimeRevisionId,
@@ -1405,6 +1436,10 @@ describe("01 专项 Runtime Dispatch Retry Worker", () => {
     threadId = thread.id;
   });
 
+  it("所有 durable role 的 startup check 可连接可写 DB 且所需表存在", async () => {
+    for (const role of DURABLE_WORKER_ROLES) await checkWorkerDatabase(role);
+  });
+
   it("Worker tick：claim due Attempt → 同一 Attempt dispatch 成功（Invocation running）", async () => {
     const seeded = await seedInvocation({
       tenantId,
@@ -1459,6 +1494,111 @@ describe("01 专项 Runtime Dispatch Retry Worker", () => {
     const tickResult2 = await worker.tick();
     expect(tickResult2.attempts).toBe(0);
     expect(attemptsSeen).toBe(1);
+  });
+
+  it("Worker 默认 Attempt lane：只把已领取 attemptId 交给 canonical persisted service", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-default-lane",
+      initialExecutionState: "waiting_user",
+    });
+    const attempt = await createAttempt({ invocationId: seeded.invocationId });
+    await db
+      .update(invocationAttemptTable)
+      .set({ nextDispatchAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, attempt.id));
+    const seen: string[] = [];
+    const worker = createRuntimeDispatchRetryWorker({
+      workerId: "worker-default-lane",
+      dispatchPersistedAttempt: async (attemptId) => {
+        seen.push(attemptId);
+      },
+      dispatchCommand: async () => {},
+    });
+
+    expect(await worker.tick()).toEqual({ attempts: 1, commands: 0 });
+    expect(seen).toEqual([attempt.id]);
+  });
+
+  it("canonical persisted service：从 DB 重建 Hosted transport 并显式启动同一 Invocation", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-canonical-retry",
+      initialExecutionState: "waiting_user",
+      useProductionFrozenFacts: true,
+    });
+    const attempt = await createAttempt({ invocationId: seeded.invocationId });
+    const launched: string[] = [];
+    const dispatch = createPersistedQueuedInvocationAttemptDispatcher({
+      hostedApplicationService: {
+        async start(input) {
+          launched.push(input.invocationId);
+          return { status: "handled_noop", invocationId: input.invocationId };
+        },
+        async resume(input) {
+          return { status: "handled_noop", invocationId: input.invocationId };
+        },
+        async cancel() {},
+        async steer() {},
+      },
+    });
+
+    const result = await dispatch(attempt.id);
+    expect(result?.status).toBe("started");
+    await Promise.resolve();
+    expect(launched).toEqual([seeded.invocationId]);
+    expect((await getInvocationById(tenantId, seeded.invocationId))?.executionState).toBe(
+      "running",
+    );
+    const [persistedAttempt] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attempt.id))
+      .limit(1);
+    expect(persistedAttempt?.attemptState).toBe("running");
+  });
+
+  it("canonical persisted service：parent 已终态时不发网络且只终态化遗留 Attempt", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-terminal-parent",
+      initialExecutionState: "completed",
+    });
+    const attempt = await createAttempt({ invocationId: seeded.invocationId });
+    const dispatch = createPersistedQueuedInvocationAttemptDispatcher({
+      createExternalTransport() {
+        throw new Error("parent terminal 时禁止创建 transport");
+      },
+    });
+
+    await dispatch(attempt.id);
+    const [persistedAttempt] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attempt.id))
+      .limit(1);
+    expect(persistedAttempt).toMatchObject({
+      attemptState: "failed",
+      errorCode: "PARENT_INVOCATION_TERMINAL",
+    });
+    expect((await getInvocationById(tenantId, seeded.invocationId))?.executionState).toBe(
+      "completed",
+    );
   });
 
   it("Worker 两实例并发：同一 Attempt 只被一个 lane 处理（SKIP LOCKED）", async () => {

@@ -7,7 +7,7 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 272,
+    "unit": 274,
     "db": 108,
     "integration": 10,
     "contract": 24,
@@ -15,7 +15,7 @@
     "e2e-desktop": 1,
     "e2e-cross-client": 1
   },
-  "total": 419,
+  "total": 421,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -4099,6 +4099,17 @@
       ]
     },
     {
+      "file": "lib/runtime/retry/runtime-dispatch-retry-policy.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/rlimit.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
@@ -4386,6 +4397,17 @@
     },
     {
       "file": "lib/utils.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workers/production-worker-topology.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,

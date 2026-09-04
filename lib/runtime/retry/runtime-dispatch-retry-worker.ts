@@ -23,12 +23,11 @@ import { logger } from "@/lib/logger";
 import type { InvocationCommand } from "@/lib/persistence/schema/conversation";
 import { threadTable } from "@/lib/persistence/schema/conversation";
 import type { InvocationAttempt } from "@/lib/persistence/schema/executions";
-import { invocationTable } from "@/lib/persistence/schema/executions";
 import { retryDispatchedCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
+import { dispatchPersistedQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-persisted-queued-invocation-attempt";
 import {
   claimDueInvocationAttempts,
   claimDueInvocationCommands,
-  recordAttemptDispatchTransientFailure,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
 import {
   type DispatchClock,
@@ -44,6 +43,8 @@ export interface RuntimeDispatchRetryWorkerDeps {
   workerId?: string;
   /** Attempt lane 覆盖（测试注入）。 */
   dispatchAttempt?: (attempt: InvocationAttempt) => Promise<void>;
+  /** canonical persisted Attempt service 覆盖（验证默认 lane 接线）。 */
+  dispatchPersistedAttempt?: (attemptId: string) => Promise<unknown>;
   /** Command lane 覆盖（测试注入）。 */
   dispatchCommand?: (command: InvocationCommand) => Promise<void>;
   /** 单轮处理上限覆盖。 */
@@ -79,25 +80,10 @@ export function createRuntimeDispatchRetryWorker(
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   /** 默认 Attempt lane：从持久化 Authority 重建 transport 并 dispatch 同一 Attempt。 */
+  const persistedAttemptDispatcher =
+    deps.dispatchPersistedAttempt ?? dispatchPersistedQueuedInvocationAttempt;
   const defaultDispatchAttempt = async (attempt: InvocationAttempt): Promise<void> => {
-    const [invocation] = await db
-      .select()
-      .from(invocationTable)
-      .where(eq(invocationTable.id, attempt.invocationId))
-      .limit(1);
-    if (!invocation) {
-      logger.warn("[runtime-dispatch-retry-worker] Attempt 关联 Invocation 不存在", {
-        attemptId: attempt.id,
-      });
-      return;
-    }
-    // Runtime 恒为 harness（harness_runtime_protocol），Attempt lane 不做远端 HTTP
-    // dispatch；按 transient 记录推进 backoff/耗尽，避免同一 work 被无限重复领取。
-    await recordAttemptDispatchTransientFailure({
-      attemptId: attempt.id,
-      errorCode: "runtime_unavailable",
-      now: clock(),
-    });
+    await persistedAttemptDispatcher(attempt.id);
   };
 
   /** 默认 Command lane：经命令网关 retry 入口（同一 idempotency key + 能力复核）。 */

@@ -1,12 +1,6 @@
-import { createToolExecutionWorker } from "@/lib/capability/tool-execution-worker";
+import { runProductionWorkerProcess } from "@/lib/workers/production-worker-process";
 
-const worker = createToolExecutionWorker();
-
-async function run(): Promise<void> {
-  for (;;) {
-    const result = await worker.runOnce();
-    if (result === "idle") await new Promise((resolve) => setTimeout(resolve, 2_000));
-  }
-}
-
-void run();
+runProductionWorkerProcess("tool-execution-worker").catch((error) => {
+  console.error("[tool-execution-worker] 启动失败:", error);
+  process.exitCode = 1;
+});

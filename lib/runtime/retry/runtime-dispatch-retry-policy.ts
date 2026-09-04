@@ -7,7 +7,7 @@
  * 职责：
  * - 固定第一版 retry policy：maxDispatchAttempts / 指数 backoff / lease 时长 / 批量 / 轮询间隔。
  * - backoffDelay(attemptCount)：attempt 1→1s、2→2s、3→4s、4→8s、5→terminal（无 jitter，保证确定性可测）。
- * - isTransientDispatchError(err)：只有 network / HTTP 503 是 transient，可进入 durable retry。
+ * - isTransientDispatchError(err)：统一读取 Runtime 错误的 retryable 分类。
  *
  * 关键约束：
  * - attempt 语义：同一个 retry work（同一个 InvocationAttempt / InvocationCommand）的
@@ -69,13 +69,20 @@ export function isTransientDispatchError(err: unknown): err is { __transient: tr
 }
 
 /**
- * RuntimeHttpClientError 的 transient 判定（network / HTTP 503）。
+ * RuntimeHttpClientError 的 transient 判定。
  * 引入位置独立以避免 policy ← errors 反向依赖。
  */
 export function isTransientRuntimeError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
-  const candidate = err as { kind?: unknown; httpStatus?: unknown };
+  const candidate = err as { kind?: unknown; httpStatus?: unknown; retryable?: unknown };
+  if (typeof candidate.retryable === "boolean") return candidate.retryable;
   if (candidate.kind === "network") return true;
-  if (candidate.kind === "http" && candidate.httpStatus === 503) return true;
+  if (
+    candidate.kind === "http" &&
+    typeof candidate.httpStatus === "number" &&
+    (candidate.httpStatus === 429 || candidate.httpStatus >= 500)
+  ) {
+    return true;
+  }
   return false;
 }

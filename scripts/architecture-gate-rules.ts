@@ -109,6 +109,57 @@ export interface AgentRevisionAuthorityGateResult {
   failures: string[];
 }
 
+export interface WorkerProductionTopologyGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+/** Durable worker 的 package、统一镜像、角色入口与生产拓扑必须同时闭合。 */
+export function checkWorkerProductionTopologyGate(
+  documents: readonly SourceDocument[],
+): WorkerProductionTopologyGateResult {
+  const failures: string[] = [];
+  const source = (path: string) =>
+    documents.find((document) => document.path === path)?.source ?? "";
+  const requiredWorkers = [
+    "hosted-provisioning-worker",
+    "control-plane-outbox-worker",
+    "runtime-dispatch-retry-worker",
+    "tool-execution-worker",
+  ];
+  const packageJson = source("package.json");
+  const topology = source("deploy/production/compose.yaml");
+  const workerImage = source("docker/worker/Dockerfile");
+  const webImage = source("Dockerfile");
+  const entrypoint = source("scripts/workers/worker-entrypoint.ts");
+  const retryWorker = stripComments(source("lib/runtime/retry/runtime-dispatch-retry-worker.ts"));
+
+  if (!packageJson.includes('"worker:start"')) failures.push("package 缺少统一 worker:start");
+  if (!entrypoint.includes("runProductionWorkerProcess"))
+    failures.push("统一 worker entrypoint 缺失");
+  if (!workerImage.includes("scripts/workers/worker-entrypoint.ts")) {
+    failures.push("worker image 未启动统一 entrypoint");
+  }
+  if (webImage.includes("worker-entrypoint") || webImage.includes("WORKER_ROLE")) {
+    failures.push("Web image 错误承载 durable worker");
+  }
+  for (const role of requiredWorkers) {
+    if (!topology.includes(`${role}:`) || !topology.includes(`WORKER_ROLE: ${role}`)) {
+      failures.push(`生产拓扑缺少 role：${role}`);
+    }
+  }
+  if (!topology.includes("web-api:") || !topology.includes("replicas:")) {
+    failures.push("生产拓扑缺少 web-api 或 replicas");
+  }
+  if (
+    !retryWorker.includes("dispatchPersistedQueuedInvocationAttempt") ||
+    retryWorker.includes("recordAttemptDispatchTransientFailure")
+  ) {
+    failures.push("Runtime retry 默认 lane 未调用 canonical persisted dispatch service");
+  }
+  return { passed: failures.length === 0, failures };
+}
+
 /** AgentRevision 是唯一版本轴，currentRevisionId 只作发布摘要。 */
 export function checkAgentRevisionAuthorityGate(
   documents: readonly SourceDocument[],

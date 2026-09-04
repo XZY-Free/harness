@@ -54,6 +54,7 @@ import {
   recordAttemptDispatchTransientFailure,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { TransientDispatchErrorCode } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
+import { isTransientRuntimeError } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import type { RuntimeHttpClient, StartInvocationResponse } from "@/lib/runtime/runtime-client";
 import {
   createSessionBinding,
@@ -287,7 +288,7 @@ export async function dispatchQueuedInvocationAttempt(
     }
     if (err instanceof RuntimeHttpClientError) {
       // transient → durable retry scheduling
-      if (err.kind === "network" || (err.kind === "http" && err.httpStatus === 503)) {
+      if (isTransientRuntimeError(err)) {
         const skipReason: TransientDispatchErrorCode =
           err.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
         const outcome = await recordAttemptDispatchTransientFailure({
@@ -352,7 +353,7 @@ export async function dispatchQueuedInvocationAttempt(
 }
 
 /** terminal 失败收口：Attempt failed + markInvocationLost（唯一 Recovery Authority）。返回更新后的 Attempt。 */
-async function failAttemptAndInvokeRecoveryAuthority(params: {
+export async function failAttemptAndInvokeRecoveryAuthority(params: {
   tenantId: string;
   attempt: InvocationAttempt;
   invocation: Invocation;

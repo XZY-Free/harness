@@ -43,6 +43,7 @@ import { getAttemptsByInvocation } from "@/lib/runtime/invocation-attempt-querie
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
 import { getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { createHttpRuntimeConformanceAdapterForTest } from "@/lib/runtime/test-support/http-runtime-conformance-adapter";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
@@ -99,12 +100,15 @@ interface ExternalRequest {
   method: string;
   url: string;
   authorization?: string;
+  idempotencyKey?: string;
   body: Record<string, unknown> | null;
 }
 
 async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) {
   const requests: ExternalRequest[] = [];
+  const acceptedStartKeys = new Set<string>();
   let startFailureStatus: number | null = null;
+  let disconnectNextAcceptedStart = false;
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -114,6 +118,10 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
       method: request.method ?? "",
       url: request.url ?? "",
       authorization: request.headers.authorization,
+      idempotencyKey:
+        typeof request.headers["idempotency-key"] === "string"
+          ? request.headers["idempotency-key"]
+          : undefined,
       body,
     });
     response.setHeader("content-type", "application/json");
@@ -131,6 +139,13 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
         response.end(
           JSON.stringify({ error: { code: "RUNTIME_UNAVAILABLE", message: "temporarily busy" } }),
         );
+        return;
+      }
+      const idempotencyKey = String(request.headers["idempotency-key"] ?? "");
+      acceptedStartKeys.add(idempotencyKey);
+      if (disconnectNextAcceptedStart) {
+        disconnectNextAcceptedStart = false;
+        request.socket.destroy();
         return;
       }
       response.end(
@@ -169,6 +184,16 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
     requests,
     setStartFailureStatus(status: number | null) {
       startFailureStatus = status;
+    },
+    disconnectNextStartAfterAccept() {
+      disconnectNextAcceptedStart = true;
+    },
+    acceptedExecutionCount() {
+      return acceptedStartKeys.size;
+    },
+    resetObservations() {
+      requests.length = 0;
+      acceptedStartKeys.clear();
     },
   };
 }
@@ -451,7 +476,7 @@ async function seedReadyExternalEmployeeTurn(suffix: string, capabilities = EXTE
     content: { text: "由外部 Runtime 执行" },
     actorId: owner.id,
   });
-  server.requests.length = 0;
+  server.resetObservations();
   return { server, tenantId: tenant.id, ownerId: owner.id, thread, turn };
 }
 
@@ -522,6 +547,47 @@ describe("dispatchEmployeeTurn", () => {
       externalSessionRef: `external-session:${invocation?.id}`,
       runtimeCapabilitiesJson: EXTERNAL_CAPABILITIES,
     });
+  });
+
+  it("默认 retry worker 不注入 dispatchAttempt，External Attempt 真实重发同一 HTTP start", async () => {
+    const { server, tenantId, ownerId, thread, turn } =
+      await seedReadyExternalEmployeeTurn("http-retry-default");
+    server.disconnectNextStartAfterAccept();
+    const initial = await dispatchEmployeeTurn({
+      tenantId,
+      threadId: thread.id,
+      turnId: turn.id,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
+    });
+    expect(initial.dispatched).toBe(true);
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.turnId, turn.id))
+      .limit(1);
+    expect(invocation).toBeTruthy();
+    const [attempt] = await getAttemptsByInvocation(invocation?.id ?? "");
+    expect(attempt?.attemptState).toBe("queued");
+    const worker = createRuntimeDispatchRetryWorker({
+      workerId: "external-default-retry-worker",
+      clock: () => new Date((attempt?.nextDispatchAt?.getTime() ?? Date.now()) + 1),
+      dispatchCommand: async () => {},
+    });
+
+    expect((await worker.tick()).attempts).toBe(1);
+    const startRequests = server.requests.filter(
+      (request) => request.method === "POST" && request.url === "/runtime/v1/invocations",
+    );
+    expect(startRequests).toHaveLength(2);
+    expect(startRequests[0]?.body?.invocation_id).toBe(invocation?.id);
+    expect(startRequests[1]?.body?.invocation_id).toBe(invocation?.id);
+    expect(new Set(startRequests.map((request) => request.idempotencyKey))).toEqual(
+      new Set([`invocation-attempt:${attempt?.id}`]),
+    );
+    expect(server.acceptedExecutionCount()).toBe(1);
+    expect((await getInvocationById(tenantId, invocation?.id ?? ""))?.executionState).toBe(
+      "running",
+    );
   });
 
   it("External start 暂态失败只排入 durable retry，不 fallback Hosted", async () => {

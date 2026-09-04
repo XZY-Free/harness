@@ -5,20 +5,9 @@
  * 用法: pnpm worker:hosted-provisioning
  */
 
-import { createHostedProvisioningWorker } from "@/lib/runtime/provisioning/hosted-provisioning-worker";
+import { runProductionWorkerProcess } from "@/lib/workers/production-worker-process";
 
-const worker = createHostedProvisioningWorker();
-
-// 优雅关闭
-process.on("SIGTERM", () => {
-  worker.stop();
-});
-
-process.on("SIGINT", () => {
-  worker.stop();
-});
-
-worker.start().catch((error) => {
+runProductionWorkerProcess("hosted-provisioning-worker").catch((error) => {
   console.error("[hosted-provisioning-worker] 启动失败:", error);
-  process.exit(1);
+  process.exitCode = 1;
 });

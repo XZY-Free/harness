@@ -1,0 +1,76 @@
+name: snow-harness
+
+x-shared-runtime: &shared-runtime
+  restart: unless-stopped
+  env_file:
+    - path: .env.production
+      required: true
+  environment:
+    APP_ENV: production
+    DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+
+x-worker: &worker
+  <<: *shared-runtime
+  build:
+    context: ../..
+    dockerfile: docker/worker/Dockerfile
+  image: snow-harness-worker:${SNOW_HARNESS_IMAGE_TAG:-latest}
+  healthcheck:
+    test:
+      - CMD
+      - node
+      - -e
+      - fetch('http://127.0.0.1:8080/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    interval: 10s
+    timeout: 3s
+    retries: 3
+    start_period: 20s
+
+services:
+  web-api:
+    <<: *shared-runtime
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: snow-harness-web:${SNOW_HARNESS_IMAGE_TAG:-latest}
+    command: ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]
+    ports:
+      - "${SNOW_HARNESS_HTTP_PORT:-3000}:3000"
+    deploy:
+      replicas: 2
+
+  hosted-provisioning-worker:
+    <<: *worker
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      WORKER_ROLE: hosted-provisioning-worker
+    deploy:
+      replicas: 2
+
+  control-plane-outbox-worker:
+    <<: *worker
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      WORKER_ROLE: control-plane-outbox-worker
+    deploy:
+      replicas: 2
+
+  runtime-dispatch-retry-worker:
+    <<: *worker
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      WORKER_ROLE: runtime-dispatch-retry-worker
+    deploy:
+      replicas: 2
+
+  tool-execution-worker:
+    <<: *worker
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      WORKER_ROLE: tool-execution-worker
+    deploy:
+      replicas: 2

@@ -94,6 +94,7 @@ import {
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
 import { recordAttemptDispatchTransientFailure } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { isTransientRuntimeError } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import type {
   GatewayAccess,
   GatewayEndpoints,
@@ -635,7 +636,7 @@ async function dispatchToRuntime(params: {
       // transient（网络不可达 / 503）→ 在同一 Attempt 上排定 durable retry work
       // （dispatchAttemptCount+1 + nextDispatchAt + 清 lease）；耗尽时由唯一
       // Recovery Authority（markInvocationLost）收口 Invocation/Turn。不再只写“等待重试”。
-      if (err.kind === "network" || (err.kind === "http" && err.httpStatus === 503)) {
+      if (isTransientRuntimeError(err)) {
         const skipReason: "runtime_network_unavailable" | "runtime_unavailable" =
           err.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
         const outcome = await recordAttemptDispatchTransientFailure({

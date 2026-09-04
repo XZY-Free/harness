@@ -65,6 +65,7 @@ import {
   scheduleCommandTransientRetry,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { RUNTIME_DISPATCH_RETRY_POLICY } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
+import { isTransientRuntimeError } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import type {
   CancelInvocationRequest,
   GatewayAccess,
@@ -1287,13 +1288,11 @@ async function handleRuntimeError(
     return handleTransient("runtime_network_unavailable");
   }
   if (err instanceof RuntimeHttpClientError) {
-    // 网络不可达 → durable retry
-    if (err.kind === "network") {
-      return handleTransient("runtime_network_unavailable");
-    }
-    // 503 RUNTIME_UNAVAILABLE → durable retry
-    if (err.kind === "http" && err.httpStatus === 503) {
-      return handleTransient("runtime_unavailable");
+    // connect/DNS/TLS/timeout/429/可重试 5xx 共用唯一 retry policy。
+    if (isTransientRuntimeError(err)) {
+      return handleTransient(
+        err.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable",
+      );
     }
     // 409 IDEMPOTENCY_CONFLICT → 幂等复用，标记 acknowledged
     if (

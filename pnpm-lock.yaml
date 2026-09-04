@@ -109,6 +109,9 @@ importers:
       tailwind-merge:
         specifier: ^3.3.1
         version: 3.6.0
+      tsx:
+        specifier: ^4.22.4
+        version: 4.23.12
       ws:
         specifier: ^8.18.0
         version: 8.21.3
@@ -188,9 +191,6 @@ importers:
       testcontainers:
         specifier: ^12.1.0
         version: 12.1.0
-      tsx:
-        specifier: ^4.22.4
-        version: 4.23.12
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0

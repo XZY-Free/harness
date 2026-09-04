@@ -15,6 +15,7 @@ import {
   checkExternalRuntimeTransportGate,
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
+  checkWorkerProductionTopologyGate,
   collectDeprecatedArchitectureViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
@@ -315,6 +316,24 @@ function checkSourceHistoryAndRetiredDependencies(): void {
   else fail(`旧 Required-Agent 执行路径回流：\n  ${agentExecutionViolations.join("\n  ")}`);
 }
 
+function checkWorkerProductionTopology(): void {
+  const paths = [
+    "package.json",
+    "Dockerfile",
+    "docker/worker/Dockerfile",
+    "deploy/production/compose.yaml",
+    "scripts/workers/worker-entrypoint.ts",
+    "lib/runtime/retry/runtime-dispatch-retry-worker.ts",
+  ];
+  const documents = paths.map((path) => ({
+    path,
+    source: existsSync(resolve(ROOT, path)) ? readFileSync(resolve(ROOT, path), "utf8") : "",
+  }));
+  const result = checkWorkerProductionTopologyGate(documents);
+  if (result.passed) pass("Durable worker 生产拓扑闭合");
+  else fail(`Durable worker 生产拓扑违规：\n  ${result.failures.join("\n  ")}`);
+}
+
 function main(): void {
   checkMigrationJournal();
   checkSchemaAuthority();
@@ -373,6 +392,7 @@ function main(): void {
   checkExecutionBoundaryRules();
   checkAgentExecutionAuthority();
   checkExternalRuntimeTransport();
+  checkWorkerProductionTopology();
   checkFinalClosureBoundaries();
   if (failures > 0) process.exitCode = 1;
 }

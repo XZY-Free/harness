@@ -5,38 +5,9 @@
  * 用法: pnpm worker:control-plane-outbox
  */
 
-import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
-import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
-import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
-import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
-import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
-import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
+import { runProductionWorkerProcess } from "@/lib/workers/production-worker-process";
 
-const buildRouteEligibility = createBuildRouteEligibility({
-  store: mysqlRouteEligibilityStore,
-});
-
-const handler = createProjectionEventHandler({
-  store: mysqlRouteEligibilityStore,
-  sourceReader: mysqlRouteEligibilitySourceReader,
-  buildRouteEligibility,
-});
-
-const worker = createOutboxRelayWorker(handler);
-const continuationWorker = createProductionInvocationContinuationWorker();
-
-// 优雅关闭
-process.on("SIGTERM", () => {
-  worker.stop();
-  continuationWorker.stop();
-});
-
-process.on("SIGINT", () => {
-  worker.stop();
-  continuationWorker.stop();
-});
-
-Promise.all([worker.start(), continuationWorker.start()]).catch((error) => {
+runProductionWorkerProcess("control-plane-outbox-worker").catch((error) => {
   console.error("[control-plane-outbox-worker] 启动失败:", error);
-  process.exit(1);
+  process.exitCode = 1;
 });

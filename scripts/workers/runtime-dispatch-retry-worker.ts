@@ -5,20 +5,9 @@
  * 用法: pnpm worker:runtime-dispatch-retry
  */
 
-import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
+import { runProductionWorkerProcess } from "@/lib/workers/production-worker-process";
 
-const worker = createRuntimeDispatchRetryWorker();
-
-// 优雅关闭
-process.on("SIGTERM", () => {
-  worker.stop();
-});
-
-process.on("SIGINT", () => {
-  worker.stop();
-});
-
-worker.start().catch((error) => {
+runProductionWorkerProcess("runtime-dispatch-retry-worker").catch((error) => {
   console.error("[runtime-dispatch-retry-worker] 启动失败:", error);
-  process.exit(1);
+  process.exitCode = 1;
 });
