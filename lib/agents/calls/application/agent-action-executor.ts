@@ -5,6 +5,8 @@ import {
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import { toAgentCallDisposition } from "@/lib/agents/calls/domain/agent-call";
+import { buildAgentCallLogicalKey } from "@/lib/agents/calls/domain/agent-call";
+import type { AgentCallTransportChannel } from "@/lib/agents/calls/domain/agent-call-attempt";
 import {
   AgentCallIdempotencyConflictError,
   mysqlAgentCallStore,
@@ -37,6 +39,7 @@ export interface CreateAgentActionExecutorParams {
   resolveRoute: RouteResolver;
   routeScopeKey?: string;
   capabilityCatalog?: CapabilityCatalogSnapshot;
+  transportChannel: AgentCallTransportChannel;
 }
 
 const createAgentCall = createCreateAgentCall({ store: mysqlAgentCallStore });
@@ -54,7 +57,7 @@ export function createAgentActionExecutor(
     }
 
     try {
-      const logicalCallKey = `${context.invocationId}:${action.actionId}:${action.payload.agentId}`;
+      const logicalCallKey = buildAgentCallLogicalKey(action.actionId, action.payload.agentId);
       const existing = await mysqlAgentCallStore.getByLogicalCallKey({
         tenantId: params.tenantId,
         parentInvocationId: context.invocationId,
@@ -90,10 +93,8 @@ export function createAgentActionExecutor(
           tenantId: params.tenantId,
           parentInvocationId: context.invocationId,
           agentId: action.payload.agentId,
-          agentRevisionId: resolved.agentRevisionId,
-          sourceType: "harness_planned",
-          sourceRef: action.actionId,
-          logicalCallKey,
+          actionId: action.actionId,
+          transportChannel: params.transportChannel,
           bindingCandidate: resolved.bindingCandidate,
         });
         call = created.call;

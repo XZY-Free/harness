@@ -92,6 +92,28 @@ export class AgentCallDomainError extends Error {
   }
 }
 
+export class AgentCallLogicalKeyError extends AgentCallDomainError {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentCallLogicalKeyError";
+  }
+}
+
+/**
+ * 规范 AgentCall 业务键。parent Invocation 由数据库唯一键的另一列承载，避免在字符串中
+ * 重复同一 Authority；字符串本身仍能直接还原 Harness action 与 stable Agent。
+ */
+export function buildAgentCallLogicalKey(actionId: string, agentId: string): string {
+  const normalizedActionId = actionId.trim();
+  const normalizedAgentId = agentId.trim();
+  if (!normalizedActionId) throw new AgentCallLogicalKeyError("AgentCall actionId 不得为空");
+  if (!normalizedAgentId) throw new AgentCallLogicalKeyError("AgentCall agentId 不得为空");
+  const key = `harness-action:${normalizedActionId}:agent:${normalizedAgentId}`;
+  if (key.length > 256)
+    throw new AgentCallLogicalKeyError("AgentCall logicalCallKey 超过 256 字符");
+  return key;
+}
+
 /** 校验状态转移合法性；非法时抛 AgentCallStateTransitionError。 */
 export function assertAgentCallTransition(
   callId: string,
@@ -109,7 +131,7 @@ export function isAgentCallTerminal(state: AgentCallState): boolean {
 /**
  * AgentCall 领域实体（持久化面向）。
  *
- * 可变字段仅限：state、agentSessionBindingId、externalTaskRef、result、
+ * 可变字段仅限：state、agentSessionBindingId、result、
  * error、lifecycle timestamp、versionNo、attempts 等。
  * 证据类字段（见 AgentCallBinding）不可变。
  */
@@ -123,15 +145,20 @@ export interface AgentCall {
   /** 调用来源类型。 */
   sourceType: AgentCallSourceType;
   /** 来源 Harness actionId。 */
-  sourceRef: string | null;
+  sourceRef: string;
   /** 当前状态。 */
   state: AgentCallState;
   /** 唯一 A2A context Authority 的引用。 */
   agentSessionBindingId: string | null;
   /** 从 AgentSessionBinding join 出的只读投影，不是 AgentCall 可写字段。 */
   sessionBinding: { id: string; externalContextRef: string } | null;
-  /** A2A taskId（外部任务引用）。 */
-  externalTaskRef: string | null;
+  /** 从 AgentCallAttempt 解析出的只读当前尝试投影，不是 AgentCall 可写字段。 */
+  currentAttempt: {
+    id: string;
+    attemptNo: number;
+    externalTaskRef: string | null;
+    transportChannel: "hosted" | "gateway";
+  } | null;
   /** 归一化结果（resultText / resultJson / resultDigest 见 result 持久化）。 */
   resultText: string | null;
   resultJson: unknown;
@@ -139,7 +166,7 @@ export interface AgentCall {
   errorCode: string | null;
   errorSummary: string | null;
   /** 业务幂等键（parentInvocationId + logicalCallKey 幂等）。 */
-  logicalCallKey: string | null;
+  logicalCallKey: string;
   /** canonical 创建请求摘要；与 outbound Attempt.requestDigest 语义独立。 */
   creationRequestDigest: string;
   createdAt: Date;
@@ -206,14 +233,14 @@ export function toAgentCallDisposition(call: AgentCall): AgentCallDisposition {
     };
   }
   if (call.state === "waiting_user") {
-    if (!call.externalTaskRef || !call.sessionBinding?.externalContextRef) {
+    if (!call.currentAttempt?.externalTaskRef || !call.sessionBinding?.externalContextRef) {
       throw new AgentCallDispositionEvidenceError(call.id, "waiting_user 缺少 task/context refs");
     }
     return {
       outcome: "waiting_user",
       state: "waiting_user",
       callId: call.id,
-      taskId: call.externalTaskRef,
+      taskId: call.currentAttempt.externalTaskRef,
       contextId: call.sessionBinding.externalContextRef,
     };
   }
@@ -227,8 +254,8 @@ export function computeAgentCallCreationRequestDigest(input: {
   agentId: string;
   agentRevisionId: string;
   sourceType: AgentCallSourceType;
-  sourceRef: string | null;
-  logicalCallKey: string | null;
+  sourceRef: string;
+  logicalCallKey: string;
   bindingHash: string;
 }): string {
   const canonical = JSON.stringify({

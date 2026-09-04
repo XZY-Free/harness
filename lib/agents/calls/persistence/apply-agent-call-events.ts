@@ -8,7 +8,7 @@
  *   Turn / ThreadItems。
  *
  * 冻结映射：
- * - A2A taskId → AgentCall.externalTaskRef
+ * - A2A taskId → AgentCallAttempt.externalTaskRef
  * - A2A contextId → AgentSessionBinding.externalContextRef（thread 只来自 parent.threadId）
  *
  * canonical payloadHash 含事件 TYPE + 递归规范化 payload（computePayloadHash 已排序）。
@@ -26,7 +26,7 @@ import {
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { invocationTable } from "@/lib/persistence/schema/executions";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 const SUPPORTED_TYPES = new Set([
   "call.started",
@@ -104,6 +104,7 @@ function parseEvent(e: AgentCallCandidateEvent): ParsedEvent {
 interface CallLock {
   state: AgentCallState;
   externalTaskRef: string | null;
+  currentAttemptId: string;
   agentSessionBindingId: string | null;
   externalContextRef: string | null;
   versionNo: number;
@@ -140,9 +141,24 @@ async function lockCall(tx: DbOrTx, callId: string, tenantId: string): Promise<C
     .where(eq(invocationTable.id, callRow.parentInvocationId))
     .limit(1)
     .for("update");
+  const attemptRows = await tx
+    .select()
+    .from(agentCallAttemptTable)
+    .where(
+      and(eq(agentCallAttemptTable.callId, callId), eq(agentCallAttemptTable.tenantId, tenantId)),
+    )
+    .orderBy(desc(agentCallAttemptTable.attemptNo))
+    .for("update");
+  const activeAttempts = attemptRows.filter(
+    (attempt) => attempt.attemptState === "queued" || attempt.attemptState === "running",
+  );
+  if (activeAttempts.length > 1) throw new Error("AgentCall 存在多个活动 Attempt");
+  const currentAttempt = activeAttempts[0] ?? attemptRows[0];
+  if (!currentAttempt) throw new Error(`AgentCallAttempt ${callId} 不存在`);
   const result: CallLock = {
     state: callRow.state as AgentCallState,
-    externalTaskRef: callRow.externalTaskRef,
+    externalTaskRef: currentAttempt.externalTaskRef,
+    currentAttemptId: currentAttempt.id,
     agentSessionBindingId: callRow.agentSessionBindingId,
     externalContextRef: null,
     versionNo: callRow.versionNo,
@@ -168,6 +184,17 @@ async function lockCall(tx: DbOrTx, callId: string, tenantId: string): Promise<C
     result.externalContextRef = session.externalContextRef;
   }
   return result;
+}
+
+async function bindCurrentAttemptTask(
+  tx: DbOrTx,
+  attemptId: string,
+  taskId: string,
+): Promise<void> {
+  await tx
+    .update(agentCallAttemptTable)
+    .set({ externalTaskRef: taskId, updatedAt: new Date() })
+    .where(eq(agentCallAttemptTable.id, attemptId));
 }
 
 /** 校验当前已绑定 refs 与事件 refs 精确匹配；已绑定但事件 refs 存在且不同 → 关联不匹配。 */
@@ -341,9 +368,10 @@ export async function applyAgentCallEvents(
           lock.parentThreadId,
           p.contextId,
         );
+        await bindCurrentAttemptTask(tx, lock.currentAttemptId, externalTaskRef);
         await tx
           .update(agentCallTable)
-          .set({ externalTaskRef, agentSessionBindingId, versionNo: lock.versionNo + 1 })
+          .set({ agentSessionBindingId, versionNo: lock.versionNo + 1 })
           .where(eq(agentCallTable.id, input.callId));
       } else if (p.taskId && externalTaskRef !== null && externalTaskRef !== p.taskId) {
         throw new Error("AgentCall taskId 关联不匹配");
@@ -375,7 +403,6 @@ export async function applyAgentCallEvents(
         .update(agentCallTable)
         .set({
           state,
-          externalTaskRef,
           resultText: text,
           resultJson: data,
           resultDigest,
@@ -402,13 +429,13 @@ export async function applyAgentCallEvents(
           lock.parentThreadId,
           p.contextId,
         );
+        await bindCurrentAttemptTask(tx, lock.currentAttemptId, externalTaskRef);
       }
       state = "waiting_user";
       await tx
         .update(agentCallTable)
         .set({
           state,
-          externalTaskRef,
           agentSessionBindingId,
           waitingAt: new Date(),
           versionNo: lock.versionNo + 1,
@@ -431,7 +458,6 @@ export async function applyAgentCallEvents(
       .update(agentCallTable)
       .set({
         state,
-        externalTaskRef,
         errorCode,
         errorSummary,
         finishedAt: new Date(),
@@ -459,7 +485,7 @@ async function updateAttempt(
     .where(
       and(eq(agentCallAttemptTable.callId, callId), eq(agentCallAttemptTable.tenantId, tenantId)),
     )
-    .orderBy(agentCallAttemptTable.attemptNo)
+    .orderBy(desc(agentCallAttemptTable.attemptNo))
     .limit(1);
   if (!attempt) return;
   const updates: Record<string, unknown> = { attemptState, updatedAt: new Date() };

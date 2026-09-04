@@ -12,13 +12,13 @@
  *
  * 冻结映射：
  * - A2A contextId → AgentSessionBinding.externalContextRef
- * - A2A taskId     → AgentCall.externalTaskRef
+ * - A2A taskId     → AgentCallAttempt.externalTaskRef
  *
  * 关键约束：
  * - AgentCall.parentInvocationId 必须属于同 tenant（Store 校验，DB 加 FK 到 Invocation）。
  * - AgentCallBinding 只有 create，没有 update（证据不可变）。
  * - AgentCallAttempt UNIQUE(callId, attemptNo)。
- * - AgentSessionBinding UNIQUE(tenantId, agentRevisionId, routeRevisionId, externalContextRef)。
+ * - AgentSessionBinding UNIQUE(tenantId, externalContextRef)。
  * - AgentCallEventIngress UNIQUE(callId, producerEventId) / UNIQUE(callId, producerSequence)。
  */
 import { randomUUID } from "node:crypto";
@@ -88,17 +88,15 @@ export const agentCallTable = mysqlTable(
     /** stable Agent.id（能力资产）。 */
     agentId: varchar("agentId", { length: 36 }).notNull(),
     /** 调用来源类型。 */
-    sourceType: varchar("sourceType", { length: 32 }).notNull(),
+    sourceType: mysqlEnum("sourceType", AGENT_CALL_SOURCE_TYPES).notNull(),
     /** 来源 Harness actionId。 */
-    sourceRef: varchar("sourceRef", { length: 256 }),
+    sourceRef: varchar("sourceRef", { length: 256 }).notNull(),
     /** 独立状态机。 */
     state: mysqlEnum("state", AGENT_CALL_STATES).notNull().default("queued"),
     /** 指向唯一 A2A context Authority；contextId 不在 AgentCall 复制。 */
     agentSessionBindingId: varchar("agentSessionBindingId", { length: 36 }).references(
       () => agentSessionBindingTable.id,
     ),
-    /** A2A taskId。 */
-    externalTaskRef: varchar("externalTaskRef", { length: 256 }),
     /** 归一化结果文本。 */
     resultText: text("resultText"),
     /** 归一化结果 JSON。 */
@@ -108,7 +106,7 @@ export const agentCallTable = mysqlTable(
     errorCode: varchar("errorCode", { length: 128 }),
     errorSummary: text("errorSummary"),
     /** 业务幂等键（parentInvocationId + logicalCallKey 幂等）。 */
-    logicalCallKey: varchar("logicalCallKey", { length: 256 }),
+    logicalCallKey: varchar("logicalCallKey", { length: 256 }).notNull(),
     /** canonical 创建请求摘要；与 outbound Attempt.requestDigest 分离。 */
     creationRequestDigest: varchar("creationRequestDigest", { length: 71 }).notNull(),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
@@ -216,7 +214,7 @@ export type AgentCallAttemptState = (typeof AGENT_CALL_ATTEMPT_STATES)[number];
  * 关键约束：
  * - UNIQUE(callId, attemptNo) 保证 Attempt 编号唯一。
  * - dispatchAttemptCount 记录该 Attempt 对远端累计 outbound 次数（防重复 outbound）。
- * - A2A taskId 由 AgentCall.externalTaskRef 唯一持有，Attempt 不复制 Authority。
+ * - A2A taskId 只由 Attempt.externalTaskRef 持有。
  */
 export const agentCallAttemptTable = mysqlTable(
   "AgentCallAttempt",
@@ -235,6 +233,11 @@ export const agentCallAttemptTable = mysqlTable(
     /** 该 Attempt 累计 outbound 次数。 */
     dispatchAttemptCount: int("dispatchAttemptCount").notNull().default(0),
     retryReasonCode: varchar("retryReasonCode", { length: 64 }),
+    /** A2A taskId 的唯一 Authority。 */
+    externalTaskRef: varchar("externalTaskRef", { length: 256 }),
+    /** Harness 所在执行通道，不得混入 AgentCall.sourceType。 */
+    transportChannel: mysqlEnum("transportChannel", ["hosted", "gateway"]).notNull(),
+    transportMetadataJson: json("transportMetadataJson"),
     /**
      * 初始 claim 的 durable 请求摘要（sha256: 前缀）。
      * 原子 claim 语义：requestDigest IS NULL 表示未被认领；非空即已被某次 start 认领。
@@ -255,6 +258,7 @@ export const agentCallAttemptTable = mysqlTable(
   },
   (t) => ({
     callAttemptUq: uniqueIndex("AgentCallAttempt_call_attempt_uq").on(t.callId, t.attemptNo),
+    tenantTaskUq: uniqueIndex("AgentCallAttempt_tenant_task_uq").on(t.tenantId, t.externalTaskRef),
     callStateIdx: index("AgentCallAttempt_call_state_idx").on(t.callId, t.attemptState),
   }),
 );
@@ -279,8 +283,7 @@ export type AgentSessionBindingState = (typeof AGENT_SESSION_BINDING_STATES)[num
  *
  * 关键约束：
  * - externalContextRef 为 A2A contextId；平台仅持久化，不解析其内容。
- * - UNIQUE(agentRevisionId, routeRevisionId, externalContextRef)：同 AgentRevision +
- *   同 RouteRevision + 同外部上下文唯一。
+ * - UNIQUE(tenantId, externalContextRef)：同租户一个外部上下文只有一个 owner。
  * - 会话生命周期跨 Turn；关闭条件只有显式关闭 / lost / 管理操作。
  */
 export const agentSessionBindingTable = mysqlTable(
@@ -313,10 +316,8 @@ export const agentSessionBindingTable = mysqlTable(
     closedAt: datetime("closedAt", { mode: "date", fsp: 3 }),
   },
   (t) => ({
-    revisionRouteContextUq: uniqueIndex("AgentSessionBinding_revision_route_context_uq").on(
+    tenantContextUq: uniqueIndex("AgentSessionBinding_tenant_context_uq").on(
       t.tenantId,
-      t.agentRevisionId,
-      t.routeRevisionId,
       t.externalContextRef,
     ),
     threadIdx: index("AgentSessionBinding_thread_idx").on(t.threadId),

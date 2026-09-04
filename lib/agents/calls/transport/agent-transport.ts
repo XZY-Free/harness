@@ -173,7 +173,7 @@ export interface StartAgentCallParams {
 /** startCall 结果：A2A taskId/contextId 关联。 */
 export interface StartAgentCallResult {
   callId: string;
-  /** A2A taskId → AgentCall.externalTaskRef。 */
+  /** A2A taskId → AgentCallAttempt.externalTaskRef。 */
   taskId: string;
   /** A2A contextId → AgentSessionBinding.externalContextRef。 */
   contextId: string;
@@ -190,7 +190,7 @@ export interface ResumeAgentCallParams {
   callId: string;
   endpoint: string;
   auth: AgentCallTransportAuth;
-  /** A2A taskId（AgentCall.externalTaskRef）。 */
+  /** A2A taskId（AgentCallAttempt.externalTaskRef）。 */
   taskId: string;
   /** A2A contextId（AgentSessionBinding.externalContextRef）。 */
   contextId: string;
@@ -208,7 +208,7 @@ export interface CancelAgentCallParams {
   callId: string;
   endpoint: string;
   auth: AgentCallTransportAuth;
-  /** A2A taskId（AgentCall.externalTaskRef）。 */
+  /** A2A taskId（AgentCallAttempt.externalTaskRef）。 */
   taskId: string;
   idempotencyKey: string;
 }

@@ -14,6 +14,7 @@ import type {
   AgentCallState,
 } from "@/lib/agents/calls/domain/agent-call";
 import type { AgentCallAttempt } from "@/lib/agents/calls/domain/agent-call-attempt";
+import type { AgentCallTransportChannel } from "@/lib/agents/calls/domain/agent-call-attempt";
 import type {
   AgentCallBindingCandidate,
   AgentCallBindingConfigInput,
@@ -24,11 +25,11 @@ export interface StoreAgentCallInput {
   tenantId: string;
   parentInvocationId: string;
   agentId: string;
-  agentRevisionId: string;
   sourceType: AgentCallSourceType;
-  sourceRef: string | null;
+  sourceRef: string;
   /** 业务幂等键。 */
-  logicalCallKey: string | null;
+  logicalCallKey: string;
+  transportChannel: AgentCallTransportChannel;
   /** 待最终事务验证的候选证据。 */
   bindingCandidate: AgentCallBindingCandidate;
   bindingHash: string;
@@ -43,7 +44,6 @@ export interface UpdateAgentCallStateInput {
   now: Date;
   /** 进入终态时填 finishedAt；waiting_user 填 waitingAt；running 填 startedAt。 */
   lifecycle?: Partial<Pick<AgentCall, "startedAt" | "waitingAt" | "finishedAt">>;
-  externalTaskRef?: string | null;
   agentSessionBindingId?: string | null;
   resultText?: string | null;
   resultJson?: unknown;
@@ -53,7 +53,7 @@ export interface UpdateAgentCallStateInput {
 }
 
 /**
- * 初始 Attempt claim 结果。
+ * 当前 Attempt claim 结果。
  * - owner：本调用赢得认领（唯一会 record outbound / 发 HTTP 的调用方）。
  * - idempotent：已存在同 input 的认领（并发同 call 同 input），返回既有 attempt/call，不重复 outbound。
  * - conflict：已存在不同 input 的认领，稳定冲突。
@@ -88,7 +88,35 @@ export interface AgentCallStore {
   createAttempt(params: {
     callId: string;
     tenantId: string;
+    retryReasonCode: string;
+    transportChannel: AgentCallTransportChannel;
+    now: Date;
+  }): Promise<AgentCallAttempt>;
+  /** 以 taskId 幂等绑定指定 Attempt；不同 taskId 或跨 Attempt 复用均冲突。 */
+  bindAttemptTask(params: {
+    callId: string;
+    tenantId: string;
     attemptNo: number;
+    externalTaskRef: string;
+    now: Date;
+  }): Promise<AgentCallAttempt>;
+  /** 按 tenant + taskId 精确定位 Attempt。 */
+  getAttemptByTaskRef(params: {
+    tenantId: string;
+    externalTaskRef: string;
+  }): Promise<AgentCallAttempt | null>;
+  /** 唯一活动 Attempt；无活动时返回 attemptNo 最大的终态 Attempt。 */
+  getCurrentAttempt(params: {
+    callId: string;
+    tenantId: string;
+  }): Promise<AgentCallAttempt | null>;
+  finishAttempt(params: {
+    callId: string;
+    tenantId: string;
+    attemptNo: number;
+    to: "completed" | "failed" | "cancelled" | "lost";
+    errorCode?: string | null;
+    errorSummary?: string | null;
     now: Date;
   }): Promise<AgentCallAttempt>;
   /** 记录一次 outbound（Attempt.dispatchAttemptCount++）。 */
@@ -98,13 +126,13 @@ export interface AgentCallStore {
     attemptNo: number;
   }): Promise<AgentCallAttempt>;
   /**
-   * 原子认领初始 Attempt（attemptNo=1）。
+   * 原子认领当前唯一活动 Attempt；禁止默认读取 Attempt 1。
    *
    * 语义：requestDigest IS NULL → owner（唯一发 HTTP 者，dispatchAttemptCount 置 1，
    * attempt 转 running，call queued→running）；requestDigest 已存在 → 同 digest=idempotent、
    * 异 digest=conflict；call/attempt 已终态 → terminal。跨并发 start 用行锁串行化。
    */
-  claimInitialAttempt(params: {
+  claimCurrentAttempt(params: {
     callId: string;
     tenantId: string;
     requestDigest: string;

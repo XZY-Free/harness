@@ -1,10 +1,7 @@
+import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
-import {
-  agentCallEventIngressTable,
-  agentCallTable,
-  agentSessionBindingTable,
-} from "@/lib/persistence/schema/agent-calls";
+import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
 import { agentTable } from "@/lib/persistence/schema/agents";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
@@ -28,33 +25,13 @@ export async function coordinateAgentInputRequired(
   tenantId: string,
   callId: string,
 ): Promise<CoordinateAgentInputRequiredResult> {
-  const [call] = await db
-    .select({
-      id: agentCallTable.id,
-      parentInvocationId: agentCallTable.parentInvocationId,
-      agentId: agentCallTable.agentId,
-      sourceType: agentCallTable.sourceType,
-      sourceRef: agentCallTable.sourceRef,
-      state: agentCallTable.state,
-      externalTaskRef: agentCallTable.externalTaskRef,
-      externalContextRef: agentSessionBindingTable.externalContextRef,
-    })
-    .from(agentCallTable)
-    .leftJoin(
-      agentSessionBindingTable,
-      and(
-        eq(agentSessionBindingTable.id, agentCallTable.agentSessionBindingId),
-        eq(agentSessionBindingTable.tenantId, agentCallTable.tenantId),
-      ),
-    )
-    .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
-    .limit(1);
+  const call = await mysqlAgentCallStore.getById({ callId, tenantId });
   if (!call || call.state !== "waiting_user") return { coordinated: false };
   if (
     call.sourceType !== "harness_planned" ||
     !call.sourceRef ||
-    !call.externalTaskRef ||
-    !call.externalContextRef
+    !call.currentAttempt?.externalTaskRef ||
+    !call.sessionBinding?.externalContextRef
   ) {
     throw new Error(`AgentCall ${callId} input-required 缺少 Harness/task/context 关联`);
   }
@@ -107,8 +84,8 @@ export async function coordinateAgentInputRequired(
     agent_display_name: agent?.displayName ?? null,
     agent_call_event_id: inputEvent.id,
     action_id: call.sourceRef,
-    task_id: call.externalTaskRef,
-    context_id: call.externalContextRef,
+    task_id: call.currentAttempt.externalTaskRef,
+    context_id: call.sessionBinding.externalContextRef,
   };
   for (let retry = 0; retry < 3; retry += 1) {
     const ingress = await getIngressByInvocation(tenantId, parent.id, { limit: 500 });

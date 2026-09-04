@@ -11,7 +11,7 @@
  *   completed text/data、input_required prompt/schema)。
  *
  * 不变量：
- * - A2A taskId → AgentCall.externalTaskRef；A2A contextId → AgentSessionBinding.externalContextRef。
+ * - A2A taskId → AgentCallAttempt.externalTaskRef；A2A contextId → AgentSessionBinding.externalContextRef。
  * - completed/failed/lost/cancelled 绝不复用 Parent 生命周期。
  * - input-required 先成为 child fact，再由应用协调器经 RuntimeEventIngress 原子生成 UAR
  *   与 Parent/Turn waiting_user；不是 A2A mapper 越权写 Parent。
@@ -121,7 +121,11 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     });
     const [callRow] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, call.id));
     expect(callRow?.state).toBe("completed");
-    expect(callRow?.externalTaskRef).toBe("task-1");
+    const [attemptRow] = await db
+      .select()
+      .from(agentCallAttemptTable)
+      .where(eq(agentCallAttemptTable.callId, call.id));
+    expect(attemptRow?.externalTaskRef).toBe("task-1");
     expect(callRow?.agentSessionBindingId).not.toBeNull();
     expect(callRow?.resultText).toBe("done");
     expect(callRow?.resultJson).toEqual({ n: 1 });
@@ -280,7 +284,14 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     ).toBe(true);
     let [callRow] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, call.id));
     expect(callRow?.state).toBe("running");
-    expect(callRow?.externalTaskRef).toBeNull();
+    expect(
+      (
+        await db
+          .select()
+          .from(agentCallAttemptTable)
+          .where(eq(agentCallAttemptTable.callId, call.id))
+      )[0]?.externalTaskRef,
+    ).toBeNull();
     // 中途非法事件：合法 started 后跟不支持类型。
     expect(
       await rejects(() =>
@@ -306,7 +317,14 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     ).toBe(true);
     [callRow] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, call.id));
     expect(callRow?.state).toBe("running");
-    expect(callRow?.externalTaskRef).toBeNull();
+    expect(
+      (
+        await db
+          .select()
+          .from(agentCallAttemptTable)
+          .where(eq(agentCallAttemptTable.callId, call.id))
+      )[0]?.externalTaskRef,
+    ).toBeNull();
     expect(await db.select().from(agentSessionBindingTable)).toHaveLength(0);
     expect(await db.select().from(agentCallEventIngressTable)).toHaveLength(0);
     const [attempt] = await db
@@ -331,7 +349,14 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
       ],
     });
     const [callRow] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, call.id));
-    expect(callRow?.externalTaskRef).toBe("task-job");
+    expect(
+      (
+        await db
+          .select()
+          .from(agentCallAttemptTable)
+          .where(eq(agentCallAttemptTable.callId, call.id))
+      )[0]?.externalTaskRef,
+    ).toBe("task-job");
     const [jobSession] = await db.select().from(agentSessionBindingTable);
     expect(jobSession?.threadId).toBeNull();
     expect(jobSession?.externalContextRef).toBe("ctx-job");

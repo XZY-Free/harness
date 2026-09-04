@@ -7,7 +7,7 @@ import {
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
+import { agentCallAttemptTable } from "@/lib/persistence/schema/agent-calls";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -51,11 +51,11 @@ describe("cancelAgentCall 冻结能力真值", () => {
       },
     });
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const [call] = await db
+      const [attemptRow] = await db
         .select()
-        .from(agentCallTable)
-        .where(eq(agentCallTable.id, scenario.callId));
-      if (call?.externalTaskRef) break;
+        .from(agentCallAttemptTable)
+        .where(eq(agentCallAttemptTable.callId, scenario.callId));
+      if (attemptRow?.externalTaskRef) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     return scenario;

@@ -29,15 +29,12 @@ describe("createAgentCall 应用服务", () => {
     const scenario = await seedAgentCallExecutionScenario();
     scenarios.push(scenario);
     const actionId = randomUUID();
-    const logicalCallKey = `${scenario.parentInvocationId}:${actionId}:${scenario.agentId}`;
     const result = await createAgentCall({
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       agentId: scenario.agentId,
-      agentRevisionId: scenario.agentRevisionId,
-      sourceType: "harness_planned",
-      sourceRef: actionId,
-      logicalCallKey,
+      actionId,
+      transportChannel: "hosted",
       bindingCandidate: scenario.binding,
       now: NOW,
     });
@@ -66,10 +63,8 @@ describe("createAgentCall 应用服务", () => {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       agentId: scenario.agentId,
-      agentRevisionId: scenario.agentRevisionId,
-      sourceType: "harness_planned" as const,
-      sourceRef: scenario.actionId,
-      logicalCallKey: scenario.logicalCallKey,
+      actionId: scenario.actionId,
+      transportChannel: "hosted" as const,
       bindingCandidate: scenario.binding,
       now: NOW,
     };

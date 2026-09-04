@@ -186,6 +186,7 @@ describe("Turn-scoped AgentUseDirective", () => {
       agentId: ctx.agentId,
       sourceType: "harness_planned",
       sourceRef: "action-consult-agent-a",
+      logicalCallKey: `harness-action:action-consult-agent-a:agent:${ctx.agentId}`,
       state: "completed",
       creationRequestDigest: `sha256:${"a".repeat(64)}`,
       resultText: "已返回真实业务结果",

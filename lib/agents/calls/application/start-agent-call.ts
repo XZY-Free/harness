@@ -4,9 +4,9 @@
  * 冻结边界：
  * - 只 tenant-scoped 加载 existing AgentCall + exact AgentCallBinding；endpoint / credential /
  *   protocol / contract 全部来自 binding，绝不读取最新 AgentRevision/Route/Contract/Credential。
- * - A2A taskId/contextId 只经 AgentCallEventIngress 写 AgentCall / AgentSessionBinding / Attempt；
+ * - A2A taskId/contextId 只经 AgentCallEventIngress 写 Attempt / AgentSessionBinding；
  *   绝不触碰 parent Invocation / RuntimeSessionBinding / RuntimeEventIngress。
- * - 原子 initial claim：同 call+同 input 并发只有一个 owner 会 record outbound/发 HTTP；
+ * - 原子 current Attempt claim：同 call+同 input 并发只有一个 owner 会 record outbound/发 HTTP；
  *   其它 waiter 返回同一 durable AgentCall。不同 input 在 claim 已存在时稳定冲突。
  * - 初始 endpoint/auth/503/protocol 错误在 claim 后归一化为子域 call.failed/call.lost 终态。
  * - 不实现 resume/cancel。
@@ -294,7 +294,7 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
 
   // 8. durable 请求摘要 + 原子 initial claim。
   const requestDigest = computeRequestDigest(callId, tenantId, command.input);
-  const claim = await mysqlAgentCallStore.claimInitialAttempt({
+  const claim = await mysqlAgentCallStore.claimCurrentAttempt({
     callId,
     tenantId,
     requestDigest,

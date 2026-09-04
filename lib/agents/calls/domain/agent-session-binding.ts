@@ -3,7 +3,7 @@
  *
  * 冻结映射：
  * - A2A contextId → AgentSessionBinding.externalContextRef
- * - A2A taskId     → AgentCall.externalTaskRef
+ * - A2A taskId     → AgentCallAttempt.externalTaskRef
  *
  * 禁止：
  * - contextId → RuntimeSessionBinding

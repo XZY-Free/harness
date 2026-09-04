@@ -24,7 +24,6 @@ export interface TransitionAgentCallStateCommand {
   to: AgentCallState;
   /** 进入终态时填 finishedAt；waiting_user 填 waitingAt；running 填 startedAt。 */
   lifecycle?: UpdateAgentCallStateInput["lifecycle"];
-  externalTaskRef?: string | null;
   agentSessionBindingId?: string | null;
   resultText?: string | null;
   resultJson?: unknown;
@@ -64,7 +63,6 @@ export function createTransitionAgentCallState(dependencies: {
       to: command.to,
       now,
       lifecycle,
-      externalTaskRef: command.externalTaskRef,
       agentSessionBindingId: command.agentSessionBindingId,
       resultText: command.resultText,
       resultJson: command.resultJson,

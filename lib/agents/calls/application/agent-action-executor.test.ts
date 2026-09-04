@@ -75,6 +75,7 @@ describe("AgentActionExecutor", () => {
       tenantId: scenario.tenantId,
       executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
       resolveRoute,
+      transportChannel: "hosted",
     });
     const action = {
       actionId: "action-agent-1",
@@ -117,7 +118,7 @@ describe("AgentActionExecutor", () => {
       .limit(1);
     expect(call).toMatchObject({
       sourceType: "harness_planned",
-      logicalCallKey: `${scenario.parentInvocationId}:${action.actionId}:${scenario.agentId}`,
+      logicalCallKey: `harness-action:${action.actionId}:agent:${scenario.agentId}`,
     });
     const [capabilityUse] = await db
       .select()
@@ -139,6 +140,7 @@ describe("AgentActionExecutor", () => {
       tenantId: scenario.tenantId,
       executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
       resolveRoute,
+      transportChannel: "hosted",
     });
     const action = {
       actionId: "action-agent-completed",
@@ -180,6 +182,7 @@ describe("AgentActionExecutor", () => {
       tenantId: scenario.tenantId,
       executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
       resolveRoute,
+      transportChannel: "hosted",
     });
     const context = {
       invocationId: scenario.parentInvocationId,
@@ -213,6 +216,7 @@ describe("AgentActionExecutor", () => {
       tenantId: scenario.tenantId,
       executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
       resolveRoute,
+      transportChannel: "hosted",
     });
     const action = {
       actionId: "action-agent-input",

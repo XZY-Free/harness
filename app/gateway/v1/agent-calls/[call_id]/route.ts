@@ -42,7 +42,7 @@ function projectCall(
     sessionBinding: { externalContextRef: string } | null;
     sourceType: string;
     state: string;
-    externalTaskRef: string | null;
+    currentAttempt: { externalTaskRef: string | null } | null;
     resultText: string | null;
     errorCode: string | null;
     errorSummary: string | null;
@@ -68,7 +68,7 @@ function projectCall(
     agent_revision_id: agentRevisionId,
     source_type: call.sourceType,
     state: call.state,
-    task_id: call.externalTaskRef,
+    task_id: call.currentAttempt?.externalTaskRef ?? null,
     context_id: call.sessionBinding?.externalContextRef ?? null,
     result_text: call.resultText,
     error_code: call.errorCode,

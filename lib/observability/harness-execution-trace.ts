@@ -1,5 +1,6 @@
 import { db } from "@/lib/db/client";
 import {
+  agentCallAttemptTable,
   agentCallBindingTable,
   agentCallTable,
   agentSessionBindingTable,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 const HARNESS_ACTION_EVENT_TYPES = new Set([
   "harness.action.proposed",
@@ -95,7 +96,8 @@ export async function loadHarnessExecutionTraceForAgentCall(tenantId: string, ca
         agentId: agentCallTable.agentId,
         actionId: agentCallTable.sourceRef,
         state: agentCallTable.state,
-        taskId: agentCallTable.externalTaskRef,
+        taskId: agentCallAttemptTable.externalTaskRef,
+        attemptNo: agentCallAttemptTable.attemptNo,
         contextId: agentSessionBindingTable.externalContextRef,
         errorCode: agentCallTable.errorCode,
         createdAt: agentCallTable.createdAt,
@@ -116,6 +118,13 @@ export async function loadHarnessExecutionTraceForAgentCall(tenantId: string, ca
         ),
       )
       .leftJoin(
+        agentCallAttemptTable,
+        and(
+          eq(agentCallAttemptTable.callId, agentCallTable.id),
+          eq(agentCallAttemptTable.tenantId, agentCallTable.tenantId),
+        ),
+      )
+      .leftJoin(
         agentSessionBindingTable,
         and(
           eq(agentSessionBindingTable.id, agentCallTable.agentSessionBindingId),
@@ -128,7 +137,11 @@ export async function loadHarnessExecutionTraceForAgentCall(tenantId: string, ca
           eq(agentCallTable.parentInvocationId, root.parentInvocationId),
         ),
       )
-      .orderBy(asc(agentCallTable.createdAt), asc(agentCallTable.id)),
+      .orderBy(
+        asc(agentCallTable.createdAt),
+        asc(agentCallTable.id),
+        desc(agentCallAttemptTable.attemptNo),
+      ),
     db
       .select()
       .from(capabilityUseTable)
@@ -173,6 +186,13 @@ export async function loadHarnessExecutionTraceForAgentCall(tenantId: string, ca
     eventRows.find((event) => event.correlationId)?.correlationId ?? root.parentInvocationId;
   const finalItem = finalRows[0] ?? null;
 
+  const currentCallRows = Array.from(
+    callRows.reduce((byCall, call) => {
+      if (!byCall.has(call.callId)) byCall.set(call.callId, call);
+      return byCall;
+    }, new Map<string, (typeof callRows)[number]>()),
+  ).map(([, call]) => call);
+
   return {
     trace_id: traceId,
     turn: {
@@ -209,7 +229,7 @@ export async function loadHarnessExecutionTraceForAgentCall(tenantId: string, ca
           occurred_at: event.occurredAt.toISOString(),
         };
       }),
-    agent_calls: callRows.map((call) => ({
+    agent_calls: currentCallRows.map((call) => ({
       call_id: call.callId,
       parent_invocation_id: root.parentInvocationId,
       action_id: call.actionId,

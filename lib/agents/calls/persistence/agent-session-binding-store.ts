@@ -19,7 +19,7 @@ export interface StoreAgentSessionBindingInput {
 }
 
 export interface AgentSessionBindingStore {
-  /** 幂等创建：UNIQUE(tenantId, agentRevisionId, routeRevisionId, externalContextRef) 冲突返回已存在。 */
+  /** 幂等创建：UNIQUE(tenantId, externalContextRef)；精确 owner 相同才返回既有映射。 */
   create(input: StoreAgentSessionBindingInput): Promise<AgentSessionBinding>;
   /** 按外部上下文精确查找同 Agent 会话（cross-tenant 隔离）。 */
   getByContext(params: {

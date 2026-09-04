@@ -61,12 +61,11 @@ describe("transitionAgentCallState 应用服务", () => {
       tenantId,
       from: "queued",
       to: "running",
-      externalTaskRef: "task-1",
       now: NOW,
     });
     expect(running.state).toBe("running");
     expect(running.startedAt).toBeTruthy();
-    expect(running.externalTaskRef).toBe("task-1");
+    expect(running.currentAttempt?.externalTaskRef).toBeNull();
 
     const completed = await transition({
       callId: call.id,

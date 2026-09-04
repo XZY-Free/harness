@@ -228,6 +228,7 @@ export async function dispatchEmployeeTurn(params: {
               executionSubject,
               resolveRoute,
               capabilityCatalog,
+              transportChannel: "hosted",
             });
           },
           recoveryPort: createMySqlHarnessLoopRecoveryPort(params.tenantId),

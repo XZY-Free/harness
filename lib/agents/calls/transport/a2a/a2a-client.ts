@@ -121,7 +121,7 @@ function throwRpcError(error: NonNullable<JsonRpcResponse["error"]>): never {
  *
  * - probe → Agent Card（/.well-known/agent-card.json）
  * - startCall → message/stream（SSE），taskId/contextId 关联为
- *   AgentCall.externalTaskRef / AgentSessionBinding.externalContextRef；
+ *   AgentCallAttempt.externalTaskRef / AgentSessionBinding.externalContextRef；
  *   后续 updates 由 Mapper 归一化后经 eventSink 进入 AgentCallEventIngress。
  * - cancelCall → tasks/cancel
  * - resumeCall → message/send（same AgentCall / same task/context）

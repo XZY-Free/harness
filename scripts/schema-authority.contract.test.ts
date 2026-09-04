@@ -105,9 +105,9 @@ describe("Schema 单一 Authority", () => {
     expect(call).not.toContain("agentRevisionId:");
     expect(call).not.toContain("externalContextRef:");
     expect(call).toContain("agentSessionBindingId:");
-    expect(call).toContain("externalTaskRef:");
+    expect(call).not.toContain("externalTaskRef:");
     expect(binding).toContain("agentRevisionId:");
-    expect(attempt).not.toContain("externalTaskRef:");
+    expect(attempt).toContain("externalTaskRef:");
     expect(session).toContain("externalContextRef:");
   });
 

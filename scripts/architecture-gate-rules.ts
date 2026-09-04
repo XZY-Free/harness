@@ -273,8 +273,15 @@ export function checkAgentCallFinalizationGate(
   const attemptSchema = schema
     .split("export const agentCallAttemptTable", 2)[1]
     ?.split("export type AgentCallAttempt", 1)[0];
-  if (attemptSchema?.includes("externalTaskRef") || attemptDomain.includes("externalTaskRef")) {
-    failures.push("AgentCallAttempt 仍复制 AgentCall.externalTaskRef Authority");
+  const callSchema = schema
+    .split("export const agentCallTable", 2)[1]
+    ?.split("export type AgentCall", 1)[0];
+  if (
+    callSchema?.includes("externalTaskRef") ||
+    !attemptSchema?.includes("externalTaskRef") ||
+    !attemptDomain.includes("externalTaskRef")
+  ) {
+    failures.push("AgentCall externalTaskRef 未唯一归属 AgentCallAttempt");
   }
 
   for (const document of documents) {

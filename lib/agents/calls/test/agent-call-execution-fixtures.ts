@@ -21,6 +21,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
 import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
+import { buildAgentCallLogicalKey } from "@/lib/agents/calls/domain/agent-call";
 import {
   type AgentCallBindingConfigInput,
   computeAgentCallBindingHash,
@@ -366,18 +367,16 @@ export async function seedAgentCallExecutionScenario(options?: {
   const resolution = resolved.resolution as Extract<RouteResolution, { target: { kind: "agent" } }>;
   const finalizedBinding = resolved.bindingCandidate;
   const finalizedBindingHash = computeAgentCallBindingHash(finalizedBinding);
-  const actionId = options?.sourceRef ?? randomUUID();
-  const logicalCallKey = options?.logicalCallKey ?? `${parentInvocationId}:${actionId}:${agent.id}`;
+  const actionId = options?.sourceRef ?? options?.logicalCallKey ?? randomUUID();
+  const logicalCallKey = buildAgentCallLogicalKey(actionId, agent.id);
 
   const createAgentCall = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => now });
   const { call } = await createAgentCall({
     tenantId,
     parentInvocationId,
     agentId: agent.id,
-    agentRevisionId: revision.id,
-    sourceType: "harness_planned",
-    sourceRef: actionId,
-    logicalCallKey,
+    actionId,
+    transportChannel: "hosted",
     bindingCandidate: finalizedBinding,
     now,
   });
@@ -539,10 +538,17 @@ export async function waitForCallTerminal(
     const [row] = await db
       .select({
         state: agentCallTable.state,
-        externalTaskRef: agentCallTable.externalTaskRef,
+        externalTaskRef: agentCallAttemptTable.externalTaskRef,
         externalContextRef: agentSessionBindingTable.externalContextRef,
       })
       .from(agentCallTable)
+      .leftJoin(
+        agentCallAttemptTable,
+        and(
+          eq(agentCallAttemptTable.callId, agentCallTable.id),
+          eq(agentCallAttemptTable.tenantId, agentCallTable.tenantId),
+        ),
+      )
       .leftJoin(
         agentSessionBindingTable,
         and(

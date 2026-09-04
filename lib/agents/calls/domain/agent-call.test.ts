@@ -115,13 +115,13 @@ function callInState(state: AgentCall["state"], overrides: Partial<AgentCall> = 
     state,
     agentSessionBindingId: null,
     sessionBinding: null,
-    externalTaskRef: null,
+    currentAttempt: null,
     resultText: null,
     resultJson: null,
     resultDigest: null,
     errorCode: null,
     errorSummary: null,
-    logicalCallKey: "inv-1:action-1:agent-1",
+    logicalCallKey: "harness-action:action-1:agent:agent-1",
     creationRequestDigest: `sha256:${"a".repeat(64)}`,
     createdAt: new Date("2026-08-30T00:00:00.000Z"),
     startedAt: null,
@@ -166,7 +166,12 @@ describe("AgentCall durable disposition", () => {
     expect(
       toAgentCallDisposition(
         callInState("waiting_user", {
-          externalTaskRef: "task-1",
+          currentAttempt: {
+            id: "attempt-1",
+            attemptNo: 1,
+            externalTaskRef: "task-1",
+            transportChannel: "hosted",
+          },
           agentSessionBindingId: "session-1",
           sessionBinding: { id: "session-1", externalContextRef: "context-1" },
         }),

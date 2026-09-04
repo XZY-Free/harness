@@ -37,7 +37,7 @@ import {
   agentCallTable,
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 export function createMysqlAgentCallStore(
   dependencies: {
@@ -118,9 +118,6 @@ export function createMysqlAgentCallStore(
           ...(input.lifecycle?.startedAt ? { startedAt: input.lifecycle.startedAt } : {}),
           ...(input.lifecycle?.waitingAt ? { waitingAt: input.lifecycle.waitingAt } : {}),
           ...(input.lifecycle?.finishedAt ? { finishedAt: input.lifecycle.finishedAt } : {}),
-          ...(input.externalTaskRef !== undefined
-            ? { externalTaskRef: input.externalTaskRef }
-            : {}),
           ...(input.agentSessionBindingId !== undefined
             ? { agentSessionBindingId: input.agentSessionBindingId }
             : {}),
@@ -178,74 +175,200 @@ export function createMysqlAgentCallStore(
       return row ? toBindingConfig(row) : null;
     },
 
-    createAttempt: async ({ callId, tenantId, attemptNo, now }) => {
-      try {
-        await db.insert(agentCallAttemptTable).values({
+    createAttempt: ({ callId, tenantId, retryReasonCode, transportChannel, now }) =>
+      db.transaction(async (tx) => {
+        const [call] = await tx
+          .select({ id: agentCallTable.id })
+          .from(agentCallTable)
+          .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+          .limit(1)
+          .for("update");
+        if (!call) throw new Error(`AgentCall ${callId} 不存在或不属于租户`);
+        const [latest] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(
+            and(
+              eq(agentCallAttemptTable.callId, callId),
+              eq(agentCallAttemptTable.tenantId, tenantId),
+            ),
+          )
+          .orderBy(desc(agentCallAttemptTable.attemptNo))
+          .limit(1)
+          .for("update");
+        if (latest && !isAgentCallAttemptTerminal(latest.attemptState)) {
+          throw new AgentCallAttemptConflictError(callId, "仍存在活动 Attempt");
+        }
+        const attemptNo = (latest?.attemptNo ?? 0) + 1;
+        await tx.insert(agentCallAttemptTable).values({
           callId,
           tenantId,
           attemptNo,
           attemptState: "queued",
           dispatchAttemptCount: 0,
+          retryReasonCode,
+          transportChannel,
+          transportMetadataJson: { channel: transportChannel },
           createdAt: now,
           updatedAt: now,
         });
-      } catch (err) {
-        if (isMysqlDuplicateEntryError(err)) {
-          // UNIQUE(callId, attemptNo) 冲突 → 已存在，返回现有 attempt。
-          const [existing] = await db
-            .select()
-            .from(agentCallAttemptTable)
-            .where(
-              and(
-                eq(agentCallAttemptTable.callId, callId),
-                eq(agentCallAttemptTable.attemptNo, attemptNo),
-              ),
-            )
-            .limit(1);
-          if (existing) return toAttempt(existing);
+        const [row] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(
+            and(
+              eq(agentCallAttemptTable.callId, callId),
+              eq(agentCallAttemptTable.attemptNo, attemptNo),
+            ),
+          )
+          .limit(1);
+        if (!row) throw new Error("AgentCallAttempt 插入后无法回读");
+        return toAttempt(row);
+      }),
+
+    bindAttemptTask: ({ callId, tenantId, attemptNo, externalTaskRef, now }) =>
+      db.transaction(async (tx) => {
+        const normalizedTaskRef = externalTaskRef.trim();
+        if (!normalizedTaskRef) throw new AgentCallAttemptConflictError(callId, "taskId 为空");
+        const [row] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(
+            and(
+              eq(agentCallAttemptTable.callId, callId),
+              eq(agentCallAttemptTable.tenantId, tenantId),
+              eq(agentCallAttemptTable.attemptNo, attemptNo),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!row) throw new Error(`AgentCallAttempt ${callId}#${attemptNo} 不存在`);
+        if (row.externalTaskRef !== null) {
+          if (row.externalTaskRef !== normalizedTaskRef) {
+            throw new AgentCallAttemptConflictError(callId, "Attempt 已绑定不同 taskId");
+          }
+          return toAttempt(row);
         }
-        throw err;
-      }
+        try {
+          await tx
+            .update(agentCallAttemptTable)
+            .set({ externalTaskRef: normalizedTaskRef, updatedAt: now })
+            .where(eq(agentCallAttemptTable.id, row.id));
+        } catch (error) {
+          if (isMysqlDuplicateEntryError(error)) {
+            throw new AgentCallAttemptConflictError(callId, "taskId 已绑定其它 Attempt");
+          }
+          throw error;
+        }
+        const [after] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(eq(agentCallAttemptTable.id, row.id))
+          .limit(1);
+        if (!after) throw new Error("AgentCallAttempt task 绑定后无法回读");
+        return toAttempt(after);
+      }),
+
+    getAttemptByTaskRef: async ({ tenantId, externalTaskRef }) => {
       const [row] = await db
         .select()
         .from(agentCallAttemptTable)
         .where(
           and(
-            eq(agentCallAttemptTable.callId, callId),
-            eq(agentCallAttemptTable.attemptNo, attemptNo),
+            eq(agentCallAttemptTable.tenantId, tenantId),
+            eq(agentCallAttemptTable.externalTaskRef, externalTaskRef),
           ),
         )
         .limit(1);
-      if (!row) throw new Error("AgentCallAttempt 插入后无法回读");
-      return toAttempt(row);
+      return row ? toAttempt(row) : null;
     },
 
-    recordOutbound: async ({ callId, tenantId, attemptNo }) => {
-      const [row] = await db
+    getCurrentAttempt: async ({ callId, tenantId }) => {
+      const rows = await db
         .select()
         .from(agentCallAttemptTable)
         .where(
           and(
             eq(agentCallAttemptTable.callId, callId),
             eq(agentCallAttemptTable.tenantId, tenantId),
-            eq(agentCallAttemptTable.attemptNo, attemptNo),
           ),
         )
-        .limit(1)
-        .for("update");
-      if (!row) throw new Error(`AgentCallAttempt ${callId}#${attemptNo} 不存在`);
-      const next = { dispatchAttemptCount: row.dispatchAttemptCount + 1, updatedAt: new Date() };
-      await db.update(agentCallAttemptTable).set(next).where(eq(agentCallAttemptTable.id, row.id));
-      const [after] = await db
-        .select()
-        .from(agentCallAttemptTable)
-        .where(eq(agentCallAttemptTable.id, row.id))
-        .limit(1);
-      if (!after) throw new Error("AgentCallAttempt outbound 后无法回读");
-      return toAttempt(after);
+        .orderBy(desc(agentCallAttemptTable.attemptNo));
+      const active = rows.filter((row) => !isAgentCallAttemptTerminal(row.attemptState));
+      if (active.length > 1) {
+        throw new AgentCallAttemptConflictError(callId, "存在多个活动 Attempt");
+      }
+      return active[0] ? toAttempt(active[0]) : rows[0] ? toAttempt(rows[0]) : null;
     },
 
-    claimInitialAttempt: ({ callId, tenantId, requestDigest, now }) =>
+    finishAttempt: ({ callId, tenantId, attemptNo, to, errorCode, errorSummary, now }) =>
+      db.transaction(async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(
+            and(
+              eq(agentCallAttemptTable.callId, callId),
+              eq(agentCallAttemptTable.tenantId, tenantId),
+              eq(agentCallAttemptTable.attemptNo, attemptNo),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!row) throw new Error(`AgentCallAttempt ${callId}#${attemptNo} 不存在`);
+        if (isAgentCallAttemptTerminal(row.attemptState)) {
+          if (row.attemptState === to) return toAttempt(row);
+          throw new AgentCallAttemptConflictError(callId, "Attempt 已进入其它终态");
+        }
+        await tx
+          .update(agentCallAttemptTable)
+          .set({
+            attemptState: to,
+            errorCode: errorCode ?? null,
+            errorSummary: errorSummary ?? null,
+            finishedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(agentCallAttemptTable.id, row.id));
+        const [after] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(eq(agentCallAttemptTable.id, row.id))
+          .limit(1);
+        if (!after) throw new Error("AgentCallAttempt 完成后无法回读");
+        return toAttempt(after);
+      }),
+
+    recordOutbound: ({ callId, tenantId, attemptNo }) =>
+      db.transaction(async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(
+            and(
+              eq(agentCallAttemptTable.callId, callId),
+              eq(agentCallAttemptTable.tenantId, tenantId),
+              eq(agentCallAttemptTable.attemptNo, attemptNo),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!row) throw new Error(`AgentCallAttempt ${callId}#${attemptNo} 不存在`);
+        const next = { dispatchAttemptCount: row.dispatchAttemptCount + 1, updatedAt: new Date() };
+        await tx
+          .update(agentCallAttemptTable)
+          .set(next)
+          .where(eq(agentCallAttemptTable.id, row.id));
+        const [after] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(eq(agentCallAttemptTable.id, row.id))
+          .limit(1);
+        if (!after) throw new Error("AgentCallAttempt outbound 后无法回读");
+        return toAttempt(after);
+      }),
+
+    claimCurrentAttempt: ({ callId, tenantId, requestDigest, now }) =>
       db.transaction(async (tx) => {
         const [callRow] = await tx
           .select()
@@ -254,19 +377,25 @@ export function createMysqlAgentCallStore(
           .limit(1)
           .for("update");
         if (!callRow) throw new Error(`AgentCall ${callId} 不存在或不属于租户`);
-        const [attemptRow] = await tx
+        const attemptRows = await tx
           .select()
           .from(agentCallAttemptTable)
           .where(
             and(
               eq(agentCallAttemptTable.callId, callId),
               eq(agentCallAttemptTable.tenantId, tenantId),
-              eq(agentCallAttemptTable.attemptNo, 1),
             ),
           )
-          .limit(1)
+          .orderBy(desc(agentCallAttemptTable.attemptNo))
           .for("update");
-        if (!attemptRow) throw new Error(`AgentCallAttempt ${callId}#1 不存在`);
+        const activeAttempts = attemptRows.filter(
+          (attempt) => !isAgentCallAttemptTerminal(attempt.attemptState),
+        );
+        if (activeAttempts.length > 1) {
+          throw new AgentCallAttemptConflictError(callId, "存在多个活动 Attempt");
+        }
+        const attemptRow = activeAttempts[0] ?? attemptRows[0];
+        if (!attemptRow) throw new Error(`AgentCallAttempt ${callId} 不存在`);
 
         const call = await toAgentCallWithSession(tx, callRow);
         const attempt = toAttempt(attemptRow);
@@ -338,6 +467,18 @@ export class AgentCallIdempotencyConflictError extends Error {
   }
 }
 
+export class AgentCallAttemptConflictError extends Error {
+  readonly code = "AGENT_CALL_ATTEMPT_CONFLICT";
+
+  constructor(
+    public readonly callId: string,
+    detail: string,
+  ) {
+    super(`AgentCall ${callId} Attempt 关联冲突：${detail}`);
+    this.name = "AgentCallAttemptConflictError";
+  }
+}
+
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** claim owner 使 call 进入 running（queued→running CAS；已 running 则仅回读，不重复 bump versionNo）。 */
@@ -381,9 +522,9 @@ async function doCreate(
     parentInvocationId: input.parentInvocationId,
     agentId: input.agentId,
     sourceType: input.sourceType,
-    sourceRef: input.sourceRef ?? null,
+    sourceRef: input.sourceRef,
     state: "queued",
-    logicalCallKey: input.logicalCallKey ?? null,
+    logicalCallKey: input.logicalCallKey,
     creationRequestDigest: computeCreationRequestDigest(input),
     createdAt: input.createdAt,
     versionNo: 1,
@@ -424,6 +565,8 @@ async function doCreate(
     attemptNo: 1,
     attemptState: "queued",
     dispatchAttemptCount: 0,
+    transportChannel: input.transportChannel,
+    transportMetadataJson: { channel: input.transportChannel },
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
   });
@@ -432,7 +575,7 @@ async function doCreate(
     invocationId: input.parentInvocationId,
     capabilityType: "agent",
     capabilityId: input.agentId,
-    revisionId: input.agentRevisionId,
+    revisionId: b.agentRevisionId,
     sourceType: input.sourceType,
     sourceRef: input.sourceRef,
     selectionReasonCode: "preferred_agent_relevant",
@@ -452,7 +595,7 @@ function computeCreationRequestDigest(input: StoreAgentCallInput): string {
     tenantId: input.tenantId,
     parentInvocationId: input.parentInvocationId,
     agentId: input.agentId,
-    agentRevisionId: input.agentRevisionId,
+    agentRevisionId: input.bindingCandidate.agentRevisionId,
     sourceType: input.sourceType,
     sourceRef: input.sourceRef,
     logicalCallKey: input.logicalCallKey,
@@ -487,7 +630,7 @@ function toAgentCall(row: typeof agentCallTable.$inferSelect): AgentCall {
     state: row.state as AgentCallState,
     agentSessionBindingId: row.agentSessionBindingId,
     sessionBinding: null,
-    externalTaskRef: row.externalTaskRef,
+    currentAttempt: null,
     resultText: row.resultText,
     resultJson: row.resultJson,
     resultDigest: row.resultDigest,
@@ -507,24 +650,50 @@ async function toAgentCallWithSession(
   client: Pick<typeof db, "select">,
   row: typeof agentCallTable.$inferSelect,
 ): Promise<AgentCall> {
-  const call = toAgentCall(row);
-  if (!row.agentSessionBindingId) return call;
-  const [session] = await client
-    .select({
-      id: agentSessionBindingTable.id,
-      externalContextRef: agentSessionBindingTable.externalContextRef,
-    })
-    .from(agentSessionBindingTable)
+  let call = toAgentCall(row);
+  if (row.agentSessionBindingId) {
+    const [session] = await client
+      .select({
+        id: agentSessionBindingTable.id,
+        externalContextRef: agentSessionBindingTable.externalContextRef,
+      })
+      .from(agentSessionBindingTable)
+      .where(
+        and(
+          eq(agentSessionBindingTable.id, row.agentSessionBindingId),
+          eq(agentSessionBindingTable.tenantId, row.tenantId),
+        ),
+      )
+      .limit(1);
+    call = { ...call, sessionBinding: session ?? null };
+  }
+  const attemptRows = await client
+    .select()
+    .from(agentCallAttemptTable)
     .where(
       and(
-        eq(agentSessionBindingTable.id, row.agentSessionBindingId),
-        eq(agentSessionBindingTable.tenantId, row.tenantId),
+        eq(agentCallAttemptTable.callId, row.id),
+        eq(agentCallAttemptTable.tenantId, row.tenantId),
       ),
     )
-    .limit(1);
+    .orderBy(desc(agentCallAttemptTable.attemptNo));
+  const activeAttempts = attemptRows.filter(
+    (attempt) => !isAgentCallAttemptTerminal(attempt.attemptState),
+  );
+  if (activeAttempts.length > 1) {
+    throw new AgentCallAttemptConflictError(row.id, "存在多个活动 Attempt");
+  }
+  const current = activeAttempts[0] ?? attemptRows[0] ?? null;
   return {
     ...call,
-    sessionBinding: session ?? null,
+    currentAttempt: current
+      ? {
+          id: current.id,
+          attemptNo: current.attemptNo,
+          externalTaskRef: current.externalTaskRef,
+          transportChannel: current.transportChannel,
+        }
+      : null,
   };
 }
 
@@ -567,6 +736,9 @@ function toAttempt(row: typeof agentCallAttemptTable.$inferSelect): AgentCallAtt
     attemptState: row.attemptState,
     dispatchAttemptCount: row.dispatchAttemptCount,
     retryReasonCode: row.retryReasonCode,
+    externalTaskRef: row.externalTaskRef,
+    transportChannel: row.transportChannel,
+    transportMetadata: row.transportMetadataJson,
     requestDigest: row.requestDigest,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,

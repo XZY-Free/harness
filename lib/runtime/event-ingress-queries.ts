@@ -37,6 +37,7 @@ import {
   isUserActionRequestType,
 } from "@/lib/permission/user-action-queries";
 import {
+  agentCallAttemptTable,
   agentCallEventIngressTable,
   agentCallTable,
   agentSessionBindingTable,
@@ -833,7 +834,10 @@ async function mapUserActionRequested(
   if (payload.agent_call_id !== undefined) {
     if (
       typeof payload.agent_call_id !== "string" ||
-      typeof payload.agent_call_event_id !== "string"
+      typeof payload.agent_call_event_id !== "string" ||
+      typeof payload.action_id !== "string" ||
+      typeof payload.task_id !== "string" ||
+      typeof payload.context_id !== "string"
     ) {
       throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
     }
@@ -841,10 +845,18 @@ async function mapUserActionRequested(
       .select({
         id: agentCallTable.id,
         sourceRef: agentCallTable.sourceRef,
-        externalTaskRef: agentCallTable.externalTaskRef,
+        externalTaskRef: agentCallAttemptTable.externalTaskRef,
         agentSessionBindingId: agentCallTable.agentSessionBindingId,
       })
       .from(agentCallTable)
+      .innerJoin(
+        agentCallAttemptTable,
+        and(
+          eq(agentCallAttemptTable.callId, agentCallTable.id),
+          eq(agentCallAttemptTable.tenantId, agentCallTable.tenantId),
+          eq(agentCallAttemptTable.externalTaskRef, payload.task_id),
+        ),
+      )
       .where(
         and(
           eq(agentCallTable.id, payload.agent_call_id),

@@ -62,19 +62,15 @@ function commandFor(
   scenario: Scenario,
   overrides: Partial<Parameters<ReturnType<typeof createCreateAgentCall>>[0]> = {},
 ) {
-  const actionId = overrides.logicalCallKey ?? scenario.actionId;
-  const { logicalCallKey: _logicalCallKey, sourceRef: _sourceRef, ...rest } = overrides;
   return {
     tenantId: scenario.tenantId,
     parentInvocationId: scenario.parentInvocationId,
     agentId: scenario.agentId,
-    agentRevisionId: scenario.agentRevisionId,
-    sourceType: "harness_planned" as const,
-    sourceRef: actionId,
-    logicalCallKey: `${scenario.parentInvocationId}:${actionId}:${scenario.agentId}`,
+    actionId: scenario.actionId,
+    transportChannel: "hosted" as const,
     bindingCandidate: scenario.binding,
     now: NOW,
-    ...rest,
+    ...overrides,
   };
 }
 
@@ -162,10 +158,10 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
         tenantId: scenario.tenantId,
         parentInvocationId: scenario.parentInvocationId,
         agentId: scenario.agentId,
-        agentRevisionId: resolved.agentRevisionId,
         sourceType: "harness_planned",
         sourceRef: scenario.actionId,
         logicalCallKey: scenario.logicalCallKey,
+        transportChannel: "hosted",
         bindingCandidate: binding,
         bindingHash: computeAgentCallBindingHash(binding),
         createdAt: NOW,
@@ -182,10 +178,10 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
         tenantId: scenario.tenantId,
         parentInvocationId: scenario.parentInvocationId,
         agentId: scenario.agentId,
-        agentRevisionId: scenario.agentRevisionId,
         sourceType: "harness_planned",
         sourceRef: scenario.actionId,
         logicalCallKey: scenario.logicalCallKey,
+        transportChannel: "hosted",
         bindingCandidate: binding,
         bindingHash: computeAgentCallBindingHash(binding),
         createdAt: NOW,
@@ -202,7 +198,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
 
     const result = await create(
-      commandFor(scenario, { logicalCallKey: `current-summary-drift:${randomUUID()}` }),
+      commandFor(scenario, { actionId: `current-summary-drift:${randomUUID()}` }),
     );
 
     expect(result.call).not.toHaveProperty("agentRevisionId");
@@ -221,7 +217,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       .where(eq(invocationTable.id, scenario.parentInvocationId));
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     await expect(
-      create(commandFor(scenario, { logicalCallKey: `parent-not-running:${randomUUID()}` })),
+      create(commandFor(scenario, { actionId: `parent-not-running:${randomUUID()}` })),
     ).rejects.toMatchObject({
       code: "AGENT_CALL_BINDING_STALE",
     });
@@ -233,8 +229,8 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
     const logicalCallKey = `${scenario.parentInvocationId}:${actionId}:${scenario.agentId}`;
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     const [left, right] = await Promise.all([
-      create(commandFor(scenario, { logicalCallKey: actionId })),
-      create(commandFor(scenario, { logicalCallKey: actionId })),
+      create(commandFor(scenario, { actionId })),
+      create(commandFor(scenario, { actionId })),
     ]);
     expect([left.status, right.status].sort()).toEqual(["created", "replayed"]);
     expect(left.call.id).toBe(right.call.id);
@@ -270,9 +266,10 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       withdrawnBy: "test",
       withdrawnAt: NOW,
     });
-    const logicalCallKey = `withdrawn:${randomUUID()}`;
+    const actionId = `withdrawn:${randomUUID()}`;
+    const logicalCallKey = `harness-action:${actionId}:agent:${scenario.agentId}`;
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
-    await expect(create(commandFor(scenario, { logicalCallKey }))).rejects.toMatchObject({
+    await expect(create(commandFor(scenario, { actionId }))).rejects.toMatchObject({
       code: "AGENT_CALL_BINDING_STALE",
     });
     expect(
@@ -296,7 +293,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
     });
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     await expect(
-      create(commandFor(scenario, { logicalCallKey: `route-switch:${randomUUID()}` })),
+      create(commandFor(scenario, { actionId: `route-switch:${randomUUID()}` })),
     ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
   });
 
@@ -308,7 +305,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       .where(eq(routeEligibilityProjection.routeId, scenario.binding.deploymentRouteId));
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     await expect(
-      create(commandFor(scenario, { logicalCallKey: `projection-bump:${randomUUID()}` })),
+      create(commandFor(scenario, { actionId: `projection-bump:${randomUUID()}` })),
     ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
   });
 
@@ -324,10 +321,10 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
         tenantId: scenario.tenantId,
         parentInvocationId: scenario.parentInvocationId,
         agentId: scenario.agentId,
-        agentRevisionId: scenario.agentRevisionId,
         sourceType: "harness_planned",
         sourceRef: scenario.actionId,
         logicalCallKey: scenario.logicalCallKey,
+        transportChannel: "hosted",
         bindingCandidate: binding,
         bindingHash: computeAgentCallBindingHash(binding),
         createdAt: NOW,
@@ -359,7 +356,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       .where(eq(publicationRecord.id, scenario.agentPublicationRecordId));
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     await expect(
-      create(commandFor(scenario, { logicalCallKey: `agent-attestation:${randomUUID()}` })),
+      create(commandFor(scenario, { actionId: `agent-attestation:${randomUUID()}` })),
     ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
   });
 
@@ -371,7 +368,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       .where(eq(policyRevisionTable.id, scenario.binding.policyRevisionId));
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     await expect(
-      create(commandFor(scenario, { logicalCallKey: `policy-drift:${randomUUID()}` })),
+      create(commandFor(scenario, { actionId: `policy-drift:${randomUUID()}` })),
     ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
 
     await db
@@ -393,7 +390,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       })
       .where(eq(governanceConfigRevisionTable.id, governance.id));
     await expect(
-      create(commandFor(scenario, { logicalCallKey: `governance-drift:${randomUUID()}` })),
+      create(commandFor(scenario, { actionId: `governance-drift:${randomUUID()}` })),
     ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
   });
 
@@ -405,7 +402,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       .where(eq(agentRevisionTable.id, scenario.agentRevisionId));
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     await expect(
-      create(commandFor(scenario, { logicalCallKey: `contract-drift:${randomUUID()}` })),
+      create(commandFor(scenario, { actionId: `contract-drift:${randomUUID()}` })),
     ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
   });
 
@@ -435,8 +432,9 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       },
     });
     const create = createCreateAgentCall({ store: failingStore, now: () => NOW });
-    const logicalCallKey = `rollback:${randomUUID()}`;
-    await expect(create(commandFor(scenario, { logicalCallKey }))).rejects.toThrow(
+    const actionId = `rollback:${randomUUID()}`;
+    const logicalCallKey = `harness-action:${actionId}:agent:${scenario.agentId}`;
+    await expect(create(commandFor(scenario, { actionId }))).rejects.toThrow(
       "simulated capability ledger failure",
     );
     expect(
@@ -487,19 +485,22 @@ describe("AgentCall 后续状态与 Attempt", () => {
         now: NOW,
       }),
     ).rejects.toBeInstanceOf(AgentCallStateConcurrencyError);
+    await mysqlAgentCallStore.finishAttempt({
+      callId: scenario.callId,
+      tenantId: scenario.tenantId,
+      attemptNo: 1,
+      to: "failed",
+      errorCode: "RETRYABLE",
+      now: NOW,
+    });
     const attempt2 = await mysqlAgentCallStore.createAttempt({
       callId: scenario.callId,
       tenantId: scenario.tenantId,
-      attemptNo: 2,
+      retryReasonCode: "transport_retry",
+      transportChannel: "hosted",
       now: NOW,
     });
-    const replayAttempt2 = await mysqlAgentCallStore.createAttempt({
-      callId: scenario.callId,
-      tenantId: scenario.tenantId,
-      attemptNo: 2,
-      now: NOW,
-    });
-    expect(replayAttempt2.id).toBe(attempt2.id);
+    expect(attempt2.attemptNo).toBe(2);
     const [parent] = await db
       .select()
       .from(invocationTable)

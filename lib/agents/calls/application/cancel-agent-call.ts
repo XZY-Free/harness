@@ -93,7 +93,7 @@ export async function cancelAgentCall(
   }
 
   // 4. cancel 需要 A2A taskId（externalTaskRef）。
-  const taskId = call.externalTaskRef;
+  const taskId = call.currentAttempt?.externalTaskRef;
   if (!taskId) {
     throw new AgentCallCancelError("AgentCall 缺少 externalTaskRef，无法取消", "context_missing");
   }

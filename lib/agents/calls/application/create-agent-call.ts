@@ -11,7 +11,8 @@
  * 幂等：parentInvocationId + logicalCallKey；同一 Invocation 重试不重复创建远端 Task。
  */
 import { randomUUID } from "node:crypto";
-import type { AgentCall, AgentCallSourceType } from "@/lib/agents/calls/domain/agent-call";
+import { type AgentCall, buildAgentCallLogicalKey } from "@/lib/agents/calls/domain/agent-call";
+import type { AgentCallTransportChannel } from "@/lib/agents/calls/domain/agent-call-attempt";
 import {
   type AgentCallBindingCandidate,
   computeAgentCallBindingHash,
@@ -22,12 +23,10 @@ export interface CreateAgentCallCommand {
   tenantId: string;
   parentInvocationId: string;
   agentId: string;
-  agentRevisionId: string;
-  sourceType: AgentCallSourceType;
   /** 来源 Harness actionId。 */
-  sourceRef: string | null;
-  /** 业务幂等键（parentInvocationId:actionId:agentId）。 */
-  logicalCallKey: string | null;
+  actionId: string;
+  /** Hosted 或 External Runtime 经 Gateway；仅写 Attempt 审计。 */
+  transportChannel: AgentCallTransportChannel;
   /** 待最终事务验证的候选证据。 */
   bindingCandidate: AgentCallBindingCandidate;
   now?: Date;
@@ -48,15 +47,16 @@ export function createCreateAgentCall(dependencies: {
   ): Promise<CreateAgentCallResult> {
     const now = clock();
     const bindingHash = computeAgentCallBindingHash(command.bindingCandidate);
+    const logicalCallKey = buildAgentCallLogicalKey(command.actionId, command.agentId);
     const { call, status } = await dependencies.store.finalizeAgentCall({
       id: randomUUID(),
       tenantId: command.tenantId,
       parentInvocationId: command.parentInvocationId,
       agentId: command.agentId,
-      agentRevisionId: command.agentRevisionId,
-      sourceType: command.sourceType,
-      sourceRef: command.sourceRef,
-      logicalCallKey: command.logicalCallKey,
+      sourceType: "harness_planned",
+      sourceRef: command.actionId.trim(),
+      logicalCallKey,
+      transportChannel: command.transportChannel,
       bindingCandidate: command.bindingCandidate,
       bindingHash,
       createdAt: now,

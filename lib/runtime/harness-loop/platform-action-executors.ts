@@ -1,4 +1,5 @@
 import { createAgentActionExecutor } from "@/lib/agents/calls/application/agent-action-executor";
+import type { AgentCallTransportChannel } from "@/lib/agents/calls/domain/agent-call-attempt";
 import { searchKnowledgeEvidence } from "@/lib/context/knowledge-queries";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import {
@@ -15,6 +16,7 @@ export function createPlatformHarnessActionExecutors(params: {
   executionSubject: ExecutionSubject;
   resolveRoute: RouteResolver;
   capabilityCatalog: CapabilityCatalogSnapshot;
+  transportChannel: AgentCallTransportChannel;
 }): HarnessActionExecutors {
   assertTrustedExecutionSubject(params.executionSubject, params.tenantId);
   return {

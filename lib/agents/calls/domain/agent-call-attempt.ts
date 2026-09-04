@@ -18,6 +18,10 @@ export const AGENT_CALL_ATTEMPT_STATES = [
 ] as const;
 export type AgentCallAttemptState = (typeof AGENT_CALL_ATTEMPT_STATES)[number];
 
+/** Harness 触发 Agent 调用时的平台执行通道；不是 AgentCall 的业务来源。 */
+export const AGENT_CALL_TRANSPORT_CHANNELS = ["hosted", "gateway"] as const;
+export type AgentCallTransportChannel = (typeof AGENT_CALL_TRANSPORT_CHANNELS)[number];
+
 /** AgentCallAttempt 终态集合。 */
 export const AGENT_CALL_ATTEMPT_TERMINAL_STATES: readonly AgentCallAttemptState[] = [
   "completed",
@@ -36,6 +40,12 @@ export interface AgentCallAttempt {
   /** 该 Attempt 累计 outbound 次数（防重复 outbound）。 */
   dispatchAttemptCount: number;
   retryReasonCode: string | null;
+  /** A2A taskId 的唯一 Authority。 */
+  externalTaskRef: string | null;
+  /** Hosted 进程内或 External Runtime 经 Gateway 触发。 */
+  transportChannel: AgentCallTransportChannel;
+  /** 可审计但不参与业务判断的 transport 元数据。 */
+  transportMetadata: unknown;
   /** 初始 claim 的 durable 请求摘要（sha256: 前缀）；null=未被认领。 */
   requestDigest: string | null;
   startedAt: Date | null;

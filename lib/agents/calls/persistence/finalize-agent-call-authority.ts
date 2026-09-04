@@ -1,3 +1,4 @@
+import { buildAgentCallLogicalKey } from "@/lib/agents/calls/domain/agent-call";
 import { computeAgentCallBindingHash } from "@/lib/agents/calls/domain/agent-call-binding";
 import type { StoreAgentCallInput } from "@/lib/agents/calls/persistence/agent-call-store";
 import type { DbOrTx } from "@/lib/db/client";
@@ -59,11 +60,7 @@ export async function lockAndValidateAgentCallAuthority(
   input: StoreAgentCallInput,
 ): Promise<void> {
   const b = input.bindingCandidate;
-  if (
-    b.agentId !== input.agentId ||
-    b.agentRevisionId !== input.agentRevisionId ||
-    computeAgentCallBindingHash(b) !== input.bindingHash
-  ) {
+  if (b.agentId !== input.agentId || computeAgentCallBindingHash(b) !== input.bindingHash) {
     stale("candidate Agent 身份或 bindingHash 与创建命令不一致");
   }
 
@@ -96,7 +93,7 @@ export async function lockAndValidateAgentCallAuthority(
   const [revision] = await tx
     .select()
     .from(agentRevisionTable)
-    .where(eq(agentRevisionTable.id, input.agentRevisionId))
+    .where(eq(agentRevisionTable.id, b.agentRevisionId))
     .limit(1)
     .for("update");
   if (
@@ -168,7 +165,7 @@ export async function lockAndValidateAgentCallAuthority(
     !publication ||
     withdrawal ||
     publication.subjectType !== "agent_revision" ||
-    publication.subjectRevisionId !== input.agentRevisionId ||
+    publication.subjectRevisionId !== b.agentRevisionId ||
     publication.agentContractSnapshotId !== b.agentContractSnapshotId ||
     publication.agentContractDigest !== b.agentContractDigest ||
     publication.agentCapabilityDigest !== b.agentCapabilityDigest ||
@@ -213,7 +210,7 @@ export async function lockAndValidateAgentCallAuthority(
   if (
     !route ||
     route.routeSetId !== routeSet.id ||
-    route.agentRevisionId !== input.agentRevisionId ||
+    route.agentRevisionId !== b.agentRevisionId ||
     route.runtimeRevisionId !== null ||
     route.routeState !== "enabled" ||
     route.activeRouteRevisionId !== b.routeRevisionId ||
@@ -235,7 +232,7 @@ export async function lockAndValidateAgentCallAuthority(
     routeRev.tenantId !== input.tenantId ||
     routeRev.routeId !== route.id ||
     routeRev.routeSetId !== routeSet.id ||
-    routeRev.agentRevisionId !== input.agentRevisionId ||
+    routeRev.agentRevisionId !== b.agentRevisionId ||
     routeRev.runtimeRevisionId !== null ||
     routeRev.agentEndpointRef !== b.endpointRef ||
     routeRev.agentIdentityMode !== b.identityMode ||
@@ -289,7 +286,7 @@ export async function lockAndValidateAgentCallAuthority(
     projection.routeRevisionId !== b.routeRevisionId ||
     projection.routeActivationId !== b.routeActivationId ||
     projection.routeContentDigest !== b.routeContentDigest ||
-    projection.agentRevisionId !== input.agentRevisionId ||
+    projection.agentRevisionId !== b.agentRevisionId ||
     projection.agentEndpointRef !== b.endpointRef ||
     projection.agentIdentityMode !== b.identityMode ||
     projection.agentCredentialRefId !== b.credentialRefId ||
@@ -402,7 +399,7 @@ export async function lockAndValidateAgentCallAuthority(
     if (!actionId || !invocation.turnId || !invocation.threadId) {
       stale("Harness action provenance 缺少 action/Turn/Thread 引用");
     }
-    if (input.logicalCallKey !== `${input.parentInvocationId}:${actionId}:${input.agentId}`) {
+    if (input.logicalCallKey !== buildAgentCallLogicalKey(actionId, input.agentId)) {
       stale("AgentCall logicalCallKey 与 parent/action/agent 不一致");
     }
     const [turn] = await tx

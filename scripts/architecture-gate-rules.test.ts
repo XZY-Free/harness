@@ -228,7 +228,14 @@ describe("checkAgentCallFinalizationGate", () => {
       "lib/agents/calls/application/resolve-agent-call-binding.ts",
       "bindingCandidate; buildAgentCallBindingCandidate();",
     ),
-    doc("lib/persistence/schema/agent-calls.ts", "creationRequestDigest; projectionVersionNo;"),
+    doc(
+      "lib/persistence/schema/agent-calls.ts",
+      "creationRequestDigest; projectionVersionNo; export const agentCallTable = {}; export type AgentCall = {}; export const agentCallAttemptTable = { externalTaskRef: true }; export type AgentCallAttempt = {};",
+    ),
+    doc(
+      "lib/agents/calls/domain/agent-call-attempt.ts",
+      "export interface AgentCallAttempt { externalTaskRef: string | null }",
+    ),
   ];
 
   it("finalize 事务、creation digest 与 candidate 语义齐备时通过", () => {
@@ -259,23 +266,17 @@ describe("checkAgentCallFinalizationGate", () => {
     expect(failures).toContain("假事实 fallback");
   });
 
-  it("AgentCallAttempt 重新复制 externalTaskRef Authority 时失败", () => {
+  it("AgentCall 主表重新复制 externalTaskRef Authority 时失败", () => {
     const docs = valid().map((item) =>
       item.path === "lib/persistence/schema/agent-calls.ts"
         ? doc(
             item.path,
-            "creationRequestDigest; projectionVersionNo; export const agentCallAttemptTable = { externalTaskRef: true }; export type AgentCallAttempt = {};",
+            "creationRequestDigest; projectionVersionNo; export const agentCallTable = { externalTaskRef: true }; export type AgentCall = {}; export const agentCallAttemptTable = { externalTaskRef: true }; export type AgentCallAttempt = {};",
           )
         : item,
     );
-    docs.push(
-      doc(
-        "lib/agents/calls/domain/agent-call-attempt.ts",
-        "export interface AgentCallAttempt { externalTaskRef: string | null }",
-      ),
-    );
     expect(checkAgentCallFinalizationGate(docs).failures).toContain(
-      "AgentCallAttempt 仍复制 AgentCall.externalTaskRef Authority",
+      "AgentCall externalTaskRef 未唯一归属 AgentCallAttempt",
     );
   });
 });

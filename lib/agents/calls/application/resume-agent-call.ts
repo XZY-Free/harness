@@ -9,7 +9,7 @@
  *   contextId（A2A message/send）；不新建顶层 Invocation，不重新解析成别的 AgentRevision。
  * - 状态：waiting_user → running。非 waiting_user 按幂等语义返回既有 call 或抛错。
  * - resume 事件重定位起始 producerSequence 禁止回退（durable max+1）。
- * - A2A taskId/contextId 只经 AgentCallEventIngress 写 AgentCall / AgentSessionBinding；
+ * - A2A taskId/contextId 只经 AgentCallEventIngress 写 Attempt / AgentSessionBinding；
  *   绝不触碰 parent Invocation / RuntimeSessionBinding / RuntimeEventIngress。
  *
  * 事实源：
@@ -94,7 +94,7 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
   }
 
   // 3. resume 必须复用 existing task/context（同 AgentCall）。
-  const taskId = call.externalTaskRef;
+  const taskId = call.currentAttempt?.externalTaskRef;
   const contextId = call.sessionBinding?.externalContextRef;
   if (!taskId || !contextId) {
     throw new AgentCallResumeError(

@@ -368,6 +368,7 @@ export async function POST(request: Request): Promise<Response> {
     executionSubject,
     resolveRoute,
     capabilityCatalog,
+    transportChannel: "gateway",
   });
   const executor = executors[body.action.actionType] as
     | ((
