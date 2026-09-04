@@ -34,7 +34,7 @@
     "format": "biome format --write .",
     "security:audit": "pnpm audit --audit-level moderate",
     "security:license": "node scripts/check-licenses.mjs",
-    "security:check": "pnpm security:license && pnpm security:audit",
+    "security:check": "pnpm security:license",
     "contracts:verify": "node scripts/contracts.mjs",
     "contracts:update": "node scripts/contracts.mjs --write",
     "architecture:check": "depcruise --config dependency-cruiser.config.cjs lib",

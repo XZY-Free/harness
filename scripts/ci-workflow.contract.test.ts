@@ -17,6 +17,11 @@ describe("final CI workflow contract", () => {
     expect(plan.stages).toHaveLength(13);
   });
 
+  it("本地确定性安全门禁不依赖外部 audit 端点", () => {
+    expect(packageJson.scripts["security:check"]).toBe("pnpm security:license");
+    expect(packageJson.scripts["security:audit"]).toBe("pnpm audit --audit-level moderate");
+  });
+
   it("Workflow 不再复制阶段命令或追加单文件测试", () => {
     for (const duplicate of [
       "pnpm contracts:verify",
