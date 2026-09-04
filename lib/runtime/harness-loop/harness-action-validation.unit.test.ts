@@ -17,6 +17,7 @@ const built = buildCapabilityCatalogSnapshot({
     publicationRecordId: "publication-1",
     displayName: "HR Agent",
     description: "员工数据查询",
+    scenarioDeclaration: "declared",
     applicableScenarios: ["查询个人年假"],
     excludedScenarios: ["普通寒暄"],
     contractSummary: "只读查询",

@@ -13,6 +13,7 @@ export interface CapabilityCatalogAgent {
   publicationRecordId: string;
   displayName: string;
   description: string;
+  scenarioDeclaration: "declared" | "unspecified";
   applicableScenarios: string[];
   excludedScenarios: string[];
   contractSummary: string;
@@ -161,6 +162,7 @@ export function capabilityCatalogModelView(snapshot: CapabilityCatalogSnapshot) 
       agentId: agent.agentId,
       displayName: agent.displayName,
       description: agent.description,
+      scenarioDeclaration: agent.scenarioDeclaration,
       applicableScenarios: [...agent.applicableScenarios],
       excludedScenarios: [...agent.excludedScenarios],
       contractSummary: agent.contractSummary,

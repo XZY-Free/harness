@@ -23,6 +23,9 @@ export type ContextNecessity = (typeof CONTEXT_NECESSITIES)[number];
 export const PROVENANCE_SOURCES = ["provider_declared", "operator_declared"] as const;
 export type ProvenanceSource = (typeof PROVENANCE_SOURCES)[number];
 
+export const SCENARIO_DECLARATIONS = ["declared", "unspecified"] as const;
+export type ScenarioDeclaration = (typeof SCENARIO_DECLARATIONS)[number];
+
 /** 运行时按冻结快照重建的调用上下文合同。 */
 export interface InvocationContextContract {
   contexts: Array<{
@@ -89,6 +92,9 @@ export interface PublicAgentInteraction {
 export interface PublicAgentContractFacts {
   contractVersion: string;
   agent: PublicAgentIdentity;
+  scenarioDeclaration: ScenarioDeclaration;
+  applicableScenarios: string[];
+  excludedScenarios: string[];
   capabilities: PublicAgentCapability[];
   invocationContexts: PublicAgentInvocationContext[];
   interaction: PublicAgentInteraction;
@@ -106,6 +112,8 @@ export interface PublicAgentContractFacts {
 const TOP_LEVEL_KEYS = [
   "contract_version",
   "agent",
+  "applicable_scenarios",
+  "excluded_scenarios",
   "capabilities",
   "invocation_context",
   "interaction",
@@ -301,6 +309,9 @@ function contractDigestPayload(
   return {
     contractVersion: facts.contractVersion,
     agent: facts.agent,
+    scenarioDeclaration: facts.scenarioDeclaration,
+    applicableScenarios: facts.applicableScenarios,
+    excludedScenarios: facts.excludedScenarios,
     capabilities: facts.capabilities,
     invocationContexts: facts.invocationContexts,
     interaction: facts.interaction,
@@ -493,6 +504,22 @@ export function parsePublicAgentContract(input: unknown): PublicAgentContractFac
     nameEn: agentName.en,
   };
 
+  const scenarioDeclaration: ScenarioDeclaration =
+    "applicable_scenarios" in root || "excluded_scenarios" in root ? "declared" : "unspecified";
+  for (const key of ["applicable_scenarios", "excluded_scenarios"] as const) {
+    if (key in root && !Array.isArray(root[key])) {
+      throw new PublicAgentContractError(`${key} 必须是字符串数组`);
+    }
+  }
+  const applicableScenarios = optionalStringArray(
+    root.applicable_scenarios,
+    "applicable_scenarios",
+    { unique: true },
+  );
+  const excludedScenarios = optionalStringArray(root.excluded_scenarios, "excluded_scenarios", {
+    unique: true,
+  });
+
   const capabilities = parseCapabilities(root.capabilities);
   const invocationContexts = parseInvocationContexts(root.invocation_context);
   // applies_to 引用的必须是已声明 capability
@@ -512,6 +539,9 @@ export function parsePublicAgentContract(input: unknown): PublicAgentContractFac
   const base = {
     contractVersion,
     agent,
+    scenarioDeclaration,
+    applicableScenarios,
+    excludedScenarios,
     capabilities,
     invocationContexts,
     interaction,

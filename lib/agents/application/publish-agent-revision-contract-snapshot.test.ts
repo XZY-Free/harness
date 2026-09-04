@@ -28,6 +28,7 @@ import {
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
+import { hrAgentContract } from "@/lib/agents/test-support/hr-agent-contract";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
@@ -164,6 +165,58 @@ async function assertNothingPublished(tenantId: string, revisionId: string) {
 }
 
 describe("PublishAgentRevision（AgentContractSnapshot 发布权威）", () => {
+  it("显式 scenario 声明参与快照 digest，发布前重算仍一致", async () => {
+    const tenant = await ensureDefaultTenant();
+    const owner = await upsertUserIdentity({
+      tenantId: tenant.id,
+      externalSubject: "scenario-contract-owner",
+      email: "scenario-contract-owner@example.com",
+      displayName: "Scenario Contract Owner",
+    });
+    const agent = await createAgent({
+      tenantId: tenant.id,
+      agentKey: "hr-assistant",
+      displayName: "Renamed Agent",
+      ownerUserId: owner.id,
+    });
+    const contract = JSON.parse(JSON.stringify(hrAgentContract)) as Record<string, unknown>;
+    contract.applicable_scenarios = ["查询本人年假"];
+    contract.excluded_scenarios = ["普通寒暄"];
+    const snapshot = await seedAgentContractSnapshot({
+      tenantId: tenant.id,
+      agentId: agent.id,
+      createdBy: owner.id,
+      contract,
+    });
+    const revision = await createDraftRevision({
+      tenantId: tenant.id,
+      agentId: agent.id,
+      agentContractSnapshotId: snapshot.id,
+      modelPolicyJson: { model: "doubao-pro" },
+      permissionRequirementsJson: {},
+      delegationPolicyJson: {},
+      agentInterfaceRequirementsJson: { required: [], optional: [] },
+      createdBy: owner.id,
+    });
+
+    const publish = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
+    await expect(
+      publish({
+        tenantId: tenant.id,
+        revisionId: revision.id,
+        agentExpectedVersionNo: agent.versionNo,
+        actor: { tenantId: tenant.id, actorType: "user", actorId: owner.id },
+        requestId: "req-scenario-contract",
+        idempotencyKey: "publish-scenario-contract",
+      }),
+    ).resolves.toMatchObject({ revision: { revisionState: "published" } });
+    expect(snapshot).toMatchObject({
+      scenarioDeclaration: "declared",
+      applicableScenarios: ["查询本人年假"],
+      excludedScenarios: ["普通寒暄"],
+    });
+  });
+
   it("从绑定的结构化合同快照冻结发布证据：snapshot id + contract/capability/context digest", async () => {
     const tenant = await ensureDefaultTenant();
     const owner = await upsertUserIdentity({

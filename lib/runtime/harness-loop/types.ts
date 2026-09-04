@@ -140,6 +140,7 @@ export interface HarnessLoopView {
         agentId: string;
         displayName: string;
         description: string;
+        scenarioDeclaration: "declared" | "unspecified";
         applicableScenarios: string[];
         excludedScenarios: string[];
         contractSummary: string;

@@ -29,6 +29,10 @@ export function createPlatformHarnessActionExecutors(params: {
     "knowledge.search": async (action) => {
       const result = await searchKnowledgeEvidence({
         tenantId: params.tenantId,
+        executionSubject: params.executionSubject,
+        allowedKnowledgeBaseIds: params.capabilityCatalog.knowledgeSources.map(
+          (source) => source.knowledgeBaseId,
+        ),
         query: action.payload.query,
         limit: action.payload.maxResults,
       });

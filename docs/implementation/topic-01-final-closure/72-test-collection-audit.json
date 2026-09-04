@@ -1998,6 +1998,17 @@
       ]
     },
     {
+      "file": "lib/context/knowledge-access.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/context/user-commands.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",

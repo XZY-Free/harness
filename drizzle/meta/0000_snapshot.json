@@ -698,6 +698,27 @@
           "notNull": true,
           "autoincrement": false
         },
+        "scenarioDeclaration": {
+          "name": "scenarioDeclaration",
+          "type": "enum('declared','unspecified')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "applicableScenarios": {
+          "name": "applicableScenarios",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "excludedScenarios": {
+          "name": "excludedScenarios",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "streamingTransport": {
           "name": "streamingTransport",
           "type": "boolean",

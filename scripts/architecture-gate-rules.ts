@@ -1086,6 +1086,44 @@ export function checkFinalClosureBoundaryGate(
   if (!/["']tool\.call["']\s*:\s*createToolActionExecutor\(/.test(executors)) {
     failures.push("生产 Harness 工厂缺少 tool.call Executor");
   }
+  if (
+    !executors.includes("executionSubject: params.executionSubject") ||
+    !executors.includes("allowedKnowledgeBaseIds:") ||
+    !executors.includes("capabilityCatalog.knowledgeSources")
+  ) {
+    failures.push("Knowledge Executor 未传递 Binding Subject 与冻结 Catalog scope");
+  }
+
+  const productionCatalog = stripComments(
+    source("lib/runtime/harness-loop/build-production-capability-catalog.ts"),
+  );
+  if (
+    /\b(?:hrLike|financeLike|legalLike|procurementLike)\b/.test(productionCatalog) ||
+    /普通寒暄|合同 capabilities 未声明的业务场景/.test(productionCatalog)
+  ) {
+    failures.push("Capability Catalog 仍根据 Agent 名称或能力文本推断业务场景");
+  }
+  if (
+    !productionCatalog.includes("header.snapshot.scenarioDeclaration") ||
+    !productionCatalog.includes("header.snapshot.applicableScenarios") ||
+    !productionCatalog.includes("header.snapshot.excludedScenarios")
+  ) {
+    failures.push("Capability Catalog 未从 exact AgentContractSnapshot 投影场景声明");
+  }
+
+  const knowledgeQueries = stripComments(source("lib/context/knowledge-queries.ts"));
+  const searchStart = knowledgeQueries.indexOf("export async function searchKnowledgeEvidence");
+  const searchEnd = knowledgeQueries.indexOf("): Promise<KnowledgeSearchResult>", searchStart);
+  const searchSignature =
+    searchStart >= 0 && searchEnd > searchStart
+      ? knowledgeQueries.slice(searchStart, searchEnd)
+      : "";
+  if (
+    !searchSignature.includes("executionSubject: ExecutionSubject") ||
+    !searchSignature.includes("allowedKnowledgeBaseIds: readonly string[]")
+  ) {
+    failures.push("Knowledge production search 仍存在 tenant-only 入口");
+  }
 
   const gateway = stripComments(source("app/gateway/v1/capability-actions/route.ts"));
   if (!gateway.includes("recoverTrustedExecutionSubject(binding, principal.tenantId)")) {

@@ -39,6 +39,7 @@ import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
 import { db } from "@/lib/db/client";
 import type { MemoryEntry, MemoryScopeType } from "@/lib/persistence/schema/memory";
 import { skillTable as skillTableTable } from "@/lib/persistence/schema/skill";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { eq } from "drizzle-orm";
 
 // ─── 源结果状态 ─────────────────────────────────────────────
@@ -83,6 +84,8 @@ export interface SourceQueryResult {
 export interface ContextQueryContext {
   tenantId: string;
   invocationId: string;
+  executionSubject?: ExecutionSubject;
+  allowedKnowledgeBaseIds?: string[];
   threadId?: string;
   /** null = 基础 Harness Route（无 Agent 资产约束）。 */
   agentId?: string | null;
@@ -674,9 +677,19 @@ export class KnowledgeResolver implements SourceResolver {
         reasonCode: "empty_query",
       };
     }
+    if (!ctx.executionSubject || !ctx.allowedKnowledgeBaseIds) {
+      return {
+        sourceType: this.sourceType,
+        status: "denied",
+        fragments: [],
+        reasonCode: "knowledge_authority_missing",
+      };
+    }
 
     const result = await searchKnowledgeEvidence({
       tenantId: ctx.tenantId,
+      executionSubject: ctx.executionSubject,
+      allowedKnowledgeBaseIds: ctx.allowedKnowledgeBaseIds,
       query: ctx.query,
       limit: this.limit,
     });
@@ -688,6 +701,15 @@ export class KnowledgeResolver implements SourceResolver {
         fragments: [],
         reasonCode: result.reasonCode ?? "knowledge_search_failed",
         detail: result.detail,
+      };
+    }
+
+    if (result.status === "denied") {
+      return {
+        sourceType: this.sourceType,
+        status: "denied",
+        fragments: [],
+        reasonCode: result.reasonCode ?? "knowledge_acl_denied",
       };
     }
 

@@ -28,6 +28,7 @@
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { evaluateKnowledgeRevisionAcl } from "@/lib/context/knowledge-acl";
 import { db } from "@/lib/db/client";
 import {
   KNOWLEDGE_BASE_LIFECYCLE_STATES,
@@ -51,6 +52,7 @@ import {
   knowledgeDocumentRevision,
   knowledgeIndex,
 } from "@/lib/persistence/schema/knowledge";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { and, eq, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -220,6 +222,90 @@ export async function listKnowledgeBases(
     .orderBy(sql`${knowledgeBase.updatedAt} DESC`)
     .limit(limit);
   return rows;
+}
+
+export class KnowledgeAclIntegrityError extends Error {
+  constructor(public readonly reasonCode: string) {
+    super(`Knowledge ACL 不可用：${reasonCode}`);
+    this.name = "KnowledgeAclIntegrityError";
+  }
+}
+
+/** 仅列出对 Trusted Subject 可发现的 KnowledgeBase，供 Capability Catalog 冻结 scope。 */
+export async function listDiscoverableKnowledgeBases(params: {
+  tenantId: string;
+  executionSubject: ExecutionSubject;
+  limit?: number;
+}): Promise<KnowledgeBase[]> {
+  if (
+    !params.executionSubject ||
+    params.executionSubject.tenantId !== params.tenantId ||
+    !params.executionSubject.subjectId ||
+    (params.executionSubject.subjectType !== "user" &&
+      params.executionSubject.subjectType !== "service")
+  ) {
+    return [];
+  }
+  const bases = await listKnowledgeBases(params.tenantId, {
+    lifecycleStates: ["active"],
+    limit: params.limit ?? 500,
+  });
+  if (bases.length === 0) return [];
+  const documents = await db
+    .select({
+      knowledgeBaseId: knowledgeDocument.knowledgeBaseId,
+      currentRevisionId: knowledgeDocument.currentRevisionId,
+    })
+    .from(knowledgeDocument)
+    .where(
+      and(
+        eq(knowledgeDocument.tenantId, params.tenantId),
+        eq(knowledgeDocument.lifecycleState, "active"),
+        inArray(
+          knowledgeDocument.knowledgeBaseId,
+          bases.map((base) => base.id),
+        ),
+        isNotNull(knowledgeDocument.currentRevisionId),
+      ),
+    );
+  const revisionIds = documents
+    .map((document) => document.currentRevisionId)
+    .filter((id): id is string => id !== null);
+  if (revisionIds.length === 0) return [];
+  const revisions = await db
+    .select()
+    .from(knowledgeDocumentRevision)
+    .where(
+      and(
+        eq(knowledgeDocumentRevision.tenantId, params.tenantId),
+        inArray(knowledgeDocumentRevision.id, revisionIds),
+        eq(knowledgeDocumentRevision.revisionState, "published"),
+        eq(knowledgeDocumentRevision.indexState, "ready"),
+      ),
+    );
+  const baseByRevision = new Map(
+    documents
+      .filter(
+        (document): document is typeof document & { currentRevisionId: string } =>
+          document.currentRevisionId !== null,
+      )
+      .map((document) => [document.currentRevisionId, document.knowledgeBaseId]),
+  );
+  const allowedBaseIds = new Set<string>();
+  for (const revision of revisions) {
+    const decision = evaluateKnowledgeRevisionAcl({
+      tenantId: params.tenantId,
+      executionSubject: params.executionSubject,
+      aclSnapshotJson: revision.aclSnapshotJson,
+      aclSnapshotHash: revision.aclSnapshotHash,
+    });
+    if (decision.status === "unavailable") {
+      throw new KnowledgeAclIntegrityError(decision.reasonCode);
+    }
+    const baseId = baseByRevision.get(revision.id);
+    if (decision.status === "allowed" && baseId) allowedBaseIds.add(baseId);
+  }
+  return bases.filter((base) => allowedBaseIds.has(base.id));
 }
 
 /**
@@ -1005,10 +1091,29 @@ export interface KnowledgeSearchResult {
  */
 export async function searchKnowledgeEvidence(params: {
   tenantId: string;
+  executionSubject: ExecutionSubject;
+  allowedKnowledgeBaseIds: readonly string[];
   query: string;
-  knowledgeBaseIds?: readonly string[];
   limit?: number;
 }): Promise<KnowledgeSearchResult> {
+  if (
+    !params.executionSubject ||
+    params.executionSubject.tenantId !== params.tenantId ||
+    !params.executionSubject.subjectId ||
+    (params.executionSubject.subjectType !== "user" &&
+      params.executionSubject.subjectType !== "service")
+  ) {
+    return { status: "denied", hits: [], reasonCode: "knowledge_subject_invalid" };
+  }
+  if (
+    !Array.isArray(params.allowedKnowledgeBaseIds) ||
+    params.allowedKnowledgeBaseIds.some((id) => typeof id !== "string" || id.trim().length === 0)
+  ) {
+    return { status: "denied", hits: [], reasonCode: "knowledge_scope_invalid" };
+  }
+  if (params.allowedKnowledgeBaseIds.length === 0) {
+    return { status: "empty", hits: [], reasonCode: "no_authorized_knowledge_scope" };
+  }
   const trimmedQuery = params.query?.trim();
   if (!trimmedQuery) {
     return {
@@ -1021,14 +1126,12 @@ export async function searchKnowledgeEvidence(params: {
   try {
     const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
 
-    // 1. 查询 active KnowledgeBase（按 knowledgeBaseIds 过滤）
+    // 1. 查询 frozen scope 内的 active KnowledgeBase。空 scope 已在进库前拒绝。
     const baseConditions = [
       eq(knowledgeBase.tenantId, params.tenantId),
       eq(knowledgeBase.lifecycleState, "active"),
+      inArray(knowledgeBase.id, [...new Set(params.allowedKnowledgeBaseIds)]),
     ];
-    if (params.knowledgeBaseIds && params.knowledgeBaseIds.length > 0) {
-      baseConditions.push(inArray(knowledgeBase.id, [...params.knowledgeBaseIds]));
-    }
 
     const bases = await db
       .select({
@@ -1113,8 +1216,25 @@ export async function searchKnowledgeEvidence(params: {
       };
     }
 
-    const readyRevisionIds = revisions.map((r) => r.id);
-    const revisionMap = new Map(revisions.map((r) => [r.id, r]));
+    const authorizedRevisions: typeof revisions = [];
+    for (const revision of revisions) {
+      const decision = evaluateKnowledgeRevisionAcl({
+        tenantId: params.tenantId,
+        executionSubject: params.executionSubject,
+        aclSnapshotJson: revision.aclSnapshotJson,
+        aclSnapshotHash: revision.aclSnapshotHash,
+      });
+      if (decision.status === "unavailable") {
+        return { status: "unavailable", hits: [], reasonCode: decision.reasonCode };
+      }
+      if (decision.status === "allowed") authorizedRevisions.push(revision);
+    }
+    if (authorizedRevisions.length === 0) {
+      return { status: "denied", hits: [], reasonCode: "knowledge_acl_denied" };
+    }
+
+    const readyRevisionIds = authorizedRevisions.map((r) => r.id);
+    const revisionMap = new Map(authorizedRevisions.map((r) => [r.id, r]));
 
     // 4. 查询这些 revision 下的 chunks，按 query 做 LIKE 匹配
     // 使用 escape 防止 LIKE 通配符注入（% 与 _）；MySQL LIKE 默认 ESCAPE 为 '\'

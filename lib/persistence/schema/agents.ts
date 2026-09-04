@@ -169,6 +169,7 @@ export type NewAgentRevisionRow = NewAgentRevision;
 const CONTRACT_CONTEXT_NECESSITIES = ["required", "preferred", "accepted"] as const;
 /** 合同声明来源。 */
 const CONTRACT_PROVENANCE_SOURCES = ["provider_declared", "operator_declared"] as const;
+const SCENARIO_DECLARATIONS = ["declared", "unspecified"] as const;
 
 /**
  * AgentContractSnapshot：管理员登记 Public Agent Contract（agent-contract.json）产生的
@@ -206,6 +207,9 @@ export const agentContractSnapshotTable = mysqlTable(
     /** 登记命令显式提供的协议事实（不来自合同文件）。 */
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
     protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
+    scenarioDeclaration: mysqlEnum("scenarioDeclaration", SCENARIO_DECLARATIONS).notNull(),
+    applicableScenarios: json("applicableScenarios").$type<string[]>().notNull(),
+    excludedScenarios: json("excludedScenarios").$type<string[]>().notNull(),
     streamingTransport: boolean("streamingTransport").notNull(),
     incrementalContent: boolean("incrementalContent").notNull(),
     inputRequired: boolean("inputRequired").notNull(),

@@ -120,7 +120,15 @@ describe("Topic 01 final closure boundary gate", () => {
     ),
     doc(
       "lib/runtime/harness-loop/platform-action-executors.ts",
-      'return { "tool.call": createToolActionExecutor({}) };',
+      'return { "tool.call": createToolActionExecutor({}), "knowledge.search": () => searchKnowledgeEvidence({ executionSubject: params.executionSubject, allowedKnowledgeBaseIds: params.capabilityCatalog.knowledgeSources.map((source) => source.knowledgeBaseId) }) };',
+    ),
+    doc(
+      "lib/runtime/harness-loop/build-production-capability-catalog.ts",
+      "return { scenarioDeclaration: header.snapshot.scenarioDeclaration, applicableScenarios: header.snapshot.applicableScenarios, excludedScenarios: header.snapshot.excludedScenarios };",
+    ),
+    doc(
+      "lib/context/knowledge-queries.ts",
+      "export async function searchKnowledgeEvidence(params: { executionSubject: ExecutionSubject; allowedKnowledgeBaseIds: readonly string[] }): Promise<KnowledgeSearchResult> {}",
     ),
     doc(
       "app/gateway/v1/capability-actions/route.ts",
@@ -194,6 +202,35 @@ describe("Topic 01 final closure boundary gate", () => {
         expect.stringContaining("固定业务 Subject"),
         expect.stringContaining("只 ACK"),
         expect.stringContaining("测试重复分组"),
+      ]),
+    );
+  });
+
+  it("拒绝 Agent 名称场景推断与 tenant-only Knowledge 检索", () => {
+    const documents = compliant().map((item) => {
+      if (item.path === "lib/runtime/harness-loop/build-production-capability-catalog.ts") {
+        return doc(
+          item.path,
+          "const hrLike = /HR|人事/.test(displayName); const excluded = ['普通寒暄'];",
+        );
+      }
+      if (item.path === "lib/context/knowledge-queries.ts") {
+        return doc(
+          item.path,
+          "export async function searchKnowledgeEvidence(params: { tenantId: string }): Promise<KnowledgeSearchResult> {}",
+        );
+      }
+      return item;
+    });
+    const result = checkFinalClosureBoundaryGate(
+      documents,
+      new Set(["lib/persistence/schema/example.ts", "lib/persistence/schema/agent-calls.ts"]),
+      [],
+    );
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Agent 名称"),
+        expect.stringContaining("tenant-only"),
       ]),
     );
   });

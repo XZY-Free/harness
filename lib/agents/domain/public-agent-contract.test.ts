@@ -192,6 +192,42 @@ describe("parsePublicAgentContract", () => {
     expect(parsePublicAgentContract(mutated).contractDigest).not.toBe(a.contractDigest);
   });
 
+  it("场景声明区分未声明与显式空数组，并进入 contract digest", () => {
+    const unspecified = parsePublicAgentContract(contract());
+    expect(unspecified.scenarioDeclaration).toBe("unspecified");
+    expect(unspecified.applicableScenarios).toEqual([]);
+    expect(unspecified.excludedScenarios).toEqual([]);
+
+    const explicitlyEmpty = contract();
+    explicitlyEmpty.applicable_scenarios = [];
+    explicitlyEmpty.excluded_scenarios = [];
+    const declaredEmpty = parsePublicAgentContract(explicitlyEmpty);
+    expect(declaredEmpty.scenarioDeclaration).toBe("declared");
+    expect(declaredEmpty.applicableScenarios).toEqual([]);
+    expect(declaredEmpty.excludedScenarios).toEqual([]);
+    expect(declaredEmpty.contractDigest).not.toBe(unspecified.contractDigest);
+
+    const declared = contract();
+    declared.applicable_scenarios = ["查询本人假期余额"];
+    declared.excluded_scenarios = ["普通寒暄"];
+    const facts = parsePublicAgentContract(declared);
+    expect(facts.scenarioDeclaration).toBe("declared");
+    expect(facts.applicableScenarios).toEqual(["查询本人假期余额"]);
+    expect(facts.excludedScenarios).toEqual(["普通寒暄"]);
+    expect(facts.contractDigest).not.toBe(declaredEmpty.contractDigest);
+  });
+
+  it("Agent 名称不会生成业务场景", () => {
+    for (const name of ["HR Agent", "财务 Agent", "random-agent-42"]) {
+      const input = contract();
+      (input.agent as { name: Record<string, string> }).name["zh-CN"] = name;
+      const facts = parsePublicAgentContract(input);
+      expect(facts.scenarioDeclaration).toBe("unspecified");
+      expect(facts.applicableScenarios).toEqual([]);
+      expect(facts.excludedScenarios).toEqual([]);
+    }
+  });
+
   describe("fail-closed 校验（每个非法类别都拒绝）", () => {
     function expectReject(mutate: (input: Record<string, unknown>) => void) {
       const input = contract();

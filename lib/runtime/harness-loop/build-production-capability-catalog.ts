@@ -3,7 +3,7 @@ import {
   resolveAgentActionBinding,
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { getCurrentToolSchemaRevision, listTools } from "@/lib/capability/tool-queries";
-import { listKnowledgeBases } from "@/lib/context/knowledge-queries";
+import { listDiscoverableKnowledgeBases } from "@/lib/context/knowledge-queries";
 import { db } from "@/lib/db/client";
 import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
 import { type PolicyRuleView, evaluatePolicy } from "@/lib/permission/policy-evaluator";
@@ -48,8 +48,9 @@ export async function buildProductionCapabilityCatalog(input: {
   const agentCandidate = await loadPreferredAgent(input, sourceRefs, unavailableFacts);
   const tools = await loadAuthorizedTools(input, sourceRefs);
   const knowledgeSources = (
-    await listKnowledgeBases(input.tenantId, {
-      lifecycleStates: ["active"],
+    await listDiscoverableKnowledgeBases({
+      tenantId: input.tenantId,
+      executionSubject: input.executionSubject,
       limit: 500,
     })
   ).map((base) => {
@@ -135,15 +136,6 @@ async function loadPreferredAgent(
     `agent-route-revision:${resolved.resolution.routeRevisionId}`,
     `agent-contract:${resolved.contractSnapshotId}:${resolved.contractDigest}`,
   );
-  const applicableScenarios = capabilities.flatMap((capability) => {
-    const examples = Array.isArray(capability.examples)
-      ? capability.examples.filter((entry): entry is string => typeof entry === "string")
-      : [];
-    return [capability.descriptionZhCn ?? capability.nameZhCn, ...examples].filter(Boolean);
-  });
-  const hrLike = /(^|[-_])hr($|[-_])|人力|人事/i.test(
-    `${header.agent.agentKey} ${header.agent.displayName}`,
-  );
   return {
     agentId: header.agent.id,
     agentRevisionId: resolved.agentRevisionId,
@@ -153,8 +145,9 @@ async function loadPreferredAgent(
     publicationRecordId: resolved.publicationRecordId,
     displayName: header.agent.displayName,
     description: header.agent.description ?? "",
-    applicableScenarios,
-    excludedScenarios: [...(hrLike ? ["普通寒暄"] : []), "合同 capabilities 未声明的业务场景"],
+    scenarioDeclaration: header.snapshot.scenarioDeclaration,
+    applicableScenarios: [...header.snapshot.applicableScenarios],
+    excludedScenarios: [...header.snapshot.excludedScenarios],
     contractSummary: [
       ...capabilities.map(
         (capability) => `${capability.nameZhCn}：${capability.descriptionZhCn ?? "按合同输出"}`,

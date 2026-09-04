@@ -18,6 +18,7 @@ import {
   type SourceResolver,
   WorkspaceMapResolver,
 } from "@/lib/context/source-resolvers";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
@@ -25,6 +26,14 @@ import {
   resolveGatewayPrincipal,
 } from "@/lib/gateway/route-helpers";
 import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
+import {
+  type CapabilityCatalogSnapshot,
+  verifyCapabilityCatalogSnapshot,
+} from "@/lib/runtime/harness-loop/capability-catalog";
+import {
+  type ExecutionSubject,
+  recoverTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 
 export const dynamic = "force-dynamic";
 
@@ -179,9 +188,32 @@ export async function POST(request: Request): Promise<Response> {
     return apiError("ACCESS_DENIED", "请求包含 context_handle 未授权的来源", { requestId });
   }
 
+  const executionBinding = await getExecutionBindingByInvocation(
+    principal.tenantId,
+    principal.invocationId,
+  );
+  if (!executionBinding) {
+    return apiError("ACCESS_DENIED", "ExecutionBinding 不存在", { requestId });
+  }
+  let executionSubject: ExecutionSubject;
+  let capabilityCatalog: CapabilityCatalogSnapshot;
+  try {
+    executionSubject = recoverTrustedExecutionSubject(executionBinding, principal.tenantId);
+    capabilityCatalog = verifyCapabilityCatalogSnapshot(
+      executionBinding.capabilityCatalogJson,
+      executionBinding.capabilityCatalogDigest,
+    );
+  } catch {
+    return apiError("ACCESS_DENIED", "Knowledge 权限事实不可恢复", { requestId });
+  }
+
   const view = await assembleContextView({
     ctx: {
       ...binding,
+      executionSubject,
+      allowedKnowledgeBaseIds: capabilityCatalog.knowledgeSources.map(
+        (source) => source.knowledgeBaseId,
+      ),
       allowedSources: binding.allowedSources,
       allowedSkillIds: binding.allowedSkillIds,
       query: body.query,

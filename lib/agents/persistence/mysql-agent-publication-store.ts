@@ -73,6 +73,12 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
               version: row.publicAgentVersion,
               name: { "zh-CN": row.agentNameZhCn, en: row.agentNameEn },
             },
+            ...(row.scenarioDeclaration === "declared"
+              ? {
+                  applicable_scenarios: row.applicableScenarios,
+                  excluded_scenarios: row.excludedScenarios,
+                }
+              : {}),
             capabilities: capabilities.map((capability) => ({
               key: capability.key,
               name: { "zh-CN": capability.nameZhCn, en: capability.nameEn },
