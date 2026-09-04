@@ -1,0 +1,96 @@
+{
+  "batch": "00",
+  "startSha": "3197cfeb23070f818aacdfa7db9662986c23ecce",
+  "endSha": "SELF_COMMIT",
+  "commitTitle": "docs(topic-01): freeze final closure contract",
+  "startedAt": "2026-09-04T03:58:21Z",
+  "finishedAt": "2026-09-04T04:13:00Z",
+  "changedFiles": [
+    "docs/implementation/topic-01-final-closure/00-baseline.md",
+    "docs/implementation/topic-01-final-closure/01-current-production-path-map.md",
+    "docs/implementation/topic-01-final-closure/02-existing-reliability-primitives.md",
+    "docs/implementation/topic-01-final-closure/03-acceptance-contract.md",
+    "docs/implementation/topic-01-final-closure/batch-00-evidence.json"
+  ],
+  "acceptanceIds": {},
+  "targetedCommands": [
+    {
+      "command": "node -e JSON.parse(batch-00-evidence.json)",
+      "testFiles": [],
+      "testCount": 0,
+      "exitCode": 0,
+      "result": "pass"
+    },
+    {
+      "command": "node acceptance ID exact-set check",
+      "testFiles": [],
+      "testCount": 0,
+      "exitCode": 0,
+      "result": "pass"
+    },
+    {
+      "command": "node changed-file reference check",
+      "testFiles": [],
+      "testCount": 0,
+      "exitCode": 0,
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check --cached",
+      "testFiles": [],
+      "testCount": 0,
+      "exitCode": 0,
+      "result": "pass"
+    }
+  ],
+  "fullTestsRun": false,
+  "githubFullCiRun": false,
+  "worktreeCleanAtStart": true,
+  "worktreeCleanAtEnd": true,
+  "baselineSha": "704b022735d64c176d9096406ae9a61d2e01eafd",
+  "headSha": "3197cfeb23070f818aacdfa7db9662986c23ecce",
+  "reliabilityPrimitiveDecision": "reuse_control_plane_outbox_event_and_delivery",
+  "unresolvedActiveMigrationRows": 0,
+  "dataAuditStatus": "configured_local_database_absent",
+  "observedRowCounts": null,
+  "plannedTestFiles": [
+    "lib/runtime/harness-loop/capability-catalog.unit.test.ts",
+    "lib/runtime/harness-loop/capability-catalog.db.test.ts",
+    "lib/runtime/harness-loop/harness-action-validation.unit.test.ts",
+    "lib/runtime/harness-loop/tool-executor.integration.test.ts",
+    "scripts/topic-01-production-wiring.contract.test.ts",
+    "lib/runtime/transport/trusted-execution-subject.unit.test.ts",
+    "lib/executions/persistence/trusted-execution-subject.db.test.ts",
+    "lib/runtime/runtime-dispatch-subject.integration.test.ts",
+    "app/gateway/v1/capability-actions/external-runtime-subject.integration.test.ts",
+    "lib/agents/calls/application/agent-call-idempotency.unit.test.ts",
+    "lib/agents/calls/persistence/agent-call-authority.db.test.ts",
+    "lib/agents/calls/persistence/agent-call-binding.db.test.ts",
+    "lib/agents/calls/persistence/agent-call-session-attempt.db.test.ts",
+    "lib/agents/calls/persistence/agent-call-authority-migration.db.test.ts",
+    "lib/agents/calls/application/agent-call-transition.unit.test.ts",
+    "lib/agents/calls/persistence/agent-call-transition.db.test.ts",
+    "lib/agents/calls/persistence/agent-call-ingress.db.test.ts",
+    "lib/agents/calls/persistence/agent-call-attempt-mapping.db.test.ts",
+    "lib/control-plane/events/continuation-producer.db.test.ts",
+    "scripts/agent-call-state-write-architecture.contract.test.ts",
+    "lib/control-plane/events/invocation-continuation.db.test.ts",
+    "lib/control-plane/events/invocation-continuation-worker.integration.test.ts",
+    "lib/runtime/harness-loop/harness-resume.integration.test.ts",
+    "lib/runtime/adapters/hosted-adapter-resume.integration.test.ts",
+    "lib/runtime/external-runtime-resume.integration.test.ts",
+    "lib/runtime/harness-loop/agent-waiting-user.integration.test.ts",
+    "lib/conversations/user-action-agent-resume.integration.test.ts",
+    "scripts/topic-01-schema-inventory.contract.test.ts",
+    "scripts/topic-01-test-collection.contract.test.ts",
+    "scripts/topic-01-verification-plan.contract.test.ts",
+    "e2e/topic-01-regression.web.spec.ts",
+    "e2e/topic-01-regression.desktop.spec.ts",
+    "e2e/topic-01-regression.cross-client.spec.ts"
+  ],
+  "deviations": [
+    "The configured local development database was absent, so row counts are not_observed; no production database was accessed.",
+    "endSha uses SELF_COMMIT because a file cannot embed the hash of the commit that contains itself."
+  ],
+  "result": "pass"
+}
