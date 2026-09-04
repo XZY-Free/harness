@@ -26,11 +26,11 @@ export interface CapabilityCatalogTool {
   operationId: string;
   schemaRevisionId: string;
   schemaHash: string;
+  executionContractDigest: string;
   displayName: string;
   description: string;
   inputSchema: Record<string, unknown>;
   sideEffect: "none" | "read" | "write" | "unknown";
-  confirmation: "none" | "required";
   idempotent: boolean;
 }
 
@@ -175,7 +175,6 @@ export function capabilityCatalogModelView(snapshot: CapabilityCatalogSnapshot) 
       description: tool.description,
       inputSchema: clone(tool.inputSchema),
       sideEffect: tool.sideEffect,
-      confirmation: tool.confirmation,
       idempotent: tool.idempotent,
     })),
     knowledgeSources: snapshot.knowledgeSources.map((source) => ({

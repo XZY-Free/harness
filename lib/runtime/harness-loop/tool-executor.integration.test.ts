@@ -12,6 +12,7 @@ const catalog = buildCapabilityCatalogSnapshot({
       operationId: "send-email",
       schemaRevisionId: "schema-7",
       schemaHash: `sha256:${"7".repeat(64)}`,
+      executionContractDigest: `sha256:${"8".repeat(64)}`,
       displayName: "发送邮件",
       description: "发送邮件",
       inputSchema: {
@@ -20,7 +21,6 @@ const catalog = buildCapabilityCatalogSnapshot({
         properties: { recipient: { type: "string" } },
       },
       sideEffect: "write",
-      confirmation: "none",
       idempotent: true,
     },
   ],
@@ -52,8 +52,9 @@ describe("production tool.call executor", () => {
   it("使用稳定逻辑幂等键调用 ToolCall 应用服务，并把 pending 交回 Harness", async () => {
     const executeToolCall = vi.fn(async () => ({
       toolCallId: "call-1",
-      state: "running" as const,
+      state: "queued" as const,
       resultSummary: null,
+      effectState: null,
       errorCode: null,
       errorSummary: null,
     }));
@@ -74,7 +75,7 @@ describe("production tool.call executor", () => {
       }),
     ).resolves.toEqual({
       authorityRef: "tool-call:call-1",
-      pending: { kind: "tool_call", callId: "call-1", state: "running" },
+      pending: { kind: "tool_call", callId: "call-1", state: "queued" },
     });
     expect(executeToolCall).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -95,6 +96,7 @@ describe("production tool.call executor", () => {
         toolCallId: "call-success",
         state: "succeeded",
         resultSummary: { messageId: "m-1" },
+        effectState: null,
         errorCode: null,
         errorSummary: null,
       }),
@@ -107,6 +109,7 @@ describe("production tool.call executor", () => {
         toolCallId: "call-failed",
         state: "failed",
         resultSummary: null,
+        effectState: null,
         errorCode: "PROVIDER_FAILED",
         errorSummary: "发送失败",
       }),
@@ -130,14 +133,19 @@ describe("production tool.call executor", () => {
     });
   });
 
-  it("需要确认时不创建 ToolCall，进入正式 user_action 请求", async () => {
-    const executeToolCall = vi.fn();
-    const requiringConfirmation = structuredClone(catalog);
-    requiringConfirmation.tools[0]!.confirmation = "required";
+  it("Catalog confirmation 不再有授权语义，仍由 canonical service 创建同一 ToolCall", async () => {
+    const executeToolCall = vi.fn(async () => ({
+      toolCallId: "call-paused",
+      state: "paused" as const,
+      resultSummary: null,
+      effectState: null,
+      errorCode: null,
+      errorSummary: null,
+    }));
     const executor = createToolActionExecutor({
       tenantId: "tenant-1",
       executionSubject,
-      capabilityCatalog: requiringConfirmation,
+      capabilityCatalog: catalog,
       executeToolCall,
     });
     const result = await executor(action, {
@@ -147,10 +155,10 @@ describe("production tool.call executor", () => {
       turnId: "turn-1",
       actionDigest: "digest",
     });
-    expect(executeToolCall).not.toHaveBeenCalled();
+    expect(executeToolCall).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
-      observation: { observationType: "tool" },
-      waitingForUser: { requestType: "input", purpose: "tool_confirmation" },
+      authorityRef: "tool-call:call-paused",
+      pending: { kind: "tool_call", callId: "call-paused", state: "waiting_user" },
     });
   });
 });

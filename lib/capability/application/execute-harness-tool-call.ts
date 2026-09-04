@@ -1,6 +1,5 @@
-import { redactArguments } from "@/lib/capability/redact-arguments";
-import { createToolCall, updateToolCallState } from "@/lib/capability/tool-call-queries";
-import { getToolById, getToolSchemaRevisionById } from "@/lib/capability/tool-queries";
+import { applyToolCall } from "@/lib/capability/application/apply-tool-call";
+import { getEffectRecordByToolCall } from "@/lib/capability/effect-queries";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
 export interface ExecuteHarnessToolCallInput {
@@ -21,6 +20,7 @@ export interface HarnessToolCallResult {
   state:
     | "proposed"
     | "paused"
+    | "queued"
     | "running"
     | "succeeded"
     | "failed"
@@ -29,60 +29,35 @@ export interface HarnessToolCallResult {
   resultSummary: unknown;
   errorCode: string | null;
   errorSummary: string | null;
+  effectState: string | null;
 }
 
 /**
  * Harness tool.call 到既有 ToolCall 领域的唯一应用入口。
  *
- * 能力选择和 Schema 来自 Invocation 冻结目录；这里仅复核同租户 Tool 仍启用、
- * exact SchemaRevision/digest 未损坏，然后复用正式 ToolCall 创建与状态服务。
- * Provider 执行仍由既有 ToolCall worker/adapter 负责，本服务不直连 Provider。
+ * Hosted Harness 与 External Gateway 共用 applyToolCall；这里不再拥有权限或状态机语义。
  */
 export async function executeHarnessToolCall(
   input: ExecuteHarnessToolCallInput,
 ): Promise<HarnessToolCallResult> {
-  if (input.executionSubject.tenantId !== input.tenantId || !input.executionSubject.subjectId) {
-    throw new Error("TOOL_EXECUTION_SUBJECT_INVALID");
-  }
-  const tool = await getToolById({ tenantId: input.tenantId, toolId: input.toolId });
-  if (!tool || tool.lifecycleState !== "enabled") {
-    throw new Error("TOOL_CAPABILITY_REVOKED");
-  }
-  const revision = await getToolSchemaRevisionById({
+  const result = await applyToolCall({
     tenantId: input.tenantId,
-    schemaRevisionId: input.toolSchemaRevisionId,
-  });
-  if (
-    !revision ||
-    revision.toolId !== tool.id ||
-    revision.schemaHash !== input.schemaHash ||
-    revision.revisionState !== "published"
-  ) {
-    throw new Error("TOOL_FROZEN_SCHEMA_UNAVAILABLE");
-  }
-  let call = await createToolCall({
-    tenantId: input.tenantId,
+    executionSubject: input.executionSubject,
     invocationId: input.invocationId,
-    threadId: input.threadId || null,
-    turnId: input.turnId || null,
     toolId: input.toolId,
     toolSchemaRevisionId: input.toolSchemaRevisionId,
     schemaHash: input.schemaHash,
     operationId: input.operationId,
-    argumentsRedactedJson: redactArguments(input.arguments),
+    arguments: input.arguments,
   });
-  if (call.callState === "proposed") {
-    call = await updateToolCallState({
-      tenantId: input.tenantId,
-      toolCallId: call.id,
-      toState: "running",
-    });
-  }
+  const call = result.toolCall;
+  const effect = await getEffectRecordByToolCall(input.tenantId, call.id);
   return {
     toolCallId: call.id,
     state: call.callState as HarnessToolCallResult["state"],
     resultSummary: call.resultSummaryJson,
     errorCode: call.errorCode,
     errorSummary: call.errorSummary,
+    effectState: effect?.effectState ?? null,
   };
 }

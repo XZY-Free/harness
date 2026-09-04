@@ -2,6 +2,7 @@ import type { ControlPlaneEventDelivery } from "@/lib/control-plane/events/contr
 import type { ControlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import type { OutboxRelayWorkerStore } from "@/lib/control-plane/events/outbox-relay-worker";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
+import type { ToolCall } from "@/lib/persistence/schema/tool-call";
 import { describe, expect, it, vi } from "vitest";
 import {
   INVOCATION_CONTINUATION_CONSUMER,
@@ -10,6 +11,7 @@ import {
   INVOCATION_CONTINUATION_RETRY_DELAYS_MS,
   InvocationContinuationPermanentError,
   classifyInvocationContinuationError,
+  createInvocationContinuationHandler,
 } from "./invocation-continuation";
 
 function delivery(attemptCount = 1): ControlPlaneEventDelivery {
@@ -61,6 +63,45 @@ function storeFor(row: ControlPlaneEventDelivery) {
 }
 
 describe("Invocation continuation worker", () => {
+  it("Tool terminal continuation 只恢复同一父 Invocation", async () => {
+    const resumeToolParent = vi.fn(async () => undefined);
+    const handler = createInvocationContinuationHandler({
+      getAgentCall: vi.fn(async () => null),
+      coordinateWaitingUser: vi.fn(async () => undefined),
+      resumeParent: vi.fn(async () => undefined),
+      resumeAfterAgentResponse: vi.fn(async () => undefined),
+      resumeAgentFromUserAction: vi.fn(async () => undefined),
+      getToolCall: vi.fn(
+        async () =>
+          ({
+            id: "tool-call-1",
+            tenantId: "tenant-1",
+            invocationId: "invocation-1",
+            callState: "succeeded",
+          }) as ToolCall,
+      ),
+      resumeToolParent,
+    });
+
+    await handler({
+      ...event,
+      eventType: "tool_call.continuation.requested",
+      aggregateType: "ToolCall",
+      aggregateId: "tool-call-1",
+      payloadJson: {
+        parent_invocation_id: "invocation-1",
+        tool_call_id: "tool-call-1",
+        kind: "resume_parent",
+      },
+    });
+
+    expect(resumeToolParent).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      invocationId: "invocation-1",
+      toolCallId: "tool-call-1",
+    });
+  });
+
   it("冻结为 8 次和 1s/5s/30s/2m/10m/30m/2h/6h", () => {
     expect(INVOCATION_CONTINUATION_MAX_ATTEMPTS).toBe(8);
     expect(INVOCATION_CONTINUATION_RETRY_DELAYS_MS).toEqual([

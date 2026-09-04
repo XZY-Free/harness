@@ -2,10 +2,10 @@
   "generatedAt": "2026-09-04",
   "authority": "lib/persistence/schema/index.ts",
   "counts": {
-    "canonical": 120,
-    "runtimeLoaded": 120,
-    "migration": 120,
-    "freshDbPlanned": 120
+    "canonical": 122,
+    "runtimeLoaded": 122,
+    "migration": 122,
+    "freshDbPlanned": 122
   },
   "currentDevelopmentDatabase": {
     "status": "not_observed",
@@ -4164,6 +4164,79 @@
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "Canonical Root 唯一定义；保留其领域事实或可重建投影"
+    },
+    {
+      "physicalTableName": "ToolExecutionAttempt",
+      "schemaDeclaration": "lib/persistence/schema/tool-execution.ts#toolExecutionAttemptTable",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "tool-execution",
+      "tenantBoundary": "tenantId 直接隔离；所有生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts"
+      ],
+      "productionReaders": [
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts"
+      ],
+      "lifecycle": "每次真实 Provider 尝试 append-only 创建；仅推进 attemptState 与结果字段",
+      "authorityStatement": "一次真实 Provider 执行尝试及 crash/retry 判定事实",
+      "duplicateCandidates": [],
+      "retentionOrGc": "跟随所属 ToolCall 的租户 retention/legal hold",
+      "constraints": [
+        "ToolExecutionAttempt_id: PRIMARY KEY(`id`),",
+        "ToolExecutionAttempt_toolCall_attemptNo_uq: UNIQUE(`toolCallId`,`attemptNo`)",
+        "ALTER TABLE `ToolExecutionAttempt` ADD CONSTRAINT `ToolExecutionAttempt_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `ToolExecutionAttempt` ADD CONSTRAINT `ToolExecutionAttempt_toolCallId_ToolCall_id_fk` FOREIGN KEY (`toolCallId`) REFERENCES `ToolCall`(`id`) ON DELETE no action ON UPDATE no action",
+        "CREATE INDEX `ToolExecutionAttempt_tenant_state_lease_idx` ON `ToolExecutionAttempt` (`tenantId`,`attemptState`,`claimExpiresAt`)"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/tool-execution.ts#toolExecutionAttemptTable",
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "区分 claimed/dispatched/terminal，支持 DB lease 与禁止未知副作用重放"
+    },
+    {
+      "physicalTableName": "ToolExecutionBinding",
+      "schemaDeclaration": "lib/persistence/schema/tool-execution.ts#toolExecutionBindingTable",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "tool-execution",
+      "tenantBoundary": "tenantId 直接隔离；所有生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/capability/application/apply-tool-call.ts",
+        "lib/capability/tool-execution-queries.ts"
+      ],
+      "productionReaders": [
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts"
+      ],
+      "lifecycle": "Permission allow 时创建，创建后 immutable，不随 Provider/Connection 当前配置漂移",
+      "authorityStatement": "ToolCall 冻结的 exact Provider/Connection/Credential/executor/contract",
+      "duplicateCandidates": [],
+      "retentionOrGc": "跟随所属 ToolCall 的租户 retention/legal hold",
+      "constraints": [
+        "ToolExecutionBinding_id: PRIMARY KEY(`id`),",
+        "ToolExecutionBinding_toolCall_uq: UNIQUE(`toolCallId`)",
+        "ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_toolCallId_ToolCall_id_fk` FOREIGN KEY (`toolCallId`) REFERENCES `ToolCall`(`id`) ON DELETE no action ON UPDATE no action",
+        "CREATE INDEX `ToolExecutionBinding_tenant_provider_idx` ON `ToolExecutionBinding` (`tenantId`,`toolProviderId`)"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/tool-execution.ts#toolExecutionBindingTable",
+        "lib/capability/application/apply-tool-call.ts",
+        "lib/capability/tool-execution-queries.ts",
+        "lib/capability/tool-execution-worker.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "只保存引用和 fingerprint，不持久化 Secret"
     },
     {
       "physicalTableName": "ToolProvider",

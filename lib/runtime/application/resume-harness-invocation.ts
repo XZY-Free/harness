@@ -48,6 +48,7 @@ export interface ResumeHarnessInvocationDependencies {
     runtimeRevision: RuntimeRevisionRow;
     subject: ExecutionSubject;
     capabilityCatalog: CapabilityCatalogSnapshot;
+    sourceType: "agent_call" | "tool_call";
     agentCallId: string;
     sourceVersion: number;
   }): Promise<{ resumed: boolean }>;
@@ -72,6 +73,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
   return async (input: {
     tenantId: string;
     invocationId: string;
+    sourceType?: "agent_call" | "tool_call";
     agentCallId: string;
     sourceVersion: number;
   }): Promise<ResumeHarnessInvocationResult> => {
@@ -144,7 +146,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
     const lease = await dependencies.acquireLease({
       tenantId: input.tenantId,
       invocationId: invocation.id,
-      ownerRef: `continuation:${input.agentCallId}:${input.sourceVersion}`,
+      ownerRef: `continuation:${input.sourceType ?? "agent_call"}:${input.agentCallId}:${input.sourceVersion}`,
     });
     if (!lease) {
       throw new InvocationContinuationRetryableError(
@@ -166,6 +168,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
           runtimeRevision,
           subject,
           capabilityCatalog,
+          sourceType: input.sourceType ?? "agent_call",
           agentCallId: input.agentCallId,
           sourceVersion: input.sourceVersion,
         });

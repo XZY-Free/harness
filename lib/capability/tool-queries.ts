@@ -22,12 +22,16 @@
  * Tool.currentSchemaRevisionId 更新。
  * - createTool 事务内校验 providerId 存在且 enabled。
  * - createToolSchemaRevision 事务内校验 toolId 存在 + 分配 revisionNo（COALESCE(MAX)+1）。
- * - schemaHash 计算：sha256(JSON.stringify({ input, output, risk }))，带 sha256: 前缀。
+ * - schemaHash 覆盖 input/output/risk/execution contract，带 sha256: 前缀。
  * - credential_ref fingerprint 格式校验（sha256: 前缀）。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
 import { createHash, randomUUID } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
+import {
+  computeToolExecutionContractDigest,
+  parseToolExecutionContract,
+} from "@/lib/capability/tool-execution-contract";
 import { db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
@@ -208,18 +212,22 @@ function assertValidRiskClass(value: string): asserts value is ToolRiskClass {
 /**
  * 计算 SchemaRevision 的 schemaHash。
  *
- * hash 内容：sha256(JSON.stringify({ input: inputSchemaJson, output: outputSchemaJson,
- * risk: riskMetadataJson }))，带 sha256: 前缀。
+ * hash 内容同时覆盖 input/output schema、risk metadata 与 immutable execution contract，
+ * 带 sha256: 前缀。
  */
 export function computeSchemaHash(params: {
   inputSchemaJson: unknown;
   outputSchemaJson: unknown;
   riskMetadataJson: unknown;
+  executionContractJson: unknown;
+  executionContractDigest: string;
 }): string {
   const payload = JSON.stringify({
     input: params.inputSchemaJson,
     output: params.outputSchemaJson,
     risk: params.riskMetadataJson,
+    executionContract: params.executionContractJson,
+    executionContractDigest: params.executionContractDigest,
   });
   const hex = createHash("sha256").update(payload, "utf-8").digest("hex");
   return `sha256:${hex}`;
@@ -1105,6 +1113,7 @@ export async function createToolSchemaRevision(params: {
   inputSchemaJson: unknown;
   outputSchemaJson?: unknown;
   riskMetadataJson?: unknown;
+  executionContractJson: unknown;
   createdBy: string;
 }): Promise<ToolSchemaRevision> {
   if (!params.createdBy) {
@@ -1138,10 +1147,14 @@ export async function createToolSchemaRevision(params: {
   }
 
   const revisionNo = await nextRevisionNo(params.toolId);
+  const executionContractJson = parseToolExecutionContract(params.executionContractJson);
+  const executionContractDigest = computeToolExecutionContractDigest(executionContractJson);
   const schemaHash = computeSchemaHash({
     inputSchemaJson: params.inputSchemaJson,
     outputSchemaJson: params.outputSchemaJson ?? null,
     riskMetadataJson: params.riskMetadataJson ?? null,
+    executionContractJson,
+    executionContractDigest,
   });
 
   const id = randomUUID();
@@ -1155,6 +1168,8 @@ export async function createToolSchemaRevision(params: {
       outputSchemaJson: params.outputSchemaJson ?? null,
       schemaHash,
       riskMetadataJson: params.riskMetadataJson ?? null,
+      executionContractJson,
+      executionContractDigest,
       revisionState: "draft",
       createdBy: params.createdBy,
     });

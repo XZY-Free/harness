@@ -14,6 +14,7 @@ function tool(overrides: Record<string, unknown> = {}) {
     operationId: "send-email",
     schemaRevisionId: "schema-mail-3",
     schemaHash: `sha256:${"a".repeat(64)}`,
+    executionContractDigest: `sha256:${"b".repeat(64)}`,
     displayName: "发送邮件",
     description: "向指定收件人发送邮件",
     inputSchema: {
@@ -26,7 +27,6 @@ function tool(overrides: Record<string, unknown> = {}) {
       additionalProperties: false,
     },
     sideEffect: "write" as const,
-    confirmation: "required" as const,
     idempotent: true,
     ...overrides,
   };

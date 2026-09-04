@@ -367,6 +367,9 @@ export const toolSchemaRevisionTable = mysqlTable(
     schemaHash: varchar("schemaHash", { length: 128 }).notNull(),
     /** 风险元数据（effect/data_class/network_scope/side_effects）。 */
     riskMetadataJson: json("riskMetadataJson"),
+    /** 不可变 Provider 执行合同；与本 SchemaRevision 一起发布。 */
+    executionContractJson: json("executionContractJson").notNull(),
+    executionContractDigest: varchar("executionContractDigest", { length: 71 }).notNull(),
     revisionState: mysqlEnum("revisionState", TOOL_REVISION_STATES).notNull().default("draft"),
     /** 创建者 userIdentityId 或 serviceId。 */
     createdBy: varchar("createdBy", { length: 128 }).notNull(),

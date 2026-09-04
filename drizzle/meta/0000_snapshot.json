@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "6daa0c4c-6b18-44eb-bdfd-8e73cd74a11d",
+  "id": "f1f5a6ba-4075-469a-9370-7cdd66ee1934",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -14247,6 +14247,370 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
+    "ToolExecutionAttempt": {
+      "name": "ToolExecutionAttempt",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "toolCallId": {
+          "name": "toolCallId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attemptNo": {
+          "name": "attemptNo",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attemptState": {
+          "name": "attemptState",
+          "type": "enum('claimed','dispatched','succeeded','failed','unknown')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestDigest": {
+          "name": "requestDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "externalIdempotencyKey": {
+          "name": "externalIdempotencyKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "providerRequestRef": {
+          "name": "providerRequestRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retryClass": {
+          "name": "retryClass",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claimedBy": {
+          "name": "claimedBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claimExpiresAt": {
+          "name": "claimExpiresAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "startedAt": {
+          "name": "startedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "finishedAt": {
+          "name": "finishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorCode": {
+          "name": "errorCode",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorSummary": {
+          "name": "errorSummary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "ToolExecutionAttempt_toolCall_attemptNo_uq": {
+          "name": "ToolExecutionAttempt_toolCall_attemptNo_uq",
+          "columns": [
+            "toolCallId",
+            "attemptNo"
+          ],
+          "isUnique": true
+        },
+        "ToolExecutionAttempt_tenant_state_lease_idx": {
+          "name": "ToolExecutionAttempt_tenant_state_lease_idx",
+          "columns": [
+            "tenantId",
+            "attemptState",
+            "claimExpiresAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "ToolExecutionAttempt_tenantId_Tenant_id_fk": {
+          "name": "ToolExecutionAttempt_tenantId_Tenant_id_fk",
+          "tableFrom": "ToolExecutionAttempt",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ToolExecutionAttempt_toolCallId_ToolCall_id_fk": {
+          "name": "ToolExecutionAttempt_toolCallId_ToolCall_id_fk",
+          "tableFrom": "ToolExecutionAttempt",
+          "tableTo": "ToolCall",
+          "columnsFrom": [
+            "toolCallId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "ToolExecutionAttempt_id": {
+          "name": "ToolExecutionAttempt_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "ToolExecutionBinding": {
+      "name": "ToolExecutionBinding",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "toolCallId": {
+          "name": "toolCallId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "toolProviderId": {
+          "name": "toolProviderId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "providerType": {
+          "name": "providerType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "connectionId": {
+          "name": "connectionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "authMethod": {
+          "name": "authMethod",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "endpointRef": {
+          "name": "endpointRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "endpointFingerprint": {
+          "name": "endpointFingerprint",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "credentialRefId": {
+          "name": "credentialRefId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "executorKind": {
+          "name": "executorKind",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionContractDigest": {
+          "name": "executionContractDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "ToolExecutionBinding_toolCall_uq": {
+          "name": "ToolExecutionBinding_toolCall_uq",
+          "columns": [
+            "toolCallId"
+          ],
+          "isUnique": true
+        },
+        "ToolExecutionBinding_tenant_provider_idx": {
+          "name": "ToolExecutionBinding_tenant_provider_idx",
+          "columns": [
+            "tenantId",
+            "toolProviderId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "ToolExecutionBinding_tenantId_Tenant_id_fk": {
+          "name": "ToolExecutionBinding_tenantId_Tenant_id_fk",
+          "tableFrom": "ToolExecutionBinding",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ToolExecutionBinding_toolCallId_ToolCall_id_fk": {
+          "name": "ToolExecutionBinding_toolCallId_ToolCall_id_fk",
+          "tableFrom": "ToolExecutionBinding",
+          "tableTo": "ToolCall",
+          "columnsFrom": [
+            "toolCallId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ToolExecutionBinding_toolProviderId_ToolProvider_id_fk": {
+          "name": "ToolExecutionBinding_toolProviderId_ToolProvider_id_fk",
+          "tableFrom": "ToolExecutionBinding",
+          "tableTo": "ToolProvider",
+          "columnsFrom": [
+            "toolProviderId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ToolExecutionBinding_connectionId_Connection_id_fk": {
+          "name": "ToolExecutionBinding_connectionId_Connection_id_fk",
+          "tableFrom": "ToolExecutionBinding",
+          "tableTo": "Connection",
+          "columnsFrom": [
+            "connectionId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ToolExecutionBinding_credentialRefId_CredentialRef_id_fk": {
+          "name": "ToolExecutionBinding_credentialRefId_CredentialRef_id_fk",
+          "tableFrom": "ToolExecutionBinding",
+          "tableTo": "CredentialRef",
+          "columnsFrom": [
+            "credentialRefId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "ToolExecutionBinding_id": {
+          "name": "ToolExecutionBinding_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "Connection": {
       "name": "Connection",
       "columns": {
@@ -14742,6 +15106,20 @@
           "type": "json",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "executionContractJson": {
+          "name": "executionContractJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionContractDigest": {
+          "name": "executionContractDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "revisionState": {

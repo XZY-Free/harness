@@ -2,11 +2,20 @@ import {
   AgentActionUnavailableError,
   resolveAgentActionBinding,
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
-import { getCurrentToolSchemaRevision, listTools } from "@/lib/capability/tool-queries";
+import { createProductionProviderExecutorRegistry } from "@/lib/capability/provider-executor";
+import {
+  computeToolExecutionContractDigest,
+  parseToolExecutionContract,
+} from "@/lib/capability/tool-execution-contract";
+import {
+  getConnectionById,
+  getCurrentToolSchemaRevision,
+  getToolProviderById,
+  listTools,
+} from "@/lib/capability/tool-queries";
 import { listDiscoverableKnowledgeBases } from "@/lib/context/knowledge-queries";
 import { db } from "@/lib/db/client";
 import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
-import { type PolicyRuleView, evaluatePolicy } from "@/lib/permission/policy-evaluator";
 import { POLICY_SET_KEY, loadFrozenPolicyRevision } from "@/lib/permission/policy-queries";
 import {
   agentContractCapabilityTable,
@@ -46,7 +55,7 @@ export async function buildProductionCapabilityCatalog(input: {
     `policy-revision:${input.policyRevisionId}`,
   ];
   const agentCandidate = await loadPreferredAgent(input, sourceRefs, unavailableFacts);
-  const tools = await loadAuthorizedTools(input, sourceRefs);
+  const tools = await loadAuthorizedTools(input, sourceRefs, unavailableFacts);
   const knowledgeSources = (
     await listDiscoverableKnowledgeBases({
       tenantId: input.tenantId,
@@ -163,6 +172,7 @@ async function loadPreferredAgent(
 async function loadAuthorizedTools(
   input: Parameters<typeof buildProductionCapabilityCatalog>[0],
   sourceRefs: string[],
+  unavailableFacts: string[],
 ): Promise<CapabilityCatalogTool[]> {
   const frozen = await loadFrozenPolicyRevision(
     db,
@@ -185,14 +195,7 @@ async function loadAuthorizedTools(
   if (digest !== input.policyRulesDigest) {
     throw new Error("CAPABILITY_CATALOG_POLICY_INTEGRITY_MISMATCH");
   }
-  const rules: PolicyRuleView[] = frozen.rules.map((rule) => ({
-    ruleKey: rule.ruleKey,
-    toolPattern: rule.toolPattern,
-    argMatcher: (rule.argMatcherJson as PolicyRuleView["argMatcher"]) ?? null,
-    decision: rule.decision,
-    scope: (rule.scopeJson as PolicyRuleView["scope"]) ?? null,
-    priority: rule.priority,
-  }));
+  const registry = createProductionProviderExecutorRegistry();
   const result: CapabilityCatalogTool[] = [];
   let cursor: string | null = null;
   do {
@@ -208,29 +211,48 @@ async function loadAuthorizedTools(
         toolId: tool.id,
       });
       if (!revision || revision.revisionState !== "published") continue;
-      const evaluation = evaluatePolicy({
-        toolKey: `tool.${tool.toolKey}`,
-        arguments: {},
-        toolRiskClass: tool.riskClass,
-        scopeContext: { threadId: input.threadId, projectId: null, skillId: null },
-        defaultDecision: frozen.defaultDecision,
-        rules,
-        agentRequirements: null,
-        grantScopes: [],
+      const provider = await getToolProviderById({
+        tenantId: input.tenantId,
+        providerId: tool.providerId,
       });
-      if (evaluation.decision === "block") continue;
-      sourceRefs.push(`tool-schema:${revision.id}:${revision.schemaHash}`);
+      if (!provider || provider.lifecycleState !== "enabled") continue;
+      const executorKind = provider.providerType === "webhook" ? "webhook.post_json" : null;
+      if (!executorKind || !registry.supports(provider.providerType, executorKind)) continue;
+      const connection = provider.connectionId
+        ? await getConnectionById({
+            tenantId: input.tenantId,
+            connectionId: provider.connectionId,
+          })
+        : null;
+      if (!connection || connection.lifecycleState !== "enabled" || !connection.endpointRef) {
+        continue;
+      }
+      if (!["none", "bearer"].includes(connection.authMethod)) {
+        unavailableFacts.push(`tool_unavailable:${tool.id}:unsupported_auth_method`);
+        continue;
+      }
+      const contract = parseToolExecutionContract(revision.executionContractJson);
+      if (computeToolExecutionContractDigest(contract) !== revision.executionContractDigest) {
+        unavailableFacts.push(`tool_unavailable:${tool.id}:execution_contract_integrity`);
+        continue;
+      }
+      sourceRefs.push(
+        `tool-schema:${revision.id}:${revision.schemaHash}`,
+        `tool-execution-contract:${revision.id}:${revision.executionContractDigest}`,
+        `tool-provider:${provider.id}:${provider.versionNo}`,
+        `connection:${connection.id}:${connection.versionNo}`,
+      );
       result.push({
         toolId: tool.id,
         operationId: tool.toolKey,
         schemaRevisionId: revision.id,
         schemaHash: revision.schemaHash,
+        executionContractDigest: revision.executionContractDigest,
         displayName: tool.displayName,
         description: revision.description ?? tool.description ?? "",
         inputSchema: asRecord(revision.inputSchemaJson),
-        sideEffect: sideEffect(revision.riskMetadataJson),
-        confirmation: evaluation.decision === "pause" ? "required" : "none",
-        idempotent: true,
+        sideEffect: contract.sideEffectMode,
+        idempotent: contract.idempotencySupport !== "none",
       });
     }
     cursor = page.nextCursor;
@@ -243,14 +265,4 @@ function asRecord(value: unknown): Record<string, unknown> {
     throw new Error("CAPABILITY_CATALOG_TOOL_SCHEMA_INVALID");
   }
   return value as Record<string, unknown>;
-}
-
-function sideEffect(value: unknown): CapabilityCatalogTool["sideEffect"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "unknown";
-  const metadata = value as Record<string, unknown>;
-  const raw = metadata.side_effects ?? metadata.sideEffect ?? metadata.effect;
-  if (raw === false || raw === "none") return "none";
-  if (raw === "read" || raw === "read_only") return "read";
-  if (raw === true || raw === "write" || raw === "side_effect") return "write";
-  return "unknown";
 }

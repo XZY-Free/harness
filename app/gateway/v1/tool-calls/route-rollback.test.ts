@@ -6,9 +6,9 @@
  * （不误写 waiting_user）。
  */
 import { randomUUID } from "node:crypto";
+import { computeToolExecutionContractDigest } from "@/lib/capability/tool-execution-contract";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
@@ -16,12 +16,14 @@ import { executionBindingTable, invocationTable } from "@/lib/persistence/schema
 import { permissionDecisionTable } from "@/lib/persistence/schema/permission";
 import {
   type ToolProvider,
+  connectionTable,
   toolProviderTable,
   toolSchemaRevisionTable,
   toolTable,
 } from "@/lib/persistence/schema/tool";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
@@ -38,6 +40,9 @@ vi.mock("@/lib/permission/user-action-queries", async (importOriginal) => {
 const TENANT = DEFAULT_TENANT_ID;
 const REQ = "req-rollback-1";
 const SIGNING_SECRET = "test-gateway-signing-secret-0123456789abcdef"; // ≥32 字节
+
+let catalogTool: Parameters<typeof buildCapabilityCatalogSnapshot>[0]["tools"][number] | null =
+  null;
 
 function hash(hex: string): string {
   return `sha256:${hex.padStart(64, "0")}`;
@@ -69,16 +74,30 @@ async function seedPolicy(defaultDecision: "allow" | "pause" | "block", rules: P
 }
 
 async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> {
+  const connectionId = randomUUID();
+  await db.insert(connectionTable).values({
+    id: connectionId,
+    tenantId: TENANT,
+    connectionKey: "test-webhook",
+    connectionType: "webhook",
+    endpointRef: "https://example.invalid/webhook",
+    authMethod: "none",
+    ownerUserId: "test-admin",
+    lifecycleState: "enabled",
+    versionNo: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
   const providerId = randomUUID();
   const provider: ToolProvider = {
     id: providerId,
     tenantId: TENANT,
     providerKey: "test-provider",
-    providerType: "builtin",
+    providerType: "webhook",
     trustLevel: "standard",
     displayName: "Test Provider",
     description: null,
-    connectionId: null,
+    connectionId,
     ownerUserId: "test-admin",
     lifecycleState: "enabled",
     versionNo: 1,
@@ -107,6 +126,15 @@ async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> 
 
   const schemaRevisionId = randomUUID();
   const schemaHash = hash("a");
+  const executionContractJson = {
+    timeoutMs: 1_000,
+    idempotencySupport: "header" as const,
+    sideEffectMode: "write" as const,
+    verificationMode: "provider_response" as const,
+    responseLimits: { maxBytes: 8_192 },
+    providerOperationMetadata: { effectType: "update" },
+  };
+  const executionContractDigest = computeToolExecutionContractDigest(executionContractJson);
   await db.insert(toolSchemaRevisionTable).values({
     id: schemaRevisionId,
     toolId,
@@ -116,6 +144,8 @@ async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> 
     outputSchemaJson: null,
     schemaHash,
     riskMetadataJson: { risk_class: "medium" },
+    executionContractJson,
+    executionContractDigest,
     revisionState: "published",
     createdBy: "test-admin",
     createdAt: new Date(),
@@ -125,6 +155,19 @@ async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> 
     .update(toolTable)
     .set({ currentSchemaRevisionId: schemaRevisionId })
     .where(eq(toolTable.id, toolId));
+
+  catalogTool = {
+    toolId,
+    operationId: "writeFile",
+    schemaRevisionId,
+    schemaHash,
+    executionContractDigest,
+    displayName: "Write File",
+    description: "v1",
+    inputSchema: { type: "object" },
+    sideEffect: "write",
+    idempotent: true,
+  };
 
   return { toolId, schemaHash };
 }
@@ -162,8 +205,25 @@ async function seedBinding(
   invocationId: string,
   frozen: { policyRevisionId: string; policyRulesDigest: string },
 ): Promise<void> {
+  if (!catalogTool) throw new Error("seedToolchain must run first");
+  const catalog = buildCapabilityCatalogSnapshot({
+    invocationId,
+    preferredAgentId: null,
+    agentCandidate: null,
+    tools: [catalogTool],
+    knowledgeSources: [],
+    sourceRefs: ["test-fixture:tool-capability-catalog"],
+  });
   await db.insert(executionBindingTable).values({
-    ...testCapabilityCatalogBindingFields(invocationId),
+    capabilityCatalogJson: catalog.snapshot,
+    capabilityCatalogDigest: catalog.digest,
+    capabilityCatalogVersion: catalog.version,
+    capabilityCatalogSourceRefs: catalog.sourceRefs,
+    capabilityCatalogCreatedAt: catalog.createdAt,
+    executionSubjectType: "user",
+    executionSubjectId: "test-user",
+    executionSubjectSource: "authenticated_user",
+    executionSubjectFrozenAt: new Date(),
     invocationId,
     tenantId: TENANT,
     runtimeRevisionId: "runtime-rev-fake",
@@ -232,6 +292,7 @@ function toolCallBody(patch: Partial<Record<string, unknown>>): Record<string, u
 
 beforeEach(async () => {
   await resetDatabase(db);
+  catalogTool = null;
   process.env.SNOW_AUTH_MODE = "dev";
   process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
   await ensureDefaultTenant();

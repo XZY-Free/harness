@@ -43,17 +43,19 @@ import {
 
 /**
  * ToolCall 状态机（稳定边界是单次 ToolCall）。
- * - proposed：模型已决策，尚未开始执行。
- * - paused：因审批/治理暂停（未在 S06-C05 实现，留后续阶段）。
- * - running：执行中。
- * - succeeded：执行成功。
- * - failed：执行失败（业务错误）。
+ * - proposed：逻辑调用已创建，尚未形成最终权限决定。
+ * - paused：正式 PermissionDecision=pause，等待用户动作。
+ * - queued：权限允许且已冻结执行绑定，等待 durable worker claim。
+ * - running：durable worker 已创建并 claim 真实 Provider attempt。
+ * - succeeded：执行成功；有副作用时 Effect 已确认成功。
+ * - failed：确定失败，且不存在未知副作用。
  * - cancelled：被取消（用户取消 / 上层取消）。
  * - unknown_effect：执行完成但副作用无法核对（取消幂等）。
  */
 export const TOOL_CALL_STATES = [
   "proposed",
   "paused",
+  "queued",
   "running",
   "succeeded",
   "failed",
@@ -111,13 +113,13 @@ export const toolCallTable = mysqlTable(
     toolSchemaRevisionId: varchar("toolSchemaRevisionId", { length: 36 }).notNull(),
     /** 调用时 Schema hash（sha256: 前缀，调用开始后固定）。 */
     schemaHash: varchar("schemaHash", { length: 128 }).notNull(),
-    /** 调用状态（proposed/paused/running/succeeded/failed/cancelled/unknown_effect）。 */
+    /** 调用状态（proposed/paused/queued/running/succeeded/failed/cancelled/unknown_effect）。 */
     callState: varchar("callState", { length: 32 }).notNull().default("proposed"),
     /** 稳定业务操作幂等 id（同 toolId + operationId 幂等）。 */
     operationId: varchar("operationId", { length: 128 }).notNull(),
     /** 脱敏参数（去除 secret/PII 后的 JSON）。 */
     argumentsRedactedJson: json("argumentsRedactedJson").notNull(),
-    /** 原参数 hash（sha256: 前缀，用于幂等比对）。 */
+    /** 规范脱敏参数 hash（sha256: 前缀，用于幂等比对）。 */
     argumentsHash: varchar("argumentsHash", { length: 128 }).notNull(),
     /** 实际执行环境 lease id（本阶段可空，留后续阶段）。 */
     environmentLeaseId: varchar("environmentLeaseId", { length: 36 }),

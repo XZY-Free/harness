@@ -571,7 +571,7 @@ export interface ClientTakeoverConditions {
   readonly can_takeover: boolean;
   /** 阻塞原因列表（中文，前端直接展示）。 */
   readonly blocking_reasons: readonly string[];
-  /** 未完成 ToolCall 数量（proposed/paused/running）。 */
+  /** 未完成 ToolCall 数量（proposed/paused/queued/running）。 */
   readonly pending_tool_calls: number;
   /** unknown_effect 状态的 EffectRecord 数量。 */
   readonly unknown_effects: number;

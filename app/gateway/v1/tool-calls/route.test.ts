@@ -2,7 +2,7 @@
  * 02-6 P6 Tool Gateway 集成测试（真实 MySQL 8 · 冻结方案 §14 / §15 / §16 / §18 / §55.5）。
  *
  * 覆盖（§55.5）：
- * - allow → ToolCall running + PermissionDecision(allow)（授权执行，Executor 后置）。
+ * - allow → ToolCall queued + immutable ToolExecutionBinding；worker claim 后才进入 running。
  * - pause(Turn) 不执行 → ToolCall paused + UAR(confirmation/tool_permission_confirmation) + Invocation waiting_user。
  * - block 不执行 → ToolCall cancelled + 403 POLICY_BLOCKED + 不创建 UAR。
  * - pause(Job) → ToolCall cancelled + 403 POLICY_REQUIRES_PREAUTH + 不创建 UAR。
@@ -12,31 +12,54 @@
  * - Policy digest mismatch → 409 POLICY_INTEGRITY_MISMATCH（fail-closed，不建 ToolCall）。
  */
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import {
+  createEffectRecord,
+  createEffectTargets,
+  reconcileEffect,
+} from "@/lib/capability/effect-queries";
+import { computeToolExecutionContractDigest } from "@/lib/capability/tool-execution-contract";
+import {
+  claimNextQueuedToolCall,
+  updateToolExecutionAttempt,
+} from "@/lib/capability/tool-execution-queries";
+import { createToolExecutionWorker } from "@/lib/capability/tool-execution-worker";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolve-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { effectRecordTable } from "@/lib/persistence/schema/effect";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { permissionDecisionTable } from "@/lib/persistence/schema/permission";
 import {
   type ToolProvider,
+  connectionTable,
   toolProviderTable,
   toolSchemaRevisionTable,
   toolTable,
 } from "@/lib/persistence/schema/tool";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
+import {
+  toolExecutionAttemptTable,
+  toolExecutionBindingTable,
+} from "@/lib/persistence/schema/tool-execution";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
-import { asc, eq } from "drizzle-orm";
+import { createInvocationContinuationHandler } from "@/lib/runtime/continuation/invocation-continuation";
+import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
+import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST } from "./route";
 
 const TENANT = DEFAULT_TENANT_ID;
 const REQ = "req-gw-1";
 const SIGNING_SECRET = "test-gateway-signing-secret-0123456789abcdef"; // ≥32 字节
+
+let catalogTool: Parameters<typeof buildCapabilityCatalogSnapshot>[0]["tools"][number] | null =
+  null;
 
 /** 固定合法 hash（sha256: + 64 hex）。 */
 function hash(hex: string): string {
@@ -70,17 +93,37 @@ async function seedPolicy(defaultDecision: "allow" | "pause" | "block", rules: P
 }
 
 /** ToolProvider + Tool + published SchemaRevision。 */
-async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> {
+async function seedToolchain(
+  options: {
+    endpointRef?: string;
+    idempotencySupport?: "none" | "header";
+    timeoutMs?: number;
+  } = {},
+): Promise<{ toolId: string; schemaHash: string }> {
+  const connectionId = randomUUID();
+  await db.insert(connectionTable).values({
+    id: connectionId,
+    tenantId: TENANT,
+    connectionKey: "test-webhook",
+    connectionType: "webhook",
+    endpointRef: options.endpointRef ?? "https://example.invalid/webhook",
+    authMethod: "none",
+    ownerUserId: "test-admin",
+    lifecycleState: "enabled",
+    versionNo: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
   const providerId = randomUUID();
   const provider: ToolProvider = {
     id: providerId,
     tenantId: TENANT,
     providerKey: "test-provider",
-    providerType: "builtin",
+    providerType: "webhook",
     trustLevel: "standard",
     displayName: "Test Provider",
     description: null,
-    connectionId: null,
+    connectionId,
     ownerUserId: "test-admin",
     lifecycleState: "enabled",
     versionNo: 1,
@@ -109,6 +152,15 @@ async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> 
 
   const schemaRevisionId = randomUUID();
   const schemaHash = hash("a");
+  const executionContractJson = {
+    timeoutMs: options.timeoutMs ?? 1_000,
+    idempotencySupport: options.idempotencySupport ?? ("header" as const),
+    sideEffectMode: "write" as const,
+    verificationMode: "provider_response" as const,
+    responseLimits: { maxBytes: 8_192 },
+    providerOperationMetadata: { effectType: "update" },
+  };
+  const executionContractDigest = computeToolExecutionContractDigest(executionContractJson);
   await db.insert(toolSchemaRevisionTable).values({
     id: schemaRevisionId,
     toolId,
@@ -118,6 +170,8 @@ async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> 
     outputSchemaJson: null,
     schemaHash,
     riskMetadataJson: { risk_class: "medium" },
+    executionContractJson,
+    executionContractDigest,
     revisionState: "published",
     createdBy: "test-admin",
     createdAt: new Date(),
@@ -127,6 +181,19 @@ async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> 
     .update(toolTable)
     .set({ currentSchemaRevisionId: schemaRevisionId })
     .where(eq(toolTable.id, toolId));
+
+  catalogTool = {
+    toolId,
+    operationId: "writeFile",
+    schemaRevisionId,
+    schemaHash,
+    executionContractDigest,
+    displayName: "Write File",
+    description: "v1",
+    inputSchema: { type: "object" },
+    sideEffect: "write",
+    idempotent: true,
+  };
 
   return { toolId, schemaHash };
 }
@@ -170,8 +237,25 @@ async function seedBinding(
   invocationId: string,
   frozen: { policyRevisionId: string; policyRulesDigest: string },
 ): Promise<void> {
+  if (!catalogTool) throw new Error("seedToolchain must run first");
+  const catalog = buildCapabilityCatalogSnapshot({
+    invocationId,
+    preferredAgentId: null,
+    agentCandidate: null,
+    tools: [catalogTool],
+    knowledgeSources: [],
+    sourceRefs: ["test-fixture:tool-capability-catalog"],
+  });
   await db.insert(executionBindingTable).values({
-    ...testCapabilityCatalogBindingFields(invocationId),
+    capabilityCatalogJson: catalog.snapshot,
+    capabilityCatalogDigest: catalog.digest,
+    capabilityCatalogVersion: catalog.version,
+    capabilityCatalogSourceRefs: catalog.sourceRefs,
+    capabilityCatalogCreatedAt: catalog.createdAt,
+    executionSubjectType: "user",
+    executionSubjectId: "test-user",
+    executionSubjectSource: "authenticated_user",
+    executionSubjectFrozenAt: new Date(),
     invocationId,
     tenantId: TENANT,
     runtimeRevisionId: "runtime-rev-fake",
@@ -299,6 +383,7 @@ async function getDecisions(toolCallId: string) {
 
 beforeEach(async () => {
   await resetDatabase(db);
+  catalogTool = null;
   process.env.SNOW_AUTH_MODE = "dev";
   process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
   await ensureDefaultTenant();
@@ -310,7 +395,48 @@ afterEach(() => {
 });
 
 describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () => {
-  it("allow：ToolCall→running + PermissionDecision(allow)；Executor 不在此执行（§18.1）", async () => {
+  it("同一 Tool 的 actual arguments 在 canonical service 分别产生 allow/block/pause", async () => {
+    const { toolId, schemaHash } = await seedToolchain();
+    const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [
+      rule({
+        ruleKey: "block-secret",
+        argMatcher: { pathRegex: "^secret" },
+        decision: "block",
+        priority: 20,
+      }),
+      rule({
+        ruleKey: "pause-sensitive",
+        argMatcher: { pathRegex: "^sensitive" },
+        decision: "pause",
+        priority: 10,
+      }),
+    ]);
+    const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+    await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+    await seedThread("t-1");
+    await seedRunningTurn("t-1", "turn-1", invocationId);
+    const call = (operation_id: string, path: string) =>
+      POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({
+            invocation_id: invocationId,
+            tool_id: toolId,
+            schema_hash: schemaHash,
+            operation_id,
+            arguments: { path },
+          }),
+        ),
+      );
+    const allowed = await call("op-allow", "/safe/file.txt");
+    const blocked = await call("op-block", "/secret/file.txt");
+    const paused = await call("op-pause", "/sensitive/file.txt");
+    expect((await allowed.json()).call_state).toBe("queued");
+    expect((await blocked.json()).error.code).toBe("POLICY_BLOCKED");
+    expect((await paused.json()).call_state).toBe("paused");
+  });
+
+  it("allow：ToolCall→queued + immutable ToolExecutionBinding，Provider 尚未开始", async () => {
     const { toolId, schemaHash } = await seedToolchain();
     const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
@@ -324,7 +450,7 @@ describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", 
     );
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.call_state).toBe("running");
+    expect(json.call_state).toBe("queued");
     expect(json.decision).toBe("allow");
     expect(json.decision_sequence).toBe(1);
     expect(json.schema_revision_id).toBeTruthy();
@@ -333,7 +459,17 @@ describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", 
     const tc = await singleRow(
       db.select().from(toolCallTable).where(eq(toolCallTable.id, json.tool_call_id)),
     );
-    expect(tc.callState).toBe("running");
+    expect(tc.callState).toBe("queued");
+    expect(tc.startedAt).toBeNull();
+    const [executionBinding] = await db
+      .select()
+      .from(toolExecutionBindingTable)
+      .where(eq(toolExecutionBindingTable.toolCallId, tc.id));
+    expect(executionBinding).toMatchObject({
+      providerType: "webhook",
+      executorKind: "webhook.post_json",
+      credentialRefId: null,
+    });
     const decisions = await getDecisions(json.tool_call_id);
     expect(decisions).toHaveLength(1);
     expect(decisions[0]!.decision).toBe("allow");
@@ -452,6 +588,544 @@ describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", 
     // 同一 ToolCall 只产生一次决策
     const decisions = await getDecisions(json1.tool_call_id);
     expect(decisions).toHaveLength(1);
+  });
+
+  it("幂等摘要使用规范 JSON：对象键顺序不同仍重放同一 ToolCall", async () => {
+    const { toolId, schemaHash } = await seedToolchain();
+    const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+    const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+    await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+
+    const base = {
+      invocation_id: invocationId,
+      tool_id: toolId,
+      schema_hash: schemaHash,
+    };
+    const first = await POST(
+      gatewayRequest(
+        gatewayToken(invocationId),
+        toolCallBody({ ...base, arguments: { path: "/tmp/foo.txt", mode: "append" } }),
+      ),
+    );
+    const second = await POST(
+      gatewayRequest(
+        gatewayToken(invocationId),
+        toolCallBody({ ...base, arguments: { mode: "append", path: "/tmp/foo.txt" } }),
+      ),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect((await first.json()).tool_call_id).toBe((await second.json()).tool_call_id);
+    expect(await db.select().from(toolCallTable)).toHaveLength(1);
+  });
+
+  it("模型 arguments 夹带 credential 字段时 fail-closed，且不创建 ToolCall", async () => {
+    const { toolId, schemaHash } = await seedToolchain();
+    const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+    const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+    await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+
+    const response = await POST(
+      gatewayRequest(
+        gatewayToken(invocationId),
+        toolCallBody({
+          invocation_id: invocationId,
+          tool_id: toolId,
+          schema_hash: schemaHash,
+          arguments: { path: "/tmp/foo.txt", token: "must-not-be-forwarded" },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error?.code).toBe("REQUEST_SCHEMA_INVALID");
+    expect(await db.select().from(toolCallTable)).toHaveLength(0);
+  });
+
+  it("queued → worker → real webhook → Effect confirmed → terminal → durable continuation", async () => {
+    let sideEffects = 0;
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        sideEffects += 1;
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "x-request-id": "provider-1",
+        });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("server address missing");
+      const { toolId, schemaHash } = await seedToolchain({
+        endpointRef: `http://127.0.0.1:${address.port}/effect`,
+      });
+      const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+      const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+      await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+      const response = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        ),
+      );
+      const body = await response.json();
+      expect(body.call_state).toBe("queued");
+      const worker = createToolExecutionWorker({
+        workerId: "tool-worker-test",
+        allowLoopbackHttp: true,
+      });
+      await expect(worker.runOnce()).resolves.toBe("executed");
+      await expect(worker.runOnce()).resolves.toBe("idle");
+      expect(sideEffects).toBe(1);
+      const [toolCall] = await db
+        .select()
+        .from(toolCallTable)
+        .where(eq(toolCallTable.id, body.tool_call_id));
+      expect(toolCall?.callState).toBe("succeeded");
+      expect(toolCall?.startedAt).not.toBeNull();
+      const [attempt] = await db
+        .select()
+        .from(toolExecutionAttemptTable)
+        .where(eq(toolExecutionAttemptTable.toolCallId, body.tool_call_id));
+      expect(attempt).toMatchObject({ attemptNo: 1, attemptState: "succeeded" });
+      const [effect] = await db
+        .select()
+        .from(effectRecordTable)
+        .where(eq(effectRecordTable.toolCallId, body.tool_call_id));
+      expect(effect?.effectState).toBe("confirmed_success");
+      const continuations = await db
+        .select()
+        .from(controlPlaneOutboxEvent)
+        .where(eq(controlPlaneOutboxEvent.aggregateId, body.tool_call_id));
+      expect(continuations).toHaveLength(1);
+      expect(continuations[0]?.eventType).toBe("tool_call.continuation.requested");
+      const terminalReplay = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        ),
+      );
+      expect(await terminalReplay.json()).toMatchObject({
+        call_state: "succeeded",
+        result: { ok: true },
+        effect: { effect_state: "confirmed_success" },
+      });
+      let resumedInvocationId: string | null = null;
+      const continuationHandler = createInvocationContinuationHandler({
+        getAgentCall: async () => null,
+        coordinateWaitingUser: async () => undefined,
+        resumeParent: async () => undefined,
+        resumeAfterAgentResponse: async () => undefined,
+        resumeAgentFromUserAction: async () => undefined,
+        getToolCall: async ({ tenantId, toolCallId }) => {
+          const [row] = await db
+            .select()
+            .from(toolCallTable)
+            .where(and(eq(toolCallTable.tenantId, tenantId), eq(toolCallTable.id, toolCallId)))
+            .limit(1);
+          return row ?? null;
+        },
+        resumeToolParent: async ({ invocationId: resumed }) => {
+          resumedInvocationId = resumed;
+        },
+      });
+      await continuationHandler(continuations[0]!);
+      expect(resumedInvocationId).toBe(invocationId);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("webhook 4xx → Attempt/Effect/ToolCall 确定失败并创建 continuation", async () => {
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => response.writeHead(422).end("invalid"));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("server address missing");
+      const { toolId, schemaHash } = await seedToolchain({
+        endpointRef: `http://127.0.0.1:${address.port}/effect`,
+      });
+      const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+      const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+      await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+      const response = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        ),
+      );
+      const body = await response.json();
+      const worker = createToolExecutionWorker({
+        workerId: "permanent-failure-worker",
+        allowLoopbackHttp: true,
+      });
+      await expect(worker.runOnce()).resolves.toBe("executed");
+      const [toolCall] = await db
+        .select()
+        .from(toolCallTable)
+        .where(eq(toolCallTable.id, body.tool_call_id));
+      const [attempt] = await db
+        .select()
+        .from(toolExecutionAttemptTable)
+        .where(eq(toolExecutionAttemptTable.toolCallId, body.tool_call_id));
+      const [effect] = await db
+        .select()
+        .from(effectRecordTable)
+        .where(eq(effectRecordTable.toolCallId, body.tool_call_id));
+      expect(toolCall).toMatchObject({ callState: "failed", errorCode: "PROVIDER_HTTP_422" });
+      expect(attempt).toMatchObject({ attemptState: "failed", retryClass: "permanent" });
+      expect(effect?.effectState).toBe("confirmed_failure");
+      expect(
+        await db
+          .select()
+          .from(controlPlaneOutboxEvent)
+          .where(eq(controlPlaneOutboxEvent.aggregateId, body.tool_call_id)),
+      ).toHaveLength(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("Provider 已产生外部副作用后 worker 崩溃：恢复为 unknown_effect，绝不二次发送", async () => {
+    let sideEffects = 0;
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        sideEffects += 1;
+        response.writeHead(200).end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("server address missing");
+      const endpoint = `http://127.0.0.1:${address.port}/effect`;
+      const { toolId, schemaHash } = await seedToolchain({ endpointRef: endpoint });
+      const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+      const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+      await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+      const response = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        ),
+      );
+      const body = await response.json();
+      const claimed = await claimNextQueuedToolCall({
+        workerId: "crashing-worker",
+        leaseMs: 60_000,
+      });
+      if (!claimed) throw new Error("claim missing");
+      const effect = await createEffectRecord({
+        tenantId: TENANT,
+        toolCallId: body.tool_call_id,
+        effectType: "update",
+        targetSummaryJson: { total: 1 },
+        externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+      });
+      await createEffectTargets({
+        tenantId: TENANT,
+        effectRecordId: effect.id,
+        targets: [{ targetRef: `tool-call:${body.tool_call_id}` }],
+      });
+      await updateToolExecutionAttempt({
+        tenantId: TENANT,
+        attemptId: claimed.attempt.id,
+        fromState: "claimed",
+        toState: "dispatched",
+        externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+        retryClass: "undetermined",
+      });
+      await fetch(endpoint, { method: "POST", body: "{}" });
+      await db
+        .update(toolExecutionAttemptTable)
+        .set({ claimExpiresAt: new Date(0) })
+        .where(eq(toolExecutionAttemptTable.id, claimed.attempt.id));
+      const worker = createToolExecutionWorker({
+        workerId: "recovery-worker",
+        allowLoopbackHttp: true,
+      });
+      await expect(worker.runOnce()).resolves.toBe("recovered");
+      await expect(worker.runOnce()).resolves.toBe("idle");
+      expect(sideEffects).toBe(1);
+      const [toolCall] = await db
+        .select()
+        .from(toolCallTable)
+        .where(eq(toolCallTable.id, body.tool_call_id));
+      expect(toolCall?.callState).toBe("unknown_effect");
+      const [recoveredEffect] = await db
+        .select()
+        .from(effectRecordTable)
+        .where(eq(effectRecordTable.id, effect.id));
+      expect(recoveredEffect?.effectState).toBe("unknown_effect");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("Effect/ToolCall/Attempt 已提交但 worker 崩溃：补发 continuation 且不重放 Provider", async () => {
+    const { toolId, schemaHash } = await seedToolchain();
+    const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+    const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+    await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+    const response = await POST(
+      gatewayRequest(
+        gatewayToken(invocationId),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+      ),
+    );
+    const body = await response.json();
+    const claimed = await claimNextQueuedToolCall({ workerId: "terminal-crash", leaseMs: 60_000 });
+    if (!claimed) throw new Error("claim missing");
+    const effect = await createEffectRecord({
+      tenantId: TENANT,
+      toolCallId: body.tool_call_id,
+      effectType: "update",
+      targetSummaryJson: { total: 1 },
+      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+    });
+    const [target] = await createEffectTargets({
+      tenantId: TENANT,
+      effectRecordId: effect.id,
+      targets: [{ targetRef: `tool-call:${body.tool_call_id}` }],
+    });
+    await updateToolExecutionAttempt({
+      tenantId: TENANT,
+      attemptId: claimed.attempt.id,
+      fromState: "claimed",
+      toState: "dispatched",
+      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+      retryClass: "undetermined",
+    });
+    await reconcileEffect({
+      tenantId: TENANT,
+      toolCallId: body.tool_call_id,
+      path: "gateway",
+      verificationMethod: "provider_query",
+      expectedOperationId: "op-1",
+      targetUpdates: [{ targetHash: target!.targetHash, targetState: "confirmed_success" }],
+      externalResultRef: "provider-success-before-crash",
+      resultSummaryJson: { ok: true },
+    });
+    await updateToolExecutionAttempt({
+      tenantId: TENANT,
+      attemptId: claimed.attempt.id,
+      fromState: "dispatched",
+      toState: "succeeded",
+      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+      providerRequestRef: "provider-success-before-crash",
+      retryClass: "none",
+      finished: true,
+    });
+
+    const worker = createToolExecutionWorker({ workerId: "terminal-recovery" });
+    await expect(worker.runOnce()).resolves.toBe("recovered");
+    await expect(worker.runOnce()).resolves.toBe("idle");
+    const [attempt] = await db
+      .select()
+      .from(toolExecutionAttemptTable)
+      .where(eq(toolExecutionAttemptTable.id, claimed.attempt.id));
+    expect(attempt?.attemptState).toBe("succeeded");
+    const continuations = await db
+      .select()
+      .from(controlPlaneOutboxEvent)
+      .where(eq(controlPlaneOutboxEvent.aggregateId, body.tool_call_id));
+    expect(continuations).toHaveLength(1);
+  });
+
+  it("worker 在 dispatch 前崩溃：过期 claim 安全回队并只执行一次", async () => {
+    let requests = 0;
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        requests += 1;
+        response.writeHead(200, { "content-type": "application/json" }).end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("server address missing");
+      const { toolId, schemaHash } = await seedToolchain({
+        endpointRef: `http://127.0.0.1:${address.port}/effect`,
+      });
+      const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+      const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+      await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+      const response = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        ),
+      );
+      expect((await response.json()).call_state).toBe("queued");
+      expect(
+        await claimNextQueuedToolCall({
+          workerId: "lost-before-dispatch",
+          leaseMs: 1,
+          now: new Date(0),
+        }),
+      ).not.toBeNull();
+      const worker = createToolExecutionWorker({
+        workerId: "replacement-worker",
+        allowLoopbackHttp: true,
+      });
+      await expect(worker.runOnce()).resolves.toBe("recovered");
+      await expect(worker.runOnce()).resolves.toBe("executed");
+      await expect(worker.runOnce()).resolves.toBe("idle");
+      expect(requests).toBe(1);
+      const attempts = await db
+        .select()
+        .from(toolExecutionAttemptTable)
+        .orderBy(asc(toolExecutionAttemptTable.attemptNo));
+      expect(attempts.map((attempt) => attempt.attemptState)).toEqual(["failed", "succeeded"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("无外部幂等保障的 write webhook 超时后进入 unknown_effect 且不自动重放", async () => {
+    let requests = 0;
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        requests += 1;
+        setTimeout(() => response.writeHead(200).end("{}"), 250);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("server address missing");
+      const { toolId, schemaHash } = await seedToolchain({
+        endpointRef: `http://127.0.0.1:${address.port}/effect`,
+        idempotencySupport: "none",
+        timeoutMs: 100,
+      });
+      const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+      const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+      await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+      const response = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        ),
+      );
+      const body = await response.json();
+      const worker = createToolExecutionWorker({
+        workerId: "timeout-worker",
+        allowLoopbackHttp: true,
+      });
+      await expect(worker.runOnce()).resolves.toBe("executed");
+      await expect(worker.runOnce()).resolves.toBe("idle");
+      expect(requests).toBe(1);
+      const [toolCall] = await db
+        .select()
+        .from(toolCallTable)
+        .where(eq(toolCallTable.id, body.tool_call_id));
+      expect(toolCall?.callState).toBe("unknown_effect");
+      const [effect] = await db
+        .select()
+        .from(effectRecordTable)
+        .where(eq(effectRecordTable.toolCallId, body.tool_call_id));
+      expect(effect?.effectState).toBe("unknown_effect");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("有外部幂等键的 5xx 可安全重试并沿用同一 key", async () => {
+    const keys: Array<string | undefined> = [];
+    const server = createServer((request, response) => {
+      keys.push(request.headers["idempotency-key"] as string | undefined);
+      request.resume();
+      request.on("end", () => {
+        if (keys.length === 1) response.writeHead(503).end("retry");
+        else response.writeHead(200, { "content-type": "application/json" }).end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("server address missing");
+      const { toolId, schemaHash } = await seedToolchain({
+        endpointRef: `http://127.0.0.1:${address.port}/effect`,
+      });
+      const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+      const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+      await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+      const response = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        ),
+      );
+      const body = await response.json();
+      const worker = createToolExecutionWorker({
+        workerId: "retry-worker",
+        allowLoopbackHttp: true,
+      });
+      await expect(worker.runOnce()).resolves.toBe("executed");
+      await expect(worker.runOnce()).resolves.toBe("executed");
+      expect(keys).toHaveLength(2);
+      expect(keys[0]).toBe(keys[1]);
+      const attempts = await db
+        .select()
+        .from(toolExecutionAttemptTable)
+        .where(eq(toolExecutionAttemptTable.toolCallId, body.tool_call_id))
+        .orderBy(asc(toolExecutionAttemptTable.attemptNo));
+      expect(attempts.map((attempt) => attempt.attemptState)).toEqual(["failed", "succeeded"]);
+      expect(attempts[0]?.externalIdempotencyKey).toBe(attempts[1]?.externalIdempotencyKey);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("Effect confirmed_partial 不得把 ToolCall 伪装为 succeeded", async () => {
+    const { toolId, schemaHash } = await seedToolchain();
+    const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [rule({})]);
+    const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
+    await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+    const response = await POST(
+      gatewayRequest(
+        gatewayToken(invocationId),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+      ),
+    );
+    const body = await response.json();
+    await claimNextQueuedToolCall({ workerId: "partial-test", leaseMs: 60_000 });
+    const effect = await createEffectRecord({
+      tenantId: TENANT,
+      toolCallId: body.tool_call_id,
+      effectType: "update",
+      targetSummaryJson: { total: 2 },
+      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+    });
+    const targets = await createEffectTargets({
+      tenantId: TENANT,
+      effectRecordId: effect.id,
+      targets: [{ targetRef: "target:one" }, { targetRef: "target:two" }],
+    });
+    const reconciled = await reconcileEffect({
+      tenantId: TENANT,
+      toolCallId: body.tool_call_id,
+      path: "gateway",
+      verificationMethod: "provider_query",
+      expectedOperationId: "op-1",
+      targetUpdates: [
+        { targetHash: targets[0]!.targetHash, targetState: "confirmed_success" },
+        { targetHash: targets[1]!.targetHash, targetState: "confirmed_failure" },
+      ],
+    });
+    expect(reconciled.effectRecord.effectState).toBe("confirmed_partial");
+    expect(reconciled.toolCall.callState).toBe("unknown_effect");
   });
 
   it("冲突：同 (toolId, operationId) 不同 args → 409 OPERATION_PAYLOAD_CONFLICT", async () => {
@@ -644,7 +1318,7 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
     expect(decisions2).toHaveLength(1);
   });
 
-  it("approve：resume same Invocation → 重提交 same ToolCall → Decision#2=allow + running + 执行一次（§20.1/§55.6）", async () => {
+  it("approve：同一 ToolCall 追加 allow 后进入 queued，等待 durable worker", async () => {
     const { toolCallId, userActionRequestId, invocationId, toolId, schemaHash } = await pauseTurn();
     await approve(userActionRequestId);
 
@@ -661,26 +1335,34 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
     expect(json.tool_call_id).toBe(toolCallId);
     expect(json.decision).toBe("allow");
     expect(json.decision_sequence).toBe(2);
-    expect(json.call_state).toBe("running");
+    expect(json.call_state).toBe("queued");
 
     const decisions = await getDecisions(toolCallId);
     expect(decisions).toHaveLength(2);
     expect(decisions[0]!.decision).toBe("pause");
     expect(decisions[1]!.decision).toBe("allow");
     expect(decisions[1]!.policyRevisionId).toBe(decisions[0]!.policyRevisionId);
+    expect(decisions[1]!.decidedBy).toBe("user_action");
+    expect(decisions[1]!.reasonCodesJson).toContain("USER_APPROVED");
 
     const tc = await singleRow(
       db.select().from(toolCallTable).where(eq(toolCallTable.id, toolCallId)),
     );
-    expect(tc.callState).toBe("running");
+    expect(tc.callState).toBe("queued");
 
-    // 执行一次：再提交 → running 重放，不新增决策。
+    // worker 尚未领取时再提交 → queued 重放，不新增决策或执行绑定。
     const res2 = await POST(gatewayRequest(gatewayToken(invocationId), body));
     expect(res2.status).toBe(200);
     const j2 = await res2.json();
-    expect(j2.call_state).toBe("running");
+    expect(j2.call_state).toBe("queued");
     const decisions2 = await getDecisions(toolCallId);
     expect(decisions2).toHaveLength(2);
+    expect(
+      await db
+        .select()
+        .from(toolExecutionBindingTable)
+        .where(eq(toolExecutionBindingTable.toolCallId, toolCallId)),
+    ).toHaveLength(1);
   });
 
   it("deny：ToolCall→cancelled + errorCode=USER_DENIED，不生成 Grant（§20.3/§45）", async () => {

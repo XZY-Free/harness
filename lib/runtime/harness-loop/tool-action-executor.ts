@@ -30,32 +30,6 @@ export function createToolActionExecutor(params: {
     }
     const { tool } = validateHarnessActionAgainstCatalog(action, params.capabilityCatalog);
     if (!tool) throw new Error("TOOL_ACTION_NOT_ALLOWED");
-    if (tool.confirmation === "required") {
-      return {
-        authorityRef: `capability-catalog:${context.invocationId}:${action.actionId}`,
-        observation: {
-          observationType: "tool",
-          summary: `${tool.displayName} 需要用户确认后执行`,
-          sourceRefs: [`tool:${tool.toolId}:schema:${tool.schemaRevisionId}`],
-          data: {
-            state: "waiting_user",
-            toolId: tool.toolId,
-            operationId: tool.operationId,
-          },
-        },
-        waitingForUser: {
-          requestType: "input",
-          purpose: "tool_confirmation",
-          prompt: `确认执行“${tool.displayName}”吗？`,
-          inputSchema: {
-            type: "object",
-            required: ["approved"],
-            properties: { approved: { type: "boolean" } },
-            additionalProperties: false,
-          },
-        },
-      };
-    }
     const result = await executeToolCall({
       tenantId: params.tenantId,
       executionSubject: params.executionSubject,
@@ -74,7 +48,12 @@ export function createToolActionExecutor(params: {
       arguments: action.payload.arguments,
     });
     const authorityRef = `tool-call:${result.toolCallId}`;
-    if (result.state === "proposed" || result.state === "running" || result.state === "paused") {
+    if (
+      result.state === "proposed" ||
+      result.state === "queued" ||
+      result.state === "running" ||
+      result.state === "paused"
+    ) {
       return {
         authorityRef,
         pending: {
@@ -83,7 +62,7 @@ export function createToolActionExecutor(params: {
           state:
             result.state === "paused"
               ? "waiting_user"
-              : result.state === "proposed"
+              : result.state === "proposed" || result.state === "queued"
                 ? "queued"
                 : "running",
         },
@@ -101,6 +80,7 @@ export function createToolActionExecutor(params: {
         data: {
           state: result.state,
           result: result.resultSummary,
+          effectState: result.effectState,
           errorCode: result.errorCode,
         },
       },

@@ -68,5 +68,21 @@ describe("External Runtime continuation resume", () => {
         sourceVersion: 4,
       }),
     );
+    await expect(
+      resume({
+        tenantId: "tenant-1",
+        invocationId: invocation.id,
+        sourceType: "tool_call",
+        agentCallId: "tool-call-1",
+        sourceVersion: 1,
+      }),
+    ).resolves.toMatchObject({ runtime: "external", invocationId: invocation.id });
+    expect(resumeExternal).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sourceType: "tool_call",
+        agentCallId: "tool-call-1",
+        sourceVersion: 1,
+      }),
+    );
   });
 });

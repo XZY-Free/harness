@@ -772,6 +772,85 @@ describe("HarnessLoop", () => {
     },
   );
 
+  it("Tool continuation 恢复 started action 后把 terminal result/effect 回灌同一 Harness", async () => {
+    const recoveredAction = {
+      actionId: "action-tool-1",
+      stepNo: 1,
+      actionType: "tool.call" as const,
+      purposeCode: "notify",
+      shortPurpose: "发送通知",
+      payload: {
+        toolId: "tool-mail",
+        operationId: "send-email",
+        arguments: { recipient: "employee@example.com" },
+      },
+    };
+    const executeTool = vi.fn(async () => ({
+      authorityRef: "tool-call:call-1",
+      observation: {
+        observationType: "tool" as const,
+        summary: "Tool send-email succeeded",
+        sourceRefs: ["tool-call:call-1"],
+        data: {
+          toolCallId: "call-1",
+          state: "succeeded",
+          result: { messageId: "message-1" },
+          effectState: "confirmed_success",
+          errorCode: null,
+        },
+      },
+    }));
+    const loop = new HarnessLoop(
+      baseParams({
+        recoveryPort: {
+          async load() {
+            return {
+              invocationState: "running" as const,
+              nextProducerSequence: 3,
+              observations: [],
+              actionHistory: [
+                {
+                  ...recoveredAction,
+                  action: recoveredAction,
+                  actionDigest: computeCanonicalDigest({
+                    actionType: recoveredAction.actionType,
+                    payload: recoveredAction.payload,
+                  }),
+                  targetRef: "tool-mail:send-email",
+                  state: "started" as const,
+                },
+              ],
+            };
+          },
+        },
+        decisionPort: decisionPort([
+          {
+            actionId: "action-2",
+            stepNo: 2,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "回答",
+            payload: { evidenceRefs: ["tool-call:call-1"] },
+          },
+        ]),
+        executors: { "tool.call": executeTool },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result.completed).toBe(true);
+    expect(executeTool).toHaveBeenCalledOnce();
+    expect(result.observations).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          toolCallId: "call-1",
+          effectState: "confirmed_success",
+        }),
+      }),
+    );
+  });
+
   it("从 started action 恢复到 pending 时保持同一行动，不调用决策与最终回答", async () => {
     const recoveredAction = {
       actionId: "action-1",

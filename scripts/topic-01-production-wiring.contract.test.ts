@@ -13,6 +13,22 @@ describe("Topic 01 production wiring", () => {
     expect(factory).toContain('"tool.call": createToolActionExecutor');
     expect(executor).toContain('from "@/lib/capability/application/execute-harness-tool-call"');
     expect(executor).not.toMatch(/fetch\(|providerEndpoint|endpointRef/);
+    const hostedApplication = source("lib/capability/application/execute-harness-tool-call.ts");
+    const externalGateway = source("app/gateway/v1/tool-calls/route.ts");
+    expect(hostedApplication).toContain("applyToolCall");
+    expect(externalGateway).toContain("applyToolCall");
+    expect(externalGateway).not.toContain("createToolCall");
+  });
+
+  it("Tool worker 真实拥有 Provider、Effect 与 durable continuation", () => {
+    const worker = source("lib/capability/tool-execution-worker.ts");
+    const provider = source("lib/capability/provider-executor.ts");
+    const bootstrap = source("scripts/workers/tool-execution-worker.ts");
+    expect(worker).toContain("claimNextQueuedToolCall");
+    expect(worker).toContain("reconcileEffect");
+    expect(worker).toContain('eventType: "tool_call.continuation.requested"');
+    expect(provider).toContain('method: "POST"');
+    expect(bootstrap).toContain("createToolExecutionWorker");
   });
 
   it("Hosted and External paths use the same catalog-aware production factory", () => {

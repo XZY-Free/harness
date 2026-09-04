@@ -147,6 +147,7 @@ export const resumeHarnessInvocation = createResumeHarnessInvocation({
     invocation,
     binding,
     runtimeRevision,
+    sourceType,
     agentCallId,
     sourceVersion,
   }) {
@@ -160,13 +161,20 @@ export const resumeHarnessInvocation = createResumeHarnessInvocation({
       runtimeEndpoint: runtimeRevision.endpointRef,
       auth,
       invocationId: invocation.id,
-      idempotencyKey: `harness-continuation:${agentCallId}:${sourceVersion}`,
+      idempotencyKey: `harness-continuation:${sourceType}:${agentCallId}:${sourceVersion}`,
       requestBody: {
-        resume_payload: {
-          source: "agent_call_continuation",
-          agent_call_id: agentCallId,
-          source_version: sourceVersion,
-        },
+        resume_payload:
+          sourceType === "tool_call"
+            ? {
+                source: "tool_call_continuation",
+                tool_call_id: agentCallId,
+                source_version: sourceVersion,
+              }
+            : {
+                source: "agent_call_continuation",
+                agent_call_id: agentCallId,
+                source_version: sourceVersion,
+              },
         trace_context: { trace_id: invocation.id, span_id: invocation.id },
         gateway_access: {
           access_token: issueWorkloadToken({

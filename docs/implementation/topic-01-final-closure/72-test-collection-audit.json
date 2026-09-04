@@ -7,15 +7,15 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 271,
-    "db": 106,
+    "unit": 272,
+    "db": 107,
     "integration": 9,
-    "contract": 23,
+    "contract": 24,
     "e2e-web": 3,
     "e2e-desktop": 1,
     "e2e-cross-client": 1
   },
-  "total": 414,
+  "total": 417,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -1855,11 +1855,33 @@
       ]
     },
     {
+      "file": "lib/capability/provider-executor.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/capability/skill-studio-queries.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
       "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/capability/tool-execution-contract.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"

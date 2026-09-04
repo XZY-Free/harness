@@ -24,7 +24,7 @@ import { type ThreadEventActorType, threadTable } from "@/lib/persistence/schema
  * - 必须存在 active ownership（否则无需接管）。
  * - 不能有 unknown_effect（必须先 reconcile 核对）。
  * - 不能有活跃写锁（必须先释放或由系统 revoke）。
- * - 不能有未完成 ToolCall（proposed/paused/running；必须等终态或取消）。
+ * - 不能有未完成 ToolCall（proposed/paused/queued/running；必须等终态或取消）。
  * - owner 心跳必须陈旧（超过阈值）；owner 在线时不允许接管。
  *
  * 不变量：
@@ -59,6 +59,7 @@ export const DEVICE_HEARTBEAT_TIMEOUT_MS = 90_000 as const;
 const TAKEOVER_BLOCKING_TOOL_CALL_STATES: readonly ToolCallState[] = [
   "proposed",
   "paused",
+  "queued",
   "running",
 ];
 
@@ -123,7 +124,7 @@ export interface TakeoverConditions {
   readonly can_takeover: boolean;
   /** 阻塞原因列表（中文，前端直接展示）。 */
   readonly blocking_reasons: readonly string[];
-  /** 未完成 ToolCall 数量（proposed/paused/running）。 */
+  /** 未完成 ToolCall 数量（proposed/paused/queued/running）。 */
   readonly pending_tool_calls: number;
   /** unknown_effect 状态的 EffectRecord 数量。 */
   readonly unknown_effects: number;

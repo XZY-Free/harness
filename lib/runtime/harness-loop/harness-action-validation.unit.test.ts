@@ -29,6 +29,7 @@ const built = buildCapabilityCatalogSnapshot({
       operationId: "send-email",
       schemaRevisionId: "schema-1",
       schemaHash: `sha256:${"1".repeat(64)}`,
+      executionContractDigest: `sha256:${"2".repeat(64)}`,
       displayName: "发送邮件",
       description: "发送邮件",
       inputSchema: {
@@ -38,7 +39,6 @@ const built = buildCapabilityCatalogSnapshot({
         additionalProperties: false,
       },
       sideEffect: "write",
-      confirmation: "required",
       idempotent: true,
     },
   ],
@@ -123,7 +123,7 @@ describe("Harness frozen capability authorization", () => {
       },
       built.snapshot,
     );
-    expect(result.tool?.confirmation).toBe("required");
+    expect(result.tool?.toolId).toBe("tool-mail");
   });
 
   it("拒绝目录外 Knowledge source ref", () => {

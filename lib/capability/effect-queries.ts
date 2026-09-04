@@ -22,7 +22,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { getToolCallById, updateToolCallState } from "@/lib/capability/tool-call-queries";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import {
   ADMIN_VERIFICATION_METHODS,
   EFFECT_STATES,
@@ -367,8 +367,9 @@ export async function createEffectTargets(
 export async function getEffectRecordById(
   tenantId: string,
   effectRecordId: string,
+  tx?: DbOrTx,
 ): Promise<EffectRecord | null> {
-  const [row] = await db
+  const [row] = await (tx ?? db)
     .select()
     .from(effectRecordTable)
     .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.id, effectRecordId)))
@@ -379,8 +380,9 @@ export async function getEffectRecordById(
 export async function getEffectRecordByToolCall(
   tenantId: string,
   toolCallId: string,
+  tx?: DbOrTx,
 ): Promise<EffectRecord | null> {
-  const [row] = await db
+  const [row] = await (tx ?? db)
     .select()
     .from(effectRecordTable)
     .where(
@@ -393,8 +395,9 @@ export async function getEffectRecordByToolCall(
 export async function listEffectTargets(
   tenantId: string,
   effectRecordId: string,
+  tx?: DbOrTx,
 ): Promise<EffectTarget[]> {
-  return db
+  return (tx ?? db)
     .select()
     .from(effectTargetTable)
     .where(
@@ -483,6 +486,8 @@ export interface ReconcileEffectInput {
   evidenceJson?: unknown | null;
   /** 整体外部结果引用；不传则不改。 */
   externalResultRef?: string | null;
+  /** Provider 已脱敏的结果摘要；与 effect/call terminal 在同一事务写入。 */
+  resultSummaryJson?: unknown;
   /** Gateway 路径必填：必须与原 ToolCall.operationId 一致。 */
   expectedOperationId?: string;
   /** 调用者标识（用于审计；本仓储不写 AuditEvent，由调用方在更高层补充）。 */
@@ -512,12 +517,15 @@ export interface ReconcileEffectResult {
  * - EffectRecord 当前状态不能为 confirmed_*（终态不可再 reconcile）；unknown_effect 可多次 reconcile。
  * - 同事务更新：effect_record + effect_target + tool_call.call_state（）。
  * - targetUpdates 中的 targetHash 必须匹配现有 EffectTarget；不存在的抛 EffectTargetNotFoundError。
- * - 派生新 effect_state：confirmed_success/partial → call_state=succeeded；
- * confirmed_failure → call_state=failed；unknown_effect 保持 unknown_effect。
+ * - 派生新 effect_state：confirmed_success → call_state=succeeded；
+ * confirmed_failure → call_state=failed；confirmed_partial → call_state=unknown_effect。
  *
  * 注意：ThreadEvent / AuditEvent 不在本仓储写入；由调用方在更高层同事务或后续写入。
  */
-export async function reconcileEffect(input: ReconcileEffectInput): Promise<ReconcileEffectResult> {
+export async function reconcileEffect(
+  input: ReconcileEffectInput,
+  sourceTx?: DbOrTx,
+): Promise<ReconcileEffectResult> {
   if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
   if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
   if (input.path !== "gateway" && input.path !== "admin") {
@@ -538,7 +546,7 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
   }
 
   // 查询现有 EffectRecord + ToolCall + Targets
-  const record = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
+  const record = await getEffectRecordByToolCall(input.tenantId, input.toolCallId, sourceTx);
   if (!record) {
     throw new EffectNotFoundError(
       `EffectRecord 不存在或跨租户不可见（toolCallId=${input.toolCallId}）`,
@@ -554,10 +562,13 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
     throw new EffectAlreadyConfirmedError(record.id, record.effectState);
   }
 
-  const toolCall = await getToolCallById({
-    tenantId: input.tenantId,
-    toolCallId: input.toolCallId,
-  });
+  const toolCall = await getToolCallById(
+    {
+      tenantId: input.tenantId,
+      toolCallId: input.toolCallId,
+    },
+    sourceTx,
+  );
   if (!toolCall) {
     throw new EffectNotFoundError(`ToolCall 不存在或跨租户不可见: ${input.toolCallId}`);
   }
@@ -567,7 +578,7 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
     throw new EffectOperationMismatchError(input.expectedOperationId ?? "", toolCall.operationId);
   }
 
-  const existingTargets = await listEffectTargets(input.tenantId, record.id);
+  const existingTargets = await listEffectTargets(input.tenantId, record.id, sourceTx);
   const targetByHash = new Map<string, EffectTarget>();
   for (const t of existingTargets) {
     targetByHash.set(t.targetHash, t);
@@ -585,7 +596,7 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
 
   // 在事务内更新 effect_target + effect_record + tool_call.call_state
   const now = new Date();
-  return db.transaction(async (tx) => {
+  const applyReconciliation = async (tx: DbOrTx) => {
     // 1. 更新各 EffectTarget
     for (const update of input.targetUpdates) {
       const setFields: Record<string, unknown> = {
@@ -651,20 +662,23 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
       );
 
     // 4. 同步更新 ToolCall.call_state（）
-    // - confirmed_success/partial → succeeded
+    // - confirmed_success → succeeded
+    // - confirmed_partial → unknown_effect
     // - confirmed_failure → failed
     // - unknown_effect 保持原状（仍为 unknown_effect 或其他）
     // - not_started 不应该出现在 reconcile（ EffectRecord 创建时若已有副作用应直接进入 unknown_effect；
     // 但若所有 target 都是 unknown，新派生状态也是 unknown_effect）
     let newCallState: typeof toolCall.callState | null = null;
-    if (newEffectState === "confirmed_success" || newEffectState === "confirmed_partial") {
+    if (newEffectState === "confirmed_success") {
       newCallState = "succeeded";
     } else if (newEffectState === "confirmed_failure") {
       newCallState = "failed";
+    } else if (newEffectState === "confirmed_partial") {
+      newCallState = "unknown_effect";
     }
     // unknown_effect 保持原状；其他情况不迁移
 
-    if (newCallState && toolCall.callState !== newCallState) {
+    if (newCallState) {
       // 直接 DB 更新（不调用 updateToolCallState，因为 reconcile 是状态机的合法路径但
       // 该函数使用全局 db 而非 tx；此处需在事务内更新以保证原子性）。
       // 状态机已校验：unknown_effect → succeeded/failed 是合法迁移
@@ -673,6 +687,9 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
         callState: newCallState,
         updatedAt: now,
       };
+      if (input.resultSummaryJson !== undefined) {
+        toolCallSetFields.resultSummaryJson = input.resultSummaryJson;
+      }
       // 进入 succeeded/failed 时设置 finishedAt（若尚未设置）
       if (newCallState === "succeeded" || newCallState === "failed") {
         if (!toolCall.finishedAt) {
@@ -727,7 +744,8 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
         unknown: unknownCount,
       },
     };
-  });
+  };
+  return sourceTx ? applyReconciliation(sourceTx) : db.transaction(applyReconciliation);
 }
 
 // ─── 便捷函数 ─────────────────────────────────────────────

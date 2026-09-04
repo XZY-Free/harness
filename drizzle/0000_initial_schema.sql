@@ -1718,6 +1718,45 @@ CREATE TABLE `ToolCall` (
 	CONSTRAINT `ToolCall_tool_operationId_uq` UNIQUE(`toolId`,`operationId`)
 );
 --> statement-breakpoint
+CREATE TABLE `ToolExecutionAttempt` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`toolCallId` varchar(36) NOT NULL,
+	`attemptNo` int NOT NULL,
+	`attemptState` enum('claimed','dispatched','succeeded','failed','unknown') NOT NULL,
+	`requestDigest` varchar(71) NOT NULL,
+	`externalIdempotencyKey` varchar(128),
+	`providerRequestRef` varchar(512),
+	`retryClass` varchar(32) NOT NULL,
+	`claimedBy` varchar(128) NOT NULL,
+	`claimExpiresAt` datetime(3) NOT NULL,
+	`startedAt` datetime(3) NOT NULL,
+	`finishedAt` datetime(3),
+	`errorCode` varchar(128),
+	`errorSummary` text,
+	`createdAt` datetime(3) NOT NULL,
+	CONSTRAINT `ToolExecutionAttempt_id` PRIMARY KEY(`id`),
+	CONSTRAINT `ToolExecutionAttempt_toolCall_attemptNo_uq` UNIQUE(`toolCallId`,`attemptNo`)
+);
+--> statement-breakpoint
+CREATE TABLE `ToolExecutionBinding` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`toolCallId` varchar(36) NOT NULL,
+	`toolProviderId` varchar(36) NOT NULL,
+	`providerType` varchar(32) NOT NULL,
+	`connectionId` varchar(36),
+	`authMethod` varchar(32) NOT NULL,
+	`endpointRef` varchar(512),
+	`endpointFingerprint` varchar(71),
+	`credentialRefId` varchar(36),
+	`executorKind` varchar(64) NOT NULL,
+	`executionContractDigest` varchar(71) NOT NULL,
+	`createdAt` datetime(3) NOT NULL,
+	CONSTRAINT `ToolExecutionBinding_id` PRIMARY KEY(`id`),
+	CONSTRAINT `ToolExecutionBinding_toolCall_uq` UNIQUE(`toolCallId`)
+);
+--> statement-breakpoint
 CREATE TABLE `Connection` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
@@ -1778,6 +1817,8 @@ CREATE TABLE `ToolSchemaRevision` (
 	`outputSchemaJson` json,
 	`schemaHash` varchar(128) NOT NULL,
 	`riskMetadataJson` json,
+	`executionContractJson` json NOT NULL,
+	`executionContractDigest` varchar(71) NOT NULL,
 	`revisionState` enum('draft','published','withdrawn') NOT NULL DEFAULT 'draft',
 	`createdBy` varchar(128) NOT NULL,
 	`createdAt` datetime(3) NOT NULL,
@@ -2564,6 +2605,13 @@ ALTER TABLE `SkillSyncBinding` ADD CONSTRAINT `SkillSyncBinding_localSkillId_Ski
 ALTER TABLE `SkillSyncBinding` ADD CONSTRAINT `SkillSyncBinding_localSkillVersionId_SkillVersion_id_fk` FOREIGN KEY (`localSkillVersionId`) REFERENCES `SkillVersion`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `CapabilityReview` ADD CONSTRAINT `CapabilityReview_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ToolCall` ADD CONSTRAINT `ToolCall_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ToolExecutionAttempt` ADD CONSTRAINT `ToolExecutionAttempt_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ToolExecutionAttempt` ADD CONSTRAINT `ToolExecutionAttempt_toolCallId_ToolCall_id_fk` FOREIGN KEY (`toolCallId`) REFERENCES `ToolCall`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_toolCallId_ToolCall_id_fk` FOREIGN KEY (`toolCallId`) REFERENCES `ToolCall`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_toolProviderId_ToolProvider_id_fk` FOREIGN KEY (`toolProviderId`) REFERENCES `ToolProvider`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_connectionId_Connection_id_fk` FOREIGN KEY (`connectionId`) REFERENCES `Connection`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ToolExecutionBinding` ADD CONSTRAINT `ToolExecutionBinding_credentialRefId_CredentialRef_id_fk` FOREIGN KEY (`credentialRefId`) REFERENCES `CredentialRef`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Connection` ADD CONSTRAINT `Connection_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `CredentialRef` ADD CONSTRAINT `CredentialRef_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `CredentialRef` ADD CONSTRAINT `CredentialRef_connectionId_Connection_id_fk` FOREIGN KEY (`connectionId`) REFERENCES `Connection`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2773,6 +2821,8 @@ CREATE INDEX `CapabilityReview_tenant_state_created_idx` ON `CapabilityReview` (
 CREATE INDEX `CapabilityReview_tenant_resource_idx` ON `CapabilityReview` (`tenantId`,`resourceType`,`resourceId`);--> statement-breakpoint
 CREATE INDEX `ToolCall_tenant_invocation_idx` ON `ToolCall` (`tenantId`,`invocationId`);--> statement-breakpoint
 CREATE INDEX `ToolCall_tenant_tool_state_idx` ON `ToolCall` (`tenantId`,`toolId`,`callState`);--> statement-breakpoint
+CREATE INDEX `ToolExecutionAttempt_tenant_state_lease_idx` ON `ToolExecutionAttempt` (`tenantId`,`attemptState`,`claimExpiresAt`);--> statement-breakpoint
+CREATE INDEX `ToolExecutionBinding_tenant_provider_idx` ON `ToolExecutionBinding` (`tenantId`,`toolProviderId`);--> statement-breakpoint
 CREATE INDEX `Connection_tenant_lifecycle_updated_idx` ON `Connection` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
 CREATE INDEX `CredentialRef_tenant_connectionId_idx` ON `CredentialRef` (`tenantId`,`connectionId`);--> statement-breakpoint
 CREATE INDEX `CredentialRef_tenant_fingerprint_idx` ON `CredentialRef` (`tenantId`,`fingerprint`);--> statement-breakpoint

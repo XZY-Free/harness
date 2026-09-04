@@ -1110,6 +1110,51 @@ export function checkFinalClosureBoundaryGate(
   ) {
     failures.push("Capability Catalog 未从 exact AgentContractSnapshot 投影场景声明");
   }
+  if (
+    productionCatalog.includes("evaluatePolicy") ||
+    /arguments\s*:\s*\{\s*\}/.test(productionCatalog)
+  ) {
+    failures.push("Capability Catalog 仍以空 arguments 承担最终 Tool 权限判断");
+  }
+  if (
+    !productionCatalog.includes("createProductionProviderExecutorRegistry") ||
+    !productionCatalog.includes("registry.supports")
+  ) {
+    failures.push("Capability Catalog 未排除没有 production executor 的 Provider");
+  }
+
+  const toolAction = stripComments(source("lib/runtime/harness-loop/tool-action-executor.ts"));
+  if (/tool\.confirmation|purpose:\s*["']tool_confirmation["']/.test(toolAction)) {
+    failures.push("Harness tool.call 仍根据 Catalog confirmation 自建确认 Authority");
+  }
+  const harnessToolApplication = stripComments(
+    source("lib/capability/application/execute-harness-tool-call.ts"),
+  );
+  const gatewayToolRoute = stripComments(source("app/gateway/v1/tool-calls/route.ts"));
+  if (
+    !harnessToolApplication.includes("applyToolCall") ||
+    !gatewayToolRoute.includes("applyToolCall")
+  ) {
+    failures.push("Hosted 与 External ToolCall 未共用 canonical application service");
+  }
+  for (const document of documents) {
+    if (document.path.includes(".test.")) continue;
+    if (
+      document.path !== "lib/capability/application/apply-tool-call.ts" &&
+      document.path !== "lib/capability/tool-call-queries.ts" &&
+      /\bcreateToolCall\s*\(/.test(stripComments(document.source))
+    ) {
+      failures.push(`生产 ToolCall 被非 canonical service 创建：${document.path}`);
+    }
+  }
+  const toolWorker = stripComments(source("lib/capability/tool-execution-worker.ts"));
+  if (
+    !toolWorker.includes("claimNextQueuedToolCall") ||
+    !toolWorker.includes("ProviderExecutionError") ||
+    !toolWorker.includes("appendToolContinuation")
+  ) {
+    failures.push("durable Tool worker 未接通 Provider/terminal/Continuation");
+  }
 
   const knowledgeQueries = stripComments(source("lib/context/knowledge-queries.ts"));
   const searchStart = knowledgeQueries.indexOf("export async function searchKnowledgeEvidence");

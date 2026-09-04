@@ -147,6 +147,12 @@ export const AgentCallContinuationRequestedPayload = z.object({
   user_action_request_id: id.optional(),
 });
 
+export const ToolCallContinuationRequestedPayload = z.object({
+  parent_invocation_id: id,
+  tool_call_id: id,
+  kind: z.literal("resume_parent"),
+});
+
 // ─── 事件类型 → Payload Schema 映射 ─────────────────────────
 
 /**
@@ -172,6 +178,7 @@ export const EVENT_PAYLOAD_SCHEMAS: Record<ControlPlaneEventType, z.ZodType> = {
   "policy.revision.published": PolicyRevisionPublishedPayload,
   "policy.revision.withdrawn": PolicyRevisionWithdrawnPayload,
   "agent_call.continuation.requested": AgentCallContinuationRequestedPayload,
+  "tool_call.continuation.requested": ToolCallContinuationRequestedPayload,
 };
 
 // ─── 事件类型 → 聚合根类型 映射 ──────────────────────────────
@@ -197,6 +204,7 @@ export const EVENT_AGGREGATE_TYPES: Record<ControlPlaneEventType, string> = {
   "policy.revision.published": "policy_revision",
   "policy.revision.withdrawn": "policy_revision",
   "agent_call.continuation.requested": "agent_call",
+  "tool_call.continuation.requested": "tool_call",
 };
 
 // ─── Payload 验证 ─────────────────────────────────────────────

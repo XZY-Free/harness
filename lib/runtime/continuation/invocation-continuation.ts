@@ -1,5 +1,6 @@
 import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
 import type { ControlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import type { ToolCall } from "@/lib/persistence/schema/tool-call";
 
 export const INVOCATION_CONTINUATION_CONSUMER = "invocation_continuation";
 export const INVOCATION_CONTINUATION_MAX_ATTEMPTS = 8;
@@ -94,6 +95,12 @@ export interface InvocationContinuationDependencies {
     agentCallId: string;
     sourceVersion: number;
   }): Promise<unknown>;
+  getToolCall?(params: { tenantId: string; toolCallId: string }): Promise<ToolCall | null>;
+  resumeToolParent?(params: {
+    tenantId: string;
+    invocationId: string;
+    toolCallId: string;
+  }): Promise<unknown>;
 }
 
 interface ParsedContinuation {
@@ -108,6 +115,41 @@ export function createInvocationContinuationHandler(
   dependencies: InvocationContinuationDependencies,
 ) {
   return async (event: ControlPlaneOutboxEvent): Promise<void> => {
+    if (event.eventType === "tool_call.continuation.requested") {
+      const payload = asRecord(event.payloadJson);
+      const invocationId = payload?.parent_invocation_id;
+      const toolCallId = payload?.tool_call_id;
+      if (
+        typeof invocationId !== "string" ||
+        typeof toolCallId !== "string" ||
+        payload?.kind !== "resume_parent" ||
+        event.aggregateId !== toolCallId ||
+        !dependencies.getToolCall ||
+        !dependencies.resumeToolParent
+      ) {
+        throw new InvocationContinuationPermanentError(
+          "CONTINUATION_EVENT_INVALID",
+          "Tool continuation payload 无效",
+        );
+      }
+      const toolCall = await dependencies.getToolCall({ tenantId: event.tenantId, toolCallId });
+      if (
+        !toolCall ||
+        toolCall.invocationId !== invocationId ||
+        !["succeeded", "failed", "cancelled", "unknown_effect"].includes(toolCall.callState)
+      ) {
+        throw new InvocationContinuationPermanentError(
+          "CONTINUATION_AUTHORITY_MISMATCH",
+          "Tool continuation 无法恢复同一父 Invocation",
+        );
+      }
+      await dependencies.resumeToolParent({
+        tenantId: event.tenantId,
+        invocationId,
+        toolCallId,
+      });
+      return;
+    }
     if (event.eventType !== "agent_call.continuation.requested") {
       throw new InvocationContinuationPermanentError(
         "CONTINUATION_EVENT_UNSUPPORTED",

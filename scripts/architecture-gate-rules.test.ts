@@ -124,7 +124,17 @@ describe("Topic 01 final closure boundary gate", () => {
     ),
     doc(
       "lib/runtime/harness-loop/build-production-capability-catalog.ts",
-      "return { scenarioDeclaration: header.snapshot.scenarioDeclaration, applicableScenarios: header.snapshot.applicableScenarios, excludedScenarios: header.snapshot.excludedScenarios };",
+      "const registry = createProductionProviderExecutorRegistry(); registry.supports(providerType, executorKind); return { scenarioDeclaration: header.snapshot.scenarioDeclaration, applicableScenarios: header.snapshot.applicableScenarios, excludedScenarios: header.snapshot.excludedScenarios };",
+    ),
+    doc(
+      "lib/runtime/harness-loop/tool-action-executor.ts",
+      "return executeHarnessToolCall(input);",
+    ),
+    doc("lib/capability/application/execute-harness-tool-call.ts", "return applyToolCall(input);"),
+    doc("app/gateway/v1/tool-calls/route.ts", "return applyToolCall(input);"),
+    doc(
+      "lib/capability/tool-execution-worker.ts",
+      "claimNextQueuedToolCall(); ProviderExecutionError; appendToolContinuation();",
     ),
     doc(
       "lib/context/knowledge-queries.ts",

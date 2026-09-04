@@ -17,7 +17,7 @@ import {
  * - 校验 action scope: tool.update + resource { type: "tool", id: tool_id }
  *   （创建 SchemaRevision 视为对 Tool 的修改操作；与 GET/PATCH /tools/{tool_id} 一致）。
  * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
- * - 校验请求体（input_schema 必填为对象；output_schema / risk_metadata / description 可选）。
+ * - 校验请求体（input_schema / execution_contract 必填为对象；其余描述字段可选）。
  * - 调用 createToolSchemaRevision 创建 draft SchemaRevision（仓储内分配 revisionNo + 计算 schemaHash）。
  * - completeRecord + 返回 201 + revision 投影。
  *
@@ -26,7 +26,7 @@ import {
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  * - Tool 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
- * - 请求体非法 / input_schema 非对象 → 400 REQUEST_SCHEMA_INVALID
+ * - 请求体非法 / input_schema 或 execution_contract 非对象 → 400 REQUEST_SCHEMA_INVALID
  * - Tool 已 retired → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - 并发 revisionNo 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
@@ -73,6 +73,7 @@ interface CreateToolSchemaRevisionBody {
   input_schema: Record<string, unknown>;
   output_schema?: unknown;
   risk_metadata?: unknown;
+  execution_contract: Record<string, unknown>;
 }
 
 /** 校验请求体。 */
@@ -95,6 +96,13 @@ function validateBody(body: unknown): body is CreateToolSchemaRevisionBody {
   }
   if (b.risk_metadata !== undefined && b.risk_metadata !== null) {
     if (typeof b.risk_metadata !== "object") return false;
+  }
+  if (
+    typeof b.execution_contract !== "object" ||
+    b.execution_contract === null ||
+    Array.isArray(b.execution_contract)
+  ) {
+    return false;
   }
   return true;
 }
@@ -125,6 +133,8 @@ function projectRevision(revision: {
   outputSchemaJson: unknown;
   schemaHash: string;
   riskMetadataJson: unknown;
+  executionContractJson: unknown;
+  executionContractDigest: string;
   revisionState: string;
   createdBy: string;
   createdAt: Date;
@@ -139,6 +149,8 @@ function projectRevision(revision: {
     output_schema: revision.outputSchemaJson,
     schema_hash: revision.schemaHash,
     risk_metadata: revision.riskMetadataJson,
+    execution_contract: revision.executionContractJson,
+    execution_contract_digest: revision.executionContractDigest,
     revision_state: revision.revisionState,
     created_by: revision.createdBy,
     created_at: revision.createdAt.toISOString(),
@@ -187,7 +199,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   if (!validateBody(body)) {
     return schemaInvalidTable(
       requestId,
-      "请求体非法：缺少 input_schema（必须为对象）或字段类型错误",
+      "请求体非法：缺少 input_schema / execution_contract（必须为对象）或字段类型错误",
     );
   }
 
@@ -240,6 +252,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       inputSchemaJson: body.input_schema,
       outputSchemaJson: body.output_schema ?? null,
       riskMetadataJson: body.risk_metadata ?? null,
+      executionContractJson: body.execution_contract,
       createdBy: createdByFromAdminPrincipal(principal),
     });
 
@@ -301,6 +314,8 @@ function projectRevisionForGet(revision: {
   outputSchemaJson: unknown;
   schemaHash: string;
   riskMetadataJson: unknown;
+  executionContractJson: unknown;
+  executionContractDigest: string;
   revisionState: string;
   createdBy: string;
   createdAt: Date;
@@ -315,6 +330,8 @@ function projectRevisionForGet(revision: {
     output_schema_json: revision.outputSchemaJson,
     schema_hash: revision.schemaHash,
     risk_metadata_json: revision.riskMetadataJson,
+    execution_contract_json: revision.executionContractJson,
+    execution_contract_digest: revision.executionContractDigest,
     description: revision.description,
     created_by: revision.createdBy,
     published_at: revision.publishedAt?.toISOString() ?? null,

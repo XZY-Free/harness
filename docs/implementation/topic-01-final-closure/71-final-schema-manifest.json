@@ -4,10 +4,10 @@
   "runtimeSchemaImport": "lib/db/client.ts -> @/lib/persistence/schema",
   "cleanMigration": "drizzle/0000_initial_schema.sql",
   "counts": {
-    "canonical": 120,
-    "runtimeLoaded": 120,
-    "migration": 120,
-    "freshDbPlanned": 120
+    "canonical": 122,
+    "runtimeLoaded": 122,
+    "migration": 122,
+    "freshDbPlanned": 122
   },
   "tables": [
     "Agent",
@@ -106,6 +106,8 @@
     "ThreadRelation",
     "Tool",
     "ToolCall",
+    "ToolExecutionAttempt",
+    "ToolExecutionBinding",
     "ToolProvider",
     "ToolSchemaRevision",
     "Turn",

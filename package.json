@@ -41,6 +41,7 @@
     "worker:hosted-provisioning": "tsx scripts/workers/hosted-provisioning-worker.ts",
     "worker:control-plane-outbox": "tsx scripts/workers/control-plane-outbox-worker.ts",
     "worker:runtime-dispatch-retry": "tsx scripts/workers/runtime-dispatch-retry-worker.ts",
+    "worker:tool-execution": "tsx scripts/workers/tool-execution-worker.ts",
     "routes:rebuild-eligibility": "tsx scripts/routes-rebuild-eligibility.ts",
     "verify": "node scripts/topic-01-acceptance.mjs --profile verify",
     "verify:quick": "node scripts/topic-01-acceptance.mjs --profile quick",

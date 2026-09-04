@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
  * - artifact_ref：扫描 Artifact.contentRef 非空且格式合法（受管引用前缀）。
  * - legal_hold：扫描 active Legal Hold 仍存在（validUntil 未过期）。
  * - deletion_evidence：扫描 completed DeletionStep 含 evidenceRef。
- * - tool_call_pending：扫描未完成 ToolCall 保持 proposed/paused/running（不伪造 succeeded）。
+ * - tool_call_pending：扫描未完成 ToolCall 保持 proposed/paused/queued/running（不伪造 succeeded）。
  * - unknown_effect：扫描 unknown_effect ToolCall 保持状态（不自动重放）。
  * - job_recovery：扫描 queued/running Job 存在（不丢失）。
  * - user_action_wait：扫描 pending UserActionRequest 保持 pending（不超时静默失败）。
@@ -354,7 +354,7 @@ async function checkDeletionEvidence(
 // ─── tool_call_pending：未完成 ToolCall 保持 pending ──────
 
 /**
- * 核对未完成 ToolCall 保持 proposed/paused/running（不伪造 succeeded）。
+ * 核对未完成 ToolCall 保持 proposed/paused/queued/running（不伪造 succeeded）。
  *
  * 故障注入后，未完成的 ToolCall 不应被标记为 succeeded（伪造完成）。
  *
@@ -363,14 +363,14 @@ async function checkDeletionEvidence(
 async function checkToolCallPending(
   tenantId: string,
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
-  // 查询 pending 状态的 ToolCall（proposed/paused/running）
+  // 查询 pending 状态的 ToolCall（proposed/paused/queued/running）
   const pendingCalls = await db
     .select({ id: toolCallTable.id, callState: toolCallTable.callState })
     .from(toolCallTable)
     .where(
       and(
         eq(toolCallTable.tenantId, tenantId),
-        inArray(toolCallTable.callState, ["proposed", "paused", "running"]),
+        inArray(toolCallTable.callState, ["proposed", "paused", "queued", "running"]),
       ),
     );
 

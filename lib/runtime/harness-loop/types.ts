@@ -153,7 +153,6 @@ export interface HarnessLoopView {
         description: string;
         inputSchema: Record<string, unknown>;
         sideEffect: string;
-        confirmation: string;
         idempotent: boolean;
       }>;
       knowledgeSources: Array<{

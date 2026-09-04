@@ -13,7 +13,7 @@
  * - getToolCallById：按 id 查询（跨租户隔离）。
  * - getToolCallByOperation：按 (toolId, operationId) 查询（幂等回查）。
  * - listToolCallsByInvocation：列出某 Invocation 的全部 ToolCall（按 callSequence 升序）。
- * - updateToolCallState：更新调用状态（proposed → running → succeeded/failed/cancelled）。
+ * - updateToolCallState：更新调用状态（proposed → queued → running → terminal）。
  *
  * 关键约束：
  * - 稳定边界是单次 ToolCall（）：调用开始时固定 schemaHash，不可变。
@@ -25,8 +25,9 @@
  * - schemaHash 必须以 `sha256:` 开头。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { type DbOrTx, db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
@@ -103,6 +104,7 @@ export class ToolCallSequenceConflictError extends Error {
 const VALID_TOOL_CALL_STATES = new Set<string>([
   "proposed",
   "paused",
+  "queued",
   "running",
   "succeeded",
   "failed",
@@ -131,7 +133,7 @@ function assertValidHash(hash: string, label: string): void {
 /**
  * 计算脱敏参数的 argumentsHash。
  *
- * 公式：sha256(JSON.stringify(argumentsRedactedJson))，带 sha256: 前缀。
+ * 公式：RFC 8785 canonical JSON 的 sha256，带 sha256: 前缀。
  *
  * - 同一 operation_id 下相同脱敏参数产生相同 hash（幂等回查）。
  * - 同一 operation_id 下不同脱敏参数产生不同 hash → ToolCallConflictError（TOOL_SCHEMA_CHANGED）。
@@ -149,9 +151,14 @@ export function computeArgumentsHash(argumentsRedactedJson: unknown): string {
       "argumentsRedactedJson 必须为非空 JSON 对象",
     );
   }
-  const payload = JSON.stringify(argumentsRedactedJson);
-  const hex = createHash("sha256").update(payload, "utf-8").digest("hex");
-  return `sha256:${hex}`;
+  try {
+    return computeCanonicalDigest(argumentsRedactedJson);
+  } catch {
+    throw new ToolCallValidationError(
+      "invalid_arguments",
+      "argumentsRedactedJson 必须是可规范化的 JSON 对象",
+    );
+  }
 }
 
 // ─── createToolCall ───────────────────────────────────────
@@ -189,7 +196,7 @@ export interface CreateToolCallParams {
  *
  * 流程：
  * 1. 校验入参（tenantId/invocationId/toolId 必填、schemaHash/argumentsHash 格式）。
- * 2. 计算 argumentsHash = sha256(JSON.stringify(argumentsRedactedJson))。
+ * 2. 计算 argumentsHash = sha256(RFC8785(argumentsRedactedJson))。
  * 3. 幂等回查：按 (toolId, operationId) 查询已存在行。
  * - 若已存在且 argumentsHash 相同 → 返回已存在行（幂等）。
  * - 若已存在但 argumentsHash 不同 → 抛 ToolCallConflictError（TOOL_SCHEMA_CHANGED）。
@@ -387,9 +394,10 @@ export async function listToolCallsByInvocation(params: {
 
 /** ToolCall 状态机：合法迁移映射。 */
 const TOOL_CALL_STATE_TRANSITIONS: Record<ToolCallState, readonly ToolCallState[]> = {
-  proposed: ["running", "paused", "cancelled"],
-  paused: ["running", "cancelled"],
-  running: ["succeeded", "failed", "cancelled", "unknown_effect", "paused"],
+  proposed: ["queued", "paused", "cancelled"],
+  paused: ["queued", "cancelled"],
+  queued: ["running", "cancelled"],
+  running: ["queued", "succeeded", "failed", "cancelled", "unknown_effect", "paused"],
   succeeded: [], // 终态
   failed: [], // 终态
   cancelled: [], // 终态
@@ -449,7 +457,28 @@ export async function updateToolCallState(
   }
 
   if (current.callState === params.toState) {
-    // 同状态：允许更新 result/error 字段（如 running → running 补充部分结果），不视为非法迁移。
+    const sameStateUpdates: Record<string, unknown> = { updatedAt: new Date() };
+    if (params.resultSummaryJson !== undefined) {
+      sameStateUpdates.resultSummaryJson = params.resultSummaryJson;
+    }
+    if (params.resultArtifactId !== undefined)
+      sameStateUpdates.resultArtifactId = params.resultArtifactId;
+    if (params.errorCode !== undefined) sameStateUpdates.errorCode = params.errorCode;
+    if (params.errorSummary !== undefined) sameStateUpdates.errorSummary = params.errorSummary;
+    if (Object.keys(sameStateUpdates).length > 1) {
+      await source
+        .update(toolCallTable)
+        .set(sameStateUpdates)
+        .where(
+          and(eq(toolCallTable.tenantId, params.tenantId), eq(toolCallTable.id, params.toolCallId)),
+        );
+      return (
+        (await getToolCallById(
+          { tenantId: params.tenantId, toolCallId: params.toolCallId },
+          source,
+        )) ?? current
+      );
+    }
     return current;
   }
 

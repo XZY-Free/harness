@@ -1,5 +1,6 @@
 import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/resume-agent-call-from-user-action";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
+import { getToolCallById } from "@/lib/capability/tool-call-queries";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
@@ -87,6 +88,16 @@ const handler = createInvocationContinuationHandler({
     if (!call || call.state === "running") return;
     await resumeHarnessInvocation(params);
   },
+  getToolCall: (params) =>
+    getToolCallById({ tenantId: params.tenantId, toolCallId: params.toolCallId }),
+  resumeToolParent: (params) =>
+    resumeHarnessInvocation({
+      tenantId: params.tenantId,
+      invocationId: params.invocationId,
+      sourceType: "tool_call",
+      agentCallId: params.toolCallId,
+      sourceVersion: 1,
+    }),
 });
 
 export function createProductionInvocationContinuationWorker(workerId?: string) {
