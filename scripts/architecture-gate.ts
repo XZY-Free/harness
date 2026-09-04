@@ -127,10 +127,7 @@ function checkSchemaAuthority(): void {
     .filter((name): name is string => Boolean(name))
     .sort();
   const manifest = JSON.parse(
-    readFileSync(
-      resolve(ROOT, "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json"),
-      "utf8",
-    ),
+    readFileSync(resolve(ROOT, "docs/topic-01/evidence/schema-manifest.json"), "utf8"),
   ) as {
     counts: { canonical: number; freshDbPlanned: number };
     tables: string[];
@@ -152,16 +149,10 @@ function checkSchemaAuthority(): void {
 
 function checkFinalClosureBoundaries(): void {
   const inventory = JSON.parse(
-    readFileSync(
-      resolve(ROOT, "docs/implementation/topic-01-final-closure/70-schema-table-inventory.json"),
-      "utf8",
-    ),
+    readFileSync(resolve(ROOT, "docs/topic-01/evidence/schema-inventory.json"), "utf8"),
   ) as { tables: Array<{ schemaDeclaration: string }> };
   const audit = JSON.parse(
-    readFileSync(
-      resolve(ROOT, "docs/implementation/topic-01-final-closure/72-test-collection-audit.json"),
-      "utf8",
-    ),
+    readFileSync(resolve(ROOT, "docs/topic-01/evidence/test-collection.json"), "utf8"),
   ) as { tests: Array<{ file: string; group: string }> };
   const schemaFiles = new Set(
     inventory.tables.map((table) => table.schemaDeclaration.split("#", 1)[0] as string),

@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: pnpm/action-setup@v4
         with:
           package_manager: true
@@ -27,3 +29,6 @@ jobs:
           sudo apt-get install -y xvfb gnome-keyring dbus-x11
       - name: Run the shared verification plan
         run: pnpm topic01:acceptance
+        env:
+          TOPIC01_REMOTE_HEAD_SHA: ${{ github.sha }}
+          TOPIC01_GITHUB_CI: passed

@@ -5,16 +5,21 @@ const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
   scripts: Record<string, string>;
 };
-const plan = JSON.parse(
-  readFileSync("docs/implementation/topic-01-final-closure/73-verification-plan.json", "utf8"),
-) as { stages: Array<{ id: string }> };
+const plan = JSON.parse(readFileSync("docs/topic-01/evidence/verification-plan.json", "utf8")) as {
+  stages: Array<{ id: string }>;
+};
 
 describe("final CI workflow contract", () => {
   it("CI、verify 与完整验收共用机器验证计划", () => {
     expect(workflow).toContain("run: pnpm topic01:acceptance");
+    expect(workflow).toContain("ref: ${{ github.sha }}");
     expect(packageJson.scripts.verify).toContain("topic-01-acceptance.mjs --profile verify");
     expect(packageJson.scripts["topic01:acceptance"]).toBe("node scripts/topic-01-acceptance.mjs");
-    expect(plan.stages).toHaveLength(13);
+    expect(plan.stages).toHaveLength(14);
+    expect(workflow).not.toContain("docs/V12/01");
+    expect(workflow).not.toContain("topic-01-final-closure");
+    expect(workflow).toContain("TOPIC01_REMOTE_HEAD_SHA: ${{ github.sha }}");
+    expect(workflow).toContain("TOPIC01_GITHUB_CI: passed");
   });
 
   it("本地确定性安全门禁不依赖外部 audit 端点", () => {

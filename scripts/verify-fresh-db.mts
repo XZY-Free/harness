@@ -6,10 +6,7 @@ import mysql from "mysql2/promise";
 
 const ROOT = process.cwd();
 const EXPECTED_TABLES = JSON.parse(
-  readFileSync(
-    resolve(ROOT, "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json"),
-    "utf8",
-  ),
+  readFileSync(resolve(ROOT, "docs/topic-01/evidence/schema-manifest.json"), "utf8"),
 ) as { counts: { freshDbPlanned: number }; tables: string[] };
 
 function loadEnvFile(path: string): Record<string, string> {

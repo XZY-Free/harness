@@ -1,8 +1,9 @@
 {
-  "generatedAt": "2026-09-04",
+  "schemaVersion": 2,
   "canonicalRoot": "lib/persistence/schema/index.ts",
   "runtimeSchemaImport": "lib/db/client.ts -> @/lib/persistence/schema",
   "cleanMigration": "drizzle/0000_initial_schema.sql",
+  "inventory": "docs/topic-01/evidence/schema-inventory.json",
   "counts": {
     "canonical": 122,
     "runtimeLoaded": 122,
@@ -136,27 +137,24 @@
   "frameworkMetadataExclusions": [
     {
       "physicalTableName": "__drizzle_migrations",
-      "reason": "Drizzle migration runner 内部元数据，不属于应用 Canonical Schema。"
+      "reason": "Drizzle migration runner 元数据，不属于应用 Canonical Schema"
     }
   ],
-  "deletedFromBaseline123": [
+  "deletedFromBaseline": [
     {
       "physicalTableName": "MemoryIndex",
-      "baseline": "旧 123 表清单",
       "decision": "delete",
-      "reason": "无生产 writer、reader、worker 或运维消费者，属于未落地空壳表。"
+      "reason": "无生产 writer、reader、worker 或运维消费者"
     },
     {
       "physicalTableName": "WorkspaceMergeConflict",
-      "baseline": "旧 123 表清单",
       "decision": "delete",
-      "reason": "无生产 writer、reader、worker 或运维消费者，属于未落地空壳表。"
+      "reason": "无生产 writer、reader、worker 或运维消费者"
     },
     {
       "physicalTableName": "WorkspaceOverlay",
-      "baseline": "旧 123 表清单",
       "decision": "delete",
-      "reason": "无生产 writer、reader、worker 或运维消费者，属于未落地空壳表。"
+      "reason": "无生产 writer、reader、worker 或运维消费者"
     }
   ]
 }

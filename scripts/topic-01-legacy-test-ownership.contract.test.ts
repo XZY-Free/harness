@@ -20,10 +20,7 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const CONFIG_PATH = join(ROOT, "vitest.config.ts");
-const AUDIT_PATH = join(
-  ROOT,
-  "docs/implementation/topic-01-final-closure/72-test-collection-audit.json",
-);
+const AUDIT_PATH = join(ROOT, "docs/topic-01/evidence/test-collection.json");
 const LEGACY_DB_TEST = "lib/db/studio-queries.test.ts";
 const LEGACY_POLICY_TEST = "lib/policy/config.test.ts";
 const CANONICAL_DB_TEST = "lib/capability/skill-studio-queries.test.ts";
@@ -73,7 +70,7 @@ describe("Topic01 legacy vitest exclusion cleanup contract", () => {
   });
 
   it("机器清单把正式路径唯一归入串行真实 MySQL db project", () => {
-    expect(config).toContain("72-test-collection-audit.json");
+    expect(config).toContain("docs/topic-01/evidence/test-collection.json");
     const entries = audit.tests.filter((test) => test.file === CANONICAL_DB_TEST);
     expect(entries).toEqual([
       expect.objectContaining({

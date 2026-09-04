@@ -128,10 +128,7 @@ describe("Schema 单一 Authority", () => {
   });
 
   it("Canonical Root、Runtime、Migration 与最终 manifest 完全一致", () => {
-    const manifestPath = join(
-      ROOT,
-      "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json",
-    );
+    const manifestPath = join(ROOT, "docs/topic-01/evidence/schema-manifest.json");
     expect(existsSync(manifestPath), "最终 Schema manifest 必须存在").toBe(true);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
       counts: { canonical: number };

@@ -10,10 +10,7 @@ import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(
-  readFileSync(
-    join(process.cwd(), "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json"),
-    "utf8",
-  ),
+  readFileSync(join(process.cwd(), "docs/topic-01/evidence/schema-manifest.json"), "utf8"),
 ) as { counts: { freshDbPlanned: number }; tables: string[] };
 
 beforeEach(async () => {

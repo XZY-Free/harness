@@ -3,10 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { relative, resolve } from "node:path";
 
 const ROOT = process.cwd();
-const OUTPUT = resolve(
-  ROOT,
-  "docs/implementation/topic-01-final-closure/72-test-collection-audit.json",
-);
+const OUTPUT = resolve(ROOT, "docs/topic-01/evidence/test-collection.json");
 const GROUPS = [
   "unit",
   "db",
@@ -92,7 +89,7 @@ function build() {
     GROUPS.map((group) => [group, tests.filter((test) => test.group === group).length]),
   );
   return {
-    generatedAt: "2026-09-04",
+    schemaVersion: 2,
     authority: "scripts/topic-01-test-collection-audit.mjs",
     policy: {
       vitest: "每个 .test.ts/.test.tsx 只进入 unit/db/integration/contract 一个 project",
@@ -132,14 +129,11 @@ function validate(audit) {
   );
   if (renderer.length !== 1) throw new Error("Desktop Renderer 测试不是唯一收集");
   const config = readFileSync(resolve(ROOT, "vitest.config.ts"), "utf8");
-  if (!config.includes("72-test-collection-audit.json")) {
+  if (!config.includes("docs/topic-01/evidence/test-collection.json")) {
     throw new Error("vitest.config.ts 未使用机器清单");
   }
   const plan = JSON.parse(
-    readFileSync(
-      resolve(ROOT, "docs/implementation/topic-01-final-closure/73-verification-plan.json"),
-      "utf8",
-    ),
+    readFileSync(resolve(ROOT, "docs/topic-01/evidence/verification-plan.json"), "utf8"),
   );
   const vitestStage = plan.stages.find((stage) => stage.id === "vitest");
   const flattenedVitest = JSON.stringify(vitestStage?.commands ?? []);
@@ -154,7 +148,7 @@ function validate(audit) {
     throw new Error("非 Vitest 阶段重复执行 Vitest 文件");
   }
   if (!process.argv.includes("--write") && readFileSync(OUTPUT, "utf8") !== stable(audit)) {
-    throw new Error("72-test-collection-audit.json 未更新");
+    throw new Error("test-collection.json 未更新");
   }
 }
 

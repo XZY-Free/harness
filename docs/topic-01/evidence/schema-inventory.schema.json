@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "authority",
+    "counts",
+    "freshDbVerification",
+    "frameworkMetadataExclusions",
+    "baselineChanges",
+    "tables"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "authority": {
+      "type": "string",
+      "minLength": 1
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "canonical",
+        "runtimeLoaded",
+        "migration",
+        "freshDbPlanned"
+      ],
+      "properties": {
+        "canonical": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runtimeLoaded": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "migration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "freshDbPlanned": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "freshDbVerification": {
+      "type": "object",
+      "required": [
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "status": {
+          "const": "planned-for-batch-07"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "frameworkMetadataExclusions": {
+      "type": "array",
+      "minItems": 1
+    },
+    "baselineChanges": {
+      "type": "array"
+    },
+    "tables": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "physicalTableName",
+          "schemaDeclaration",
+          "migrationSource",
+          "domainOwner",
+          "tenantBoundary",
+          "productionWriters",
+          "productionReaders",
+          "lifecycle",
+          "authorityKind",
+          "authorityStatement",
+          "accessException",
+          "duplicateCandidates",
+          "retentionOrGc",
+          "constraints",
+          "decision",
+          "evidence",
+          "notes"
+        ],
+        "properties": {
+          "physicalTableName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "schemaDeclaration": {
+            "type": "string",
+            "minLength": 1
+          },
+          "migrationSource": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "domainOwner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tenantBoundary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "productionWriters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "productionReaders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lifecycle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "authorityKind": {
+            "enum": [
+              "canonical-entity",
+              "binding",
+              "append-only-fact",
+              "projection"
+            ]
+          },
+          "authorityStatement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accessException": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "exceptionReason",
+                  "projectionOwner"
+                ],
+                "properties": {
+                  "exceptionReason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "projectionOwner": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "duplicateCandidates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "retentionOrGc": {
+            "type": "string",
+            "minLength": 1
+          },
+          "constraints": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "const": "keep"
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "baselineSha",
+    "diffRange",
+    "localAcceptanceSha",
+    "remoteHeadSha",
+    "githubCi",
+    "profile",
+    "planPath",
+    "matrixPath",
+    "status",
+    "fullLocalAcceptance",
+    "worktreeCleanBeforeRun",
+    "artifactDigests",
+    "skippedTests",
+    "acceptanceIdResults",
+    "stages"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "baselineSha": { "type": "string", "minLength": 40 },
+    "diffRange": { "type": "string", "minLength": 1 },
+    "localAcceptanceSha": { "type": "string", "minLength": 40 },
+    "remoteHeadSha": { "type": ["string", "null"] },
+    "githubCi": { "enum": ["pending", "passed", "failed"] },
+    "profile": { "type": "string", "minLength": 1 },
+    "planPath": { "const": "docs/topic-01/evidence/verification-plan.json" },
+    "matrixPath": { "const": "docs/topic-01/evidence/acceptance-matrix.json" },
+    "status": { "enum": ["running", "failed", "partial-passed", "local-passed", "closed"] },
+    "fullLocalAcceptance": { "enum": ["running", "failed", "partial", "passed"] },
+    "worktreeCleanBeforeRun": { "const": true },
+    "artifactDigests": { "type": "object" },
+    "skippedTests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "testName", "reason", "acceptanceImpact"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "testName": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 },
+          "acceptanceImpact": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "acceptanceIdResults": { "type": "array" },
+    "stages": { "type": "array" }
+  }
+}

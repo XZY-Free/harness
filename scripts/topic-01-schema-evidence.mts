@@ -1,56 +1,27 @@
 #!/usr/bin/env npx tsx
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { db } from "@/lib/db/client";
 import Ajv2020 from "ajv/dist/2020.js";
+import {
+  type SchemaDeclaration,
+  assertCurrentProductionReference,
+  discoverSchemaDeclarations,
+  scanCurrentProductionReferences,
+} from "./topic-01-schema-evidence-core.mjs";
 
 const ROOT = process.cwd();
-const OUTPUT_DIR = resolve(ROOT, "docs/implementation/topic-01-final-closure");
-const INVENTORY_PATH = resolve(OUTPUT_DIR, "70-schema-table-inventory.json");
-const INVENTORY_MD_PATH = resolve(OUTPUT_DIR, "70-schema-table-inventory.md");
-const INVENTORY_SCHEMA_PATH = resolve(OUTPUT_DIR, "70-schema-table-inventory.schema.json");
-const MANIFEST_PATH = resolve(OUTPUT_DIR, "71-final-schema-manifest.json");
-const OLD_INVENTORY_PATH = resolve(
-  ROOT,
-  "docs/implementation/topic-01-loop-schema/04-schema-table-inventory.json",
-);
+const EVIDENCE_DIR = resolve(ROOT, "docs/topic-01/evidence");
+const INVENTORY_PATH = resolve(EVIDENCE_DIR, "schema-inventory.json");
+const INVENTORY_MD_PATH = resolve(EVIDENCE_DIR, "schema-inventory.md");
+const INVENTORY_SCHEMA_PATH = resolve(EVIDENCE_DIR, "schema-inventory.schema.json");
+const MANIFEST_PATH = resolve(EVIDENCE_DIR, "schema-manifest.json");
 const MIGRATION_PATH = resolve(ROOT, "drizzle/0000_initial_schema.sql");
 const REMOVED_EMPTY_TABLES = ["MemoryIndex", "WorkspaceMergeConflict", "WorkspaceOverlay"];
-const REQUIRED_FIELDS = [
-  "physicalTableName",
-  "schemaDeclaration",
-  "migrationSource",
-  "domainOwner",
-  "tenantBoundary",
-  "productionWriters",
-  "productionReaders",
-  "lifecycle",
-  "authorityStatement",
-  "duplicateCandidates",
-  "retentionOrGc",
-  "constraints",
-  "decision",
-  "evidence",
-  "notes",
-] as const;
 
-type PreviousRecord = {
-  physicalTableName: string;
-  declarationSymbol: string;
-  declarationFile: string;
-  canonicalDomain: string;
-  exportedByRoot: boolean;
-  productionWriters: string[];
-  productionReaders: string[];
-  lifecycle: string;
-  authorityFact: string;
-  duplicateCandidate: string | null;
-  retention: string;
-  decisionReason: string;
-  evidence: string[];
-};
-
+type AccessException = { exceptionReason: string; projectionOwner: string };
+type AuthorityKind = "canonical-entity" | "binding" | "append-only-fact" | "projection";
 type InventoryRecord = {
   physicalTableName: string;
   schemaDeclaration: string;
@@ -60,7 +31,9 @@ type InventoryRecord = {
   productionWriters: string[];
   productionReaders: string[];
   lifecycle: string;
+  authorityKind: AuthorityKind;
   authorityStatement: string;
+  accessException: AccessException | null;
   duplicateCandidates: string[];
   retentionOrGc: string;
   constraints: string[];
@@ -69,7 +42,109 @@ type InventoryRecord = {
   notes: string;
 };
 
-function namesFromSchema(): string[] {
+const INVENTORY_SCHEMA = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  type: "object",
+  required: [
+    "schemaVersion",
+    "authority",
+    "counts",
+    "freshDbVerification",
+    "frameworkMetadataExclusions",
+    "baselineChanges",
+    "tables",
+  ],
+  properties: {
+    schemaVersion: { const: 2 },
+    authority: { type: "string", minLength: 1 },
+    counts: {
+      type: "object",
+      required: ["canonical", "runtimeLoaded", "migration", "freshDbPlanned"],
+      properties: {
+        canonical: { type: "integer", minimum: 1 },
+        runtimeLoaded: { type: "integer", minimum: 1 },
+        migration: { type: "integer", minimum: 1 },
+        freshDbPlanned: { type: "integer", minimum: 1 },
+      },
+      additionalProperties: false,
+    },
+    freshDbVerification: {
+      type: "object",
+      required: ["status", "reason"],
+      properties: {
+        status: { const: "planned-for-batch-07" },
+        reason: { type: "string", minLength: 1 },
+      },
+      additionalProperties: false,
+    },
+    frameworkMetadataExclusions: { type: "array", minItems: 1 },
+    baselineChanges: { type: "array" },
+    tables: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        required: [
+          "physicalTableName",
+          "schemaDeclaration",
+          "migrationSource",
+          "domainOwner",
+          "tenantBoundary",
+          "productionWriters",
+          "productionReaders",
+          "lifecycle",
+          "authorityKind",
+          "authorityStatement",
+          "accessException",
+          "duplicateCandidates",
+          "retentionOrGc",
+          "constraints",
+          "decision",
+          "evidence",
+          "notes",
+        ],
+        properties: {
+          physicalTableName: { type: "string", minLength: 1 },
+          schemaDeclaration: { type: "string", minLength: 1 },
+          migrationSource: { type: "array", minItems: 1, items: { type: "string" } },
+          domainOwner: { type: "string", minLength: 1 },
+          tenantBoundary: { type: "string", minLength: 1 },
+          productionWriters: { type: "array", items: { type: "string" } },
+          productionReaders: { type: "array", items: { type: "string" } },
+          lifecycle: { type: "string", minLength: 1 },
+          authorityKind: {
+            enum: ["canonical-entity", "binding", "append-only-fact", "projection"],
+          },
+          authorityStatement: { type: "string", minLength: 1 },
+          accessException: {
+            anyOf: [
+              { type: "null" },
+              {
+                type: "object",
+                required: ["exceptionReason", "projectionOwner"],
+                properties: {
+                  exceptionReason: { type: "string", minLength: 1 },
+                  projectionOwner: { type: "string", minLength: 1 },
+                },
+                additionalProperties: false,
+              },
+            ],
+          },
+          duplicateCandidates: { type: "array", items: { type: "string" } },
+          retentionOrGc: { type: "string", minLength: 1 },
+          constraints: { type: "array", minItems: 1, items: { type: "string" } },
+          decision: { const: "keep" },
+          evidence: { type: "array", minItems: 2, items: { type: "string" } },
+          notes: { type: "string", minLength: 1 },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+function canonicalNames(): string[] {
   const expression =
     'import * as s from "./lib/persistence/schema/index.ts"; import {Table,is,getTableName} from "drizzle-orm"; process.stdout.write(Object.values(s).filter(v=>is(v,Table)).map(v=>getTableName(v)).sort().join("\\n"))';
   return execFileSync("pnpm", ["exec", "tsx", "-e", expression], {
@@ -91,57 +166,15 @@ function migrationNames(sql: string): string[] {
   return Array.from(sql.matchAll(/CREATE TABLE `([^`]+)`/g), (match) => match[1] as string).sort();
 }
 
-function sourceFiles(path: string): string[] {
-  if (!existsSync(path)) return [];
-  if (statSync(path).isFile()) return /\.(?:ts|tsx|mts|mjs)$/.test(path) ? [path] : [];
-  return readdirSync(path).flatMap((entry) =>
-    ["node_modules", ".git", ".next", "dist", "build"].includes(entry)
-      ? []
-      : sourceFiles(resolve(path, entry)),
-  );
-}
-
-const PRODUCTION_SOURCES = ["app", "components", "desktop", "hooks", "lib", "scripts"]
-  .flatMap((root) => sourceFiles(resolve(ROOT, root)))
-  .filter((path) => !path.includes(".test.") && !path.includes("/test-support/"));
-
-function currentDirectReferences(
-  symbol: string,
-  declarationFile: string,
-): {
-  writers: string[];
-  readers: string[];
-} {
-  const writers: string[] = [];
-  const readers: string[] = [];
-  for (const absolutePath of PRODUCTION_SOURCES) {
-    const path = relative(ROOT, absolutePath);
-    if (path === declarationFile) continue;
-    const source = readFileSync(absolutePath, "utf8");
-    if (!new RegExp(`\\b${symbol}\\b`).test(source)) continue;
-    if (new RegExp(`\\.(?:insert|update|delete)\\(\\s*${symbol}\\b`).test(source))
-      writers.push(path);
-    if (
-      new RegExp(`\\.(?:from|join|leftJoin|rightJoin|innerJoin|fullJoin)\\(\\s*${symbol}\\b`).test(
-        source,
-      ) ||
-      new RegExp(`\\b${symbol}\\.[A-Za-z_]`).test(source)
-    ) {
-      readers.push(path);
-    }
-  }
-  return { writers, readers };
-}
-
 function constraintsFor(tableName: string, sql: string): string[] {
   const marker = `CREATE TABLE \`${tableName}\` (`;
   const start = sql.indexOf(marker);
   const end = start < 0 ? -1 : sql.indexOf("\n);", start);
   const create = start < 0 || end < 0 ? "" : sql.slice(start + marker.length, end);
-  const local = Array.from(
-    create.matchAll(/CONSTRAINT `([^`]+)` ([^\n]+)/g),
-    (match) => `${match[1]}: ${match[2].trim()}`,
-  );
+  const local = create
+    .split("\n")
+    .map((line) => line.trim().replace(/,$/, ""))
+    .filter((line) => /PRIMARY KEY|UNIQUE|CONSTRAINT|NOT NULL/.test(line));
   const external = sql
     .split("\n")
     .filter(
@@ -158,91 +191,83 @@ function tenantBoundaryFor(tableName: string, sql: string): string {
   const start = sql.indexOf(marker);
   const end = start < 0 ? -1 : sql.indexOf("\n);", start);
   const definition = start < 0 || end < 0 ? "" : sql.slice(start, end);
-  if (definition.includes("`tenantId`")) return "tenantId 直接隔离；所有生产查询必须携带 tenantId";
-  if (definition.includes("`tenant_id`"))
-    return "tenant_id 直接隔离；所有生产查询必须携带 tenant_id";
-  return "经父记录外键或不可变绑定继承 tenant；读取前由父 Authority 校验租户";
+  if (definition.includes("`tenantId`")) return "tenantId 直接隔离；生产查询必须携带 tenantId";
+  if (definition.includes("`tenant_id`")) {
+    return "tenant_id 直接隔离；生产查询必须携带 tenant_id";
+  }
+  return "通过父记录外键或不可变绑定继承租户；访问前由父 Authority 校验";
+}
+
+function authorityKindFor(name: string): AuthorityKind {
+  if (/Projection|Checkpoint|Snapshot|Aggregate|Index$/.test(name)) return "projection";
+  if (/Binding|Route|Grant|Policy/.test(name)) return "binding";
+  if (/Event|Ingress|Attempt|Record|Audit|Trace|Span|Observation|Outbox/.test(name)) {
+    return "append-only-fact";
+  }
+  return "canonical-entity";
+}
+
+function accessExceptionFor(
+  declaration: SchemaDeclaration,
+  kind: AuthorityKind,
+  writers: string[],
+  readers: string[],
+): AccessException | null {
+  if (writers.length > 0 && readers.length > 0) return null;
+  if (kind !== "projection" || writers.length + readers.length === 0) return null;
+  return {
+    exceptionReason:
+      writers.length === 0
+        ? "该表是只读投影；写入由声明的投影 owner 间接维护"
+        : "该表是写入侧物化投影；当前没有独立生产读取路径",
+    projectionOwner: writers[0] ?? readers[0] ?? declaration.file,
+  };
+}
+
+function domainOwnerFor(declaration: SchemaDeclaration): string {
+  if (declaration.file.startsWith("lib/control-plane/")) return "control-plane";
+  return basename(declaration.file).replace(/\.[^.]+$/, "");
 }
 
 function build() {
-  const sourcePath = existsSync(INVENTORY_PATH) ? INVENTORY_PATH : OLD_INVENTORY_PATH;
-  const sourceDocument = JSON.parse(readFileSync(sourcePath, "utf8")) as {
-    tables: Array<PreviousRecord | InventoryRecord>;
-  };
-  const previous: { tables: PreviousRecord[] } = {
-    tables: sourceDocument.tables.map((record) => {
-      if ("schemaDeclaration" in record) {
-        const [declarationFile, declarationSymbol] = record.schemaDeclaration.split("#", 2);
-        return {
-          physicalTableName: record.physicalTableName,
-          declarationSymbol: declarationSymbol ?? "",
-          declarationFile: declarationFile ?? "",
-          canonicalDomain: record.domainOwner,
-          exportedByRoot: true,
-          productionWriters: record.productionWriters,
-          productionReaders: record.productionReaders,
-          lifecycle: record.lifecycle,
-          authorityFact: record.authorityStatement,
-          duplicateCandidate: record.duplicateCandidates[0] ?? null,
-          retention: record.retentionOrGc,
-          decisionReason: record.notes,
-          evidence: record.evidence,
-        };
-      }
-      return record;
-    }),
-  };
   const sql = readFileSync(MIGRATION_PATH, "utf8");
-  const canonical = namesFromSchema();
+  const canonical = canonicalNames();
   const runtime = runtimeNames();
   const migration = migrationNames(sql);
-  const byName = new Map(
-    previous.tables
-      .filter((record) => record.exportedByRoot)
-      .map((record) => [record.physicalTableName, record]),
+  const declarations = discoverSchemaDeclarations(ROOT);
+  const declarationsByName = new Map(
+    declarations.map((declaration) => [declaration.physicalTableName, declaration]),
   );
   const tables: InventoryRecord[] = canonical.map((name) => {
-    const old = byName.get(name);
-    if (!old) throw new Error(`旧逐表证据中缺少 Canonical 表：${name}`);
-    const direct = currentDirectReferences(old.declarationSymbol, old.declarationFile);
-    const writers = [
-      ...new Set([
-        ...old.productionWriters.filter((path) => existsSync(resolve(ROOT, path))),
-        ...direct.writers,
-      ]),
-    ].sort();
-    const readers = [
-      ...new Set([
-        ...old.productionReaders.filter((path) => existsSync(resolve(ROOT, path))),
-        ...direct.readers,
-      ]),
-    ].sort();
+    const declaration = declarationsByName.get(name);
+    if (!declaration) throw new Error(`当前源码缺少 Canonical 表声明：${name}`);
+    const { writers, readers } = scanCurrentProductionReferences(ROOT, declaration);
+    const authorityKind = authorityKindFor(name);
+    const accessException = accessExceptionFor(declaration, authorityKind, writers, readers);
+    const schemaDeclaration = `${declaration.file}#${declaration.symbol}`;
     return {
       physicalTableName: name,
-      schemaDeclaration: `${old.declarationFile}#${old.declarationSymbol}`,
+      schemaDeclaration,
       migrationSource: ["drizzle/0000_initial_schema.sql"],
-      domainOwner: old.canonicalDomain,
+      domainOwner: domainOwnerFor(declaration),
       tenantBoundary: tenantBoundaryFor(name, sql),
       productionWriters: writers,
       productionReaders: readers,
-      lifecycle: old.lifecycle,
-      authorityStatement: old.authorityFact,
-      duplicateCandidates: old.duplicateCandidate ? [old.duplicateCandidate] : [],
-      retentionOrGc: old.retention,
+      lifecycle:
+        authorityKind === "projection"
+          ? "由生产投影 owner 随源事实更新，并按投影重建或保留策略清理"
+          : authorityKind === "append-only-fact"
+            ? "由生产写入者创建不可变事实，并按领域保留策略归档或清理"
+            : "由领域服务创建和转换状态，并按领域保留策略清理",
+      authorityKind,
+      authorityStatement: `${schemaDeclaration} 是 ${name} 的唯一物理 Schema Authority`,
+      accessException,
+      duplicateCandidates: [],
+      retentionOrGc: "由 domain owner 的生产保留、删除或投影重建流程负责",
       constraints: constraintsFor(name, sql),
       decision: "keep",
-      evidence: [
-        ...new Set([
-          `${old.declarationFile}#${old.declarationSymbol}`,
-          ...writers,
-          ...readers,
-          ...old.evidence.filter((path) =>
-            existsSync(resolve(ROOT, path.split("#", 1)[0] as string)),
-          ),
-          "drizzle/0000_initial_schema.sql",
-        ]),
-      ],
-      notes: old.decisionReason,
+      evidence: [schemaDeclaration, ...writers, ...readers, "drizzle/0000_initial_schema.sql"],
+      notes: "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory",
     };
   });
   const counts = {
@@ -252,40 +277,38 @@ function build() {
     freshDbPlanned: migration.length,
   };
   const inventory = {
-    generatedAt: "2026-09-04",
+    schemaVersion: 2,
     authority: "lib/persistence/schema/index.ts",
     counts,
-    currentDevelopmentDatabase: {
-      status: "not_observed",
-      tableCount: null,
-      reason:
-        "Batch 00 已确认项目开发端口无 MySQL 服务；Batch 06 按工程包只做静态检查，未连接任何数据库。",
+    freshDbVerification: {
+      status: "planned-for-batch-07",
+      reason: "批次06只验证生成器；空库迁移、运行时加载与数据库 introspection 在批次07执行",
     },
     frameworkMetadataExclusions: [
       {
         physicalTableName: "__drizzle_migrations",
-        reason: "Drizzle migration runner 内部元数据，不属于应用 Canonical Schema。",
+        reason: "Drizzle migration runner 元数据，不属于应用 Canonical Schema",
       },
     ],
-    baselineChanges: REMOVED_EMPTY_TABLES.map((name) => ({
-      physicalTableName: name,
-      baseline: "旧 123 表清单",
+    baselineChanges: REMOVED_EMPTY_TABLES.map((physicalTableName) => ({
+      physicalTableName,
       decision: "delete",
-      reason: "无生产 writer、reader、worker 或运维消费者，属于未落地空壳表。",
+      reason: "无生产 writer、reader、worker 或运维消费者",
     })),
     tables,
   };
   const manifest = {
-    generatedAt: "2026-09-04",
+    schemaVersion: 2,
     canonicalRoot: "lib/persistence/schema/index.ts",
     runtimeSchemaImport: "lib/db/client.ts -> @/lib/persistence/schema",
     cleanMigration: "drizzle/0000_initial_schema.sql",
+    inventory: "docs/topic-01/evidence/schema-inventory.json",
     counts,
     tables: canonical,
     frameworkMetadataExclusions: inventory.frameworkMetadataExclusions,
-    deletedFromBaseline123: inventory.baselineChanges,
+    deletedFromBaseline: inventory.baselineChanges,
   };
-  return { inventory, manifest, canonical, runtime, migration };
+  return { inventory, manifest, declarationsByName, canonical, runtime, migration };
 }
 
 function stable(value: unknown): string {
@@ -296,16 +319,15 @@ function markdown(inventory: ReturnType<typeof build>["inventory"]): string {
   const rows = inventory.tables
     .map(
       (table) =>
-        `| ${table.physicalTableName} | ${table.domainOwner} | ${table.schemaDeclaration} | ${table.productionWriters.join("<br>")} | ${table.productionReaders.join("<br>")} | ${table.authorityStatement} |`,
+        `| ${table.physicalTableName} | ${table.domainOwner} | ${table.authorityKind} | ${table.productionWriters.join("<br>") || "受控例外"} | ${table.productionReaders.join("<br>") || "受控例外"} |`,
     )
     .join("\n");
-  return `# Topic 01 最终 Schema 逐表证据\n\nCanonical = ${inventory.counts.canonical}\n\nRuntime-loaded = ${inventory.counts.runtimeLoaded}\n\nMigration = ${inventory.counts.migration}\n\nFresh DB = ${inventory.counts.freshDbPlanned}\n\n当前开发数据库未观察：Batch 00 已确认项目开发端口没有 MySQL 服务，本批按约束未连接数据库；这不等同于 0 张表。框架元数据 \`__drizzle_migrations\` 单独排除。\n\n旧 123 基线中 \`MemoryIndex\`、\`WorkspaceMergeConflict\`、\`WorkspaceOverlay\` 均无生产读写或 Worker，已从 Root、Runtime 与 clean migration 同步删除，最终为 120 张。\n\n完整生命周期、租户边界、约束、保留策略和证据见同目录机器清单。\n\n| 表 | 领域 | Schema 声明 | 生产写入者 | 生产读取者 | 唯一事实 |\n|---|---|---|---|---|---|\n${rows}\n`;
+  return `# Topic 01 Schema 逐表证据\n\n本清单只由当前 Canonical Schema、clean migration、runtime-loaded schema 与当前生产源码生成，不继承历史清单。Fresh DB introspection 在批次07执行。\n\n| 表 | 领域 owner | Authority 类型 | 生产写入者 | 生产读取者 |\n|---|---|---|---|---|\n${rows}\n`;
 }
 
 function validate(built: ReturnType<typeof build>): void {
-  const { inventory, manifest, canonical, runtime, migration } = built;
-  const inventorySchema = JSON.parse(readFileSync(INVENTORY_SCHEMA_PATH, "utf8"));
-  const validateInventory = new Ajv2020({ allErrors: true }).compile(inventorySchema);
+  const { inventory, manifest, declarationsByName, canonical, runtime, migration } = built;
+  const validateInventory = new Ajv2020({ allErrors: true }).compile(INVENTORY_SCHEMA);
   if (!validateInventory(inventory)) {
     throw new Error(`inventory JSON Schema 校验失败：${JSON.stringify(validateInventory.errors)}`);
   }
@@ -313,39 +335,56 @@ function validate(built: ReturnType<typeof build>): void {
   if (new Set(names).size !== names.length) throw new Error("inventory 存在重复表名");
   if (JSON.stringify(names) !== JSON.stringify(canonical))
     throw new Error("Canonical 表未被唯一覆盖");
-  if (JSON.stringify(runtime) !== JSON.stringify(canonical))
+  if (JSON.stringify(runtime) !== JSON.stringify(canonical)) {
     throw new Error("Runtime-loaded 与 Canonical 不一致");
-  if (JSON.stringify(migration) !== JSON.stringify(canonical))
+  }
+  if (JSON.stringify(migration) !== JSON.stringify(canonical)) {
     throw new Error("Migration 与 Canonical 不一致");
-  if (manifest.counts.freshDbPlanned !== canonical.length)
-    throw new Error("Fresh DB 计划与 Canonical 不一致");
+  }
   for (const table of inventory.tables) {
-    for (const field of REQUIRED_FIELDS) {
-      if (!(field in table)) throw new Error(`${table.physicalTableName} 缺少 ${field}`);
+    const declaration = declarationsByName.get(table.physicalTableName) as SchemaDeclaration;
+    for (const path of [...table.productionWriters, ...table.productionReaders]) {
+      assertCurrentProductionReference(ROOT, declaration, path);
     }
-    if (table.productionWriters.length === 0)
-      throw new Error(`${table.physicalTableName} writers 为空`);
-    if (table.productionReaders.length === 0)
-      throw new Error(`${table.physicalTableName} readers 为空`);
-    if (table.decision !== "keep") throw new Error(`${table.physicalTableName} decision 非 keep`);
+    const hasBothDirections =
+      table.productionWriters.length > 0 && table.productionReaders.length > 0;
+    if (!hasBothDirections) {
+      if (table.authorityKind !== "projection" || !table.accessException) {
+        throw new Error(
+          `${table.physicalTableName} 缺少生产 writer/reader 且没有受控 projection 例外`,
+        );
+      }
+      assertCurrentProductionReference(ROOT, declaration, table.accessException.projectionOwner);
+    } else if (table.accessException) {
+      throw new Error(`${table.physicalTableName} 不需要 accessException`);
+    }
+    if (table.constraints.length === 0) throw new Error(`${table.physicalTableName} 缺少约束证据`);
   }
   if (!process.argv.includes("--write")) {
-    if (readFileSync(INVENTORY_PATH, "utf8") !== stable(inventory))
-      throw new Error("70 inventory 未更新");
-    if (readFileSync(MANIFEST_PATH, "utf8") !== stable(manifest))
-      throw new Error("71 manifest 未更新");
-    if (readFileSync(INVENTORY_MD_PATH, "utf8") !== markdown(inventory))
-      throw new Error("70 markdown 未更新");
+    if (readFileSync(INVENTORY_PATH, "utf8") !== stable(inventory)) {
+      throw new Error("schema-inventory.json 未更新");
+    }
+    if (readFileSync(MANIFEST_PATH, "utf8") !== stable(manifest)) {
+      throw new Error("schema-manifest.json 未更新");
+    }
+    if (readFileSync(INVENTORY_MD_PATH, "utf8") !== markdown(inventory)) {
+      throw new Error("schema-inventory.md 未更新");
+    }
+    if (readFileSync(INVENTORY_SCHEMA_PATH, "utf8") !== stable(INVENTORY_SCHEMA)) {
+      throw new Error("schema-inventory.schema.json 未更新");
+    }
   }
 }
 
 const built = build();
 if (process.argv.includes("--write")) {
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
   writeFileSync(INVENTORY_PATH, stable(built.inventory));
   writeFileSync(MANIFEST_PATH, stable(built.manifest));
   writeFileSync(INVENTORY_MD_PATH, markdown(built.inventory));
+  writeFileSync(INVENTORY_SCHEMA_PATH, stable(INVENTORY_SCHEMA));
 }
 validate(built);
 console.log(
-  `Schema evidence OK: Canonical=${built.canonical.length}, Runtime=${built.runtime.length}, Migration=${built.migration.length}, Fresh=${built.manifest.counts.freshDbPlanned}`,
+  `Schema evidence OK: Canonical=${built.canonical.length}, Runtime=${built.runtime.length}, Migration=${built.migration.length}, Fresh=Batch07`,
 );

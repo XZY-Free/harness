@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 2,
+  "authority": "docs/topic-01/evidence/acceptance-matrix.json",
+  "items": [
+    {
+      "id": "KNOWLEDGE-SUBJECT-ACL",
+      "requirement": "Knowledge 检索按冻结 Trusted Subject 与 Revision ACL 授权，跨租户和畸形 ACL 失败关闭",
+      "productionEntry": ["lib/context/knowledge-queries.ts", "lib/context/knowledge-acl.ts"],
+      "authority": ["lib/persistence/schema/knowledge.ts", "lib/runtime/harness-loop/build-production-capability-catalog.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/context/knowledge-access.db.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/capability-and-knowledge.md"],
+      "passCondition": "同租户仅返回 ACL 授权 Revision，跨租户、hash mismatch 和畸形 ACL 均在 Chunk 查询前拒绝"
+    },
+    {
+      "id": "AGENT-SCENARIO-AUTHORITY",
+      "requirement": "Agent 场景声明来自发布时 ContractSnapshot，名称变化不能伪造场景事实",
+      "productionEntry": ["lib/agents/domain/public-agent-contract.ts", "lib/agents/application/publish-agent-revision.ts"],
+      "authority": ["lib/persistence/schema/agents.ts", "lib/agents/persistence/mysql-agent-publication-store.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/runtime/harness-loop/capability-catalog.db.test.ts", "lib/agents/application/publish-agent-revision-contract-snapshot.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/capability-and-knowledge.md"],
+      "passCondition": "目录只投影 exact ContractSnapshot 场景，declared/unspecified 与空声明语义稳定且参与 digest"
+    },
+    {
+      "id": "TOOL-PERMISSION-AUTHORITY",
+      "requirement": "Tool permission 只由 Policy/Grant 与 UserActionRequest 决策，不由 Catalog confirmation 替代",
+      "productionEntry": ["lib/capability/application/apply-tool-call.ts", "lib/permission/policy-evaluator.ts"],
+      "authority": ["lib/persistence/schema/permission.ts", "lib/persistence/schema/tool-call.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/runtime/harness-loop/tool-executor.integration.test.ts", "lib/permission/policy-evaluator.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/tool-authority-and-execution.md"],
+      "passCondition": "Catalog confirmation 不授予权限，未授权调用生成 durable request，拒绝与批准均经唯一策略入口"
+    },
+    {
+      "id": "TOOL-PROVIDER-CLOSURE",
+      "requirement": "ToolCall 从 queued 经 Worker、Provider、Effect 到 durable continuation 的生产执行闭合",
+      "productionEntry": ["lib/capability/tool-execution-worker.ts", "lib/capability/provider-executor.ts", "scripts/workers/tool-execution-worker.ts"],
+      "authority": ["lib/persistence/schema/tool-execution.ts", "lib/capability/tool-execution-contract.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/capability/provider-executor.test.ts", "lib/runtime/continuation/invocation-continuation-worker.integration.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/tool-authority-and-execution.md"],
+      "passCondition": "Worker 创建真实 attempt 后才进入 running，Provider 结果经 Effect reconcile 落库并只恢复同一父 Invocation"
+    },
+    {
+      "id": "HOSTED-RESUME-DURABILITY",
+      "requirement": "Hosted resume 只凭持久化 Invocation/Binding/Checkpoint 在新进程恢复",
+      "productionEntry": ["lib/runtime/application/hosted-runtime-application-service.ts", "lib/runtime/in-process-hosted-runtime.ts"],
+      "authority": ["lib/persistence/schema/executions.ts", "lib/persistence/schema/context-checkpoint.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/runtime/adapters/hosted-adapter-resume.integration.test.ts", "lib/runtime/in-process-hosted-runtime.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/hosted-control-and-resume.md"],
+      "passCondition": "全新 Adapter/Client 不依赖旧实例 Map，使用原 Invocation 与冻结 ExecutionBinding 恢复"
+    },
+    {
+      "id": "HOSTED-CANCEL-STEER",
+      "requirement": "Hosted cancel/steer 经正式应用服务到安全点确认，不伪造 ACK",
+      "productionEntry": ["lib/runtime/application/hosted-runtime-application-service.ts", "lib/runtime/command-dispatcher.ts"],
+      "authority": ["lib/persistence/schema/executions.ts", "lib/runtime/harness-loop/mysql-recovery-port.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/runtime/command-dispatcher.test.ts", "lib/runtime/in-process-hosted-runtime.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/hosted-control-and-resume.md"],
+      "passCondition": "cancel 等待实际应用完成，steer 只注入一次且重复 dispatch 不重复生效"
+    },
+    {
+      "id": "EXTERNAL-RUNTIME-HTTP",
+      "requirement": "external_endpoint 使用绑定 endpoint/auth 的真实 HTTP capabilities/start/cancel/resume/steer",
+      "productionEntry": ["lib/runtime/transport/http-harness-runtime-transport.ts", "lib/runtime/employee-turn-dispatcher.ts"],
+      "authority": ["lib/persistence/schema/runtimes.ts", "lib/persistence/schema/executions.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/runtime/transport/http-harness-runtime-transport.integration.test.ts", "lib/runtime/employee-turn-dispatcher.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/external-runtime-transport.md"],
+      "passCondition": "External 五个 canonical route 真实发 HTTP，错误映射稳定，且任何失败都不回退 Hosted"
+    },
+    {
+      "id": "RUNTIME-RETRY-DEFAULT-WIRING",
+      "requirement": "默认 Runtime retry Worker 重新派发同一 durable Attempt 和 idempotency key",
+      "productionEntry": ["lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts", "lib/runtime/retry/runtime-dispatch-retry-worker.ts"],
+      "authority": ["lib/persistence/schema/executions.ts", "lib/runtime/retry/runtime-dispatch-retry-policy.ts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/runtime/employee-turn-dispatcher.test.ts", "lib/runtime/retry/runtime-dispatch-retry-policy.test.ts", "lib/runtime/redispatch-queries.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/runtime-retry-worker-topology.md"],
+      "passCondition": "网络、超时、429 和 retryable 5xx 排入同一 Attempt，默认 Worker 真正重发且终态父调用不发网络"
+    },
+    {
+      "id": "DURABLE-WORKER-TOPOLOGY",
+      "requirement": "四类 durable work 各有独立生产 Worker role、镜像、实例和可验证健康语义",
+      "productionEntry": ["lib/workers/production-worker-role.ts", "lib/workers/production-worker-process.ts", "scripts/workers/worker-entrypoint.ts", "deploy/production/compose.yaml"],
+      "authority": ["docker/worker/Dockerfile", "package.json"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/topic-01-production-wiring.contract.test.ts"],
+      "testEvidence": ["lib/workers/production-worker-topology.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/remediation/runtime-retry-worker-topology.md"],
+      "passCondition": "每个 required role 使用统一镜像独立启动，startup/readiness/liveness 依赖真实数据库与 poll loop 状态"
+    },
+    {
+      "id": "SCHEMA-EVIDENCE-INTEGRITY",
+      "requirement": "Schema inventory 从当前源码重建且 Canonical、runtime-loaded、clean migration 与 Fresh DB 一致",
+      "productionEntry": ["lib/persistence/schema/index.ts", "lib/db/client.ts", "drizzle/0000_initial_schema.sql"],
+      "authority": ["scripts/topic-01-schema-evidence.mts", "scripts/topic-01-schema-evidence-core.mts"],
+      "machineGate": ["scripts/architecture-gate.ts", "scripts/schema-authority.contract.test.ts"],
+      "testEvidence": ["scripts/topic-01-schema-evidence.test.ts", "lib/db/fresh-schema.test.ts"],
+      "evidenceArtifact": ["docs/topic-01/evidence/schema-inventory.json", "docs/topic-01/evidence/schema-manifest.json"],
+      "passCondition": "每张表的当前生产 writer/reader 可复查且无测试路径或历史继承，批次07 Fresh DB introspection 与另外三方精确相等"
+    }
+  ]
+}

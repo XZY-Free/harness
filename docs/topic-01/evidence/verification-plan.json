@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 2,
+  "authority": "docs/topic-01/evidence/verification-plan.json",
+  "resultPath": "docs/topic-01/evidence/acceptance-result.json",
+  "baselineSha": "24a8d97b26270100d908b8f6d6c81d019324525e",
+  "profiles": {
+    "acceptance": [
+      "static-architecture",
+      "schema-authority",
+      "vitest",
+      "production-wiring",
+      "fresh-db",
+      "web-build",
+      "desktop-build",
+      "e2e-web",
+      "e2e-desktop",
+      "e2e-cross-client",
+      "security",
+      "acceptance-matrix",
+      "worktree-cleanliness",
+      "final-evidence-integrity"
+    ],
+    "verify": [
+      "static-architecture",
+      "schema-authority",
+      "vitest",
+      "production-wiring",
+      "fresh-db",
+      "web-build",
+      "desktop-build",
+      "e2e-web",
+      "e2e-desktop",
+      "e2e-cross-client",
+      "security",
+      "acceptance-matrix",
+      "worktree-cleanliness",
+      "final-evidence-integrity"
+    ],
+    "quick": ["static-architecture", "schema-authority", "production-wiring", "acceptance-matrix"]
+  },
+  "stages": [
+    {
+      "id": "static-architecture",
+      "name": "静态类型、格式与架构门禁",
+      "commands": [
+        ["pnpm", "typecheck"],
+        ["pnpm", "lint"],
+        ["pnpm", "architecture:check"],
+        ["pnpm", "architecture:gate"],
+        ["git", "diff", "--check"]
+      ]
+    },
+    {
+      "id": "schema-authority",
+      "name": "合同、Schema Authority 与测试收集证据",
+      "commands": [
+        ["pnpm", "contracts:verify"],
+        ["pnpm", "topic01:schema:verify"],
+        ["pnpm", "topic01:tests:audit"]
+      ]
+    },
+    {
+      "id": "vitest",
+      "name": "Unit、DB、Integration 与 Contract 唯一收集",
+      "commands": [
+        [
+          "node",
+          "scripts/topic-01-vitest-stage.mjs",
+          "unit",
+          "db",
+          "integration",
+          "contract"
+        ]
+      ]
+    },
+    {
+      "id": "production-wiring",
+      "name": "生产入口与 Authority 映射",
+      "commands": [["node", "scripts/topic-01-acceptance-contract.mjs", "--production-wiring"]]
+    },
+    {
+      "id": "fresh-db",
+      "name": "空 MySQL 迁移、seed、boot 与四方 Schema 对比",
+      "commands": [["pnpm", "db:verify-fresh"]]
+    },
+    {
+      "id": "web-build",
+      "name": "Web production build",
+      "commands": [["pnpm", "build:prod"]]
+    },
+    {
+      "id": "desktop-build",
+      "name": "Desktop build 与 native rebuild",
+      "commands": [["pnpm", "build:desktop"], ["pnpm", "rebuild:desktop-native"]]
+    },
+    {
+      "id": "e2e-web",
+      "name": "Web E2E",
+      "commands": [["node", "scripts/topic-01-playwright-stage.mjs", "e2e-web"]]
+    },
+    {
+      "id": "e2e-desktop",
+      "name": "Desktop E2E",
+      "commands": [["node", "scripts/topic-01-playwright-stage.mjs", "e2e-desktop"]]
+    },
+    {
+      "id": "e2e-cross-client",
+      "name": "Cross-client E2E",
+      "commands": [["node", "scripts/topic-01-playwright-stage.mjs", "e2e-cross-client"]]
+    },
+    {
+      "id": "security",
+      "name": "确定性安全检查",
+      "commands": [["pnpm", "security:check"]]
+    },
+    {
+      "id": "acceptance-matrix",
+      "name": "Topic01 验收矩阵",
+      "commands": [["node", "scripts/topic-01-acceptance-contract.mjs"]]
+    },
+    {
+      "id": "worktree-cleanliness",
+      "name": "验收工作区清洁性",
+      "commands": [["node", "scripts/topic-01-worktree-cleanliness.mjs"]]
+    },
+    {
+      "id": "final-evidence-integrity",
+      "name": "最终证据完整性",
+      "commands": [["node", "scripts/topic-01-evidence-integrity.mjs"]]
+    }
+  ]
+}

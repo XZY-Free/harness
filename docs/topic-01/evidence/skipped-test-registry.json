@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "tests": [
+    {
+      "file": "lib/runtime/__tests__/parallel-threads.integration.test.ts",
+      "testName": "parallel threads integration (docker) > 2 thread 各自独立容器 + 不同端口 + 文件隔离",
+      "reason": "仅在 SNOW_RUN_DOCKER_TESTS=1 且预构建 container runtime 镜像时执行",
+      "acceptanceImpact": "不覆盖本轮 Topic01 Runtime transport/worker 路径；对应生产拓扑由独立 worker image 与真实 MySQL 验收覆盖"
+    }
+  ]
+}

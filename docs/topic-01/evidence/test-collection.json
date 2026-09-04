@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-04",
+  "schemaVersion": 2,
   "authority": "scripts/topic-01-test-collection-audit.mjs",
   "policy": {
     "vitest": "每个 .test.ts/.test.tsx 只进入 unit/db/integration/contract 一个 project",
@@ -8,14 +8,14 @@
   },
   "counts": {
     "unit": 274,
-    "db": 108,
+    "db": 109,
     "integration": 10,
-    "contract": 24,
+    "contract": 27,
     "e2e-web": 3,
     "e2e-desktop": 1,
     "e2e-cross-client": 1
   },
-  "total": 421,
+  "total": 425,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -4561,6 +4561,17 @@
       ]
     },
     {
+      "file": "scripts/topic-01-acceptance-contract.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "scripts/topic-01-agent-lifecycle-e2e.contract.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -4584,6 +4595,17 @@
     },
     {
       "file": "scripts/topic-01-artifact-attestation-ownership.contract.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "scripts/topic-01-evidence-integrity.test.ts",
       "group": "contract",
       "command": "pnpm vitest run --project contract",
       "needsDB": false,
@@ -4627,6 +4649,17 @@
       ]
     },
     {
+      "file": "scripts/topic-01-schema-evidence.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "scripts/topic-01-schema-ownership.contract.test.ts",
       "group": "contract",
       "command": "pnpm vitest run --project contract",
@@ -4639,6 +4672,17 @@
     },
     {
       "file": "scripts/topic-01-thread-agent-decoupling.contract.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "scripts/topic-01-vitest-result.test.ts",
       "group": "contract",
       "command": "pnpm vitest run --project contract",
       "needsDB": false,
