@@ -11,10 +11,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(
   readFileSync(
-    join(process.cwd(), "docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json"),
+    join(process.cwd(), "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json"),
     "utf8",
   ),
-) as { tableCount: number; tables: string[] };
+) as { counts: { freshDbPlanned: number }; tables: string[] };
 
 beforeEach(async () => {
   await resetDatabase(db);
@@ -27,7 +27,7 @@ describe("Fresh MySQL Schema", () => {
       .map((row) => String(Object.values(row)[0]))
       .filter((name) => !name.startsWith("__"))
       .sort();
-    expect(actual).toHaveLength(manifest.tableCount);
+    expect(actual).toHaveLength(manifest.counts.freshDbPlanned);
     expect(actual).toEqual(manifest.tables);
   });
 

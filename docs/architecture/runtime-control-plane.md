@@ -337,6 +337,13 @@ Eval Experiment
 
 成本投影来自事件与 Trace，不修改业务状态。
 
+## 最终执行与恢复边界
+
+- `tool.call` 必须由生产 Harness 工厂装配并经过 Capability Catalog、Policy 与可信 Subject 校验。
+- Runtime Start 请求体不接受 Subject；Subject 只从服务端认证 Principal 冻结到 ExecutionBinding，恢复时重新读取该 Binding。
+- `invocation_continuation` 由业务事务写入 Control Plane Outbox，Worker 读取后恢复原 Invocation；内存事件不能作为恢复事实。
+- Hosted `handleResume` 必须继续运行原 Harness Loop；未知 Invocation 明确失败，不能只返回 ACK。
+
 ## 19. 容量
 
 组件分工：

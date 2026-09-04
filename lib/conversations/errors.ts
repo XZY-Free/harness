@@ -542,58 +542,6 @@ export class WorkspaceWriteLockStateError extends Error {
 }
 
 /**
- * Workspace Overlay 合并冲突已报告，等待父 Agent 决策（05 文档 §13 行 268）。
- *
- * 触发场景：
- * - 子 Overlay 修改与父 WorkspaceBinding 同期修改冲突。
- * - 报告冲突后 Overlay 进入 conflict 状态，禁止后完成者覆盖。
- * - 父 Agent 必须显式 resolve（手动合并）或 abandon（放弃 Overlay）。
- *
- * 映射 409 WORKSPACE_OVERLAY_MERGE_CONFLICT。
- */
-export class WorkspaceOverlayMergeConflictError extends Error {
-  constructor(
-    public readonly overlayId: string,
-    public readonly conflictIds: string[],
-  ) {
-    super(
-      `Workspace Overlay ${overlayId} 合并冲突：conflicts=${conflictIds.join(",")} 已报告，等待父 Agent 决策`,
-    );
-    this.name = "WorkspaceOverlayMergeConflictError";
-  }
-}
-
-/**
- * Workspace Overlay 不存在或跨租户不可见。
- *
- * 映射 404 RESOURCE_NOT_FOUND（不泄露存在）。
- */
-export class WorkspaceOverlayNotFoundError extends Error {
-  constructor(public readonly overlayId: string) {
-    super(`Workspace Overlay 不存在或不可见：${overlayId}`);
-    this.name = "WorkspaceOverlayNotFoundError";
-  }
-}
-
-/**
- * Workspace Overlay 状态不允许当前操作（如 active 状态尝试 merge 时已 conflict）。
- *
- * 映射 409 WORKSPACE_OVERLAY_STATE_CONFLICT。
- */
-export class WorkspaceOverlayStateError extends Error {
-  constructor(
-    public readonly overlayId: string,
-    public readonly currentState: string,
-    public readonly expectedState: string,
-  ) {
-    super(
-      `Workspace Overlay ${overlayId} 状态为 ${currentState}，期望 ${expectedState}，不允许当前操作`,
-    );
-    this.name = "WorkspaceOverlayStateError";
-  }
-}
-
-/**
  * 跨 sibling 共享父任务总预算已耗尽（05 文档 §18 行 352-362）。
  *
  * 触发场景：

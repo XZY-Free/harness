@@ -1561,3 +1561,9 @@ Adapter 必须使用同一组规范能力名声明 `event_stream、cancel、resu
 | `/api/threads/{id}/workspace/*` | Employee Workspace/Attachment/Artifact API；Desktop 本地操作增加设备签名 |
 
 迁移完成后删除旧写路径，不长期维持两套 Message/Run/Event 语义。兼容路由如必须短期存在，只能调用 Application Service，不能继续写旧表。
+
+## 最终 AgentCall 与 Continuation 协议
+
+- AgentCall 主表只负责逻辑调用与父 Invocation 归属；revision 在 `AgentCallBinding`，context 在 `AgentSessionBinding`，task 在 `AgentCallAttempt`。
+- Agent 终态先由唯一 ingress transition 写入，随后以 durable Outbox 请求父 Harness 继续；用户输入恢复同样写 Outbox，不由 HTTP route 同步抢跑。
+- Agent 的失败、取消或 lost 作为结构化 Observation 返回父 Harness，由 Harness 决定后续动作，不直接篡改父 Invocation 终态。

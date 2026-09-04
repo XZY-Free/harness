@@ -147,6 +147,9 @@ CREATE TABLE `AgentCallAttempt` (
 	`attemptState` enum('queued','running','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
 	`dispatchAttemptCount` int NOT NULL DEFAULT 0,
 	`retryReasonCode` varchar(64),
+	`externalTaskRef` varchar(256),
+	`transportChannel` enum('hosted','gateway') NOT NULL,
+	`transportMetadataJson` json,
 	`requestDigest` varchar(71),
 	`startedAt` datetime(3),
 	`finishedAt` datetime(3),
@@ -155,7 +158,8 @@ CREATE TABLE `AgentCallAttempt` (
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `AgentCallAttempt_id` PRIMARY KEY(`id`),
-	CONSTRAINT `AgentCallAttempt_call_attempt_uq` UNIQUE(`callId`,`attemptNo`)
+	CONSTRAINT `AgentCallAttempt_call_attempt_uq` UNIQUE(`callId`,`attemptNo`),
+	CONSTRAINT `AgentCallAttempt_tenant_task_uq` UNIQUE(`tenantId`,`externalTaskRef`)
 );
 --> statement-breakpoint
 CREATE TABLE `AgentCallBinding` (
@@ -193,17 +197,20 @@ CREATE TABLE `AgentCallEventIngress` (
 	`id` varchar(36) NOT NULL,
 	`callId` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
+	`producerSource` varchar(192) NOT NULL,
 	`producerEventId` varchar(128) NOT NULL,
 	`producerSequence` bigint NOT NULL,
 	`candidateType` varchar(64) NOT NULL,
 	`payloadHash` varchar(128) NOT NULL,
 	`payloadJson` json,
-	`ingressState` enum('accepted','mapped','rejected') NOT NULL DEFAULT 'accepted',
+	`ingressState` enum('applied','idempotent','rejected','failed_retryable') NOT NULL,
 	`receivedAt` datetime(3) NOT NULL,
-	`mappedAt` datetime(3),
-	`rejectedReason` varchar(256),
+	`reasonCode` varchar(128),
+	`beforeVersionNo` bigint NOT NULL,
+	`afterVersionNo` bigint NOT NULL,
+	`processedAt` datetime(3) NOT NULL,
 	CONSTRAINT `AgentCallEventIngress_id` PRIMARY KEY(`id`),
-	CONSTRAINT `AgentCallEventIngress_call_producer_event_uq` UNIQUE(`callId`,`producerEventId`),
+	CONSTRAINT `AgentCallEventIngress_producer_event_uq` UNIQUE(`tenantId`,`producerSource`,`producerEventId`),
 	CONSTRAINT `AgentCallEventIngress_call_producer_seq_uq` UNIQUE(`callId`,`producerSequence`)
 );
 --> statement-breakpoint
@@ -212,17 +219,16 @@ CREATE TABLE `AgentCall` (
 	`tenantId` varchar(36) NOT NULL,
 	`parentInvocationId` varchar(36) NOT NULL,
 	`agentId` varchar(36) NOT NULL,
-	`sourceType` varchar(32) NOT NULL,
-	`sourceRef` varchar(256),
+	`sourceType` enum('harness_planned') NOT NULL,
+	`sourceRef` varchar(256) NOT NULL,
 	`state` enum('queued','running','waiting_user','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
 	`agentSessionBindingId` varchar(36),
-	`externalTaskRef` varchar(256),
 	`resultText` text,
 	`resultJson` json,
 	`resultDigest` varchar(71),
 	`errorCode` varchar(128),
 	`errorSummary` text,
-	`logicalCallKey` varchar(256),
+	`logicalCallKey` varchar(256) NOT NULL,
 	`creationRequestDigest` varchar(71) NOT NULL,
 	`createdAt` datetime(3) NOT NULL,
 	`startedAt` datetime(3),
@@ -247,7 +253,7 @@ CREATE TABLE `AgentSessionBinding` (
 	`lastUsedAt` datetime(3) NOT NULL,
 	`closedAt` datetime(3),
 	CONSTRAINT `AgentSessionBinding_id` PRIMARY KEY(`id`),
-	CONSTRAINT `AgentSessionBinding_revision_route_context_uq` UNIQUE(`tenantId`,`agentRevisionId`,`routeRevisionId`,`externalContextRef`)
+	CONSTRAINT `AgentSessionBinding_tenant_context_uq` UNIQUE(`tenantId`,`externalContextRef`)
 );
 --> statement-breakpoint
 CREATE TABLE `AuditEvent` (
@@ -1096,18 +1102,6 @@ CREATE TABLE `MemoryEntry` (
 	CONSTRAINT `MemoryEntry_entryKey_uq` UNIQUE(`entryKey`)
 );
 --> statement-breakpoint
-CREATE TABLE `MemoryIndex` (
-	`id` varchar(36) NOT NULL,
-	`memoryEntryId` varchar(36) NOT NULL,
-	`indexProvider` varchar(64) NOT NULL,
-	`indexRef` varchar(512) NOT NULL,
-	`embeddingModelRef` varchar(128),
-	`contentHash` varchar(128) NOT NULL,
-	`indexedAt` datetime(3) NOT NULL,
-	CONSTRAINT `MemoryIndex_id` PRIMARY KEY(`id`),
-	CONSTRAINT `MemoryIndex_entry_provider_uq` UNIQUE(`memoryEntryId`,`indexProvider`)
-);
---> statement-breakpoint
 CREATE TABLE `MemorySource` (
 	`id` varchar(36) NOT NULL,
 	`memoryEntryId` varchar(36) NOT NULL,
@@ -1449,6 +1443,15 @@ CREATE TABLE `ExecutionBinding` (
 	`resolutionInputDigest` varchar(71) NOT NULL,
 	`projectionVersionNo` int NOT NULL,
 	`environmentDefinitionRevisionId` varchar(36),
+	`capabilityCatalogJson` json NOT NULL,
+	`capabilityCatalogDigest` varchar(71) NOT NULL,
+	`capabilityCatalogVersion` varchar(32) NOT NULL,
+	`capabilityCatalogSourceRefs` json NOT NULL,
+	`capabilityCatalogCreatedAt` datetime(3) NOT NULL,
+	`executionSubjectType` enum('user','service') NOT NULL,
+	`executionSubjectId` varchar(128) NOT NULL,
+	`executionSubjectSource` enum('authenticated_user','trusted_service') NOT NULL,
+	`executionSubjectFrozenAt` datetime(3) NOT NULL,
 	`configHash` varchar(128) NOT NULL,
 	`boundAt` datetime(3) NOT NULL,
 	CONSTRAINT `ExecutionBinding_invocationId` PRIMARY KEY(`invocationId`),
@@ -1966,47 +1969,6 @@ CREATE TABLE `WorkloadTokenRevocation` (
 	`revokedAt` datetime(3) NOT NULL,
 	CONSTRAINT `WorkloadTokenRevocation_id` PRIMARY KEY(`id`),
 	CONSTRAINT `WorkloadTokenRevocation_tenant_jti_uq` UNIQUE(`tenantId`,`jti`)
-);
---> statement-breakpoint
-CREATE TABLE `WorkspaceMergeConflict` (
-	`id` varchar(36) NOT NULL,
-	`tenantId` varchar(36) NOT NULL,
-	`overlayId` varchar(36) NOT NULL,
-	`conflictPathRef` varchar(512) NOT NULL,
-	`pathFingerprint` varchar(128) NOT NULL,
-	`beforeHash` varchar(128),
-	`oursHash` varchar(128),
-	`theirsHash` varchar(128),
-	`conflictState` enum('reported','resolved','abandoned') NOT NULL DEFAULT 'reported',
-	`conflictDetailsJson` json,
-	`resolutionSummary` text,
-	`reportedAt` datetime(3) NOT NULL,
-	`resolvedAt` datetime(3),
-	`versionNo` varchar(64) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	CONSTRAINT `WorkspaceMergeConflict_id` PRIMARY KEY(`id`)
-);
---> statement-breakpoint
-CREATE TABLE `WorkspaceOverlay` (
-	`id` varchar(36) NOT NULL,
-	`tenantId` varchar(36) NOT NULL,
-	`parentWorkspaceBindingId` varchar(36) NOT NULL,
-	`relationId` varchar(36) NOT NULL,
-	`overlayType` enum('git_worktree','cloud_overlay') NOT NULL,
-	`overlayLocationRef` varchar(512) NOT NULL,
-	`overlayFingerprint` varchar(128) NOT NULL,
-	`baseRevisionRef` varchar(256),
-	`overlayState` enum('active','merged','conflict','discarded') NOT NULL DEFAULT 'active',
-	`taskDescription` text,
-	`mergedRevisionRef` varchar(256),
-	`mergedAt` datetime(3),
-	`discardedAt` datetime(3),
-	`versionNo` varchar(64) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	CONSTRAINT `WorkspaceOverlay_id` PRIMARY KEY(`id`),
-	CONSTRAINT `WorkspaceOverlay_tenant_binding_relation_uq` UNIQUE(`tenantId`,`parentWorkspaceBindingId`,`relationId`)
 );
 --> statement-breakpoint
 CREATE TABLE `WorkspaceWriteLock` (
@@ -2567,7 +2529,6 @@ ALTER TABLE `KnowledgeIndex` ADD CONSTRAINT `KnowledgeIndex_tenantId_Tenant_id_f
 ALTER TABLE `KnowledgeIndex` ADD CONSTRAINT `KnowledgeIndex_chunkId_KnowledgeChunk_id_fk` FOREIGN KEY (`chunkId`) REFERENCES `KnowledgeChunk`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `MemoryCandidate` ADD CONSTRAINT `MemoryCandidate_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `MemoryEntry` ADD CONSTRAINT `MemoryEntry_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `MemoryIndex` ADD CONSTRAINT `MemoryIndex_memoryEntryId_MemoryEntry_id_fk` FOREIGN KEY (`memoryEntryId`) REFERENCES `MemoryEntry`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `MemorySource` ADD CONSTRAINT `MemorySource_memoryEntryId_MemoryEntry_id_fk` FOREIGN KEY (`memoryEntryId`) REFERENCES `MemoryEntry`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Grant` ADD CONSTRAINT `Grant_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Grant` ADD CONSTRAINT `Grant_credentialRefId_CredentialRef_id_fk` FOREIGN KEY (`credentialRefId`) REFERENCES `CredentialRef`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2617,11 +2578,6 @@ ALTER TABLE `service_level_indicator` ADD CONSTRAINT `service_level_indicator_te
 ALTER TABLE `usage_record` ADD CONSTRAINT `usage_record_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `UserActionRequest` ADD CONSTRAINT `UserActionRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkloadTokenRevocation` ADD CONSTRAINT `WorkloadTokenRevocation_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceMergeConflict` ADD CONSTRAINT `WorkspaceMergeConflict_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceMergeConflict` ADD CONSTRAINT `WorkspaceMergeConflict_overlayId_WorkspaceOverlay_id_fk` FOREIGN KEY (`overlayId`) REFERENCES `WorkspaceOverlay`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceOverlay` ADD CONSTRAINT `WorkspaceOverlay_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceOverlay` ADD CONSTRAINT `WorkspaceOverlay_parentWorkspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`parentWorkspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceOverlay` ADD CONSTRAINT `WorkspaceOverlay_relationId_ThreadRelation_id_fk` FOREIGN KEY (`relationId`) REFERENCES `ThreadRelation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_workspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_holderInvocationId_Invocation_id_fk` FOREIGN KEY (`holderInvocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2846,10 +2802,6 @@ CREATE INDEX `UserActionRequest_tenant_state_expires_idx` ON `UserActionRequest`
 CREATE INDEX `UserActionRequest_auth_state_hash_idx` ON `UserActionRequest` (`authStateHash`);--> statement-breakpoint
 CREATE INDEX `WorkloadTokenRevocation_tenant_revoked_idx` ON `WorkloadTokenRevocation` (`tenantId`,`revokedAt`);--> statement-breakpoint
 CREATE INDEX `WorkloadTokenRevocation_expires_idx` ON `WorkloadTokenRevocation` (`expiresAt`);--> statement-breakpoint
-CREATE INDEX `WorkspaceMergeConflict_tenant_overlay_idx` ON `WorkspaceMergeConflict` (`tenantId`,`overlayId`);--> statement-breakpoint
-CREATE INDEX `WorkspaceMergeConflict_tenant_state_idx` ON `WorkspaceMergeConflict` (`tenantId`,`conflictState`);--> statement-breakpoint
-CREATE INDEX `WorkspaceOverlay_tenant_state_idx` ON `WorkspaceOverlay` (`tenantId`,`overlayState`);--> statement-breakpoint
-CREATE INDEX `WorkspaceOverlay_tenant_relation_idx` ON `WorkspaceOverlay` (`tenantId`,`relationId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceWriteLock_tenant_holder_idx` ON `WorkspaceWriteLock` (`tenantId`,`holderInvocationId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceWriteLock_tenant_state_idx` ON `WorkspaceWriteLock` (`tenantId`,`lockState`);--> statement-breakpoint
 CREATE INDEX `WorkspaceWriteLock_tenant_expiry_idx` ON `WorkspaceWriteLock` (`tenantId`,`expiresAt`);--> statement-breakpoint
@@ -2884,6 +2836,4 @@ CREATE INDEX `RouteEligibilityProjection_tenant_idx` ON `RouteEligibilityProject
 CREATE INDEX `RuntimeConformanceRun_revision_completed_idx` ON `RuntimeConformanceRun` (`runtimeRevisionId`,`completedAt`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_tenantId_idx` ON `HostedProvisioningRequest` (`tenantId`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_state_idx` ON `HostedProvisioningRequest` (`state`);--> statement-breakpoint
-CREATE INDEX `HostedProvisioningRequest_claimable_idx` ON `HostedProvisioningRequest` (`state`,`nextAttemptAt`,`leaseExpiresAt`);--> statement-breakpoint
-CREATE TRIGGER `RouteRevision_prevent_update` BEFORE UPDATE ON `RouteRevision` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteRevision is append-only'; END;--> statement-breakpoint
-CREATE TRIGGER `RouteActivation_prevent_update` BEFORE UPDATE ON `RouteActivation` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteActivation is append-only'; END;
+CREATE INDEX `HostedProvisioningRequest_claimable_idx` ON `HostedProvisioningRequest` (`state`,`nextAttemptAt`,`leaseExpiresAt`);

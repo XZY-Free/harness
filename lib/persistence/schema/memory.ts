@@ -1,5 +1,5 @@
 /**
- * Memory schema：memory_candidate / memory_entry / memory_source / memory_index 表。
+ * Memory schema：memory_candidate / memory_entry / memory_source 表。
  *
  * 事实源：
  * - docs/architecture/persistence.md （Memory 与知识索引表）、§2（命名与公共字段）。
@@ -15,7 +15,7 @@
  * - source_item_id / source_job_id / source_artifact_id 恰一个非空（route 层校验，DB 不强制）。
  * - Organization scope 一律 needs_review（Policy 层强制）。
  * - Secret/Token/Cookie/私钥直接 rejected，正文销毁，响应不回显（Policy 层强制）。
- * - accepted 与 MemoryEntry upsert 同事务；MemorySource 关联同事务；索引异步。
+ * - accepted 与 MemoryEntry upsert 同事务；MemorySource 关联同事务。
  * - 管理员复核只能缩小 scope，不能扩大（route 层校验）。
  * - memory_entry 的 scopeType/scopeRef 决定挂载范围；memory_state=active 才参与检索。
  */
@@ -273,40 +273,6 @@ export const memorySource = mysqlTable(
   }),
 );
 
-// ─── memory_index ──────────────────────────────────────────
-
-export const memoryIndex = mysqlTable(
-  "MemoryIndex",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    /** 所属 MemoryEntry（DB 级 FK → MemoryEntry.id ON DELETE CASCADE）。 */
-    memoryEntryId: varchar("memoryEntryId", { length: 36 })
-      .notNull()
-      .references(() => memoryEntry.id),
-    /** 索引提供方（如 "internal_vector" / "external_pinecone"）。 */
-    indexProvider: varchar("indexProvider", { length: 64 }).notNull(),
-    /** 索引引用（向量 id 或外部索引 doc id）。 */
-    indexRef: varchar("indexRef", { length: 512 }).notNull(),
-    /** 嵌入模型引用（如 "text-embedding-3-small@2026-07"）；可空。 */
-    embeddingModelRef: varchar("embeddingModelRef", { length: 128 }),
-    /** 被索引内容 hash（与 memory_entry.contentHash 一致；用于一致性校验）。 */
-    contentHash: varchar("contentHash", { length: 128 }).notNull(),
-    indexedAt: datetime("indexedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    // 同一 MemoryEntry 同一 indexProvider 只有一条索引记录。
-    entryProviderUq: uniqueIndex("MemoryIndex_entry_provider_uq").on(
-      t.memoryEntryId,
-      t.indexProvider,
-    ),
-  }),
-);
-
 // ─── 类型导出 ──────────────────────────────────────────────
 
 export type MemoryCandidate = InferSelectModel<typeof memoryCandidate>;
@@ -315,5 +281,3 @@ export type MemoryEntry = InferSelectModel<typeof memoryEntry>;
 export type NewMemoryEntry = InferInsertModel<typeof memoryEntry>;
 export type MemorySource = InferSelectModel<typeof memorySource>;
 export type NewMemorySource = InferInsertModel<typeof memorySource>;
-export type MemoryIndex = InferSelectModel<typeof memoryIndex>;
-export type NewMemoryIndex = InferInsertModel<typeof memoryIndex>;

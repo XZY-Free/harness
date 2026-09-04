@@ -365,14 +365,6 @@
       "http": 401,
       "retryable": false
     },
-    "WORKSPACE_OVERLAY_MERGE_CONFLICT": {
-      "http": 409,
-      "retryable": false
-    },
-    "WORKSPACE_OVERLAY_STATE_CONFLICT": {
-      "http": 409,
-      "retryable": false
-    },
     "WORKSPACE_WRITE_LOCK_CONFLICT": {
       "http": 409,
       "retryable": false

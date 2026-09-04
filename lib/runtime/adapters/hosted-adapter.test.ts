@@ -430,19 +430,17 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
     expect(result.already_completed_effects_preserved).toBe(true);
   });
 
-  it("handleResume 返回 resume_state=accepted + runtime_execution_ref + requires_redispatch=false", async () => {
+  it("handleResume 对未登记 Invocation fail closed", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
-    const result = await adapter.handleResume({
-      invocationId: "inv-resume-001",
-      resumePayload: { action: "confirm" },
-      authToken: mockAuthToken(),
-    });
-
-    expect(result.resume_state).toBe("accepted");
-    expect(result.runtime_execution_ref).toMatch(/^hosted-exec-resume-/);
-    expect(result.requires_redispatch).toBe(false);
+    await expect(
+      adapter.handleResume({
+        invocationId: "inv-resume-001",
+        resumePayload: { action: "confirm" },
+        authToken: mockAuthToken(),
+      }),
+    ).rejects.toMatchObject({ code: "HARNESS_LOOP_STATE_RECOVERY_FAILED" });
   });
 
   it("handleSteer 返回 steer_state=accepted + applies_at=next_safe_point + generation_interrupted=false", async () => {

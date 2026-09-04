@@ -7,10 +7,10 @@ import mysql from "mysql2/promise";
 const ROOT = process.cwd();
 const EXPECTED_TABLES = JSON.parse(
   readFileSync(
-    resolve(ROOT, "docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json"),
+    resolve(ROOT, "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json"),
     "utf8",
   ),
-) as { tableCount: number; tables: string[] };
+) as { counts: { freshDbPlanned: number }; tables: string[] };
 
 function loadEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
@@ -134,6 +134,49 @@ async function main(): Promise<void> {
         .sort();
       if (JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES.tables)) {
         throw new Error(`Fresh DB table manifest 不一致：actual=${tables.length}`);
+      }
+      const [columnRows] = await connection.query<mysql.RowDataPacket[]>(
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE " +
+          "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() " +
+          "AND TABLE_NAME IN ('ExecutionBinding','AgentCall','AgentCallEventIngress','ControlPlaneEventDelivery')",
+      );
+      const column = (tableName: string, columnName: string) =>
+        columnRows.find((row) => row.TABLE_NAME === tableName && row.COLUMN_NAME === columnName);
+      for (const name of [
+        "executionSubjectType",
+        "executionSubjectId",
+        "executionSubjectSource",
+        "executionSubjectFrozenAt",
+      ]) {
+        if (column("ExecutionBinding", name)?.IS_NULLABLE !== "NO") {
+          throw new Error(`Fresh DB trusted subject 列缺失或可空：ExecutionBinding.${name}`);
+        }
+      }
+      if (column("AgentCall", "logicalCallKey")?.IS_NULLABLE !== "NO") {
+        throw new Error("Fresh DB AgentCall.logicalCallKey 缺失或可空");
+      }
+      for (const removed of ["agentRevisionId", "externalContextRef", "externalTaskRef"]) {
+        if (column("AgentCall", removed)) throw new Error(`Fresh DB AgentCall 重复 Authority 未删除：${removed}`);
+      }
+      if (!String(column("AgentCallEventIngress", "ingressState")?.COLUMN_TYPE ?? "").includes("rejected")) {
+        throw new Error("Fresh DB Ingress 缺少 rejected 持久状态");
+      }
+      for (const leaseColumn of ["lockedBy", "lockExpiresAt", "attemptCount", "nextAttemptAt"]) {
+        if (!column("ControlPlaneEventDelivery", leaseColumn)) {
+          throw new Error(`Fresh DB Continuation lease 列缺失：${leaseColumn}`);
+        }
+      }
+      const [outboxIndexes] = await connection.query<mysql.RowDataPacket[]>(
+        "SHOW INDEX FROM ControlPlaneOutboxEvent",
+      );
+      const [deliveryIndexes] = await connection.query<mysql.RowDataPacket[]>(
+        "SHOW INDEX FROM ControlPlaneEventDelivery",
+      );
+      if (!outboxIndexes.some((row) => row.Key_name === "ControlPlaneOutboxEvent_eventKey_uq" && row.Non_unique === 0)) {
+        throw new Error("Fresh DB Outbox eventKey 唯一约束缺失");
+      }
+      if (!deliveryIndexes.some((row) => row.Key_name === "ControlPlaneEventDelivery_event_consumer_uq" && row.Non_unique === 0)) {
+        throw new Error("Fresh DB Continuation event+consumer 唯一约束缺失");
       }
       const [seedRows] = await connection.query<mysql.RowDataPacket[]>(
         "SELECT (SELECT COUNT(*) FROM Tenant) AS tenants, " +

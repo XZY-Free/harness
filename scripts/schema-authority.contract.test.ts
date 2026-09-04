@@ -130,20 +130,20 @@ describe("Schema 单一 Authority", () => {
   it("Canonical Root、Runtime、Migration 与最终 manifest 完全一致", () => {
     const manifestPath = join(
       ROOT,
-      "docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json",
+      "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json",
     );
     expect(existsSync(manifestPath), "最终 Schema manifest 必须存在").toBe(true);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-      tableCount: number;
+      counts: { canonical: number };
       tables: string[];
     };
     const migration = readFileSync(join(ROOT, "drizzle/0000_initial_schema.sql"), "utf8");
     const canonical = canonicalTableNames();
 
-    expect(canonical).toHaveLength(123);
+    expect(canonical).toHaveLength(120);
     expect(runtimeTableNames()).toEqual(canonical);
     expect(migrationTableNames(migration)).toEqual(canonical);
-    expect(manifest.tableCount).toBe(canonical.length);
+    expect(manifest.counts.canonical).toBe(canonical.length);
     expect(manifest.tables).toEqual(canonical);
     for (const legacy of LEGACY_TABLES) expect(canonical).not.toContain(legacy);
   });

@@ -652,7 +652,7 @@ ThreadEvent sequence 通过锁定 Thread.last_event_sequence 原子递增；JobE
 
 `lib/persistence/schema/index.ts` 是唯一 Canonical Root（标准根入口）。`drizzle.config.ts`、`lib/db/client.ts` 和 MySQL 测试基建都直接消费该 Root，不再手工 spread Schema，也不存在第二定义入口。
 
-当前 clean initial migration 为 `drizzle/0000_initial_schema.sql`，从最终 Root 生成 123 张业务表。开发期增量 migration 已删除；该初始迁移不含 rename/drop/backfill 兼容链。Root、Runtime Drizzle、Migration 和 Fresh MySQL 的表名集必须与 `docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json` 完全一致。
+当前 clean initial migration 为 `drizzle/0000_initial_schema.sql`，从最终 Root 生成 120 张业务表。开发期增量 migration 已删除；该初始迁移不含 rename/drop/backfill 兼容链。Root、Runtime Drizzle、Migration 和 Fresh MySQL 的表名集必须与 `docs/implementation/topic-01-final-closure/71-final-schema-manifest.json` 完全一致。旧 123 表基线中的 `MemoryIndex`、`WorkspaceMergeConflict`、`WorkspaceOverlay` 因无生产读写者已删除。
 
 ### 10.1 已删除的第二事实
 

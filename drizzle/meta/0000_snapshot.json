@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "3cb50b91-55b9-45b0-8c13-90ccfd227b89",
+  "id": "6daa0c4c-6b18-44eb-bdfd-8e73cd74a11d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -1189,6 +1189,27 @@
           "notNull": false,
           "autoincrement": false
         },
+        "externalTaskRef": {
+          "name": "externalTaskRef",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "transportChannel": {
+          "name": "transportChannel",
+          "type": "enum('hosted','gateway')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "transportMetadataJson": {
+          "name": "transportMetadataJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "requestDigest": {
           "name": "requestDigest",
           "type": "varchar(71)",
@@ -1245,6 +1266,14 @@
           "columns": [
             "callId",
             "attemptNo"
+          ],
+          "isUnique": true
+        },
+        "AgentCallAttempt_tenant_task_uq": {
+          "name": "AgentCallAttempt_tenant_task_uq",
+          "columns": [
+            "tenantId",
+            "externalTaskRef"
           ],
           "isUnique": true
         },
@@ -1549,6 +1578,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "producerSource": {
+          "name": "producerSource",
+          "type": "varchar(192)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "producerEventId": {
           "name": "producerEventId",
           "type": "varchar(128)",
@@ -1586,11 +1622,10 @@
         },
         "ingressState": {
           "name": "ingressState",
-          "type": "enum('accepted','mapped','rejected')",
+          "type": "enum('applied','idempotent','rejected','failed_retryable')",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'accepted'"
+          "autoincrement": false
         },
         "receivedAt": {
           "name": "receivedAt",
@@ -1599,26 +1634,41 @@
           "notNull": true,
           "autoincrement": false
         },
-        "mappedAt": {
-          "name": "mappedAt",
-          "type": "datetime(3)",
+        "reasonCode": {
+          "name": "reasonCode",
+          "type": "varchar(128)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "rejectedReason": {
-          "name": "rejectedReason",
-          "type": "varchar(256)",
+        "beforeVersionNo": {
+          "name": "beforeVersionNo",
+          "type": "bigint",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "afterVersionNo": {
+          "name": "afterVersionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "processedAt": {
+          "name": "processedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {
-        "AgentCallEventIngress_call_producer_event_uq": {
-          "name": "AgentCallEventIngress_call_producer_event_uq",
+        "AgentCallEventIngress_producer_event_uq": {
+          "name": "AgentCallEventIngress_producer_event_uq",
           "columns": [
-            "callId",
+            "tenantId",
+            "producerSource",
             "producerEventId"
           ],
           "isUnique": true
@@ -1699,7 +1749,7 @@
         },
         "sourceType": {
           "name": "sourceType",
-          "type": "varchar(32)",
+          "type": "enum('harness_planned')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -1708,7 +1758,7 @@
           "name": "sourceRef",
           "type": "varchar(256)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "state": {
@@ -1722,13 +1772,6 @@
         "agentSessionBindingId": {
           "name": "agentSessionBindingId",
           "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "externalTaskRef": {
-          "name": "externalTaskRef",
-          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1772,7 +1815,7 @@
           "name": "logicalCallKey",
           "type": "varchar(256)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "creationRequestDigest": {
@@ -2000,12 +2043,10 @@
         }
       },
       "indexes": {
-        "AgentSessionBinding_revision_route_context_uq": {
-          "name": "AgentSessionBinding_revision_route_context_uq",
+        "AgentSessionBinding_tenant_context_uq": {
+          "name": "AgentSessionBinding_tenant_context_uq",
           "columns": [
             "tenantId",
-            "agentRevisionId",
-            "routeRevisionId",
             "externalContextRef"
           ],
           "isUnique": true
@@ -9216,95 +9257,6 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "MemoryIndex": {
-      "name": "MemoryIndex",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "memoryEntryId": {
-          "name": "memoryEntryId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "indexProvider": {
-          "name": "indexProvider",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "indexRef": {
-          "name": "indexRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "embeddingModelRef": {
-          "name": "embeddingModelRef",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contentHash": {
-          "name": "contentHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "indexedAt": {
-          "name": "indexedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "MemoryIndex_entry_provider_uq": {
-          "name": "MemoryIndex_entry_provider_uq",
-          "columns": [
-            "memoryEntryId",
-            "indexProvider"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "MemoryIndex_memoryEntryId_MemoryEntry_id_fk": {
-          "name": "MemoryIndex_memoryEntryId_MemoryEntry_id_fk",
-          "tableFrom": "MemoryIndex",
-          "tableTo": "MemoryEntry",
-          "columnsFrom": [
-            "memoryEntryId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "MemoryIndex_id": {
-          "name": "MemoryIndex_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
     "MemorySource": {
       "name": "MemorySource",
       "columns": {
@@ -12022,6 +11974,69 @@
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "capabilityCatalogJson": {
+          "name": "capabilityCatalogJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilityCatalogDigest": {
+          "name": "capabilityCatalogDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilityCatalogVersion": {
+          "name": "capabilityCatalogVersion",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilityCatalogSourceRefs": {
+          "name": "capabilityCatalogSourceRefs",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilityCatalogCreatedAt": {
+          "name": "capabilityCatalogCreatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionSubjectType": {
+          "name": "executionSubjectType",
+          "type": "enum('user','service')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionSubjectId": {
+          "name": "executionSubjectId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionSubjectSource": {
+          "name": "executionSubjectSource",
+          "type": "enum('authenticated_user','trusted_service')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionSubjectFrozenAt": {
+          "name": "executionSubjectFrozenAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "configHash": {
@@ -16404,376 +16419,6 @@
       "compositePrimaryKeys": {
         "WorkloadTokenRevocation_id": {
           "name": "WorkloadTokenRevocation_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "WorkspaceMergeConflict": {
-      "name": "WorkspaceMergeConflict",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "overlayId": {
-          "name": "overlayId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conflictPathRef": {
-          "name": "conflictPathRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "pathFingerprint": {
-          "name": "pathFingerprint",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "beforeHash": {
-          "name": "beforeHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "oursHash": {
-          "name": "oursHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "theirsHash": {
-          "name": "theirsHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "conflictState": {
-          "name": "conflictState",
-          "type": "enum('reported','resolved','abandoned')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'reported'"
-        },
-        "conflictDetailsJson": {
-          "name": "conflictDetailsJson",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "resolutionSummary": {
-          "name": "resolutionSummary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reportedAt": {
-          "name": "reportedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "resolvedAt": {
-          "name": "resolvedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "WorkspaceMergeConflict_tenant_overlay_idx": {
-          "name": "WorkspaceMergeConflict_tenant_overlay_idx",
-          "columns": [
-            "tenantId",
-            "overlayId"
-          ],
-          "isUnique": false
-        },
-        "WorkspaceMergeConflict_tenant_state_idx": {
-          "name": "WorkspaceMergeConflict_tenant_state_idx",
-          "columns": [
-            "tenantId",
-            "conflictState"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "WorkspaceMergeConflict_tenantId_Tenant_id_fk": {
-          "name": "WorkspaceMergeConflict_tenantId_Tenant_id_fk",
-          "tableFrom": "WorkspaceMergeConflict",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "WorkspaceMergeConflict_overlayId_WorkspaceOverlay_id_fk": {
-          "name": "WorkspaceMergeConflict_overlayId_WorkspaceOverlay_id_fk",
-          "tableFrom": "WorkspaceMergeConflict",
-          "tableTo": "WorkspaceOverlay",
-          "columnsFrom": [
-            "overlayId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "WorkspaceMergeConflict_id": {
-          "name": "WorkspaceMergeConflict_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "WorkspaceOverlay": {
-      "name": "WorkspaceOverlay",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "parentWorkspaceBindingId": {
-          "name": "parentWorkspaceBindingId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "relationId": {
-          "name": "relationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "overlayType": {
-          "name": "overlayType",
-          "type": "enum('git_worktree','cloud_overlay')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "overlayLocationRef": {
-          "name": "overlayLocationRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "overlayFingerprint": {
-          "name": "overlayFingerprint",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "baseRevisionRef": {
-          "name": "baseRevisionRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "overlayState": {
-          "name": "overlayState",
-          "type": "enum('active','merged','conflict','discarded')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'active'"
-        },
-        "taskDescription": {
-          "name": "taskDescription",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "mergedRevisionRef": {
-          "name": "mergedRevisionRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "mergedAt": {
-          "name": "mergedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "discardedAt": {
-          "name": "discardedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "WorkspaceOverlay_tenant_binding_relation_uq": {
-          "name": "WorkspaceOverlay_tenant_binding_relation_uq",
-          "columns": [
-            "tenantId",
-            "parentWorkspaceBindingId",
-            "relationId"
-          ],
-          "isUnique": true
-        },
-        "WorkspaceOverlay_tenant_state_idx": {
-          "name": "WorkspaceOverlay_tenant_state_idx",
-          "columns": [
-            "tenantId",
-            "overlayState"
-          ],
-          "isUnique": false
-        },
-        "WorkspaceOverlay_tenant_relation_idx": {
-          "name": "WorkspaceOverlay_tenant_relation_idx",
-          "columns": [
-            "tenantId",
-            "relationId"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "WorkspaceOverlay_tenantId_Tenant_id_fk": {
-          "name": "WorkspaceOverlay_tenantId_Tenant_id_fk",
-          "tableFrom": "WorkspaceOverlay",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "WorkspaceOverlay_parentWorkspaceBindingId_WorkspaceBinding_id_fk": {
-          "name": "WorkspaceOverlay_parentWorkspaceBindingId_WorkspaceBinding_id_fk",
-          "tableFrom": "WorkspaceOverlay",
-          "tableTo": "WorkspaceBinding",
-          "columnsFrom": [
-            "parentWorkspaceBindingId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "WorkspaceOverlay_relationId_ThreadRelation_id_fk": {
-          "name": "WorkspaceOverlay_relationId_ThreadRelation_id_fk",
-          "tableFrom": "WorkspaceOverlay",
-          "tableTo": "ThreadRelation",
-          "columnsFrom": [
-            "relationId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "WorkspaceOverlay_id": {
-          "name": "WorkspaceOverlay_id",
           "columns": [
             "id"
           ]

@@ -89,8 +89,6 @@ export const API_ERROR_CODES = {
   TURN_REQUIRES_USER_ACTION: { http: 409, retryable: false },
   TURN_ALREADY_TERMINAL: { http: 409, retryable: false },
   UNSUPPORTED_CAPABILITY: { http: 409, retryable: false },
-  WORKSPACE_OVERLAY_MERGE_CONFLICT: { http: 409, retryable: false },
-  WORKSPACE_OVERLAY_STATE_CONFLICT: { http: 409, retryable: false },
   WORKSPACE_WRITE_LOCK_CONFLICT: { http: 409, retryable: false },
   WORKSPACE_WRITE_LOCK_STATE_CONFLICT: { http: 409, retryable: false },
   WORKLOAD_TOKEN_REVOKED: { http: 401, retryable: false },

@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "5",
-      "when": 1788159214148,
+      "when": 1788507272144,
       "tag": "0000_initial_schema",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1788496313340,
-      "tag": "0001_quick_korvac",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1788497441325,
-      "tag": "0002_careless_spacker_dave",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1788500297711,
-      "tag": "0003_sweet_peter_parker",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1788502472813,
-      "tag": "0004_agent_call_ingress_authority",
       "breakpoints": true
     }
   ]

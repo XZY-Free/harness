@@ -996,7 +996,9 @@ export function checkAgentExecutionAuthorityGate(
       failures.push("Runtime Start Request 出现 agent execution target / 下发字段");
     }
     if (
-      (path.startsWith("lib/runtime/") || path.startsWith("app/runtime/")) &&
+      (path === START_REQUEST_PATH ||
+        path === "lib/runtime/application/build-runtime-start-request.ts" ||
+        path.startsWith("app/runtime/")) &&
       RUNTIME_START_AGENT_REVISION.test(source)
     ) {
       failures.push(`Runtime start 通道出现 agentRevisionId：${path}`);
@@ -1031,4 +1033,109 @@ export function checkAgentExecutionAuthorityGate(
   }
 
   return { passed: failures.length === 0, failures };
+}
+
+// ─── Topic 01 final closure boundaries ────────────────────
+
+export interface FinalClosureTestEntry {
+  file: string;
+  group: string;
+}
+
+export interface FinalClosureBoundaryGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+/**
+ * 最终封版边界：只覆盖 Topic 01 冻结项，不扩张为全仓风格检查。
+ */
+export function checkFinalClosureBoundaryGate(
+  documents: readonly SourceDocument[],
+  canonicalSchemaFiles: ReadonlySet<string>,
+  testCollection: readonly FinalClosureTestEntry[],
+): FinalClosureBoundaryGateResult {
+  const failures: string[] = [];
+  const source = (path: string) => documents.find((document) => document.path === path)?.source ?? "";
+
+  for (const document of documents) {
+    if (document.path.includes(".test.") || document.path.includes("/test-support/")) continue;
+    if (AGENT_EXECUTION_RULE_DEFINITIONS.has(document.path)) continue;
+    const production = stripComments(document.source);
+    if (production.includes("mysqlTable(") && !canonicalSchemaFiles.has(document.path)) {
+      failures.push(`第二 Schema Root/未登记表声明：${document.path}`);
+    }
+    if (
+      document.path !== "lib/agents/calls/persistence/apply-agent-call-transition.ts" &&
+      /\.update\(\s*agentCallTable\s*\)/.test(production)
+    ) {
+      failures.push(`AgentCall 状态被非授权模块直接写入：${document.path}`);
+    }
+  }
+
+  const dbClient = stripComments(source("lib/db/client.ts"));
+  if (!dbClient.includes('import * as schema from "@/lib/persistence/schema"')) {
+    failures.push("Runtime 未从 Canonical Schema Root 加载");
+  }
+  if (/from\s+["']@\/lib\/(?:db\/schema|persistence\/schema\/[^"']+)["']/.test(dbClient)) {
+    failures.push("Runtime 从非 Canonical Schema 导入");
+  }
+
+  const executors = stripComments(source("lib/runtime/harness-loop/platform-action-executors.ts"));
+  if (!/["']tool\.call["']\s*:\s*createToolActionExecutor\(/.test(executors)) {
+    failures.push("生产 Harness 工厂缺少 tool.call Executor");
+  }
+
+  const gateway = stripComments(source("app/gateway/v1/capability-actions/route.ts"));
+  if (!gateway.includes("recoverTrustedExecutionSubject(binding, principal.tenantId)")) {
+    failures.push("External Capability Gateway 未从 Binding 恢复可信 Subject");
+  }
+  if (/executionSubject\s*=\s*\{/.test(gateway)) {
+    failures.push("External Capability Gateway 构造固定业务 Subject");
+  }
+
+  const runtimeClient = stripComments(source("lib/runtime/runtime-client.ts"));
+  const requestStart = runtimeClient.indexOf("export interface StartInvocationRequestBody");
+  const requestEnd = runtimeClient.indexOf("export interface StartInvocationResponse", requestStart);
+  const requestBody = requestStart >= 0 && requestEnd > requestStart
+    ? runtimeClient.slice(requestStart, requestEnd)
+    : "";
+  if (/\b(?:subjectId|subject_id|executionSubject|execution_subject)\s*[?:]/.test(requestBody)) {
+    failures.push("Runtime Start 请求体重新成为 Subject Authority");
+  }
+
+  const agentCallSchema = stripComments(source("lib/persistence/schema/agent-calls.ts"));
+  const callStart = agentCallSchema.indexOf("export const agentCallTable");
+  const callEnd = agentCallSchema.indexOf("export const agentCallBindingTable", callStart);
+  const callBlock = callStart >= 0 && callEnd > callStart ? agentCallSchema.slice(callStart, callEnd) : "";
+  if (/\b(?:agentRevisionId|externalContextRef|externalTaskRef)\s*:/.test(callBlock)) {
+    failures.push("AgentCall 主表重新加入 revision/context/task Authority");
+  }
+
+  for (const producerPath of [
+    "lib/agents/calls/persistence/apply-agent-call-transition.ts",
+    "lib/conversations/user-action-resolve-queries.ts",
+  ]) {
+    const producer = stripComments(source(producerPath));
+    if (!producer.includes("controlPlaneOutboxEvent") || !producer.includes("controlPlaneEventDelivery")) {
+      failures.push(`Continuation 生产端未写 durable Outbox：${producerPath}`);
+    }
+  }
+
+  const hosted = stripComments(source("lib/runtime/adapters/hosted-adapter.ts"));
+  const resumeStart = hosted.indexOf("async handleResume(");
+  const resumeEnd = hosted.indexOf("async handleSteer(", resumeStart);
+  const resumeBlock = resumeStart >= 0 && resumeEnd > resumeStart ? hosted.slice(resumeStart, resumeEnd) : "";
+  if (!resumeBlock.includes("new HostedHarnessLoop(") || !resumeBlock.includes("await runPromise")) {
+    failures.push("Hosted Resume 退化为只 ACK");
+  }
+
+  const seen = new Map<string, string>();
+  for (const test of testCollection) {
+    const previous = seen.get(test.file);
+    if (previous) failures.push(`测试重复分组：${test.file} (${previous}, ${test.group})`);
+    else seen.set(test.file, test.group);
+  }
+
+  return { passed: failures.length === 0, failures: [...new Set(failures)] };
 }

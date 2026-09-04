@@ -110,7 +110,7 @@ export async function applyAgentCallTransition(
   }
 
   // 远端尚未正式 started，或流在运行中丢失时，只结束当前 Attempt；不得伪造
-  // queued→failed / running→lost。Batch 05 的恢复 Worker 会据此创建新 Attempt。
+  // queued→failed / running→lost。Durable continuation Worker 会据此创建新 Attempt。
   if (
     command.authority === "local_failure" &&
     (authority.call.state === "queued" || command.input === "call.lost")

@@ -12,6 +12,7 @@ import {
   checkAgentInvokeAuthorizationGate,
   checkAgentRevisionAuthorityGate,
   checkDispatchRecoveryAuthorityGate,
+  checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
   collectDeprecatedArchitectureViolations,
   collectExecutionBoundaryViolations,
@@ -125,24 +126,47 @@ function checkSchemaAuthority(): void {
     .sort();
   const manifest = JSON.parse(
     readFileSync(
-      resolve(ROOT, "docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json"),
+      resolve(ROOT, "docs/implementation/topic-01-final-closure/71-final-schema-manifest.json"),
       "utf8",
     ),
-  ) as { tableCount: number; tables: string[] };
+  ) as {
+    counts: { canonical: number; freshDbPlanned: number };
+    tables: string[];
+  };
 
   if (
-    canonical.length !== 123 ||
-    manifest.tableCount !== canonical.length ||
+    manifest.counts.canonical !== canonical.length ||
     JSON.stringify(runtime) !== JSON.stringify(canonical) ||
     JSON.stringify(migrationTables) !== JSON.stringify(canonical) ||
     JSON.stringify(manifest.tables) !== JSON.stringify(canonical)
   ) {
     fail(
-      `Schema manifest 不一致：Root=${canonical.length}, Runtime=${runtime.length}, Migration=${migrationTables.length}, Fresh=${manifest.tableCount}`,
+      `Schema manifest 不一致：Root=${canonical.length}, Runtime=${runtime.length}, Migration=${migrationTables.length}, Fresh=${manifest.counts.freshDbPlanned}`,
     );
     return;
   }
   pass(`Schema Root/Runtime/Migration/Fresh manifest 一致：${canonical.length} 表`);
+}
+
+function checkFinalClosureBoundaries(): void {
+  const inventory = JSON.parse(
+    readFileSync(
+      resolve(ROOT, "docs/implementation/topic-01-final-closure/70-schema-table-inventory.json"),
+      "utf8",
+    ),
+  ) as { tables: Array<{ schemaDeclaration: string }> };
+  const audit = JSON.parse(
+    readFileSync(
+      resolve(ROOT, "docs/implementation/topic-01-final-closure/72-test-collection-audit.json"),
+      "utf8",
+    ),
+  ) as { tests: Array<{ file: string; group: string }> };
+  const schemaFiles = new Set(
+    inventory.tables.map((table) => table.schemaDeclaration.split("#", 1)[0] as string),
+  );
+  const result = checkFinalClosureBoundaryGate(productionDocuments(), schemaFiles, audit.tests);
+  if (result.passed) pass("Topic 01 最终封版边界闭合");
+  else fail(`Topic 01 最终封版边界违规：\n  ${result.failures.join("\n  ")}`);
 }
 
 function checkRetiredNaming(): void {
@@ -341,6 +365,7 @@ function main(): void {
   checkAgentRevisionAuthority();
   checkExecutionBoundaryRules();
   checkAgentExecutionAuthority();
+  checkFinalClosureBoundaries();
   if (failures > 0) process.exitCode = 1;
 }
 

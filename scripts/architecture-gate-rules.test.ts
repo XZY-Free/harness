@@ -7,6 +7,7 @@ import {
   checkAgentInvokeAuthorizationGate,
   checkAgentRevisionAuthorityGate,
   checkDispatchRecoveryAuthorityGate,
+  checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
   collectDeprecatedArchitectureViolations,
   collectExecutionBoundaryViolations,
@@ -107,6 +108,85 @@ describe("source history and retired dependency gates", () => {
       "lib/runtime/old-bridge.ts",
       "lib/agents/calls/old.ts",
     ]);
+  });
+});
+
+describe("Topic 01 final closure boundary gate", () => {
+  const compliant = (): SourceDocument[] => [
+    doc("lib/persistence/schema/example.ts", 'export const example = mysqlTable("Example", {});'),
+    doc("lib/db/client.ts", 'import * as schema from "@/lib/persistence/schema"; drizzle(pool, { schema });'),
+    doc(
+      "lib/runtime/harness-loop/platform-action-executors.ts",
+      'return { "tool.call": createToolActionExecutor({}) };',
+    ),
+    doc(
+      "app/gateway/v1/capability-actions/route.ts",
+      "executionSubject = recoverTrustedExecutionSubject(binding, principal.tenantId);",
+    ),
+    doc(
+      "lib/runtime/runtime-client.ts",
+      "export interface StartInvocationRequestBody { invocation_id: string }\nexport interface StartInvocationResponse {}",
+    ),
+    doc(
+      "lib/persistence/schema/agent-calls.ts",
+      "export const agentCallTable = mysqlTable('AgentCall', { parentInvocationId: x });\nexport const agentCallBindingTable = mysqlTable('AgentCallBinding', { agentRevisionId: x });",
+    ),
+    doc(
+      "lib/agents/calls/persistence/apply-agent-call-transition.ts",
+      "tx.update(agentCallTable); tx.insert(controlPlaneOutboxEvent); tx.insert(controlPlaneEventDelivery);",
+    ),
+    doc(
+      "lib/conversations/user-action-resolve-queries.ts",
+      "tx.insert(controlPlaneOutboxEvent); tx.insert(controlPlaneEventDelivery);",
+    ),
+    doc(
+      "lib/runtime/adapters/hosted-adapter.ts",
+      "async handleResume() { const loop = new HostedHarnessLoop({}); const runPromise = loop.run(); await runPromise; } async handleSteer() {}",
+    ),
+  ];
+
+  it("接受单一 Schema Root、durable continuation 与真实 Hosted resume", () => {
+    const result = checkFinalClosureBoundaryGate(
+      compliant(),
+      new Set(["lib/persistence/schema/example.ts", "lib/persistence/schema/agent-calls.ts"]),
+      [
+        { file: "a.test.ts", group: "unit" },
+        { file: "b.test.ts", group: "db" },
+      ],
+    );
+    expect(result).toEqual({ passed: true, failures: [] });
+  });
+
+  it("同时拒绝第二 Schema Root、越权状态写、固定 Subject、ACK-only 与重复测试", () => {
+    const docs = [
+      ...compliant(),
+      doc("lib/other/schema.ts", 'mysqlTable("Other", {})'),
+      doc("lib/agents/calls/persistence/bypass.ts", "db.update(agentCallTable).set({ state: 'completed' })"),
+    ].map((item) =>
+      item.path === "app/gateway/v1/capability-actions/route.ts"
+        ? doc(item.path, "executionSubject = { subjectId: 'fixed' }")
+        : item.path === "lib/runtime/adapters/hosted-adapter.ts"
+          ? doc(item.path, "async handleResume() { return { resume_state: 'accepted' }; } async handleSteer() {}")
+          : item,
+    );
+    const result = checkFinalClosureBoundaryGate(
+      docs,
+      new Set(["lib/persistence/schema/example.ts", "lib/persistence/schema/agent-calls.ts"]),
+      [
+        { file: "same.test.ts", group: "unit" },
+        { file: "same.test.ts", group: "db" },
+      ],
+    );
+    expect(result.passed).toBe(false);
+    expect(result.failures).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("第二 Schema Root"),
+        expect.stringContaining("非授权模块"),
+        expect.stringContaining("固定业务 Subject"),
+        expect.stringContaining("只 ACK"),
+        expect.stringContaining("测试重复分组"),
+      ]),
+    );
   });
 });
 
@@ -1133,12 +1213,12 @@ describe("checkAgentExecutionAuthorityGate", () => {
     expect(result.failures.some((f) => f.includes("旧 Agent 选择协议"))).toBe(true);
   });
 
-  it("Runtime adapter start 参数出现 agentRevisionId → 失败", () => {
+  it("Runtime Start builder 参数出现 agentRevisionId → 失败", () => {
     const docs = [
       ...compliantDocs(),
       doc(
-        "lib/runtime/adapters/hosted-adapter.ts",
-        "interface StartInvocationParams { agentRevisionId: string | null }",
+        "lib/runtime/application/build-runtime-start-request.ts",
+        "interface BuildRuntimeStartRequestInput { agentRevisionId: string | null }",
       ),
     ];
     const result = checkAgentExecutionAuthorityGate(docs);

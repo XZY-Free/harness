@@ -2,25 +2,35 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+  scripts: Record<string, string>;
+};
+const plan = JSON.parse(
+  readFileSync(
+    "docs/implementation/topic-01-final-closure/73-verification-plan.json",
+    "utf8",
+  ),
+) as { stages: Array<{ id: string }> };
 
 describe("final CI workflow contract", () => {
-  it.each([
-    ["Contract verification", "pnpm contracts:verify"],
-    ["Architecture gate", "pnpm architecture:gate"],
-    ["Dependency architecture", "pnpm architecture:check"],
-    ["Type check", "pnpm typecheck"],
-    ["Lint", "pnpm lint"],
-    ["Empty MySQL migration", "pnpm db:migrate"],
-    ["Seed", "pnpm db:seed"],
-    ["Unit and MySQL integration tests", "pnpm test"],
-    ["Control-plane and Hosted E2E", "lib/control-plane/end-to-end-acceptance.test.ts"],
-    ["Web Playwright E2E", "pnpm test:e2e"],
-    ["Desktop build", "pnpm build:desktop"],
-    ["Desktop smoke", "desktop/main/local-renderer-server.test.ts"],
-    ["Production Web build", "pnpm build:prod"],
-    ["Security check", "pnpm security:check"],
-  ])("declares %s as a visible check", (name, command) => {
-    expect(workflow).toContain(`name: ${name}`);
-    expect(workflow).toContain(command);
+  it("CI、verify 与完整验收共用机器验证计划", () => {
+    expect(workflow).toContain("run: pnpm topic01:acceptance");
+    expect(packageJson.scripts.verify).toContain("topic-01-acceptance.mjs --profile verify");
+    expect(packageJson.scripts["topic01:acceptance"]).toBe("node scripts/topic-01-acceptance.mjs");
+    expect(plan.stages).toHaveLength(13);
+  });
+
+  it("Workflow 不再复制阶段命令或追加单文件测试", () => {
+    for (const duplicate of [
+      "pnpm contracts:verify",
+      "pnpm architecture:gate",
+      "pnpm typecheck",
+      "pnpm test",
+      "pnpm test:e2e",
+      "lib/control-plane/end-to-end-acceptance.test.ts",
+      "desktop/main/local-renderer-server.test.ts",
+    ]) {
+      expect(workflow).not.toContain(duplicate);
+    }
   });
 });

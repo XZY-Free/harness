@@ -1,97 +1,45 @@
 import { resolve } from "node:path";
+import collectionAudit from "./docs/implementation/topic-01-final-closure/72-test-collection-audit.json";
 import { defineConfig } from "vitest/config";
 
 const alias = { "@": resolve(__dirname, ".") };
+type VitestGroup = "unit" | "db" | "integration" | "contract";
+
+function filesFor(group: VitestGroup): string[] {
+  return collectionAudit.tests
+    .filter((test) => test.group === group)
+    .map((test) => test.file)
+    .sort();
+}
+
+function project(group: VitestGroup, serial = false) {
+  return {
+    resolve: { alias },
+    test: {
+      name: group,
+      include: filesFor(group),
+      environmentMatchGlobs: [
+        ["**/*.test.tsx", "happy-dom"],
+        ["**/*.test.ts", "node"],
+      ],
+      ...(serial
+        ? {
+            environment: "node" as const,
+            pool: "forks" as const,
+            poolOptions: { forks: { singleFork: true } },
+            hookTimeout: 60_000,
+            testTimeout: 60_000,
+          }
+        : {}),
+    },
+  };
+}
 
 export default defineConfig({
   resolve: { alias },
   test: {
-    // S1（08 同构）：起真实 MySQL 容器供 DB 测试使用。
+    // DB project 使用真实 MySQL 且串行；其余项目由机器清单逐文件归属，不按业务目录粗分。
     globalSetup: ["./lib/db/test/global-setup.ts"],
-    // DB 测试共享 container，并发 resetDatabase 会互相清表 → DB 测试串行（singleFork）；
-    // 非 DB 测试并发保持速度。用 projects 分离。
-    projects: [
-      {
-        resolve: { alias },
-        test: {
-          name: "db",
-          include: [
-            "lib/db/**/*.test.ts",
-            "lib/browser/**/*.test.ts",
-            "lib/analytics/**/*.test.ts",
-            // 02-6 及其后续批：新正式领域的 DB 集成测试也必须走串行（db）project，
-            // 否则会在并行 unit project 里 resetDatabase 清表，互相/与 db project 竞争。
-            "app/gateway/**/*.test.ts",
-            "app/admin/api/v1/deployment-route-sets/route.test.ts",
-            "lib/governance/**/*.test.ts",
-            "lib/executions/**/*.test.ts",
-            "lib/permission/**/*.test.ts",
-            "lib/routes/persistence/**/*.test.ts",
-            "lib/capability/skill-studio-queries.test.ts",
-            "lib/identity/**/*.test.ts",
-            "lib/agents/agent-lifecycle.test.ts",
-            "lib/agents/application/**/*.test.ts",
-            "lib/agents/calls/**/*.test.ts",
-            "lib/artifacts/*.test.ts",
-            "lib/control-plane/**/*.test.ts",
-            "lib/catalog/**/*.test.ts",
-            "lib/publications/**/*.test.ts",
-            "lib/routes/application/**/*.test.ts",
-            "lib/runtimes/application/publish-runtime-revision.test.ts",
-            "lib/runtimes/application/record-runtime-conformance-run.test.ts",
-            "lib/runtimes/runtime-lifecycle.test.ts",
-            "lib/conversations/**/*.test.ts",
-            "lib/runtime/**/*.test.ts",
-            "lib/job/**/*.test.ts",
-          ],
-          environment: "node",
-          pool: "forks",
-          poolOptions: { forks: { singleFork: true } },
-          // resetDatabase TRUNCATE 所有表（60+ 迁移），10s 默认不够。
-          hookTimeout: 60000,
-          testTimeout: 60000,
-        },
-      },
-      {
-        resolve: { alias },
-        test: {
-          name: "unit",
-          include: ["**/*.test.ts", "**/*.test.tsx"],
-          exclude: [
-            "lib/db/**",
-            "lib/browser/**",
-            "lib/analytics/**",
-            "app/gateway/**",
-            "app/admin/api/v1/deployment-route-sets/route.test.ts",
-            "lib/governance/**",
-            "lib/executions/**",
-            "lib/permission/**",
-            "lib/routes/persistence/**",
-            "lib/capability/skill-studio-queries.test.ts",
-            "lib/identity/**",
-            "lib/agents/agent-lifecycle.test.ts",
-            "lib/agents/application/**",
-            "lib/agents/calls/**",
-            "lib/artifacts/*.test.ts",
-            "lib/control-plane/**",
-            "lib/catalog/**",
-            "lib/publications/**",
-            "lib/routes/application/**",
-            "lib/runtimes/application/publish-runtime-revision.test.ts",
-            "lib/runtimes/application/record-runtime-conformance-run.test.ts",
-            "lib/runtimes/runtime-lifecycle.test.ts",
-            "lib/conversations/**",
-            "lib/runtime/**",
-            "lib/job/**",
-            "node_modules",
-            ".next",
-          ],
-          environmentMatchGlobs: [
-            ["**/*.test.tsx", "happy-dom"],
-            ["**/*.test.ts", "node"],
-          ],
-        },
-      },
-    ],
+    projects: [project("unit"), project("db", true), project("integration"), project("contract")],
   },
 });

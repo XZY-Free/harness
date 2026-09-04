@@ -1,6 +1,8 @@
 # 最终 Schema Authority 映射
 
-> 状态：2026-08-31 已实施。本文只描述当前可运行事实，不保留开发期兼容路径。
+> 状态：已被 Topic 01 Final Closure 清单取代。唯一当前 Authority 是
+> `docs/implementation/topic-01-final-closure/71-final-schema-manifest.json` 与
+> `70-schema-table-inventory.json`；本文仅保留旧 123 表收口历史，不再声明最终表数。
 
 ## 旧表收口结果
 
@@ -28,7 +30,7 @@
 | `lib/db/test/mysql-harness.ts` | 使用同一 Canonical Root |
 | `drizzle/0000_initial_schema.sql` | 从最终 Root 生成的单一 clean initial migration |
 
-Root、Runtime、Migration 与 Fresh MySQL 均为 123 张业务表，精确表名见 `07-final-schema-manifest.json`。
+Root、Runtime、Migration 与 Fresh DB 的当前表数及精确表名见 Final Closure manifest。
 
 ## AgentCall 字段 Authority
 
