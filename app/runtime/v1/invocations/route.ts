@@ -55,6 +55,7 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
     "turn_context",
     "job_context",
     "capability_directives",
+    "capability_catalog",
     "input_items",
     "context_handle",
     "gateway_endpoints",
@@ -90,6 +91,13 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
     return false;
   }
   if (!Array.isArray(b.input_items) || b.input_items.length === 0) return false;
+  if (
+    !b.capability_catalog ||
+    typeof b.capability_catalog !== "object" ||
+    Array.isArray(b.capability_catalog)
+  ) {
+    return false;
+  }
   if (typeof b.context_handle !== "string" || b.context_handle.length === 0) return false;
   if (!b.gateway_endpoints || typeof b.gateway_endpoints !== "object") return false;
   const gw = b.gateway_endpoints as Record<string, unknown>;
@@ -198,6 +206,7 @@ export async function POST(request: Request): Promise<Response> {
       threadId: turnContext.thread_id,
       turnId: turnContext.turn_id,
       capabilityDirectives: body.capability_directives,
+      capabilityCatalog: body.capability_catalog,
       inputItems: body.input_items,
       contextHandle: body.context_handle,
       gatewayEndpoints: body.gateway_endpoints,

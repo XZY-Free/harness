@@ -3,15 +3,22 @@ import { searchKnowledgeEvidence } from "@/lib/context/knowledge-queries";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import type { HarnessActionExecutors } from "./loop";
+import type { CapabilityCatalogSnapshot } from "./capability-catalog";
+import { createToolActionExecutor } from "./tool-action-executor";
 
 /** 平台内置 Action Executor；Hosted 进程内与 Gateway HTTP 共用。 */
 export function createPlatformHarnessActionExecutors(params: {
   tenantId: string;
   executionSubject: ExecutionSubject | null;
   resolveRoute: RouteResolver;
+  capabilityCatalog: CapabilityCatalogSnapshot;
 }): HarnessActionExecutors {
   return {
     "agent.call": createAgentActionExecutor(params),
+    "tool.call": createToolActionExecutor({
+      tenantId: params.tenantId,
+      capabilityCatalog: params.capabilityCatalog,
+    }),
     "knowledge.search": async (action) => {
       const result = await searchKnowledgeEvidence({
         tenantId: params.tenantId,

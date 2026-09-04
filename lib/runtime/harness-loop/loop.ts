@@ -2,6 +2,11 @@ import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { ZodError } from "zod";
 import { parseHarnessNextAction } from "./action-schema";
 import {
+  capabilityCatalogModelView,
+  type CapabilityCatalogSnapshot,
+  validateHarnessActionAgainstCatalog,
+} from "./capability-catalog";
+import {
   type AgentCallAction,
   HARNESS_ACTION_TYPES,
   type HarnessActionHistoryEntry,
@@ -119,6 +124,8 @@ export interface HarnessLoopParams {
     capability_id: string;
     mode: "preferred";
   }>;
+  /** 生产路径必填；可选仅用于既有纯 Loop 测试夹具。 */
+  capabilityCatalog?: CapabilityCatalogSnapshot;
   decisionPort: HarnessDecisionPort;
   finalResponsePort: HarnessFinalResponsePort;
   eventWriter: HarnessLoopEventWriter;
@@ -408,6 +415,9 @@ export class HarnessLoop {
         `actionId 已存在：${action.actionId}`,
       );
     }
+    if (this.params.capabilityCatalog) {
+      validateHarnessActionAgainstCatalog(action, this.params.capabilityCatalog);
+    }
     if (action.actionType === "agent.call") {
       const preferredAgentId = this.preferredAgentId();
       if (!preferredAgentId || preferredAgentId !== action.payload.agentId) {
@@ -516,6 +526,9 @@ export class HarnessLoop {
         ),
         preferredAgentCandidate: this.preferredAgentId()
           ? { agentId: this.preferredAgentId() as string }
+          : null,
+        catalog: this.params.capabilityCatalog
+          ? capabilityCatalogModelView(this.params.capabilityCatalog)
           : null,
       },
       observations: [...this.observations],

@@ -4,24 +4,24 @@
 
 | ID | 实现位置 | 生产调用方 | 测试位置 | 证据位置 | 状态 |
 |---|---|---|---|---|---|
-| ARC-01 | 待 Batch 01—07 回填 | 待回填 | TS-ARC-01、TS-UX-01 | 待回填 | pending |
-| ARC-02 | 待 Batch 01—07 回填 | 待回填 | TS-ARC-02 | 待回填 | pending |
+| ARC-01 | `lib/runtime/dispatcher.ts`、`lib/runtime/harness-loop/loop.ts` | Turn API → Dispatcher → Harness Loop | `scripts/topic-01-production-wiring.contract.test.ts`；TS-UX-01 待 Batch 07 | `10-batch-01-evidence.md` | batch_01_pass_pending_final |
+| ARC-02 | `lib/runtime/harness-loop/platform-action-executors.ts` | Hosted / External shared executor → `agent-action-executor` | `scripts/topic-01-production-wiring.contract.test.ts` | `10-batch-01-evidence.md` | batch_01_pass_pending_final |
 | ARC-03 | 待 Batch 07 回填 | 待回填 | TS-UX-01、TS-UX-02 | 待回填 | pending |
 | ARC-04 | 待 Batch 07 回填 | 待回填 | TS-UX-01 | 待回填 | pending |
 | ARC-05 | 待 Batch 02、05、07 回填 | 待回填 | TS-ARC-03 | 待回填 | pending |
 | ARC-06 | 待 Batch 04、05、07 回填 | 待回填 | TS-ARC-04、TS-CONT-01 | 待回填 | pending |
 | ARC-07 | 待 Batch 05、07 回填 | 待回填 | TS-CONT-02、TS-CONT-03 | 待回填 | pending |
 | ARC-08 | 待 Batch 07 回填 | 待回填 | TS-UX-01、TS-UX-03 | 待回填 | pending |
-| CAP-01 | 待 Batch 01 回填 | 待回填 | TS-CAP-01、TS-CAP-02 | 待回填 | pending |
-| CAP-02 | 待 Batch 01 回填 | 待回填 | TS-CAP-03、TS-CAP-04 | 待回填 | pending |
-| CAP-03 | 待 Batch 01 回填 | 待回填 | TS-CAP-05 | 待回填 | pending |
-| CAP-04 | 待 Batch 01 回填 | 待回填 | TS-CAP-06 | 待回填 | pending |
-| CAP-05 | 待 Batch 01 回填 | 待回填 | TS-CAP-02、TS-CAP-07 | 待回填 | pending |
-| CAP-06 | 待 Batch 01 回填 | 待回填 | TS-CAP-08、TS-CAP-09 | 待回填 | pending |
-| CAP-07 | 待 Batch 01 回填 | 待回填 | TS-TOOL-01 | 待回填 | pending |
-| CAP-08 | 待 Batch 01 回填 | 待回填 | TS-TOOL-02 | 待回填 | pending |
-| CAP-09 | 待 Batch 01、02 回填 | 待回填 | TS-TOOL-03、TS-TOOL-04 | 待回填 | pending |
-| CAP-10 | 待 Batch 01、07 回填 | 待回填 | TS-CAP-10 | 待回填 | pending |
+| CAP-01 | `capability-catalog.ts`、ExecutionBinding 5 个冻结字段、`0001_quick_korvac.sql` | Dispatcher 在首次 Runtime Start 前构建并保存 | `capability-catalog.unit.test.ts`、`capability-catalog.db.test.ts` | `10-batch-01-evidence.md` | pass |
+| CAP-02 | `capabilityCatalogModelView`、`HarnessLoop.buildView` | `configuredDecisionPort` 接收同一 Loop view | `capability-catalog.unit.test.ts`、生产接线合同 | `10-batch-01-evidence.md` | pass |
+| CAP-03 | `build-production-capability-catalog.ts` | Dispatcher → frozen Policy / enabled Tool / published exact schema | 目录与行动校验测试 | `10-batch-01-evidence.md` | pass |
+| CAP-04 | `build-production-capability-catalog.ts` | Dispatcher → tenant active KnowledgeBase | 目录测试 | `10-batch-01-evidence.md` | pass |
+| CAP-05 | `verifyCapabilityCatalogSnapshot`、Runtime Start builder | Start、Hosted、External Gateway 均只读 Binding 快照 | 目录篡改与恢复测试 | `10-batch-01-evidence.md` | pass |
+| CAP-06 | `validateHarnessActionAgainstCatalog` | Harness Loop 与 Capability Gateway 在执行前调用 | `harness-action-validation.unit.test.ts` | `10-batch-01-evidence.md` | pass |
+| CAP-07 | `platform-action-executors.ts` | 共享生产工厂正式注册 `tool.call` | Tool executor 与生产接线合同 | `10-batch-01-evidence.md` | pass |
+| CAP-08 | `tool-action-executor.ts`、`execute-harness-tool-call.ts` | `tool.call` → 既有 ToolCall create/state 服务 | Tool executor 与生产接线合同 | `10-batch-01-evidence.md` | pass |
+| CAP-09 | 冻结 Operation、Schema、确认政策与逻辑幂等键 | Tool executor；可信 Subject 持久恢复待 Batch 02 | `tool-executor.integration.test.ts` | `10-batch-01-evidence.md` | batch_01_pass_pending_batch_02 |
+| CAP-10 | Runtime Start 下发同一快照；Hosted/External 共用校验器与工厂 | In-process Hosted / Runtime API / Capability Gateway | `topic-01-production-wiring.contract.test.ts`；E2E 待 Batch 07 | `10-batch-01-evidence.md` | batch_01_pass_pending_final |
 | SUB-01 | 待 Batch 02 回填 | 待回填 | TS-SUB-01 | 待回填 | pending |
 | SUB-02 | 待 Batch 02 回填 | 待回填 | TS-SUB-02 | 待回填 | pending |
 | SUB-03 | 待 Batch 02 回填 | 待回填 | TS-SUB-03 | 待回填 | pending |

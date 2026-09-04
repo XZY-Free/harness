@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolve-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
@@ -170,6 +171,7 @@ async function seedBinding(
   frozen: { policyRevisionId: string; policyRulesDigest: string },
 ): Promise<void> {
   await db.insert(executionBindingTable).values({
+    ...testCapabilityCatalogBindingFields(invocationId),
     invocationId,
     tenantId: TENANT,
     runtimeRevisionId: "runtime-rev-fake",

@@ -20,6 +20,7 @@ import type { ExecutionBindingControlPlaneEvidence } from "@/lib/executions/doma
 import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
 import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import { ExecutionBindingAlreadyExistsError } from "@/lib/runtime/errors";
+import { testCapabilityCatalogBindingFields } from "./test-capability-catalog";
 import { eq } from "drizzle-orm";
 
 /** 旧状态机测试显式写入的完整、不可空 Binding 证据。 */
@@ -165,6 +166,7 @@ export async function createExecutionBinding(
 
   // 3. INSERT ExecutionBinding（invocationId 为主键，1:1）
   await db.insert(executionBindingTable).values({
+    ...testCapabilityCatalogBindingFields(params.invocationId),
     invocationId: params.invocationId,
     tenantId: params.tenantId,
     runtimeRevisionId: params.runtimeRevisionId,

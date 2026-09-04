@@ -19,6 +19,7 @@ import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import type { HarnessActionExecutors } from "@/lib/runtime/harness-loop/loop";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 
 export class AgentActionExecutionError extends Error {
   constructor(
@@ -35,6 +36,7 @@ export interface CreateAgentActionExecutorParams {
   executionSubject: ExecutionSubject | null;
   resolveRoute: RouteResolver;
   routeScopeKey?: string;
+  capabilityCatalog?: CapabilityCatalogSnapshot;
 }
 
 const createAgentCall = createCreateAgentCall({ store: mysqlAgentCallStore });
@@ -67,6 +69,23 @@ export function createAgentActionExecutor(
           routeScopeKey: params.routeScopeKey ?? "default",
           businessKey: { threadId: context.threadId },
         });
+        const frozenAgent = params.capabilityCatalog?.agents.find(
+          (entry) => entry.agentId === action.payload.agentId,
+        );
+        if (
+          params.capabilityCatalog &&
+          (!frozenAgent ||
+            frozenAgent.agentRevisionId !== resolved.agentRevisionId ||
+            frozenAgent.routeRevisionId !== resolved.resolution.routeRevisionId ||
+            frozenAgent.contractSnapshotId !== resolved.contractSnapshotId ||
+            frozenAgent.contractDigest !== resolved.contractDigest ||
+            frozenAgent.publicationRecordId !== resolved.publicationRecordId)
+        ) {
+          throw new AgentActionExecutionError(
+            "AGENT_CALL_BINDING_INVALID",
+            "Agent 当前解析结果与 Invocation 冻结能力目录不一致",
+          );
+        }
         const created = await createAgentCall({
           tenantId: params.tenantId,
           parentInvocationId: context.invocationId,

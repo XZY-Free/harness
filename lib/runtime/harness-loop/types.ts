@@ -134,6 +134,34 @@ export interface HarnessLoopView {
   capabilities: {
     supportedActionTypes: HarnessActionType[];
     preferredAgentCandidate: { agentId: string } | null;
+    catalog: {
+      version: string;
+      agents: Array<{
+        agentId: string;
+        displayName: string;
+        description: string;
+        applicableScenarios: string[];
+        excludedScenarios: string[];
+        contractSummary: string;
+        contextRequirements: string[];
+      }>;
+      tools: Array<{
+        toolId: string;
+        operationId: string;
+        displayName: string;
+        description: string;
+        inputSchema: Record<string, unknown>;
+        sideEffect: string;
+        confirmation: string;
+        idempotent: boolean;
+      }>;
+      knowledgeSources: Array<{
+        sourceRef: string;
+        displayName: string;
+        description: string;
+      }>;
+      unavailableFacts: string[];
+    } | null;
   };
   observations: HarnessObservation[];
   actionHistory: HarnessActionHistoryEntry[];

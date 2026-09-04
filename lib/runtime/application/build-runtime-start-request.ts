@@ -30,6 +30,10 @@ import type {
   StartInvocationRequestBody,
 } from "@/lib/runtime/runtime-client";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import {
+  verifyCapabilityCatalogSnapshot,
+  type CapabilityCatalogSnapshot,
+} from "@/lib/runtime/harness-loop/capability-catalog";
 
 /** builder 入参。 */
 export interface BuildRuntimeStartRequestInput {
@@ -160,6 +164,10 @@ export async function buildRuntimeStartRequestForInvocation(
     ...(input.capabilityDirectives && input.capabilityDirectives.length > 0
       ? { capability_directives: input.capabilityDirectives }
       : {}),
+    capability_catalog: verifyCapabilityCatalogSnapshot(
+      binding.capabilityCatalogJson,
+      binding.capabilityCatalogDigest,
+    ) as CapabilityCatalogSnapshot,
     input_items: inputItems,
     context_handle: contextHandle,
     gateway_endpoints: input.gatewayEndpoints,

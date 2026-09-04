@@ -2,6 +2,7 @@ import {
   ExecutionBindingEvidenceError,
   computeExecutionBindingConfigHash,
 } from "@/lib/executions/domain/execution-binding";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { describe, expect, it } from "vitest";
 
 const EVIDENCE = {
@@ -22,6 +23,7 @@ const EVIDENCE = {
 
 function bindingInput() {
   return {
+    ...testCapabilityCatalogBindingFields("invocation-1"),
     runtimeRevisionId: "runtime-revision-1",
     deploymentRouteId: "route-1",
     modelProvider: "provider",

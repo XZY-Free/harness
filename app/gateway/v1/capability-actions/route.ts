@@ -22,6 +22,11 @@ import {
 } from "@/lib/runtime/harness-loop/loop";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
+import {
+  CapabilityActionValidationError,
+  verifyCapabilityCatalogSnapshot,
+  validateHarnessActionAgainstCatalog,
+} from "@/lib/runtime/harness-loop/capability-catalog";
 import type { HarnessNextAction } from "@/lib/runtime/harness-loop/types";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { executionSubjectFromServiceIdentity } from "@/lib/runtime/transport/execution-subject";
@@ -117,6 +122,31 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
   }
+  let capabilityCatalog;
+  try {
+    capabilityCatalog = verifyCapabilityCatalogSnapshot(
+      binding.capabilityCatalogJson,
+      binding.capabilityCatalogDigest,
+    );
+    validateHarnessActionAgainstCatalog(body.action, capabilityCatalog);
+  } catch (error) {
+    if (error instanceof CapabilityActionValidationError) {
+      const code: ApiErrorCode =
+        error.code === "ACTION_SCOPE_DENIED"
+          ? "ACTION_SCOPE_DENIED"
+          : error.code === "TOOL_ARGUMENTS_INVALID"
+            ? "REQUEST_SCHEMA_INVALID"
+            : error.code === "AGENT_ACTION_NOT_ALLOWED"
+              ? "AGENT_ACTION_NOT_ALLOWED"
+              : "CAPABILITY_NOT_ALLOWED";
+      return apiError(code, error.message, { requestId });
+    }
+    return apiError(
+      "HARNESS_LOOP_STATE_RECOVERY_FAILED",
+      "冻结能力目录不可验证",
+      { requestId },
+    );
+  }
   let frozenGovernance: Awaited<ReturnType<typeof loadFrozenGovernanceConfig>>;
   try {
     frozenGovernance = await loadFrozenGovernanceConfig(
@@ -175,14 +205,6 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
   }
-  if (
-    body.action.actionType === "knowledge.search" &&
-    body.action.payload.preferredSourceRefs?.length
-  ) {
-    return apiError("ACTION_SCOPE_DENIED", "当前 Invocation 未下发可定址 Knowledge source ref", {
-      requestId,
-    });
-  }
   if (body.action.stepNo > limits.maxLoopSteps) {
     return apiError("HARNESS_LOOP_STEP_LIMIT_EXCEEDED", "Harness Loop 步骤预算耗尽", {
       requestId,
@@ -228,6 +250,7 @@ export async function POST(request: Request): Promise<Response> {
     tenantId: principal.tenantId,
     executionSubject: executionSubjectFromServiceIdentity(principal.tenantId, "gateway"),
     resolveRoute,
+    capabilityCatalog,
   });
   const executor = executors[body.action.actionType] as
     | ((

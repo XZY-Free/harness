@@ -23,6 +23,7 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { invocationCommandTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
@@ -187,6 +188,7 @@ async function attachA2ABinding(params: {
     .set({ runtimeExecutionRef: taskId, runtimeSessionBindingId: binding.id })
     .where(eq(invocationTable.id, params.invocationId));
   await db.insert(executionBindingTable).values({
+    ...testCapabilityCatalogBindingFields(params.invocationId),
     invocationId: params.invocationId,
     tenantId: params.tenantId,
     runtimeRevisionId,

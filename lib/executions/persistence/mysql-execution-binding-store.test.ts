@@ -11,6 +11,7 @@ import {
   validateFrozenPublicationEvidenceDigest,
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import {
   PUBLICATION_CONFORMANCE_CASES,
   PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -20,6 +21,7 @@ import { describe, expect, it } from "vitest";
 type BindingRow = Parameters<typeof toExecutionBinding>[0];
 
 const bindingRow: BindingRow = {
+  ...testCapabilityCatalogBindingFields("invocation-1"),
   invocationId: "invocation-1",
   tenantId: "tenant-1",
   runtimeRevisionId: "runtime-revision-1",

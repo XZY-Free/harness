@@ -31,6 +31,7 @@ import {
   outboundAuthHeaders,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
+import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 
 // ─── 共享类型 ──────────────────────────────────────────────
 
@@ -113,6 +114,8 @@ export interface StartInvocationRequestBody {
     capability_id: string;
     mode: "preferred";
   }>;
+  /** Invocation 创建时冻结且经摘要验证的安全能力目录。 */
+  capability_catalog?: CapabilityCatalogSnapshot;
   input_items: unknown[];
   context_handle: string;
   /** §24：下发 Governance Config 引用（Runtime 按 Snapshot 约束本地行为；不含 permission_policy.rules）。 */

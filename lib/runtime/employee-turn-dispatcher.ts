@@ -210,12 +210,13 @@ export async function dispatchEmployeeTurn(params: {
             params.finalResponsePort ??
             configuredFinalResponsePort(params.modelRef ?? aiConfig.chatModel),
           tenantId: params.tenantId,
-          actionExecutors:
-            params.actionExecutors ??
+          actionExecutors: params.actionExecutors,
+          actionExecutorFactory: (capabilityCatalog) =>
             createPlatformHarnessActionExecutors({
               tenantId: params.tenantId,
               executionSubject: params.executionSubject ?? null,
               resolveRoute,
+              capabilityCatalog,
             }),
           recoveryPort: createMySqlHarnessLoopRecoveryPort(params.tenantId),
           ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {

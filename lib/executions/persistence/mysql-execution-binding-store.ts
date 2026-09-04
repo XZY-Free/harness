@@ -167,6 +167,11 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         resolutionInputDigest: evidence.resolutionInputDigest,
         projectionVersionNo: input.projectionVersionNo,
         environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
+        capabilityCatalogJson: input.capabilityCatalogJson,
+        capabilityCatalogDigest: input.capabilityCatalogDigest,
+        capabilityCatalogVersion: input.capabilityCatalogVersion,
+        capabilityCatalogSourceRefs: input.capabilityCatalogSourceRefs,
+        capabilityCatalogCreatedAt: input.capabilityCatalogCreatedAt,
         configHash: input.configHash,
         boundAt: input.boundAt,
       });
@@ -1137,6 +1142,11 @@ export function toExecutionBinding(
     !!row.runtimePublicationRecordId &&
     !!row.conformanceRunId &&
     !!row.resolutionInputDigest &&
+    !!row.capabilityCatalogJson &&
+    !!row.capabilityCatalogDigest &&
+    !!row.capabilityCatalogVersion &&
+    Array.isArray(row.capabilityCatalogSourceRefs) &&
+    !!row.capabilityCatalogCreatedAt &&
     Number.isInteger(row.projectionVersionNo) &&
     row.projectionVersionNo >= 0;
   if (!runtimeFieldsComplete) {
@@ -1158,6 +1168,11 @@ export function toExecutionBinding(
     governanceConfigDigest: row.governanceConfigDigest,
     contextCheckpointId: row.contextCheckpointId,
     environmentDefinitionRevisionId: row.environmentDefinitionRevisionId,
+    capabilityCatalogJson: row.capabilityCatalogJson,
+    capabilityCatalogDigest: row.capabilityCatalogDigest,
+    capabilityCatalogVersion: row.capabilityCatalogVersion,
+    capabilityCatalogSourceRefs: [...row.capabilityCatalogSourceRefs],
+    capabilityCatalogCreatedAt: row.capabilityCatalogCreatedAt,
     routeRevisionId: row.routeRevisionId,
     routeActivationId: row.routeActivationId,
     routeContentDigest: row.routeContentDigest,

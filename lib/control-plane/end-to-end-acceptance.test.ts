@@ -12,6 +12,7 @@
  * 场景11（Hosted Worker 完整 Saga）使用真实 MySQL Gateway 执行 Saga 步骤。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
@@ -606,6 +607,7 @@ async function createBindingFromResolved(params: {
     params.resolution.policyRevisionId,
   );
   return createCreateExecutionBinding({ store: mysqlExecutionBindingStore })({
+    ...testCapabilityCatalogBindingFields(params.invocationId),
     invocationId: params.invocationId,
     tenantId: params.tenantId,
     runtimeRevisionId: params.resolution.target.runtimeRevisionId,

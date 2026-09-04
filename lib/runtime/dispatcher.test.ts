@@ -33,6 +33,7 @@ import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import { ExecutionBindingAlreadyExistsError as StableExecutionBindingAlreadyExistsError } from "@/lib/executions/domain/execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
@@ -1039,6 +1040,7 @@ describe("Dispatcher 调度", () => {
     const runtimeEvidence = resolution.controlPlaneEvidence;
     const { kind: _runtimeEvidenceKind, ...runtimeControlPlaneEvidence } = runtimeEvidence;
     const command = {
+      ...testCapabilityCatalogBindingFields(invocation.id),
       invocationId: invocation.id,
       tenantId: ctx.tenantId,
       runtimeRevisionId: runtimeTarget.runtimeRevisionId,

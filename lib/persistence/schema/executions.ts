@@ -197,6 +197,16 @@ export const executionBindingTable = mysqlTable(
     /** Projection 版本号 — Binding 用此检测 Projection 滞后。 */
     projectionVersionNo: int("projectionVersionNo").notNull(),
     environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", { length: 36 }),
+    /** Invocation 首次决策前冻结的规范化能力目录。 */
+    capabilityCatalogJson: json("capabilityCatalogJson").$type<unknown>().notNull(),
+    capabilityCatalogDigest: varchar("capabilityCatalogDigest", { length: 71 }).notNull(),
+    capabilityCatalogVersion: varchar("capabilityCatalogVersion", { length: 32 }).notNull(),
+    /** 构建目录所使用的 exact revision / binding 引用。 */
+    capabilityCatalogSourceRefs: json("capabilityCatalogSourceRefs").$type<string[]>().notNull(),
+    capabilityCatalogCreatedAt: datetime("capabilityCatalogCreatedAt", {
+      mode: "date",
+      fsp: 3,
+    }).notNull(),
     configHash: varchar("configHash", { length: 128 }).notNull(),
     boundAt: datetime("boundAt", { mode: "date", fsp: 3 })
       .notNull()

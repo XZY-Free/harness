@@ -1,0 +1,34 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+function source(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), "utf8");
+}
+
+describe("Topic 01 production wiring", () => {
+  it("shared production executor registers tool.call through the ToolCall application service", () => {
+    const factory = source("lib/runtime/harness-loop/platform-action-executors.ts");
+    const executor = source("lib/runtime/harness-loop/tool-action-executor.ts");
+    expect(factory).toContain('"tool.call": createToolActionExecutor');
+    expect(executor).toContain('from "@/lib/capability/application/execute-harness-tool-call"');
+    expect(executor).not.toMatch(/fetch\(|providerEndpoint|endpointRef/);
+  });
+
+  it("Hosted and External paths use the same catalog-aware production factory", () => {
+    const hosted = source("lib/runtime/employee-turn-dispatcher.ts");
+    const external = source("app/gateway/v1/capability-actions/route.ts");
+    expect(hosted).toContain("createPlatformHarnessActionExecutors");
+    expect(external).toContain("createPlatformHarnessActionExecutors");
+    expect(hosted).toContain("capabilityCatalog");
+    expect(external).toContain("capabilityCatalog");
+  });
+
+  it("Harness validates every action against the frozen catalog before executor dispatch", () => {
+    const loop = source("lib/runtime/harness-loop/loop.ts");
+    expect(loop).toContain("validateHarnessActionAgainstCatalog");
+    expect(loop.indexOf("validateHarnessActionAgainstCatalog")).toBeLessThan(
+      loop.indexOf("this.executeAction(historyEntry"),
+    );
+  });
+});

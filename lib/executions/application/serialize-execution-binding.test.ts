@@ -1,8 +1,10 @@
 import { serializeExecutionBinding } from "@/lib/executions/application/serialize-execution-binding";
 import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
+import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { describe, expect, it } from "vitest";
 
 const binding: ExecutionBinding = {
+  ...testCapabilityCatalogBindingFields("invocation-1"),
   invocationId: "invocation-1",
   tenantId: "tenant-1",
   runtimeRevisionId: "runtime-revision-1",

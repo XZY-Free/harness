@@ -32,6 +32,7 @@ import {
   HarnessLoopError,
   type HarnessLoopRecoveryPort,
 } from "@/lib/runtime/harness-loop/loop";
+import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import type {
   RuntimeCapabilitiesResponse,
   StartInvocationRequestBody,
@@ -195,6 +196,7 @@ export interface StartInvocationParams {
     capability_id: string;
     mode: "preferred";
   }>;
+  capabilityCatalog?: CapabilityCatalogSnapshot;
   /** 输入 Item 列表（来自 startInvocation 请求体 input_items）。 */
   inputItems: unknown[];
   contextHandle?: string;
@@ -329,6 +331,7 @@ export interface HostedHarnessLoopParams {
     capability_id: string;
     mode: "preferred";
   }>;
+  capabilityCatalog?: CapabilityCatalogSnapshot;
   inputItems: unknown[];
   contextHandle?: string;
   workspace?: StartInvocationRequestBody["workspace"];
@@ -448,6 +451,7 @@ export class HostedHarnessLoop {
       executionLimits: this.params.executionLimits,
       traceContext: this.params.traceContext,
       capabilityDirectives: this.params.capabilityDirectives,
+      capabilityCatalog: this.params.capabilityCatalog,
       decisionPort: this.params.decisionPort ?? missingDecisionPort,
       finalResponsePort: this.params.finalResponsePort ?? missingFinalResponsePort,
       executors: this.params.actionExecutors ?? {},
@@ -683,6 +687,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           threadId: startParams.threadId,
           turnId: startParams.turnId,
           capabilityDirectives: startParams.capabilityDirectives,
+          capabilityCatalog: startParams.capabilityCatalog,
           inputItems: startParams.inputItems,
           contextHandle: startParams.contextHandle,
           gatewayEndpoints: startParams.gatewayEndpoints,

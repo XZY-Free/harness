@@ -77,6 +77,7 @@ import {
   RuntimeSessionBindingConflictError,
 } from "@/lib/runtime/errors";
 import { createAttempt } from "@/lib/runtime/invocation-attempt-queries";
+import { buildProductionCapabilityCatalog } from "@/lib/runtime/harness-loop/build-production-capability-catalog";
 import {
   type CreateInvocationParams,
   createInvocation,
@@ -309,6 +310,19 @@ export async function dispatchInvocationForTurn(params: {
   // 先从 runtime RouteEvidence 剥离判别字段 kind，再展开扁平 evidence — Binding 不得出现 kind 或任何 Agent evidence。
   const { kind: _runtimeEvidenceKind, ...runtimeControlPlaneEvidence } =
     routeResolution.controlPlaneEvidence;
+  const capabilityCatalog = await buildProductionCapabilityCatalog({
+    tenantId: params.tenantId,
+    invocationId: invocation.id,
+    threadId: thread.id,
+    preferredAgentId:
+      turn.agentUseMode === "preferred" ? (turn.preferredAgentId ?? null) : null,
+    runtimeRevisionId: plan.runtimeRevisionId,
+    policyRevisionId: bindingGovernance.policyRevisionId,
+    policyRulesDigest: bindingGovernance.policyRulesDigest,
+    executionSubject: params.executionSubject ?? null,
+    resolveRoute: params.routeResolver ?? defaultRouteResolver,
+    routeScopeKey,
+  });
   const bindingParams: CreateExecutionBindingCommand = {
     invocationId: invocation.id,
     tenantId: params.tenantId,
@@ -326,6 +340,11 @@ export async function dispatchInvocationForTurn(params: {
     governanceConfigDigest: bindingGovernance.governanceConfigDigest,
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
+    capabilityCatalogJson: capabilityCatalog.snapshot,
+    capabilityCatalogDigest: capabilityCatalog.digest,
+    capabilityCatalogVersion: capabilityCatalog.version,
+    capabilityCatalogSourceRefs: capabilityCatalog.sourceRefs,
+    capabilityCatalogCreatedAt: capabilityCatalog.createdAt,
     /** Projection 版本号，用于 Binding 版本一致性校验。 */
     projectionVersionNo,
     controlPlaneEvidence: {
