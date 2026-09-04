@@ -1,12 +1,13 @@
 # SnowHarness durable worker 的统一生产制品。
 FROM node:24-alpine AS dependencies
+RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile
 
 FROM node:24-alpine AS worker
-RUN apk add --no-cache tini git
+RUN apk add --no-cache tini git libstdc++
 WORKDIR /app
 ENV NODE_ENV=production
 ENV WORKER_HEALTH_PORT=8080
