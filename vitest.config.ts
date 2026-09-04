@@ -21,7 +21,7 @@ function project(group: VitestGroup, serial = false) {
       environmentMatchGlobs: [
         ["**/*.test.tsx", "happy-dom"],
         ["**/*.test.ts", "node"],
-      ],
+      ] as Array<[string, "happy-dom" | "node"]>,
       ...(serial
         ? {
             environment: "node" as const,
