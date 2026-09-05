@@ -82,6 +82,8 @@ export class HostExecutionRuntime implements ExecutionRuntime {
         timeout,
         reject: false,
         maxBuffer: 1024 * 1024, // 1MB
+        // timeout 后最多等待 1s 再强制终止，避免 shell 子进程让调用超过 timeout 太久。
+        forceKillAfterDelay: 1_000,
         // P1 修复(02-):env 白名单过滤,防 AI 命令 printenv 泄露平台 secret。
         // 白名单(PATH/HOME/NPM_CONFIG_* 等)+ 敏感关键字黑名单兜底;secretsCache 显式注入。
         env: buildSafeEnv(this.secretsCache),

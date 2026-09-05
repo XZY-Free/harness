@@ -15,8 +15,6 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
-        with:
-          package_manager: true
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -27,7 +25,7 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           node node_modules/electron/install.js
           sudo apt-get update
-          sudo apt-get install -y xvfb gnome-keyring dbus-x11
+          sudo apt-get install -y ripgrep xvfb gnome-keyring dbus-x11
       - name: Run the shared verification plan
         run: pnpm topic01:acceptance
         env:
