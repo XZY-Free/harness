@@ -1,4 +1,10 @@
+import { createHash } from "node:crypto";
+import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
+import {
+  type ConfirmationProposal,
+  parseHostControls,
+} from "@/lib/agents/calls/transport/a2a/host-control-contract";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
 import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
@@ -71,15 +77,23 @@ export async function coordinateAgentInputRequired(
   if (!prompt || !inputSchema) {
     throw new Error(`AgentCall ${callId} input-required 缺少 prompt/input_schema`);
   }
+  const binding = await mysqlAgentCallStore.getBinding({ callId, tenantId });
+  if (!binding) throw new Error(`AgentCall ${callId} 缺少冻结 Binding`);
+  const hostControlPolicy = await loadHostControlCapabilityPolicy(
+    tenantId,
+    binding.agentRevisionId,
+  );
+  const parsedHostControls = parseHostControls(payload?.data, "input-required", hostControlPolicy);
+  const confirmation =
+    parsedHostControls?.kind === "confirmation" ? parsedHostControls.proposal : null;
   const producerEventId = `agent-input-required:${inputEvent.id}`;
   const existing = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
   if (existing) return { coordinated: true, runtimeProducerEventId: producerEventId };
 
   const runtimePayload = {
-    request_type: "input",
-    purpose: "a2a_input_required",
-    prompt,
-    input_schema: inputSchema,
+    request_type: confirmation ? "confirmation" : "input",
+    purpose: confirmation ? "a2a_confirmation" : "a2a_input_required",
+    ...(confirmation ? confirmationPrompt(confirmation) : { prompt, input_schema: inputSchema }),
     agent_call_id: call.id,
     agent_display_name: agent?.displayName ?? null,
     agent_call_event_id: inputEvent.id,
@@ -113,6 +127,22 @@ export async function coordinateAgentInputRequired(
     }
   }
   return { coordinated: false };
+}
+
+function confirmationPrompt(proposal: ConfirmationProposal): Record<string, unknown> {
+  const actionId = `a2a-confirm:${createHash("sha256")
+    .update(`${proposal.proposal_id}`)
+    .digest("hex")
+    .slice(0, 32)}`;
+  return {
+    action_id: actionId,
+    proposal_id: proposal.proposal_id,
+    action_key: proposal.action_key,
+    title: proposal.title,
+    summary: proposal.summary,
+    impact: proposal.impact,
+    preview: proposal.preview,
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

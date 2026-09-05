@@ -194,8 +194,14 @@ export interface ResumeAgentCallParams {
   taskId: string;
   /** A2A contextId（AgentSessionBinding.externalContextRef）。 */
   contextId: string;
-  /** 用户补充文本。 */
-  text: string;
+  /** 普通 input-required 的用户补充文本。 */
+  text?: string;
+  /** confirmation UAR 的结构化解析事实；不得退化为自然语言 marker。 */
+  confirmation?: {
+    proposalId: string;
+    resolution: "approve" | "deny";
+    resolvedAt: string;
+  };
   /** 已解析的公共 Context metadata。 */
   contextMetadata?: Record<string, unknown>;
   /** resume 事件重定位起始 producerSequence（禁止回退进程内计数器）。 */

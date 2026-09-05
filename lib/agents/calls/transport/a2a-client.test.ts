@@ -278,6 +278,70 @@ describe("createA2AAgentTransport — start message/stream wire + 归一化（04
     expect(new Set(seqs).size).toBe(seqs.length);
   });
 
+  it("completed DataPart 的 ui_actions 先按 exact Revision 能力规范化，客户端只会看到安全投影", async () => {
+    const fixture = createFixture([
+      sseResponse([
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "rpc-1",
+          result: {
+            kind: "status-update",
+            taskId: "task-1",
+            contextId: "ctx-1",
+            status: {
+              state: "completed",
+              final: true,
+              message: {
+                role: "agent",
+                parts: [
+                  { kind: "text", text: "已完成" },
+                  {
+                    kind: "data",
+                    data: {
+                      host_controls: {
+                        version: "1",
+                        ui_actions: [
+                          {
+                            action_id: "action-1",
+                            action_type: "navigate",
+                            title: "打开当前会话",
+                            label: "打开",
+                            description: null,
+                            target_key: "thread.current",
+                            url: null,
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      ]),
+    ]);
+    const transport = makeTransport(fixture, {
+      hostControlPolicy: {
+        confirmationActionKeys: [],
+        uiActionTypes: ["navigate"],
+        uiActionTargetKeys: ["thread.current"],
+      },
+    });
+    await transport.startCall(startRequest());
+    await waitForBatches(fixture, 1);
+
+    const completed = fixture.batches
+      .flatMap((batch) => batch.events)
+      .find((event) => event.type === "call.completed");
+    expect(completed).toBeDefined();
+    const data = (completed?.payload as Record<string, unknown>).data as Record<string, unknown>;
+    expect(data.host_controls).toEqual({
+      version: "1",
+      ui_actions: [expect.objectContaining({ web_path: "/threads", url: null })],
+    });
+  });
+
   it("multiple chunks：一个 SSE 事件跨多个网络分片仍完整解析", async () => {
     const full = `data: ${statusUpdate("working")}\n\ndata: ${statusUpdate("completed", "task-1", "ctx-1", "ok", true)}\n\n`;
     const fixture = createFixture([
@@ -473,6 +537,52 @@ describe("createA2AAgentTransport — artifact / input-required / resume（04 §
     const completed = resumeBatch?.events.find((e) => e.type === "call.completed");
     expect((completed?.payload as Record<string, unknown>).text).toBe("最终答复");
     expect(resumeBatch?.events.map((e) => e.producer_sequence)).toEqual([41]);
+  });
+
+  it("resume confirmation：只发送结构化 resolution DataPart，不把 approve/deny 伪装成文本", async () => {
+    const fixture = createFixture([
+      sseResponse([statusUpdate("working")]),
+      jsonResponse({ jsonrpc: "2.0", id: "rpc-2", result: taskResult() }),
+    ]);
+    const transport = makeTransport(fixture);
+    await transport.startCall(startRequest());
+    await waitForBatches(fixture, 1);
+
+    await transport.resumeCall({
+      callId: "call-1",
+      endpoint: "https://agent.example.com",
+      auth: { mode: "bearer", token: "token" },
+      taskId: "task-1",
+      contextId: "ctx-1",
+      confirmation: {
+        proposalId: "proposal-1",
+        resolution: "approve",
+        resolvedAt: "2026-09-05T00:00:00.000Z",
+      },
+      nextProducerSequence: 41,
+      idempotencyKey: "idem-confirmation",
+    });
+
+    const rpc = JSON.parse(String(fixture.requests[1]?.init.body)) as {
+      method: string;
+      params: { message: { parts: Array<Record<string, unknown>> } };
+    };
+    expect(rpc.method).toBe("message/send");
+    expect(rpc.params.message.parts).toEqual([
+      {
+        kind: "data",
+        data: {
+          host_controls: {
+            version: "1",
+            confirmation_resolution: {
+              proposal_id: "proposal-1",
+              resolution: "approve",
+              resolved_at: "2026-09-05T00:00:00.000Z",
+            },
+          },
+        },
+      },
+    ]);
   });
 
   it("resume correlation 不匹配（官方 Task id/contextId ≠ 存储 refs）→ invalid_correlation，sink 不被调用", async () => {

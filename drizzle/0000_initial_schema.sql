@@ -191,6 +191,7 @@ CREATE TABLE `AgentCallBinding` (
 	`policyRulesDigest` varchar(71) NOT NULL,
 	`governanceConfigRevisionId` varchar(36) NOT NULL,
 	`governanceConfigDigest` varchar(71) NOT NULL,
+	`enterpriseUserContextJson` json,
 	`bindingHash` varchar(128) NOT NULL,
 	`boundAt` datetime(3) NOT NULL,
 	CONSTRAINT `AgentCallBinding_callId` PRIMARY KEY(`callId`)
@@ -442,7 +443,7 @@ CREATE TABLE `ThreadItem` (
 	`threadId` varchar(36) NOT NULL,
 	`turnId` varchar(36) NOT NULL,
 	`itemSequence` bigint NOT NULL,
-	`itemType` enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action') NOT NULL,
+	`itemType` enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action','host_action') NOT NULL,
 	`itemState` enum('pending','completed','failed','superseded','cancelled') NOT NULL DEFAULT 'pending',
 	`authorType` enum('user','assistant','system','tool') NOT NULL,
 	`authorId` varchar(36),
@@ -887,6 +888,43 @@ CREATE TABLE `UserIdentity` (
 	CONSTRAINT `UserIdentity_tenant_subject_uq` UNIQUE(`tenantId`,`externalSubject`)
 );
 --> statement-breakpoint
+CREATE TABLE `EnterpriseProfileSyncState` (
+	`id` varchar(36) NOT NULL,
+	`userIdentityId` varchar(36) NOT NULL,
+	`profileFingerprint` varchar(72) NOT NULL,
+	`lastVerifiedAt` datetime(3) NOT NULL,
+	`stale` boolean NOT NULL DEFAULT false,
+	`lastSyncErrorCode` varchar(96),
+	`sourceSystem` varchar(128) NOT NULL,
+	`updatedAt` datetime(3) NOT NULL,
+	CONSTRAINT `EnterpriseProfileSyncState_id` PRIMARY KEY(`id`),
+	CONSTRAINT `EnterpriseProfileSyncState_user_uq` UNIQUE(`userIdentityId`)
+);
+--> statement-breakpoint
+CREATE TABLE `UserExtensionAttribute` (
+	`id` varchar(36) NOT NULL,
+	`userIdentityId` varchar(36) NOT NULL,
+	`attributeKey` varchar(96) NOT NULL,
+	`valueType` enum('string','number','boolean','json') NOT NULL,
+	`stringValue` text,
+	`numberValue` decimal(30,10),
+	`booleanValue` boolean,
+	`jsonValue` json,
+	`sourceSystem` varchar(128) NOT NULL,
+	`updatedAt` datetime(3) NOT NULL,
+	CONSTRAINT `UserExtensionAttribute_id` PRIMARY KEY(`id`),
+	CONSTRAINT `UserExtensionAttribute_user_key_uq` UNIQUE(`userIdentityId`,`attributeKey`),
+	CONSTRAINT `UserExtensionAttribute_value_slot_ck` CHECK ((
+        (valueType = 'string' AND stringValue IS NOT NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NULL)
+        OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)
+        OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)
+        OR (valueType = 'json' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NOT NULL)
+      ))
+);
+--> statement-breakpoint
+ALTER TABLE `EnterpriseProfileSyncState` ADD CONSTRAINT `EnterpriseProfileSyncState_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `UserExtensionAttribute` ADD CONSTRAINT `UserExtensionAttribute_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX `UserExtensionAttribute_user_idx` ON `UserExtensionAttribute` (`userIdentityId`);--> statement-breakpoint
 CREATE TABLE `JobCommand` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,

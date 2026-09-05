@@ -1,5 +1,6 @@
 import type { AgentCallBinding } from "@/lib/agents/calls/domain/agent-call-binding";
 import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
+import type { HostControlCapabilityPolicy } from "@/lib/agents/calls/transport/a2a/host-control-contract";
 import {
   type AgentBackgroundFailureHandler,
   type AgentCallEventSink,
@@ -30,6 +31,7 @@ import {
   buildInvocationContextBundle,
 } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import { externalAgentContextPolicyFilter } from "@/lib/context/enrichment/external-agent-context-policy";
+import type { EnterpriseUserAccessPolicy } from "@/lib/identity/enterprise-user-access-policy";
 import { resolveOutboundCredential } from "@/lib/identity/resolve-outbound-credential";
 
 /** binding 冻结的调用上下文合同 + 快照能力布尔（来自 ContractSnapshot 权威）。 */
@@ -94,11 +96,26 @@ export async function loadAgentCallContract(
 export function buildAgentCallContextMetadata(
   contract: InvocationContextContract,
   environment: PlatformContextEnvironment,
+  enterprisePolicy: EnterpriseUserAccessPolicy = { profileRequirement: "none", allowedFields: [] },
 ): Record<string, unknown> {
+  const effectiveContract =
+    enterprisePolicy.profileRequirement === "none" ||
+    contract.contexts.some((context) => context.contextKind === "enterprise_user_context")
+      ? contract
+      : {
+          contexts: [
+            ...contract.contexts,
+            { contextKind: "enterprise_user_context", necessity: "required" as const },
+          ],
+        };
   const bundle = buildInvocationContextBundle({
-    contract,
+    contract: effectiveContract,
     environment,
-    policyFilter: externalAgentContextPolicyFilter(),
+    policyFilter: externalAgentContextPolicyFilter(
+      enterprisePolicy.profileRequirement === "none"
+        ? undefined
+        : { explicitAllows: new Set(["enterprise_user_context"]) },
+    ),
   });
   const contextMetadata: Record<string, unknown> = {};
   for (const entry of bundle.entries) {
@@ -126,6 +143,7 @@ export interface AgentCallTransportDeps {
   onBackgroundFailure?: AgentBackgroundFailureHandler;
   capabilities: LoadedAgentCallContract["capabilities"];
   streamTimeoutMs?: number;
+  hostControlPolicy?: HostControlCapabilityPolicy;
 }
 
 /** 构造 A2A AgentTransport（事件只走 AgentCallEventIngress；background 只合成子域 lost）。 */
@@ -142,5 +160,6 @@ export function createAgentCallTransport(deps: AgentCallTransportDeps) {
     eventSink: deps.eventSink,
     onBackgroundFailure: deps.onBackgroundFailure,
     streamTimeoutMs: deps.streamTimeoutMs ?? 60_000,
+    hostControlPolicy: deps.hostControlPolicy,
   });
 }

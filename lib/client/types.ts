@@ -63,7 +63,8 @@ export type ClientItemType =
   | "artifact"
   | "job_result"
   | "child_thread"
-  | "user_action";
+  | "user_action"
+  | "host_action";
 
 /** Item 状态（与服务端 THREAD_ITEM_STATES 一致）。 */
 export type ClientItemState = "pending" | "completed" | "failed" | "superseded" | "cancelled";

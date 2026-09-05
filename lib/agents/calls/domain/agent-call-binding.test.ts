@@ -4,6 +4,7 @@ import {
   assertAgentCallBindingEvidence,
   computeAgentCallBindingHash,
 } from "@/lib/agents/calls/domain/agent-call-binding";
+import type { EnterpriseUserPublicContext } from "@/lib/identity/enterprise-user-access-policy";
 import { describe, expect, it } from "vitest";
 
 const D = (hex: string): string => `sha256:${hex.repeat(64)}`;
@@ -140,5 +141,57 @@ describe("AgentCallBinding 不可变冻结", () => {
     expect(() => computeAgentCallBindingHash(validConfig({ projectionVersionNo: 0 }))).toThrow(
       AgentCallBindingEvidenceError,
     );
+  });
+  it("冻结企业用户上下文时只接受安全投影，拒绝权限、数据范围和未登记字段", () => {
+    const validContext: EnterpriseUserPublicContext = {
+      context_version: "1",
+      profile_status: "fresh",
+      last_verified_at: "2026-09-05T00:00:00.000Z",
+      fields: { employeeNo: "E-001" },
+    };
+    expect(() =>
+      assertAgentCallBindingEvidence(validConfig({ enterpriseUserContext: validContext })),
+    ).not.toThrow();
+    const forbiddenFields: Record<string, unknown>[] = [
+      { enterprisePermissions: ["payroll.read"] },
+      { dataScopes: ["factory-a"] },
+      { unknownField: "value" },
+    ];
+    for (const fields of forbiddenFields) {
+      expect(() =>
+        assertAgentCallBindingEvidence(
+          validConfig({ enterpriseUserContext: { ...validContext, fields: fields as never } }),
+        ),
+      ).toThrow(AgentCallBindingEvidenceError);
+    }
+  });
+
+  it("冻结企业用户上下文时拒绝非法版本、状态和验证时间", () => {
+    for (const enterpriseUserContext of [
+      {
+        context_version: "2",
+        profile_status: "fresh",
+        last_verified_at: "2026-09-05T00:00:00.000Z",
+        fields: {},
+      },
+      {
+        context_version: "1",
+        profile_status: "unavailable",
+        last_verified_at: "2026-09-05T00:00:00.000Z",
+        fields: {},
+      },
+      {
+        context_version: "1",
+        profile_status: "fresh",
+        last_verified_at: "not-a-date",
+        fields: {},
+      },
+    ]) {
+      expect(() =>
+        assertAgentCallBindingEvidence(
+          validConfig({ enterpriseUserContext: enterpriseUserContext as never }),
+        ),
+      ).toThrow(AgentCallBindingEvidenceError);
+    }
   });
 });

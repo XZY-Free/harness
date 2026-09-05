@@ -137,7 +137,7 @@ describe("Schema 单一 Authority", () => {
     const migration = readFileSync(join(ROOT, "drizzle/0000_initial_schema.sql"), "utf8");
     const canonical = canonicalTableNames();
 
-    expect(canonical).toHaveLength(122);
+    expect(canonical).toHaveLength(124);
     expect(runtimeTableNames()).toEqual(canonical);
     expect(migrationTableNames(migration)).toEqual(canonical);
     expect(manifest.counts.canonical).toBe(canonical.length);

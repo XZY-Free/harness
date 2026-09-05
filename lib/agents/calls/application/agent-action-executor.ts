@@ -1,4 +1,5 @@
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
+import { projectAgentHostActions } from "@/lib/agents/calls/application/project-host-actions";
 import {
   AgentActionUnavailableError,
   resolveAgentActionBinding,
@@ -11,10 +12,17 @@ import {
   AgentCallIdempotencyConflictError,
   mysqlAgentCallStore,
 } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
+import type { HostAction } from "@/lib/agents/calls/transport/a2a/host-control-contract";
 import {
   RequiredContextDeniedError,
   RequiredContextUnavailableError,
 } from "@/lib/context/enrichment/build-invocation-context-bundle";
+import {
+  EnterpriseUserContextRequirementError,
+  buildEnterpriseUserContext,
+  loadCurrentEnterpriseUserProfile,
+  loadEnterpriseUserAccessPolicy,
+} from "@/lib/identity/enterprise-user-access-policy";
 import { OutboundCredentialError } from "@/lib/identity/resolve-outbound-credential";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
@@ -87,13 +95,36 @@ export function createAgentActionExecutor(
             "Agent 当前解析结果与 Invocation 冻结能力目录不一致",
           );
         }
+        const enterprisePolicy = await loadEnterpriseUserAccessPolicy(
+          params.tenantId,
+          resolved.agentRevisionId,
+        );
+        const enterpriseUserContext =
+          enterprisePolicy.profileRequirement === "none"
+            ? undefined
+            : buildEnterpriseUserContext(
+                enterprisePolicy,
+                params.executionSubject.subjectType === "user"
+                  ? await loadCurrentEnterpriseUserProfile(
+                      params.tenantId,
+                      params.executionSubject.subjectId,
+                    )
+                  : {
+                      profileStatus: "unavailable" as const,
+                      lastVerifiedAt: null,
+                      attributes: {},
+                    },
+              );
         const created = await createAgentCall({
           tenantId: params.tenantId,
           parentInvocationId: context.invocationId,
           agentId: action.payload.agentId,
           actionId: action.actionId,
           transportChannel: params.transportChannel,
-          bindingCandidate: resolved.bindingCandidate,
+          bindingCandidate: {
+            ...resolved.bindingCandidate,
+            ...(enterpriseUserContext ? { enterpriseUserContext } : {}),
+          },
         });
         call = created.call;
       } else if (
@@ -142,6 +173,17 @@ export function createAgentActionExecutor(
           },
         };
       }
+      const hostActions = readHostActions(disposition.resultJson);
+      if (hostActions.length > 0) {
+        await projectAgentHostActions({
+          tenantId: params.tenantId,
+          threadId: context.threadId,
+          turnId: context.turnId,
+          invocationId: context.invocationId,
+          agentCallId: disposition.callId,
+          actions: hostActions,
+        });
+      }
       return {
         authorityRef: `agent-call:${disposition.callId}`,
         observation: {
@@ -176,7 +218,8 @@ export function createAgentActionExecutor(
       }
       if (
         error instanceof RequiredContextUnavailableError ||
-        error instanceof RequiredContextDeniedError
+        error instanceof RequiredContextDeniedError ||
+        error instanceof EnterpriseUserContextRequirementError
       ) {
         throw new AgentActionExecutionError("AGENT_CONTEXT_REQUIREMENT_UNSATISFIED", error.message);
       }
@@ -187,6 +230,14 @@ export function createAgentActionExecutor(
       );
     }
   };
+}
+
+function readHostActions(value: unknown): HostAction[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const controls = (value as Record<string, unknown>).host_controls;
+  if (!controls || typeof controls !== "object" || Array.isArray(controls)) return [];
+  const actions = (controls as Record<string, unknown>).ui_actions;
+  return Array.isArray(actions) ? (actions as HostAction[]) : [];
 }
 
 function normalizeTerminalCode(code: string): string {

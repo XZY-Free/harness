@@ -6,6 +6,10 @@ import {
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import {
+  HostControlProtocolError,
+  parseHostControlCapabilityPolicy,
+} from "@/lib/agents/calls/transport/a2a/host-control-contract";
 /**
  * POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision。
  *
@@ -53,6 +57,10 @@ import {
   actorFromWorkloadPrincipal,
   recordAuditEvent,
 } from "@/lib/identity/audit";
+import {
+  EnterpriseUserAccessPolicyError,
+  parseEnterpriseUserAccessPolicy,
+} from "@/lib/identity/enterprise-user-access-policy";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -199,6 +207,18 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
     return schemaInvalidTable(requestId, "请求体非法：缺少必填字段或字段类型错误");
+  }
+  try {
+    parseEnterpriseUserAccessPolicy(body.agent_interface_requirements);
+    parseHostControlCapabilityPolicy(body.agent_interface_requirements);
+  } catch (error) {
+    if (
+      error instanceof EnterpriseUserAccessPolicyError ||
+      error instanceof HostControlProtocolError
+    ) {
+      return schemaInvalidTable(requestId, error.message);
+    }
+    throw error;
   }
 
   // 5.5 校验绑定的 AgentContractSnapshot 存在、属于当前租户且属于同一 Agent

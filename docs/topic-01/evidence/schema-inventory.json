@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "authority": "lib/persistence/schema/index.ts",
   "counts": {
-    "canonical": 122,
-    "runtimeLoaded": 122,
-    "migration": 122,
-    "freshDbPlanned": 122
+    "canonical": 124,
+    "runtimeLoaded": 124,
+    "migration": 124,
+    "freshDbPlanned": 124
   },
   "freshDbVerification": {
     "status": "planned-for-batch-07",
@@ -51,6 +51,7 @@
       ],
       "productionReaders": [
         "lib/agents/calls/application/agent-call-projection.ts",
+        "lib/agents/calls/application/host-control-policy.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/agents/persistence/agent-contract-store.ts",
         "lib/agents/persistence/agent-queries.ts",
@@ -60,6 +61,7 @@
         "lib/catalog/catalog-queries.ts",
         "lib/catalog/projector.ts",
         "lib/control-plane/persistence/mysql-revision-execution-evidence-reader.ts",
+        "lib/identity/enterprise-user-access-policy.ts",
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/runtime/harness-loop/build-production-capability-catalog.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
@@ -94,6 +96,7 @@
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
         "lib/agents/calls/application/agent-call-projection.ts",
+        "lib/agents/calls/application/host-control-policy.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/agents/persistence/agent-contract-store.ts",
         "lib/agents/persistence/agent-queries.ts",
@@ -103,6 +106,7 @@
         "lib/catalog/catalog-queries.ts",
         "lib/catalog/projector.ts",
         "lib/control-plane/persistence/mysql-revision-execution-evidence-reader.ts",
+        "lib/identity/enterprise-user-access-policy.ts",
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/runtime/harness-loop/build-production-capability-catalog.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
@@ -530,11 +534,13 @@
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts"
       ],
       "productionReaders": [
+        "lib/agents/calls/application/host-control-policy.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/agents/persistence/agent-revision-queries.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
         "lib/control-plane/persistence/mysql-revision-execution-evidence-reader.ts",
+        "lib/identity/enterprise-user-access-policy.ts",
         "lib/routes/persistence/mysql-route-set-activation-store.ts",
         "lib/routes/projection/build-route-eligibility.ts"
       ],
@@ -567,11 +573,13 @@
         "lib/agents/persistence/agent-revision-queries.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
+        "lib/agents/calls/application/host-control-policy.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/agents/persistence/agent-revision-queries.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
         "lib/control-plane/persistence/mysql-revision-execution-evidence-reader.ts",
+        "lib/identity/enterprise-user-access-policy.ts",
         "lib/routes/persistence/mysql-route-set-activation-store.ts",
         "lib/routes/projection/build-route-eligibility.ts",
         "drizzle/0000_initial_schema.sql"
@@ -1721,6 +1729,47 @@
         "lib/persistence/schema/effect.ts#effectTargetTable",
         "lib/capability/effect-queries.ts",
         "lib/capability/effect-queries.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "EnterpriseProfileSyncState",
+      "schemaDeclaration": "lib/persistence/schema/identity.ts#enterpriseProfileSyncState",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "identity",
+      "tenantBoundary": "通过父记录外键或不可变绑定继承租户；访问前由父 Authority 校验",
+      "productionWriters": [
+        "lib/identity/enterprise-user-profile-queries.ts"
+      ],
+      "productionReaders": [
+        "lib/identity/enterprise-user-profile-queries.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/identity.ts#enterpriseProfileSyncState 是 EnterpriseProfileSyncState 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`userIdentityId` varchar(36) NOT NULL",
+        "`profileFingerprint` varchar(72) NOT NULL",
+        "`lastVerifiedAt` datetime(3) NOT NULL",
+        "`stale` boolean NOT NULL DEFAULT false",
+        "`sourceSystem` varchar(128) NOT NULL",
+        "`updatedAt` datetime(3) NOT NULL",
+        "CONSTRAINT `EnterpriseProfileSyncState_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `EnterpriseProfileSyncState_user_uq` UNIQUE(`userIdentityId`)",
+        "ALTER TABLE `EnterpriseProfileSyncState` ADD CONSTRAINT `EnterpriseProfileSyncState_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/identity.ts#enterpriseProfileSyncState",
+        "lib/identity/enterprise-user-profile-queries.ts",
+        "lib/identity/enterprise-user-profile-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -4846,6 +4895,7 @@
         "lib/runtime/invocation-queries.ts"
       ],
       "productionReaders": [
+        "lib/agents/calls/application/project-host-actions.ts",
         "lib/context/context-handle.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/environment-takeover-queries.ts",
@@ -4907,6 +4957,7 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/runtime/invocation-queries.ts",
+        "lib/agents/calls/application/project-host-actions.ts",
         "lib/context/context-handle.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/environment-takeover-queries.ts",
@@ -4948,6 +4999,7 @@
         "lib/runtime/dispatcher.ts"
       ],
       "productionReaders": [
+        "lib/agents/calls/application/project-host-actions.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/thread-queries.ts",
@@ -4989,6 +5041,7 @@
         "lib/conversations/thread-queries.ts",
         "lib/conversations/turn-queries.ts",
         "lib/runtime/dispatcher.ts",
+        "lib/agents/calls/application/project-host-actions.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/thread-queries.ts",
@@ -5011,6 +5064,7 @@
       "domainOwner": "conversation",
       "tenantBoundary": "通过父记录外键或不可变绑定继承租户；访问前由父 Authority 校验",
       "productionWriters": [
+        "lib/agents/calls/application/project-host-actions.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/steer-queries.ts",
         "lib/conversations/thread-item-queries.ts",
@@ -5045,7 +5099,7 @@
         "`threadId` varchar(36) NOT NULL",
         "`turnId` varchar(36) NOT NULL",
         "`itemSequence` bigint NOT NULL",
-        "`itemType` enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action') NOT NULL",
+        "`itemType` enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action','host_action') NOT NULL",
         "`itemState` enum('pending','completed','failed','superseded','cancelled') NOT NULL DEFAULT 'pending'",
         "`authorType` enum('user','assistant','system','tool') NOT NULL",
         "`contentJson` json NOT NULL",
@@ -5062,6 +5116,7 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/conversation.ts#threadItemTable",
+        "lib/agents/calls/application/project-host-actions.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/steer-queries.ts",
         "lib/conversations/thread-item-queries.ts",
@@ -5706,6 +5761,52 @@
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
     {
+      "physicalTableName": "UserExtensionAttribute",
+      "schemaDeclaration": "lib/persistence/schema/identity.ts#userExtensionAttribute",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "identity",
+      "tenantBoundary": "通过父记录外键或不可变绑定继承租户；访问前由父 Authority 校验",
+      "productionWriters": [
+        "lib/identity/enterprise-user-profile-queries.ts"
+      ],
+      "productionReaders": [
+        "lib/identity/enterprise-user-profile-queries.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/identity.ts#userExtensionAttribute 是 UserExtensionAttribute 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`userIdentityId` varchar(36) NOT NULL",
+        "`attributeKey` varchar(96) NOT NULL",
+        "`valueType` enum('string','number','boolean','json') NOT NULL",
+        "`sourceSystem` varchar(128) NOT NULL",
+        "`updatedAt` datetime(3) NOT NULL",
+        "CONSTRAINT `UserExtensionAttribute_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `UserExtensionAttribute_user_key_uq` UNIQUE(`userIdentityId`,`attributeKey`)",
+        "CONSTRAINT `UserExtensionAttribute_value_slot_ck` CHECK ((",
+        "(valueType = 'string' AND stringValue IS NOT NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NULL)",
+        "OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)",
+        "OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)",
+        "OR (valueType = 'json' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NOT NULL)",
+        "ALTER TABLE `UserExtensionAttribute` ADD CONSTRAINT `UserExtensionAttribute_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action",
+        "CREATE INDEX `UserExtensionAttribute_user_idx` ON `UserExtensionAttribute` (`userIdentityId`)"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/identity.ts#userExtensionAttribute",
+        "lib/identity/enterprise-user-profile-queries.ts",
+        "lib/identity/enterprise-user-profile-queries.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
       "physicalTableName": "UserIdentity",
       "schemaDeclaration": "lib/persistence/schema/identity.ts#userIdentity",
       "migrationSource": [
@@ -5717,6 +5818,9 @@
         "lib/identity/user-identity-queries.ts"
       ],
       "productionReaders": [
+        "lib/identity/enterprise-user-profile-queries.ts",
+        "lib/identity/enterprise-user-sync.ts",
+        "lib/identity/resolver.ts",
         "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",
         "lib/studio/admin-audit.ts",
@@ -5745,6 +5849,9 @@
       "evidence": [
         "lib/persistence/schema/identity.ts#userIdentity",
         "lib/identity/user-identity-queries.ts",
+        "lib/identity/enterprise-user-profile-queries.ts",
+        "lib/identity/enterprise-user-sync.ts",
+        "lib/identity/resolver.ts",
         "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",
         "lib/studio/admin-audit.ts",

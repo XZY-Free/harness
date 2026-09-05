@@ -223,9 +223,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     // Agent input-required 先由同事务 Outbox 恢复原 AgentCall/task/context；父 Runtime
     // 不得在 Agent 回答被接受前抢跑。普通 UAR 仍走 Runtime Command Gateway。
     const durableAgentResume =
-      result.request.requestType === "input" &&
-      result.request.purpose === "a2a_input_required" &&
-      body.resolution === "submit";
+      (result.request.requestType === "input" &&
+        result.request.purpose === "a2a_input_required" &&
+        body.resolution === "submit") ||
+      (result.request.requestType === "confirmation" &&
+        result.request.purpose === "a2a_confirmation" &&
+        (body.resolution === "approve" || body.resolution === "deny"));
     const gatewayResult = durableAgentResume
       ? null
       : await dispatchResumeCommandToRuntime({

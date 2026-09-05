@@ -42,6 +42,7 @@ import type {
   JsonRpcResponse,
   a2aMessageText,
 } from "@/lib/agents/calls/transport/a2a/a2a-types";
+import type { HostControlCapabilityPolicy } from "@/lib/agents/calls/transport/a2a/host-control-contract";
 import {
   type AgentBackgroundFailureHandler,
   type AgentBackgroundFailureKind,
@@ -91,6 +92,8 @@ export interface CreateA2AAgentTransportParams {
    * 不直接写 DB；外层 orchestration 再调用正式 AgentCall lost/failed 转移。
    */
   onBackgroundFailure?: AgentBackgroundFailureHandler;
+  /** exact AgentRevision 的 host_controls 能力；缺省全拒绝。 */
+  hostControlPolicy?: HostControlCapabilityPolicy;
 }
 
 /** 抛出 JSON-RPC error 的稳定分类映射。 */
@@ -409,6 +412,7 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
           nextSequence + (prependStarted ? 1 : 0),
           update,
           artifacts,
+          params.hostControlPolicy,
         );
         if (mapsToStarted) startedObserved = true;
         if (!prependStarted) return mapped;
@@ -710,12 +714,18 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
           `A2A Transport 冻结能力不含 resume（call=${req.callId}）`,
         );
       }
-      // 1) payload 校验（网络之前）：非空纯文本字符串（null/undefined/对象等非字符串
-      //    也必须在此 fail closed，绝不在 .trim() 上抛裸 TypeError）。
-      if (typeof req.text !== "string" || req.text.trim().length === 0) {
+      // 1) payload 校验（网络之前）：普通输入与 confirmation 必须二选一。
+      if (req.confirmation) {
+        if (
+          !req.confirmation.proposalId.trim() ||
+          !["approve", "deny"].includes(req.confirmation.resolution) ||
+          Number.isNaN(Date.parse(req.confirmation.resolvedAt))
+        ) {
+          throw new AgentTransportError("protocol_schema", "confirmation resume payload 非法");
+        }
+      } else if (typeof req.text !== "string" || req.text.trim().length === 0) {
         throw new AgentTransportError("protocol_schema", "resume_payload 必须是非空纯文本");
       }
-      const resumeText = req.text.trim();
 
       // 2) 关联 refs：taskId/contextId 必须精确已知（fail-closed）。
       if (!req.taskId || !req.contextId) {
@@ -751,7 +761,23 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
             role: "user",
             contextId: req.contextId,
             taskId: req.taskId,
-            parts: [{ kind: "text", text: resumeText }],
+            parts: req.confirmation
+              ? [
+                  {
+                    kind: "data",
+                    data: {
+                      host_controls: {
+                        version: "1",
+                        confirmation_resolution: {
+                          proposal_id: req.confirmation.proposalId,
+                          resolution: req.confirmation.resolution,
+                          resolved_at: req.confirmation.resolvedAt,
+                        },
+                      },
+                    },
+                  },
+                ]
+              : [{ kind: "text", text: req.text?.trim() }],
             ...(Object.keys(resumeMetadata).length > 0 ? { metadata: resumeMetadata } : {}),
           },
         },
@@ -796,6 +822,7 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
           status: task.status,
         },
         artifacts,
+        params.hostControlPolicy,
       );
       await params.eventSink({
         callId: req.callId,

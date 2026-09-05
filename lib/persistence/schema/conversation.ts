@@ -123,6 +123,7 @@ export const TURN_TERMINAL_STATES: readonly TurnState[] = [
  * - job_result：Job 结果。
  * - child_thread：子 Thread 引用。
  * - user_action：用户操作请求。
+ * - host_action：外部 Agent completed 结果经过服务端校验后的宿主界面动作投影。
  */
 export const THREAD_ITEM_TYPES = [
   "user_message",
@@ -133,6 +134,7 @@ export const THREAD_ITEM_TYPES = [
   "job_result",
   "child_thread",
   "user_action",
+  "host_action",
 ] as const;
 export type ThreadItemType = (typeof THREAD_ITEM_TYPES)[number];
 

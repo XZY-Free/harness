@@ -14,6 +14,11 @@
 import { authConfig } from "@/lib/config";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { type ApiAudience, apiError, generateRequestId } from "@/lib/http";
+import type { NormalizedEnterpriseUserProfile } from "@/lib/identity/enterprise-user";
+import {
+  type EnterpriseUserProfileStatus,
+  syncEnterpriseUserProfile,
+} from "@/lib/identity/enterprise-user-sync";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -34,6 +39,18 @@ export interface Principal {
   email: string;
   displayName: string | null;
   audience: ApiAudience;
+  /** 企业资料健康状态；default 模式为 unavailable，不影响标准身份使用。 */
+  profileStatus?: EnterpriseUserProfileStatus;
+  lastVerifiedAt?: Date | null;
+  /** 服务端当前上下文使用的规范化企业字段，不包含 token/raw profile。 */
+  enterpriseAttributes?: NormalizedEnterpriseUserProfile["attributes"];
+}
+
+/** 当前用户上下文的强类型形式；普通 Principal 兼容保留为可选扩展。 */
+export interface CurrentUserContext extends Principal {
+  profileStatus: EnterpriseUserProfileStatus;
+  lastVerifiedAt: Date | null;
+  enterpriseAttributes: NormalizedEnterpriseUserProfile["attributes"];
 }
 
 /** 认证失败错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
@@ -117,13 +134,24 @@ export async function resolvePrincipal(
     displayName,
   });
 
-  // 同步 principal_binding（subjectType=user），保证外部 subject 到内部 identity 的映射可查。
+  const synced = await syncEnterpriseUserProfile({
+    subject: {
+      tenantId: tenant.id,
+      tenantKey: tenant.key,
+      externalSubject,
+      email,
+      displayName,
+    },
+    userIdentityId: identity.id,
+  });
+
+  // 同步后使用适配器确认过的标准字段建立绑定，避免企业资料漂移后绑定显示名落后。
   await upsertPrincipalBinding({
     tenantId: tenant.id,
     subjectType: "user",
     externalId: externalSubject,
-    displayName,
-    userIdentityId: identity.id,
+    displayName: synced.userIdentity.displayName,
+    userIdentityId: synced.userIdentity.id,
   });
 
   return {
@@ -131,10 +159,29 @@ export async function resolvePrincipal(
     tenantKey: tenant.key,
     userIdentityId: identity.id,
     externalSubject,
-    email,
-    displayName,
+    email: synced.userIdentity.email,
+    displayName: synced.userIdentity.displayName,
     audience,
+    profileStatus: synced.profileStatus,
+    lastVerifiedAt: synced.lastVerifiedAt,
+    enterpriseAttributes: synced.attributes,
   };
+}
+
+/** 显式返回完整的当前用户上下文，供需要企业资料状态的调用方使用。 */
+export async function resolveCurrentUserContext(
+  headers: Headers,
+  audience: ApiAudience = "employee",
+): Promise<CurrentUserContext> {
+  const principal = await resolvePrincipal(headers, audience);
+  if (
+    !principal.profileStatus ||
+    principal.lastVerifiedAt === undefined ||
+    !principal.enterpriseAttributes
+  ) {
+    throw new Error("当前用户上下文缺少企业资料状态");
+  }
+  return principal as CurrentUserContext;
 }
 
 /**

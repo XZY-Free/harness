@@ -5,9 +5,9 @@
  * email/displayName 允许漂移更新（不再是身份主键）。
  * MySQL 无 INSERT ... RETURNING：IGNORE + 回查，并发下也只建一行。
  */
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import { userIdentity } from "@/lib/persistence/schema/identity";
-import type { UserIdentity } from "@/lib/persistence/schema/identity";
+import type { UserIdentity, UserIdentityStatus } from "@/lib/persistence/schema/identity";
 import { and, eq } from "drizzle-orm";
 
 /** 按 (tenantId, externalSubject) upsert 用户身份。 */
@@ -16,10 +16,19 @@ export async function upsertUserIdentity(params: {
   externalSubject: string;
   email: string;
   displayName: string | null;
+  status?: UserIdentityStatus;
+  client?: DbOrTx;
 }): Promise<UserIdentity> {
-  const { tenantId, externalSubject: subject, email, displayName } = params;
+  const {
+    tenantId,
+    externalSubject: subject,
+    email,
+    displayName,
+    status = "active",
+    client = db,
+  } = params;
 
-  const [existing] = await db
+  const [existing] = await client
     .select()
     .from(userIdentity)
     .where(and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, subject)))
@@ -27,26 +36,30 @@ export async function upsertUserIdentity(params: {
 
   if (existing) {
     // email / displayName 漂移才轻量 update，避免无谓写入。
-    if (existing.email !== email || existing.displayName !== displayName) {
-      await db
+    if (
+      existing.email !== email ||
+      existing.displayName !== displayName ||
+      existing.status !== status
+    ) {
+      await client
         .update(userIdentity)
-        .set({ email, displayName })
+        .set({ email, displayName, status, updatedAt: new Date() })
         .where(eq(userIdentity.id, existing.id));
-      return { ...existing, email, displayName };
+      return { ...existing, email, displayName, status };
     }
     return existing;
   }
 
   // INSERT IGNORE + 回查（并发竞态下也只建一行）。
-  await db.insert(userIdentity).ignore().values({
+  await client.insert(userIdentity).ignore().values({
     tenantId,
     externalSubject: subject,
     email,
     displayName,
-    status: "active",
+    status,
   });
 
-  const [created] = await db
+  const [created] = await client
     .select()
     .from(userIdentity)
     .where(and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, subject)))

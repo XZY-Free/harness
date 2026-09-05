@@ -97,6 +97,12 @@ export const AUDIT_ACTION_TYPES = [
   "permission_rule.deleted",
   "thread.purged",
   "approval.resolved",
+  // 企业用户资料同步（只记录来源、变更 key 和稳定错误分类，不保存原值）。
+  "enterprise.user_profile.created",
+  "enterprise.user_profile.changed",
+  "enterprise.user_profile.sync_failed",
+  "enterprise.user_profile.fresh",
+  "enterprise.user.disabled",
   // Runtime 跨边界能力调用：caller workload 与 effective subject 同时进入脱敏元数据。
   "capability.action.execute",
   "invocation.continuation.dead_letter",

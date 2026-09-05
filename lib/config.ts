@@ -378,6 +378,22 @@ export const authConfig = {
   },
 } as const;
 
+/**
+ * 企业用户资料适配器选择。具体 enterprise 实现由部署方在启动时注册；主仓不提供
+ * 企业目录连接器。该配置是唯一的适配器选择 Authority。
+ */
+export const enterpriseUserConfig = {
+  get adapterMode(): "default" | "enterprise" {
+    const raw = optionalEnv("SNOW_ENTERPRISE_USER_ADAPTER", "default");
+    if (raw !== "default" && raw !== "enterprise") {
+      throw new Error(
+        `[config] 无效的 SNOW_ENTERPRISE_USER_ADAPTER="${raw}"，可选值：default | enterprise`,
+      );
+    }
+    return raw;
+  },
+} as const;
+
 export const appConfig = {
   /** 当前部署环境。 */
   env: APP_ENV,

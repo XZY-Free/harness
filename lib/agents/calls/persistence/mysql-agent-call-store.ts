@@ -476,6 +476,7 @@ async function doCreate(
     policyRulesDigest: b.policyRulesDigest,
     governanceConfigRevisionId: b.governanceConfigRevisionId,
     governanceConfigDigest: b.governanceConfigDigest,
+    enterpriseUserContextJson: b.enterpriseUserContext ?? null,
     bindingHash: input.bindingHash,
     boundAt: input.createdAt,
   });
@@ -644,6 +645,12 @@ function toBindingConfig(
     policyRulesDigest: row.policyRulesDigest,
     governanceConfigRevisionId: row.governanceConfigRevisionId,
     governanceConfigDigest: row.governanceConfigDigest,
+    ...(row.enterpriseUserContextJson
+      ? {
+          enterpriseUserContext:
+            row.enterpriseUserContextJson as AgentCallBindingConfigInput["enterpriseUserContext"],
+        }
+      : {}),
   };
 }
 

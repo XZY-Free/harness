@@ -50,7 +50,18 @@ const handler = createInvocationContinuationHandler({
       );
     }
     const prompt = asRecord(request.promptJson);
-    if (prompt?.agent_call_id !== params.agentCallId || request.resolution !== "submit") {
+    const validInputResolution =
+      request.requestType === "input" &&
+      request.purpose === "a2a_input_required" &&
+      request.resolution === "submit";
+    const validConfirmationResolution =
+      request.requestType === "confirmation" &&
+      request.purpose === "a2a_confirmation" &&
+      (request.resolution === "approve" || request.resolution === "deny");
+    if (
+      prompt?.agent_call_id !== params.agentCallId ||
+      (!validInputResolution && !validConfirmationResolution)
+    ) {
       throw new InvocationContinuationPermanentError(
         "USER_ACTION_REQUEST_MISMATCH",
         "Agent UserActionRequest 与 continuation 不一致",

@@ -7,15 +7,15 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 274,
-    "db": 109,
+    "unit": 279,
+    "db": 110,
     "integration": 10,
-    "contract": 27,
+    "contract": 28,
     "e2e-web": 3,
     "e2e-desktop": 1,
     "e2e-cross-client": 1
   },
-  "total": 425,
+  "total": 432,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -118,6 +118,17 @@
     },
     {
       "file": "app/api/v1/threads/route.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "app/api/v1/user/current/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -756,6 +767,17 @@
     },
     {
       "file": "components/thread/items/child-thread-item.test.tsx",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "components/thread/items/host-action-item.test.tsx",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -1748,6 +1770,17 @@
       "file": "lib/agents/calls/transport/a2a-provider-blackbox.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/agents/calls/transport/a2a/host-control-contract.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
       "needsDB": false,
       "serial": false,
       "inFullAcceptance": true,
@@ -3026,6 +3059,50 @@
       "command": "pnpm vitest run --project db",
       "needsDB": true,
       "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/identity/enterprise-user-access-policy.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/identity/enterprise-user-adapter.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/identity/enterprise-user-profile-sync.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/identity/enterprise-user.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"

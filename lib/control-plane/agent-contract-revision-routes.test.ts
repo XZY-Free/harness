@@ -146,6 +146,23 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions（AgentContractSnapshot
     expect(await countRevisions(agentId)).toBe(1);
   });
 
+  it("host_controls 能力声明非法时 fail closed，且不创建 Revision", async () => {
+    const response = await buildPost(
+      agentId,
+      {
+        ...baseRevisionBody(),
+        agent_contract_snapshot_id: snapshotId,
+        agent_interface_requirements: {
+          host_controls: { ui_action_types: ["execute_business_side_effect"] },
+        },
+      },
+      "idem-contract-rev-host-controls-invalid-001",
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("REQUEST_SCHEMA_INVALID");
+    expect(await countRevisions(agentId)).toBe(0);
+  });
+
   it("legacy key agent_descriptor_snapshot_id 不再被接受，且与新 key 同传也拒绝 → 400，无 Revision", async () => {
     const response = await buildPost(
       agentId,

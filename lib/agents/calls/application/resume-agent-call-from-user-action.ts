@@ -13,20 +13,51 @@ export interface ResumeAgentCallFromUserActionParams {
 export async function resumeAgentCallFromUserAction(
   params: ResumeAgentCallFromUserActionParams,
 ): Promise<{ resumed: false } | { resumed: true; callId: string; state: string }> {
-  if (params.request.requestType !== "input" || params.request.purpose !== "a2a_input_required") {
+  const isInput =
+    params.request.requestType === "input" && params.request.purpose === "a2a_input_required";
+  const isConfirmation =
+    params.request.requestType === "confirmation" && params.request.purpose === "a2a_confirmation";
+  if (!isInput && !isConfirmation) {
     return { resumed: false };
   }
   const prompt = asRecord(params.request.promptJson);
   const response = asRecord(params.responseRedactedJson);
   const callId = typeof prompt?.agent_call_id === "string" ? prompt.agent_call_id : null;
-  const text = typeof response?.text === "string" ? response.text.trim() : "";
   if (!callId) return { resumed: false };
-  if (!text) throw new Error("Agent input-required resolve 缺少非空 text");
+
+  if (isInput) {
+    const text = typeof response?.text === "string" ? response.text.trim() : "";
+    if (!text) throw new Error("Agent input-required resolve 缺少非空 text");
+    const call = await resumeAgentCall({
+      tenantId: params.tenantId,
+      callId,
+      text,
+      contextEnvironment: {
+        tenantId: params.tenantId,
+        executionSubject: params.executionSubject,
+        now: new Date(),
+        timezone: "Asia/Shanghai",
+        locale: "zh-CN",
+      },
+    });
+    return { resumed: true, callId: call.id, state: call.state };
+  }
+
+  const proposalId = typeof prompt?.proposal_id === "string" ? prompt.proposal_id : "";
+  const resolvedAt = params.request.resolvedAt?.toISOString();
+  if (!proposalId || !resolvedAt) throw new Error("Agent confirmation resolve 缺少 proposal_id");
+  if (params.request.resolution !== "approve" && params.request.resolution !== "deny") {
+    throw new Error("Agent confirmation resolve 的 resolution 非法");
+  }
 
   const call = await resumeAgentCall({
     tenantId: params.tenantId,
     callId,
-    text,
+    confirmation: {
+      proposalId,
+      resolution: params.request.resolution,
+      resolvedAt,
+    },
     contextEnvironment: {
       tenantId: params.tenantId,
       executionSubject: params.executionSubject,

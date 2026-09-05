@@ -23,6 +23,7 @@ import {
   synthesizeAgentCallTerminalEvent,
 } from "@/lib/agents/calls/application/agent-call-events-common";
 import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
+import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
 import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
 import {
@@ -37,13 +38,23 @@ import {
   AgentTransportError,
 } from "@/lib/agents/calls/transport/agent-transport";
 import type { PlatformContextEnvironment } from "@/lib/context/enrichment/build-invocation-context-bundle";
+import {
+  loadCurrentEnterpriseUserProfile,
+  loadEnterpriseUserAccessPolicy,
+} from "@/lib/identity/enterprise-user-access-policy";
 
 /** resumeAgentCall 冻结 API 入参。 */
 export interface ResumeAgentCallCommand {
   tenantId: string;
   callId: string;
   /** 用户补充文本（非空纯文本；空白/缺失网络前失败）。 */
-  text: string;
+  text?: string;
+  /** confirmation UAR 的结构化解析事实。 */
+  confirmation?: {
+    proposalId: string;
+    resolution: "approve" | "deny";
+    resolvedAt: string;
+  };
   /** 平台上下文（tenant 必须等于 call tenant）。 */
   contextEnvironment?: PlatformContextEnvironment;
 }
@@ -58,6 +69,7 @@ export class AgentCallResumeError extends Error {
       | "state_invalid"
       | "context_missing"
       | "context_tenant_mismatch"
+      | "enterprise_context_disabled"
       | "input_invalid"
       | "transport",
   ) {
@@ -104,8 +116,10 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
     );
   }
 
-  // 4. 输入非空纯文本。
-  if (typeof command.text !== "string" || command.text.trim() === "") {
+  // 4. 普通输入与 confirmation 二选一；confirmation 不转成“确认”文本。
+  const hasText = typeof command.text === "string" && command.text.trim().length > 0;
+  const hasConfirmation = Boolean(command.confirmation);
+  if (hasText === hasConfirmation) {
     throw new AgentCallResumeError("resume text 不能为空", "input_invalid");
   }
 
@@ -131,6 +145,27 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
     agentCapabilityDigest: binding.agentCapabilityDigest,
     agentContextDigest: binding.agentContextDigest,
   });
+  const enterprisePolicy = await loadEnterpriseUserAccessPolicy(tenantId, binding.agentRevisionId);
+  const hostControlPolicy = await loadHostControlCapabilityPolicy(
+    tenantId,
+    binding.agentRevisionId,
+  );
+  if (enterprisePolicy.profileRequirement !== "none") {
+    if (!env?.executionSubject || env.executionSubject.subjectType !== "user") {
+      throw new AgentCallResumeError("resume 缺少可信用户主体", "context_missing");
+    }
+    const currentProfile = await loadCurrentEnterpriseUserProfile(
+      tenantId,
+      env.executionSubject.subjectId,
+    );
+    if (currentProfile.profileStatus === "disabled") {
+      throw new AgentCallResumeError(
+        "企业用户已停用，禁止恢复原 AgentCall",
+        "enterprise_context_disabled",
+      );
+    }
+    if (!env) throw new AgentCallResumeError("resume 缺少平台上下文", "context_missing");
+  }
   const auth = await resolveAgentCallOutboundAuth(tenantId, binding);
 
   // 7. 构造 transport（事件只走 AgentCallEventIngress；background 只合成子域 lost）。
@@ -160,11 +195,18 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
     onBackgroundFailure,
     capabilities,
     streamTimeoutMs: 60_000,
+    hostControlPolicy,
   });
 
   // 8. resumeCall（message/send，same task/context）；producerSequence 取 durable max+1。
   const nextProducerSequence = await nextAgentCallProducerSequence(callId, tenantId);
-  const contextMetadata = env ? buildAgentCallContextMetadata(contract, env) : undefined;
+  const contextMetadata = env
+    ? buildAgentCallContextMetadata(
+        contract,
+        { ...env, enterpriseUserContext: binding.enterpriseUserContext ?? null },
+        enterprisePolicy,
+      )
+    : undefined;
   try {
     await transport.resumeCall({
       callId,
@@ -172,7 +214,7 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
       auth,
       taskId,
       contextId,
-      text: command.text,
+      ...(hasText ? { text: command.text } : { confirmation: command.confirmation }),
       contextMetadata,
       nextProducerSequence,
       idempotencyKey: `agentcall:${callId}:resume:${nextProducerSequence}`,

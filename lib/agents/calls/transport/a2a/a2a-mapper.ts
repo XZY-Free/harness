@@ -30,6 +30,10 @@ import {
   a2aMessageText,
 } from "@/lib/agents/calls/transport/a2a/a2a-types";
 import {
+  type HostControlCapabilityPolicy,
+  parseHostControls,
+} from "@/lib/agents/calls/transport/a2a/host-control-contract";
+import {
   type AgentCallCandidateEvent,
   AgentTransportError,
 } from "@/lib/agents/calls/transport/agent-transport";
@@ -60,6 +64,7 @@ export const A2A_PUBLIC_CONTEXT_KEYS = new Set([
   "conversation_context",
   "attachment_references",
   "workspace_context",
+  "enterprise_user_context",
 ]);
 
 /**
@@ -151,6 +156,7 @@ export function mapAgentCallUpdate(
   sequence: number,
   update: A2AMappableUpdate,
   artifacts: A2AArtifactCache,
+  hostControlPolicy?: HostControlCapabilityPolicy,
 ): AgentCallCandidateEvent[] {
   const base = {
     producer_event_id: `a2a:${callId}:${sequence}`,
@@ -199,6 +205,8 @@ export function mapAgentCallUpdate(
       // status.message 缺失时（HR 官方顺序），追问文本与 data 取最新 artifact 累积。
       const cached = artifacts.get(taskId);
       const text = a2aMessageText(update.status.message) ?? cached?.text ?? null;
+      const data = a2aMessageData(update.status.message) ?? cached?.data;
+      const hostControls = parseHostControlsSafely(data, "input-required", hostControlPolicy);
       return [
         {
           ...base,
@@ -211,7 +219,7 @@ export function mapAgentCallUpdate(
             purpose: "a2a_input_required",
             prompt: text ?? "Agent 请求补充输入",
             message: text,
-            data: cached?.data,
+            data: normalizeHostControlData(data, hostControls),
             input_schema: A2A_INPUT_ACTION_SCHEMA,
           },
         },
@@ -220,6 +228,8 @@ export function mapAgentCallUpdate(
     case "completed": {
       const cached = artifacts.get(taskId);
       const text = a2aMessageText(update.status.message) ?? cached?.text ?? null;
+      const data = a2aMessageData(update.status.message) ?? cached?.data;
+      const hostControls = parseHostControlsSafely(data, "completed", hostControlPolicy);
       return [
         {
           ...base,
@@ -229,7 +239,7 @@ export function mapAgentCallUpdate(
             task_id: taskId,
             context_id: contextId,
             text,
-            data: cached?.data,
+            data: normalizeHostControlData(data, hostControls),
           },
         },
       ];
@@ -303,6 +313,35 @@ export function mapAgentCallUpdate(
   }
 }
 
+function parseHostControlsSafely(
+  data: unknown,
+  stage: "input-required" | "completed",
+  policy: HostControlCapabilityPolicy | undefined,
+) {
+  try {
+    return parseHostControls(data, stage, policy);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "host_controls 结构非法";
+    throw new AgentTransportError("protocol_schema", message);
+  }
+}
+
+function normalizeHostControlData(
+  data: unknown,
+  parsed: ReturnType<typeof parseHostControls> | null,
+): unknown {
+  if (!parsed) return data;
+  const normalized =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? { ...(data as Record<string, unknown>) }
+      : {};
+  normalized.host_controls =
+    parsed.kind === "confirmation"
+      ? { version: "1", confirmation: parsed.proposal }
+      : { version: "1", ui_actions: parsed.actions };
+  return normalized;
+}
+
 function artifactText(artifact: A2AArtifact): string | null {
   const parts = Array.isArray(artifact.parts) ? artifact.parts : [];
   const texts = parts
@@ -314,6 +353,12 @@ function artifactText(artifact: A2AArtifact): string | null {
 function artifactData(artifact: A2AArtifact): unknown {
   const parts = Array.isArray(artifact.parts) ? artifact.parts : [];
   const dataPart = parts.find((p) => p && "data" in p && p.data !== undefined);
+  return dataPart?.data;
+}
+
+function a2aMessageData(message: A2AMessage | null | undefined): unknown {
+  const parts = Array.isArray(message?.parts) ? message.parts : [];
+  const dataPart = parts.find((part) => part?.kind === "data" && "data" in part);
   return dataPart?.data;
 }
 

@@ -1511,6 +1511,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "enterpriseUserContextJson": {
+          "name": "enterpriseUserContextJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "bindingHash": {
           "name": "bindingHash",
           "type": "varchar(128)",
@@ -3637,7 +3644,7 @@
         },
         "itemType": {
           "name": "itemType",
-          "type": "enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action')",
+          "type": "enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action','host_action')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -7138,6 +7145,102 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
+    "EnterpriseProfileSyncState": {
+      "name": "EnterpriseProfileSyncState",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userIdentityId": {
+          "name": "userIdentityId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "profileFingerprint": {
+          "name": "profileFingerprint",
+          "type": "varchar(72)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lastVerifiedAt": {
+          "name": "lastVerifiedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stale": {
+          "name": "stale",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "lastSyncErrorCode": {
+          "name": "lastSyncErrorCode",
+          "type": "varchar(96)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sourceSystem": {
+          "name": "sourceSystem",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "EnterpriseProfileSyncState_user_uq": {
+          "name": "EnterpriseProfileSyncState_user_uq",
+          "columns": [
+            "userIdentityId"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "EnterpriseProfileSyncState_userIdentityId_UserIdentity_id_fk": {
+          "name": "EnterpriseProfileSyncState_userIdentityId_UserIdentity_id_fk",
+          "tableFrom": "EnterpriseProfileSyncState",
+          "tableTo": "UserIdentity",
+          "columnsFrom": [
+            "userIdentityId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "EnterpriseProfileSyncState_id": {
+          "name": "EnterpriseProfileSyncState_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "PrincipalBinding": {
       "name": "PrincipalBinding",
       "columns": {
@@ -7323,6 +7426,128 @@
       },
       "uniqueConstraints": {},
       "checkConstraint": {}
+    },
+    "UserExtensionAttribute": {
+      "name": "UserExtensionAttribute",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userIdentityId": {
+          "name": "userIdentityId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attributeKey": {
+          "name": "attributeKey",
+          "type": "varchar(96)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "valueType": {
+          "name": "valueType",
+          "type": "enum('string','number','boolean','json')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stringValue": {
+          "name": "stringValue",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "numberValue": {
+          "name": "numberValue",
+          "type": "decimal(30,10)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "booleanValue": {
+          "name": "booleanValue",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "jsonValue": {
+          "name": "jsonValue",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sourceSystem": {
+          "name": "sourceSystem",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "UserExtensionAttribute_user_key_uq": {
+          "name": "UserExtensionAttribute_user_key_uq",
+          "columns": [
+            "userIdentityId",
+            "attributeKey"
+          ],
+          "isUnique": true
+        },
+        "UserExtensionAttribute_user_idx": {
+          "name": "UserExtensionAttribute_user_idx",
+          "columns": [
+            "userIdentityId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "UserExtensionAttribute_userIdentityId_UserIdentity_id_fk": {
+          "name": "UserExtensionAttribute_userIdentityId_UserIdentity_id_fk",
+          "tableFrom": "UserExtensionAttribute",
+          "tableTo": "UserIdentity",
+          "columnsFrom": [
+            "userIdentityId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "UserExtensionAttribute_id": {
+          "name": "UserExtensionAttribute_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "UserExtensionAttribute_value_slot_ck": {
+          "name": "UserExtensionAttribute_value_slot_ck",
+          "value": "(\n        (valueType = 'string' AND stringValue IS NOT NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NULL)\n        OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)\n        OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)\n        OR (valueType = 'json' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NOT NULL)\n      "
+        }
+      }
     },
     "UserIdentity": {
       "name": "UserIdentity",
@@ -16662,14 +16887,6 @@
           ],
           "isUnique": true
         },
-        "UserActionRequest_invocation_harnessAction_uq": {
-          "name": "UserActionRequest_invocation_harnessAction_uq",
-          "columns": [
-            "invocationId",
-            "harnessActionId"
-          ],
-          "isUnique": true
-        },
         "UserActionRequest_permissionDecision_id_uq": {
           "name": "UserActionRequest_permissionDecision_id_uq",
           "columns": [
@@ -16685,6 +16902,14 @@
             "requestState"
           ],
           "isUnique": false
+        },
+        "UserActionRequest_invocation_harnessAction_uq": {
+          "name": "UserActionRequest_invocation_harnessAction_uq",
+          "columns": [
+            "invocationId",
+            "harnessActionId"
+          ],
+          "isUnique": true
         },
         "UserActionRequest_tenant_toolCall_idx": {
           "name": "UserActionRequest_tenant_toolCall_idx",

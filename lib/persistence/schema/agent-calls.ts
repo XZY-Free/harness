@@ -176,6 +176,8 @@ export const agentCallBindingTable = mysqlTable(
     policyRulesDigest: varchar("policyRulesDigest", { length: 71 }).notNull(),
     governanceConfigRevisionId: varchar("governanceConfigRevisionId", { length: 36 }).notNull(),
     governanceConfigDigest: varchar("governanceConfigDigest", { length: 71 }).notNull(),
+    /** 由服务端按 Agent Revision allowlist 生成的企业用户公开上下文快照。 */
+    enterpriseUserContextJson: json("enterpriseUserContextJson"),
     bindingHash: varchar("bindingHash", { length: 128 }).notNull(),
     boundAt: datetime("boundAt", { mode: "date", fsp: 3 })
       .notNull()

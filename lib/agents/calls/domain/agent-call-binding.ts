@@ -19,6 +19,11 @@
  */
 
 import { createHash } from "node:crypto";
+import {
+  ENTERPRISE_ATTRIBUTE_CATALOG,
+  type EnterpriseAttributeKey,
+} from "@/lib/identity/enterprise-user";
+import type { EnterpriseUserPublicContext } from "@/lib/identity/enterprise-user-access-policy";
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const AGENT_IDENTITY_MODES = ["none", "bearer"] as const;
@@ -71,6 +76,8 @@ export interface AgentCallBindingConfigInput {
   policyRulesDigest: string;
   governanceConfigRevisionId: string;
   governanceConfigDigest: string;
+  /** 可选；仅企业资料要求非 none 时冻结安全投影，绝不冻结 raw profile。 */
+  enterpriseUserContext?: EnterpriseUserPublicContext | null;
 }
 
 /** Resolver/Application 提交给最终事务的候选；事务成功前不代表已冻结事实。 */
@@ -171,6 +178,63 @@ export function assertAgentCallBindingEvidence(input: AgentCallBindingConfigInpu
   ) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结有效 governance 证据");
   }
+  if (input.enterpriseUserContext !== undefined && input.enterpriseUserContext !== null) {
+    assertFrozenEnterpriseUserContext(input.enterpriseUserContext);
+  }
+}
+
+function assertFrozenEnterpriseUserContext(
+  value: unknown,
+): asserts value is EnterpriseUserPublicContext {
+  if (!isRecord(value)) {
+    throw new AgentCallBindingEvidenceError("enterpriseUserContext 必须是对象");
+  }
+  if (value.context_version !== "1") {
+    throw new AgentCallBindingEvidenceError("enterpriseUserContext.context_version 非法");
+  }
+  if (value.profile_status !== "fresh" && value.profile_status !== "stale") {
+    throw new AgentCallBindingEvidenceError("enterpriseUserContext.profile_status 非法");
+  }
+  if (
+    typeof value.last_verified_at !== "string" ||
+    Number.isNaN(Date.parse(value.last_verified_at)) ||
+    new Date(value.last_verified_at).toISOString() !== value.last_verified_at
+  ) {
+    throw new AgentCallBindingEvidenceError("enterpriseUserContext.last_verified_at 非法");
+  }
+  if (!isRecord(value.fields)) {
+    throw new AgentCallBindingEvidenceError("enterpriseUserContext.fields 必须是对象");
+  }
+  for (const key of Object.keys(value.fields)) {
+    if (!(key in ENTERPRISE_ATTRIBUTE_CATALOG)) {
+      throw new AgentCallBindingEvidenceError(`enterpriseUserContext 含未登记字段：${key}`);
+    }
+    const descriptor = ENTERPRISE_ATTRIBUTE_CATALOG[key as EnterpriseAttributeKey];
+    if (!descriptor.agentProjectionAllowed) {
+      throw new AgentCallBindingEvidenceError(`enterpriseUserContext 含禁止外发字段：${key}`);
+    }
+    if (!isJsonValue(value.fields[key])) {
+      throw new AgentCallBindingEvidenceError(`enterpriseUserContext 字段值非法：${key}`);
+    }
+  }
+}
+
+function isJsonValue(value: unknown): boolean {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (!isRecord(value)) return false;
+  return Object.values(value).every(isJsonValue);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isBlankString(value: unknown): boolean {

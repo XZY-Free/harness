@@ -29,6 +29,7 @@ import { AgentCallTimelineItem } from "./items/agent-call-timeline-item";
 import { ArtifactItem } from "./items/artifact-item";
 import { AssistantMessageItem } from "./items/assistant-message-item";
 import { ChildThreadItem } from "./items/child-thread-item";
+import { HostActionItem } from "./items/host-action-item";
 import { JobResultItem } from "./items/job-result-item";
 import { ToolCallItem } from "./items/tool-call-item";
 import { UserActionItem } from "./items/user-action-item";
@@ -118,6 +119,8 @@ function renderItem(item: ClientItem, threadId: string, turn?: ClientTurn): Reac
         return <ArtifactItem item={item} />;
       case "user_action":
         return <UserActionItem threadId={threadId} item={item} />;
+      case "host_action":
+        return <HostActionItem item={item} />;
       case "child_thread":
         return <ChildThreadItem item={item} />;
       case "job_result":

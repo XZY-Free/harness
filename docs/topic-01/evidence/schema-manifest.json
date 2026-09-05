@@ -5,10 +5,10 @@
   "cleanMigration": "drizzle/0000_initial_schema.sql",
   "inventory": "docs/topic-01/evidence/schema-inventory.json",
   "counts": {
-    "canonical": 122,
-    "runtimeLoaded": 122,
-    "migration": 122,
-    "freshDbPlanned": 122
+    "canonical": 124,
+    "runtimeLoaded": 124,
+    "migration": 124,
+    "freshDbPlanned": 124
   },
   "tables": [
     "Agent",
@@ -41,6 +41,7 @@
     "Device",
     "EffectRecord",
     "EffectTarget",
+    "EnterpriseProfileSyncState",
     "EnvironmentChangeRequest",
     "EnvironmentDefinition",
     "EnvironmentLease",
@@ -114,6 +115,7 @@
     "Turn",
     "TurnTimelineProjection",
     "UserActionRequest",
+    "UserExtensionAttribute",
     "UserIdentity",
     "WithdrawalRecord",
     "WorkloadTokenRevocation",

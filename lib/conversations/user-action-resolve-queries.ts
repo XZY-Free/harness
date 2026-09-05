@@ -472,15 +472,23 @@ export async function resolveGenericUserAction(
             resume_payload: params.responseRedactedJson,
           }
         : {}),
+      ...(request.requestType === "confirmation" &&
+      request.purpose === "a2a_confirmation" &&
+      (params.resolution === "approve" || params.resolution === "deny")
+        ? { resume_source: "user_action_confirmation" }
+        : {}),
     };
     const resumePayloadHash = computeEventPayloadHash(resumePayload);
     const agentRefs = agentCallResumeRefs(request.promptJson);
     const agentCallId = agentRefs.agent_call_id;
     const durableAgentResume =
-      request.requestType === "input" &&
-      request.purpose === "a2a_input_required" &&
-      params.resolution === "submit" &&
-      typeof agentCallId === "string";
+      typeof agentCallId === "string" &&
+      ((request.requestType === "input" &&
+        request.purpose === "a2a_input_required" &&
+        params.resolution === "submit") ||
+        (request.requestType === "confirmation" &&
+          request.purpose === "a2a_confirmation" &&
+          (params.resolution === "approve" || params.resolution === "deny")));
     await tx.insert(invocationCommandTable).values({
       id: resumeCommandId,
       invocationId: invocation.id,

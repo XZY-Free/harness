@@ -15,6 +15,7 @@
  * - 调用方传入 before/after 内容或其 hash；本模块只做 hash 计算与写入。
  */
 import { createHash } from "node:crypto";
+import type { DbOrTx } from "@/lib/db/client";
 import { generateRequestId } from "@/lib/http";
 import { appendAuditEvent } from "@/lib/identity/audit-queries";
 import {
@@ -64,6 +65,8 @@ export interface RecordAuditEventParams {
   /** 关联请求 id；缺省由平台生成。 */
   requestId?: string;
   occurredAt?: Date;
+  /** 事务内审计时传入当前事务；普通调用默认使用全局连接。 */
+  client?: DbOrTx;
 }
 
 /**
@@ -82,21 +85,24 @@ export async function recordAuditEvent(params: RecordAuditEventParams): Promise<
   const afterHash = resolveHash(params.afterHash, params.after);
   const requestId = params.requestId ?? generateRequestId();
 
-  return appendAuditEvent({
-    tenantId: params.actor.tenantId,
-    actorType: params.actor.actorType,
-    actorId: params.actor.actorId,
-    actionType: params.actionType,
-    targetType: params.targetType,
-    targetId: params.targetId ?? null,
-    beforeHash,
-    afterHash,
-    reason: params.reason ?? null,
-    outcome: params.outcome ?? null,
-    metadataRedacted: params.metadataRedacted ?? null,
-    requestId,
-    occurredAt: params.occurredAt,
-  });
+  return appendAuditEvent(
+    {
+      tenantId: params.actor.tenantId,
+      actorType: params.actor.actorType,
+      actorId: params.actor.actorId,
+      actionType: params.actionType,
+      targetType: params.targetType,
+      targetId: params.targetId ?? null,
+      beforeHash,
+      afterHash,
+      reason: params.reason ?? null,
+      outcome: params.outcome ?? null,
+      metadataRedacted: params.metadataRedacted ?? null,
+      requestId,
+      occurredAt: params.occurredAt,
+    },
+    params.client,
+  );
 }
 
 /** 系统级审计（如 Event Projection 自动处理隔离事件）：actorType=system。 */

@@ -22,6 +22,7 @@
  */
 
 import type { InvocationContextContract } from "@/lib/agents/domain/public-agent-contract";
+import type { EnterpriseUserPublicContext } from "@/lib/identity/enterprise-user-access-policy";
 import {
   type ExecutionSubject,
   executionSubjectToPublicAgentSubject,
@@ -46,6 +47,8 @@ export interface PlatformContextEnvironment {
   attachmentRefs?: string[];
   /** 工作区引用（contextKind=workspace_context）。 */
   workspaceContextRef?: string | null;
+  /** 服务端生成的安全企业资料上下文；客户端输入不得覆盖。 */
+  enterpriseUserContext?: EnterpriseUserPublicContext | null;
 }
 
 /** Policy/Permission 决策（05 §8：Agent Wants ≠ Agent Is Allowed To Receive）。 */
@@ -219,6 +222,10 @@ function enumeratePlatformContext(
     case "workspace_context":
       return environment.workspaceContextRef
         ? { available: true, value: environment.workspaceContextRef }
+        : { available: false };
+    case "enterprise_user_context":
+      return environment.enterpriseUserContext
+        ? { available: true, value: environment.enterpriseUserContext }
         : { available: false };
     case "organization_context":
     case "memory_context":

@@ -51,6 +51,7 @@ export function classifyInvocationContinuationError(error: unknown): {
     const code = typeof named.code === "string" ? named.code : "CONTINUATION_PERMANENT_FAILURE";
     if (
       named.name === "AgentCallAttemptConflictError" ||
+      named.name === "HostControlProtocolError" ||
       (named.name === "AgentCallResumeError" &&
         [
           "binding_not_found",

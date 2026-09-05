@@ -14,10 +14,12 @@
  */
 import { createHash } from "node:crypto";
 import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
+import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
 import { type AgentCall, isAgentCallTerminal } from "@/lib/agents/calls/domain/agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
+import { buildAgentCallContextMetadata } from "@/lib/agents/calls/transport/agent-call-transport-factory";
 import {
   type AgentBackgroundFailureHandler,
   type AgentCallEventSink,
@@ -29,11 +31,8 @@ import type {
   InvocationContextContract,
 } from "@/lib/agents/domain/public-agent-contract";
 import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
-import {
-  type PlatformContextEnvironment,
-  buildInvocationContextBundle,
-} from "@/lib/context/enrichment/build-invocation-context-bundle";
-import { externalAgentContextPolicyFilter } from "@/lib/context/enrichment/external-agent-context-policy";
+import type { PlatformContextEnvironment } from "@/lib/context/enrichment/build-invocation-context-bundle";
+import { loadEnterpriseUserAccessPolicy } from "@/lib/identity/enterprise-user-access-policy";
 import { resolveOutboundCredential } from "@/lib/identity/resolve-outbound-credential";
 
 /** startAgentCall 冻结 API 入参。 */
@@ -246,6 +245,12 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     agentContextDigest: binding.agentContextDigest,
   });
 
+  const enterprisePolicy = await loadEnterpriseUserAccessPolicy(tenantId, binding.agentRevisionId);
+  const hostControlPolicy = await loadHostControlCapabilityPolicy(
+    tenantId,
+    binding.agentRevisionId,
+  );
+
   // 5. 上下文：trusted environment tenant 必须等于 call tenant；required missing/denied 网络前失败。
   const env = command.contextEnvironment;
   if (!env) throw new AgentCallContextEnvironmentError(callId);
@@ -253,15 +258,16 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
   if (env.executionSubject && env.executionSubject.tenantId !== tenantId) {
     throw new AgentCallContextTenantError(callId);
   }
-  const bundle = buildInvocationContextBundle({
+  const effectiveEnvironment: PlatformContextEnvironment = {
+    ...env,
+    // 企业上下文只能来自已冻结 Binding；调用方传入的同名值永远被覆盖。
+    enterpriseUserContext: binding.enterpriseUserContext ?? null,
+  };
+  const contextMetadata = buildAgentCallContextMetadata(
     contract,
-    environment: env,
-    policyFilter: externalAgentContextPolicyFilter(),
-  });
-  const contextMetadata: Record<string, unknown> = {};
-  for (const entry of bundle.entries) {
-    if (entry.supplied) contextMetadata[entry.contextKind] = entry.value;
-  }
+    effectiveEnvironment,
+    enterprisePolicy,
+  );
 
   // 6. 输入非空纯文本；空白/缺失网络前失败。
   if (typeof command.input !== "string" || command.input.trim() === "") {
@@ -315,6 +321,7 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     eventSink,
     onBackgroundFailure,
     streamTimeoutMs: 60_000,
+    hostControlPolicy,
   });
 
   // 10. startCall：binding endpoint、resolved auth、durable idempotency key、冻结 capabilities。
