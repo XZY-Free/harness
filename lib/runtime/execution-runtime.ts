@@ -79,6 +79,8 @@ export class HostExecutionRuntime implements ExecutionRuntime {
       const subprocess = execa(sandboxed, {
         cwd,
         shell: true,
+        // Unix 上建立独立进程组，timeout 时可以连同 shell 派生的子进程一起终止。
+        detached: process.platform !== "win32",
         timeout,
         reject: false,
         maxBuffer: 1024 * 1024, // 1MB
@@ -96,14 +98,31 @@ export class HostExecutionRuntime implements ExecutionRuntime {
         subprocess.stdout?.on("data", (d: Buffer) => onChunk("stdout", d.toString()));
         subprocess.stderr?.on("data", (d: Buffer) => onChunk("stderr", d.toString()));
       }
-      const result = await subprocess;
-      return {
-        ok: result.exitCode === 0,
-        exitCode: result.exitCode ?? null,
-        stdout: result.stdout.slice(0, cap),
-        stderr: result.stderr.slice(0, cap),
-        command,
-      };
+      // execa 的 timeout 只 kill 外层 shell；独立进程组兜底清理其派生进程，避免管道仍被
+      // 子进程持有而让 Promise 延迟到子进程自然退出。
+      const processGroupKillTimer =
+        process.platform !== "win32" && timeout > 0
+          ? setTimeout(() => {
+              if (!subprocess.pid) return;
+              try {
+                process.kill(-subprocess.pid, "SIGKILL");
+              } catch {
+                // 进程已自然退出时忽略 ESRCH 等竞态错误。
+              }
+            }, timeout + 1_000)
+          : undefined;
+      try {
+        const result = await subprocess;
+        return {
+          ok: result.exitCode === 0,
+          exitCode: result.exitCode ?? null,
+          stdout: result.stdout.slice(0, cap),
+          stderr: result.stderr.slice(0, cap),
+          command,
+        };
+      } finally {
+        if (processGroupKillTimer) clearTimeout(processGroupKillTimer);
+      }
     } catch (error) {
       // spawn 级失败（ENOENT / timeout 等）——对齐现有 runCommand/runTests 的 catch 兜底
       return {
