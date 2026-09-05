@@ -15,9 +15,9 @@ if (process.platform === "linux" && group !== "e2e-web") {
   executable = "dbus-run-session";
   const command = [
     'echo "" | gnome-keyring-daemon --unlock --replace --components=secrets >/dev/null 2>&1 &',
-    "sleep 2",
+    "sleep 2;",
     `xvfb-run -a pnpm exec playwright test ${files.map((file) => JSON.stringify(file)).join(" ")}`,
-  ].join("; ");
+  ].join(" ");
   args = ["--", "bash", "-c", command];
 }
 const run = spawnSync(executable, args, { stdio: "inherit", env: process.env });
