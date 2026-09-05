@@ -167,13 +167,15 @@ async function dispatchCommand(params: {
   if (!context || context.command.commandType !== params.expectedType) {
     return { dispatched: false, reason: "command_not_found" };
   }
+  const sessionBinding = context.invocation.runtimeSessionBindingId
+    ? await getSessionBindingById(params.tenantId, context.invocation.runtimeSessionBindingId)
+    : null;
   const capabilities = await resolveEffectiveInvocationCapabilities({
     tenantId: params.tenantId,
     binding: context.binding,
-    sessionCapabilitiesJson: context.invocation.runtimeSessionBindingId
-      ? ((await getSessionBindingById(params.tenantId, context.invocation.runtimeSessionBindingId))
-          ?.runtimeCapabilitiesJson ?? null)
-      : null,
+    ...(context.invocation.runtimeSessionBindingId
+      ? { sessionCapabilitiesJson: sessionBinding?.runtimeCapabilitiesJson ?? null }
+      : {}),
   });
   const supported =
     params.expectedType === "interrupt"
