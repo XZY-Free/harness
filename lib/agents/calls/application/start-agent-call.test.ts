@@ -8,7 +8,7 @@
  *    parent Invocation 与 RuntimeEventIngress 完全不变。
  * 3) 并发同 call+同 input 只 outbound 一次；不同 input 必须冲突。
  * 4) 错误输入/凭据/context 一律 fail closed，零 HTTP，无 parent 变更，错误里不含 secret。
- * 5) 死端点/401/403/503/畸形流 → call failed/lost 分类，父不变，无 runtime session 变更。
+ * 5) 死端点/401/403/503/畸形流 → call 与 Attempt 一起 failed，父不变，无 runtime session 变更。
  * 6) 网络前失败不得声称成功；outbound claim 后失败经 ingress 产出子域终态/error。
  *
  * 事实源：真实 MySQL（db project，串行）+ 仓内真实 A2A Provider + 真实 fetch。
@@ -16,6 +16,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
+import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
   type ExecutionScenario,
   loadAttempt,
@@ -462,14 +463,14 @@ describe("startAgentCall 执行域启动", () => {
     }
   });
 
-  it("远端正式 started 前的 dead/401/403/503/畸形流只结束 Attempt，Call 保持 queued 等待恢复", async () => {
-    // dead endpoint：binding 冻结到一个无人监听端口 → 连接拒绝，只结束当前 Attempt。
+  it("远端正式 started 前的 dead/401/403/503/畸形流同时结束 Call 与 Attempt", async () => {
+    // dead endpoint：binding 冻结到一个无人监听端口 → 连接拒绝，Call/Attempt 一起失败。
     const dead = await seedAgentCallExecutionScenario({
       mutateBinding: (b) => ({ ...b, endpointRef: "http://127.0.0.1:1" }),
     });
     trackedEnvVars.add(dead.credentialEnvVar);
-    await expect(startAgentCall(startParams(dead))).rejects.toThrow();
-    expect((await mysqlCall(dead)).state).toBe("queued");
+    await expect(startAgentCall(startParams(dead))).resolves.toMatchObject({ state: "failed" });
+    expect((await mysqlCall(dead)).state).toBe("failed");
     expect((await loadAttempt(dead.callId, dead.tenantId))?.attemptState).toBe("failed");
     const [deadParent] = await db
       .select()
@@ -488,8 +489,8 @@ describe("startAgentCall 执行域启动", () => {
     const auth = await seedAgentCallExecutionScenario();
     trackedEnvVars.add(auth.credentialEnvVar);
     auth.provider.setExpectedBearerToken(`wrong-${auth.credentialToken}`);
-    await expect(startAgentCall(startParams(auth))).rejects.toThrow();
-    expect((await mysqlCall(auth)).state).toBe("queued");
+    await expect(startAgentCall(startParams(auth))).resolves.toMatchObject({ state: "failed" });
+    expect((await mysqlCall(auth)).state).toBe("failed");
     expect((await loadAttempt(auth.callId, auth.tenantId))?.attemptState).toBe("failed");
     const authSessions = await db
       .select()
@@ -502,8 +503,8 @@ describe("startAgentCall 执行域启动", () => {
     const flaky = await seedAgentCallExecutionScenario();
     trackedEnvVars.add(flaky.credentialEnvVar);
     flaky.provider.setFlaky(1);
-    await expect(startAgentCall(startParams(flaky))).rejects.toThrow();
-    expect((await mysqlCall(flaky)).state).toBe("queued");
+    await expect(startAgentCall(startParams(flaky))).resolves.toMatchObject({ state: "failed" });
+    expect((await mysqlCall(flaky)).state).toBe("failed");
     expect((await loadAttempt(flaky.callId, flaky.tenantId))?.attemptState).toBe("failed");
     const [flakyParent] = await db
       .select()
@@ -516,8 +517,10 @@ describe("startAgentCall 执行域启动", () => {
     // 畸形 SSE 流 → protocol parse 失败，只结束 Attempt，父不变，无 session。
     const malformed = await seedAgentCallExecutionScenario({ providerScenario: "malformed" });
     trackedEnvVars.add(malformed.credentialEnvVar);
-    await expect(startAgentCall(startParams(malformed))).rejects.toThrow();
-    expect((await mysqlCall(malformed)).state).toBe("queued");
+    await expect(startAgentCall(startParams(malformed))).resolves.toMatchObject({
+      state: "failed",
+    });
+    expect((await mysqlCall(malformed)).state).toBe("failed");
     expect((await loadAttempt(malformed.callId, malformed.tenantId))?.attemptState).toBe("failed");
     const [malformedParent] = await db
       .select()
@@ -531,6 +534,42 @@ describe("startAgentCall 执行域启动", () => {
       .where(eq(agentSessionBindingTable.tenantId, malformed.tenantId));
     expect(malformedSessions.length).toBe(0);
     await malformed.provider.close();
+  });
+
+  it("重试 Attempt 使用自己的稳定 Idempotency-Key，不复用 attempt-1", async () => {
+    const scenario = await seedAgentCallExecutionScenario();
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    scenario.provider.setFlaky(1);
+    await expect(startAgentCall(startParams(scenario))).resolves.toMatchObject({ state: "failed" });
+
+    await mysqlAgentCallStore.createAttempt({
+      callId: scenario.callId,
+      tenantId: scenario.tenantId,
+      retryReasonCode: "infra_error",
+      transportChannel: "hosted",
+      now: NOW,
+    });
+    await db
+      .update(agentCallTable)
+      .set({
+        state: "queued",
+        versionNo: 3,
+        finishedAt: null,
+        errorCode: null,
+        errorSummary: null,
+      })
+      .where(eq(agentCallTable.id, scenario.callId));
+    scenario.provider.setFlaky(0);
+
+    await startAgentCall(startParams(scenario));
+    const postRequests = scenario.provider.requests.filter((request) => request.method === "POST");
+    expect(postRequests.map((request) => request.idempotencyKey)).toEqual([
+      `agentcall:${scenario.callId}:attempt-1`,
+      `agentcall:${scenario.callId}:attempt-2`,
+    ]);
+    expect((await loadAttempt(scenario.callId, scenario.tenantId, 2))?.attemptState).toBe(
+      "completed",
+    );
   });
 
   it("网络前失败不得声称成功；outbound claim 后失败经 ingress 产出子域终态/error", async () => {

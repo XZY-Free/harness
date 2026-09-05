@@ -201,7 +201,7 @@ describe("AgentCall 状态转换事务", () => {
     });
   });
 
-  it("started 前的本地失败只结束 Attempt，不伪造 queued 终态", async () => {
+  it("started 前的本地失败同时结束 Call 与 Attempt，避免无主 queued", async () => {
     const scenario = await seed();
     const result = await transitionAgentCall({
       tenantId: scenario.tenantId,
@@ -213,10 +213,10 @@ describe("AgentCall 状态转换事务", () => {
     });
     expect(result).toMatchObject({
       outcome: "applied",
-      reasonCode: "attempt_failure_recorded",
-      finalState: "queued",
+      reasonCode: "call_failure_recorded",
+      finalState: "failed",
       beforeVersionNo: 1,
-      afterVersionNo: 1,
+      afterVersionNo: 2,
     });
     const [attempt] = await db
       .select()

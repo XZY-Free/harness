@@ -214,6 +214,7 @@ export async function POST(request: Request): Promise<Response> {
       executionLimits: body.execution_limits,
       traceContext: body.trace_context,
       authToken: token,
+      gatewayAccessToken: body.gateway_access.access_token,
       correlationId: requestId,
     });
   }

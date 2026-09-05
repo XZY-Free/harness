@@ -398,6 +398,29 @@ export const appConfig = {
 } as const;
 
 /**
+ * SnowHarness 对外回调基地址。
+ *
+ * External Runtime 与平台不在同一进程，必须通过可路由的绝对 URL 回调 Gateway。
+ * 缺失时返回空串，由 endpoint builder 在真正需要 External Runtime 时 fail closed；
+ * 不在模块加载阶段抛错，以保持 Next build 的惰性配置约束。
+ */
+export const runtimeGatewayConfig = {
+  get publicBaseUrl(): string {
+    const raw = optionalEnv("SNOW_CONTROL_PLANE_PUBLIC_URL", "").trim();
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      if (url.username || url.password || url.search || url.hash) return "";
+      if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+      if (appConfig.isProd && url.protocol !== "https:") return "";
+      return url.href.replace(/\/$/, "");
+    } catch {
+      return "";
+    }
+  },
+} as const;
+
+/**
  * Agent Studio 后台配置（）。
  *
  * `devOpen`：dev/test 下默认用户（DEFAULT_USER_ID）是否自动获得 admin 直进 /studio，

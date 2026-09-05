@@ -17,6 +17,7 @@ import {
   resolveOutboundRuntimeAuth,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { RedispatchNotAllowedError, RuntimeHttpClientError } from "@/lib/runtime/errors";
+import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { getAttemptById, updateAttemptState } from "@/lib/runtime/invocation-attempt-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
@@ -29,17 +30,6 @@ import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/executio
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 import { eq } from "drizzle-orm";
-
-const GATEWAY_ENDPOINTS = {
-  events: "in-process://events",
-  cancel: "in-process://cancel",
-  resume: "in-process://resume",
-  steer: "in-process://steer",
-  tools: "in-process://gateway/v1/tools",
-  tool_calls: "in-process://gateway/v1/tool-calls",
-  user_action_requests: "in-process://gateway/v1/user-action-requests",
-  capability_actions: "in-process://gateway/v1/capability-actions",
-};
 
 export interface PersistedAttemptDispatcherDependencies {
   hostedApplicationService?: HostedRuntimeApplicationService;
@@ -154,7 +144,9 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
           return {
             runtimeEndpoint: endpoint,
             auth,
-            gatewayEndpoints: GATEWAY_ENDPOINTS,
+            gatewayEndpoints: buildGatewayEndpoints({
+              external: revision.runtimeEvidenceKind === "external_endpoint",
+            }),
             governanceConfig: {
               revision_id: frozenBinding.governanceConfigRevisionId,
               config_digest: frozenBinding.governanceConfigDigest,

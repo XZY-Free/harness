@@ -825,6 +825,28 @@ Ingress 先以 `(invocation_id, producer_event_id)` 和 `(invocation_id, produce
 
 `response.delta`、heartbeat 和 stdout/stderr 不进入该批次账本，走 transient 通道或 Trace；纯 Job 的临时输出只发给后台订阅者。Tool 意图必须调用 Gateway ToolCall API，不能用候选 Event 绕过 Schema、Policy 和 operation_id。
 
+#### External Runtime Gateway 回调
+
+External Runtime 启动请求中的 `gateway_endpoints` 必须是平台公开的绝对 URL，不能使用 `in-process://`。平台通过 `SNOW_CONTROL_PLANE_PUBLIC_URL` 生成以下端点，并在 `gateway_access.access_token` 中下发 invocation-scoped Gateway Workload Token：
+
+| 端点字段 | 方法 | 用途 |
+|---|---|---|
+| `events` | `POST` | 批量回传 Runtime Candidate Event，进入唯一 `RuntimeEventIngress` |
+| `user_action_requests` | `POST` | 回传单个 `user_action.requested`，创建 `UserActionRequest Authority` 与 Item Projection |
+| `tools` | `POST` | 查询工具/能力目录（`/gateway/v1/tools` 为 `/capabilities/search` 的同逻辑入口） |
+| `tool_calls` | `POST` | 提交 ToolCall 意图并执行 Gateway Policy/Permission |
+| `capability_actions` | `POST` | 提交 Harness action（含 `agent.call`） |
+
+`events` 的 URL 为 `/gateway/v1/runtime-events`，请求体包含 `invocation_id`、`producer_sequence_start` 与 `events`；`user_action_requests` 复用同一 envelope 且只接受一个 `user_action.requested` 事件。两条回调都要求 `Authorization: Bearer <gateway_access_token>`、`Idempotency-Key`，并校验 Token 中的 tenant/invocation，随后调用同一个 `ingressEventBatch` 事务，不允许 Runtime 直接写 Item、ThreadEvent 或 UserAction 表。
+
+```bash
+curl -X POST 'https://snow.example.com/gateway/v1/runtime-events' \
+  -H 'Authorization: Bearer <gateway-access-token>' \
+  -H 'Idempotency-Key: inv_01J:runtime-events:17' \
+  -H 'Content-Type: application/json' \
+  -d '{"invocation_id":"inv_01J","producer_sequence_start":17,"events":[{"producer_event_id":"vevt_17","producer_sequence":17,"type":"response.completed","schema_version":1,"payload":{"text":"已完成"}}]}'
+```
+
 ### 4.3 回传 Transient Event
 
 `POST /runtime/v1/invocations/{invocation_id}/transient-events/batch`

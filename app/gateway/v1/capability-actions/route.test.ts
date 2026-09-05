@@ -25,12 +25,15 @@ import {
   governanceConfigRevisionTable,
   governanceConfigSetTable,
 } from "@/lib/persistence/schema/governance-config";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
   type CapabilityCatalogAgent,
   buildCapabilityCatalogSnapshot,
 } from "@/lib/runtime/harness-loop/capability-catalog";
 import { and, asc, eq, like } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { POST as runtimeEventsPOST } from "../runtime-events/route";
+import { POST as userActionRequestsPOST } from "../user-action-requests/route";
 import { POST } from "./route";
 
 const TENANT = DEFAULT_TENANT_ID;
@@ -227,6 +230,95 @@ function request(
 }
 
 describe("POST /gateway/v1/capability-actions", () => {
+  it("External Runtime 通过 Gateway 回传事件与 user_action 请求，写入同一 Ingress/Authority", async () => {
+    const seeded = await seedRunningTurn();
+    const gatewayHeaders = {
+      authorization: `Bearer ${token(seeded.invocationId)}`,
+      "content-type": "application/json",
+      "idempotency-key": `${seeded.invocationId}:runtime-events:1`,
+    };
+    const eventBody = {
+      invocation_id: seeded.invocationId,
+      producer_sequence_start: 1,
+      events: [
+        {
+          producer_event_id: "external-user-action-1",
+          producer_sequence: 1,
+          type: "user_action.requested",
+          schema_version: 1,
+          payload: {
+            request_type: "confirmation",
+            purpose: "external_runtime_confirmation",
+            prompt: "请确认继续",
+          },
+        },
+      ],
+    };
+    const runtimeResponse = await runtimeEventsPOST(
+      new Request("http://localhost/gateway/v1/runtime-events", {
+        method: "POST",
+        headers: gatewayHeaders,
+        body: JSON.stringify(eventBody),
+      }),
+    );
+    expect(runtimeResponse.status).toBe(200);
+    expect(await db.select().from(userActionRequestTable)).toHaveLength(1);
+
+    const second = await seedRunningTurn();
+    const userActionResponse = await userActionRequestsPOST(
+      new Request("http://localhost/gateway/v1/user-action-requests", {
+        method: "POST",
+        headers: {
+          ...gatewayHeaders,
+          authorization: `Bearer ${token(second.invocationId)}`,
+          "idempotency-key": `${second.invocationId}:user-action:1`,
+        },
+        body: JSON.stringify({ ...eventBody, invocation_id: second.invocationId }),
+      }),
+    );
+    expect(userActionResponse.status).toBe(200);
+    expect(await db.select().from(userActionRequestTable)).toHaveLength(2);
+
+    const completed = await seedRunningTurn();
+    const completedResponse = await runtimeEventsPOST(
+      new Request("http://localhost/gateway/v1/runtime-events", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token(completed.invocationId)}`,
+          "content-type": "application/json",
+          "idempotency-key": `${completed.invocationId}:runtime-events:1`,
+        },
+        body: JSON.stringify({
+          invocation_id: completed.invocationId,
+          producer_sequence_start: 1,
+          events: [
+            {
+              producer_event_id: "external-response-1",
+              producer_sequence: 1,
+              type: "response.completed",
+              payload: { text: "外部 Runtime 已完成" },
+            },
+            {
+              producer_event_id: "external-execution-2",
+              producer_sequence: 2,
+              type: "execution.completed",
+              payload: { outcome: "success" },
+            },
+          ],
+        }),
+      }),
+    );
+    expect(completedResponse.status).toBe(200);
+    expect(
+      (
+        await db
+          .select()
+          .from(invocationTable)
+          .where(eq(invocationTable.id, completed.invocationId))
+      )[0]?.executionState,
+    ).toBe("completed");
+  });
+
   it("knowledge.search 经同一 action schema 执行并持久化 proposed/started/completed", async () => {
     const seeded = await seedRunningTurn();
     const action = {

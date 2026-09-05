@@ -16,6 +16,7 @@ import {
   resolveOutboundRuntimeAuth,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
+import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import {
   configuredDecisionPort,
   configuredFinalResponsePort,
@@ -213,16 +214,7 @@ export async function dispatchEmployeeTurn(params: {
         // Hosted 保持 in-process 引用（Hosted 路径无行为回退）。
         runtimeEndpoint: managedEndpoint,
         auth: await resolveOutboundAuth(),
-        gatewayEndpoints: {
-          events: "in-process://events",
-          cancel: "in-process://cancel",
-          resume: "in-process://resume",
-          steer: "in-process://steer",
-          tools: "in-process://gateway/v1/tools",
-          tool_calls: "in-process://gateway/v1/tool-calls",
-          user_action_requests: "in-process://gateway/v1/user-action-requests",
-          capability_actions: "in-process://gateway/v1/capability-actions",
-        },
+        gatewayEndpoints: buildGatewayEndpoints({ external: isExternalEndpoint }),
         governanceConfig: {
           revision_id: binding.governanceConfigRevisionId,
           config_digest: binding.governanceConfigDigest,

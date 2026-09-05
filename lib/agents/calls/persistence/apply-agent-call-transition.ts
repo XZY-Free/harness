@@ -109,12 +109,55 @@ export async function applyAgentCallTransition(
     });
   }
 
-  // 远端尚未正式 started，或流在运行中丢失时，只结束当前 Attempt；不得伪造
-  // queued→failed / running→lost。Durable continuation Worker 会据此创建新 Attempt。
-  if (
-    command.authority === "local_failure" &&
-    (authority.call.state === "queued" || command.input === "call.lost")
-  ) {
+  // 远端尚未正式 started 时，Call 与当前 Attempt 必须一起进入 failed，避免留下
+  // “Call=queued + Attempt=failed” 的无主孤儿。运行中的流丢失仍只结束当前 Attempt，
+  // 由后续恢复路径决定是否创建新 Attempt。
+  if (command.authority === "local_failure" && authority.call.state === "queued") {
+    const mapping = await resolveMapping(tx, authority, command, now);
+    if (mapping.outcome !== "ok" || !mapping.attempt) {
+      return finish(tx, command, authority, now, {
+        outcome: mapping.outcome === "ok" ? "rejected" : mapping.outcome,
+        reasonCode: mapping.reasonCode ?? "active_attempt_missing",
+        beforeVersionNo,
+        afterVersionNo: beforeVersionNo,
+        finalState: authority.call.state as AgentCallState,
+      });
+    }
+    await updateAttemptForTransition(tx, mapping.attempt, command.input, now);
+    const afterVersionNo = beforeVersionNo + 1;
+    const updates = buildCallUpdates(
+      authority.call,
+      command,
+      "failed",
+      afterVersionNo,
+      now,
+      mapping.sessionBindingId,
+    );
+    const updateResult = await tx
+      .update(agentCallTable)
+      .set(updates)
+      .where(
+        and(
+          eq(agentCallTable.id, command.callId),
+          eq(agentCallTable.tenantId, command.tenantId),
+          eq(agentCallTable.state, "queued"),
+          eq(agentCallTable.versionNo, beforeVersionNo),
+        ),
+      );
+    if (updateResult[0].affectedRows !== 1) {
+      throw new Error("AgentCall 本地失败 CAS 冲突，可靠接入必须重试");
+    }
+    return finish(tx, command, authority, now, {
+      outcome: "applied",
+      reasonCode: "call_failure_recorded",
+      beforeVersionNo,
+      afterVersionNo,
+      finalState: "failed",
+    });
+  }
+
+  // 运行中丢流仍仅结束当前 Attempt，不改变 Call 的 running 状态。
+  if (command.authority === "local_failure" && command.input === "call.lost") {
     const mapping = await resolveMapping(tx, authority, command, now);
     if (mapping.outcome !== "ok" || !mapping.attempt) {
       return finish(tx, command, authority, now, {

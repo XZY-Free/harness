@@ -47,7 +47,7 @@ import type {
  * Runtime 通过这些端点回传事件 / 发送命令。
  */
 export interface GatewayEndpoints {
-  /** 事件回传端点基础 URL（POST {events}/runtime/v1/invocations/{id}/events/batch）。 */
+  /** 事件回传端点 URL（POST {events}）。 */
   events: string;
   /** cancel 命令端点。 */
   cancel: string;
@@ -67,7 +67,7 @@ export interface GatewayEndpoints {
  * Event Ingress 客户端接口：Runtime 侧调用以回传候选事件批次。
  *
  * 两种实现：
- * - HTTP：调用平台 /runtime/v1/invocations/{id}/events/batch 路由（createHttpEventIngressClient）。
+ * - HTTP：调用平台 /gateway/v1/runtime-events 路由（createHttpEventIngressClient）。
  * - 包装 EventBatchSink：测试用，绕过 HTTP 直接调用 ingressEventBatch 仓储。
  */
 export interface EventIngressClient {
@@ -88,25 +88,30 @@ export interface EventIngressClient {
 /**
  * 创建 HTTP Event Ingress 客户端。
  *
- * 调用平台 events/batch 路由（POST {gatewayEndpoints.events}/runtime/v1/invocations/{id}/events/batch）。
+ * 调用平台 Gateway Runtime Events 路由（POST {gatewayEndpoints.events}）。
  *
  * @param params.gatewayEndpoints 平台 Gateway 端点
- * @param params.authToken 平台颁发的 Workload Token
+ * @param params.authToken Runtime Workload Token（仅兼容旧调用方）
+ * @param params.gatewayAccessToken 平台颁发的 Gateway Workload Token
  */
 export function createHttpEventIngressClient(params: {
   gatewayEndpoints: GatewayEndpoints;
   authToken: string;
+  /** Gateway Workload Token；旧调用方未提供时仅作为兼容回退。 */
+  gatewayAccessToken?: string;
 }): EventIngressClient {
   return {
     async postEventBatch(invocationId, events, producerSequenceStart) {
-      const url = `${params.gatewayEndpoints.events}/runtime/v1/invocations/${invocationId}/events/batch`;
+      const url = params.gatewayEndpoints.events;
       const resp = await fetch(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${params.authToken}`,
+          authorization: `Bearer ${params.gatewayAccessToken ?? params.authToken}`,
+          "idempotency-key": `${invocationId}:runtime-events:${producerSequenceStart}`,
         },
         body: JSON.stringify({
+          invocation_id: invocationId,
           events,
           producer_sequence_start: producerSequenceStart,
         }),
@@ -208,6 +213,8 @@ export interface StartInvocationParams {
   traceContext?: StartInvocationRequestBody["trace_context"];
   /** 平台颁发的 Workload Token（HTTP sink 用）。 */
   authToken: string;
+  /** 平台颁发的 Gateway Workload Token（回调 Gateway 时使用）。 */
+  gatewayAccessToken?: string;
   /** 关联标识（X-Request-Id / traceparent）。 */
   correlationId?: string | null;
 }
@@ -341,6 +348,7 @@ export interface HostedHarnessLoopParams {
   gatewayEndpoints: GatewayEndpoints;
   runtimeEndpoint: string;
   authToken: string;
+  gatewayAccessToken?: string;
   /** 可注入的 Event Ingress 客户端（测试用）；不传则用 HTTP 默认实现。 */
   ingressClient?: EventIngressClient;
   /** 每步只产出一个结构化行动。 */
@@ -428,6 +436,7 @@ export class HostedHarnessLoop {
       createHttpEventIngressClient({
         gatewayEndpoints: this.params.gatewayEndpoints,
         authToken: this.params.authToken,
+        gatewayAccessToken: this.params.gatewayAccessToken,
       });
     const missingDecisionPort: HarnessDecisionPort = {
       async decideNextAction() {
@@ -608,6 +617,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
   function createIngressClient(
     gatewayEndpoints: GatewayEndpoints,
     authToken: string,
+    gatewayAccessToken?: string,
   ): EventIngressClient {
     if (trackedSink) {
       return {
@@ -616,7 +626,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
         },
       };
     }
-    return createHttpEventIngressClient({ gatewayEndpoints, authToken });
+    return createHttpEventIngressClient({ gatewayEndpoints, authToken, gatewayAccessToken });
   }
 
   return {
@@ -635,6 +645,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
         const ingressClient = createIngressClient(
           startParams.gatewayEndpoints,
           startParams.authToken,
+          startParams.gatewayAccessToken,
         );
 
         const loopParams: HostedHarnessLoopParams = {
@@ -652,6 +663,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           traceContext: startParams.traceContext,
           runtimeEndpoint: params.platformEndpoint,
           authToken: startParams.authToken,
+          gatewayAccessToken: startParams.gatewayAccessToken,
           ingressClient,
           decisionPort: params.decisionPort,
           finalResponsePort: params.finalResponsePort,

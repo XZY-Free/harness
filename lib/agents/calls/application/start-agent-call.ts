@@ -8,8 +8,8 @@
  *   绝不触碰 parent Invocation / RuntimeSessionBinding / RuntimeEventIngress。
  * - 原子 current Attempt claim：同 call+同 input 并发只有一个 owner 会 record outbound/发 HTTP；
  *   其它 waiter 返回同一 durable AgentCall。不同 input 在 claim 已存在时稳定冲突。
- * - started 前的 endpoint/auth/503/protocol 错误只结束当前 Attempt，不伪造 queued→failed；
- *   后续由恢复 Worker 判断是否创建新 Attempt。
+ * - started 前的 endpoint/auth/503/protocol 错误把当前 Call 与 Attempt 一起标为 failed，
+ *   不留下 queued + failed 的无主组合；运行中丢流仍由恢复 Worker 决定是否创建新 Attempt。
  * - 不实现 resume/cancel。
  */
 import { createHash } from "node:crypto";
@@ -326,7 +326,7 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
       input: command.input,
       contextMetadata,
       existingContextId: null,
-      idempotencyKey: `agentcall:${callId}:attempt-1`,
+      idempotencyKey: `agentcall:${callId}:attempt-${claim.attempt.attemptNo}`,
       capabilities,
     });
   } catch (err) {

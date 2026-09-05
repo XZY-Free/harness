@@ -49,6 +49,7 @@ import {
   type EventBatchSink,
   type StartInvocationParams,
   createHostedAdapter,
+  createHttpEventIngressClient,
   hostedAdapterCapabilities,
   setRouteHostedAdapter,
 } from "@/lib/runtime/adapters/hosted-adapter";
@@ -73,6 +74,7 @@ beforeEach(async () => {
 afterEach(() => {
   // 清理路由层 Adapter 单例，避免泄漏到其他测试文件（如 command-dispatcher.test.ts）
   setRouteHostedAdapter(null);
+  vi.unstubAllGlobals();
 });
 
 // ─── 辅助：mock sink（捕获候选事件，不调用 DB） ───────────
@@ -163,6 +165,39 @@ function mockApplicationService(): HostedRuntimeApplicationService {
 // ═══════════════════════════════════════════════════════════
 
 describe("S05-C05 HostedAdapter 基本能力", () => {
+  it("HTTP Event Ingress 直接调用 Gateway 回调并携带 Gateway Token/幂等键", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHttpEventIngressClient({
+      gatewayEndpoints: mockGatewayEndpoints(),
+      authToken: "runtime-token",
+      gatewayAccessToken: "gateway-token",
+    });
+    const event = {
+      producer_event_id: "event-1",
+      producer_sequence: 3,
+      type: "progress.snapshot",
+      payload: { text: "working" },
+    };
+    await client.postEventBatch("invocation-1", [event], 3);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://platform.internal",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer gateway-token",
+          "idempotency-key": "invocation-1:runtime-events:3",
+        }),
+        body: JSON.stringify({
+          invocation_id: "invocation-1",
+          events: [event],
+          producer_sequence_start: 3,
+        }),
+      }),
+    );
+  });
+
   it("未配置模型执行器时回传 execution.failed，不生成回复", async () => {
     const { sink, events } = createMockSink();
     const adapter = createHostedAdapter({

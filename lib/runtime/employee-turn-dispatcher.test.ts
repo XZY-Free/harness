@@ -63,6 +63,7 @@ const externalServers: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   for (const close of externalServers.splice(0)) await close();
+  vi.unstubAllEnvs();
 });
 
 const EXTERNAL_CAPABILITIES = {
@@ -506,6 +507,7 @@ async function createExternalResumeCommand(params: {
 
 describe("dispatchEmployeeTurn", () => {
   it("external_endpoint 真实发送 HTTP 并持久化会话能力，不启动 Hosted Loop", async () => {
+    vi.stubEnv("SNOW_CONTROL_PLANE_PUBLIC_URL", "https://platform.example.test/base/");
     const { server, tenantId, ownerId, thread, turn } =
       await seedReadyExternalEmployeeTurn("http-start");
     const hostedDecision = vi.fn();
@@ -529,6 +531,16 @@ describe("dispatchEmployeeTurn", () => {
     expect(server.requests[0]?.body).not.toHaveProperty("tenantId");
     expect(server.requests[0]?.body).not.toHaveProperty("userId");
     expect(server.requests[0]?.body).not.toHaveProperty("execution_subject");
+    expect(server.requests[0]?.body?.gateway_endpoints).toEqual({
+      events: "https://platform.example.test/base/gateway/v1/runtime-events",
+      cancel: "https://platform.example.test/base/gateway/v1/runtime-commands/cancel",
+      resume: "https://platform.example.test/base/gateway/v1/runtime-commands/resume",
+      steer: "https://platform.example.test/base/gateway/v1/runtime-commands/steer",
+      tools: "https://platform.example.test/base/gateway/v1/tools",
+      tool_calls: "https://platform.example.test/base/gateway/v1/tool-calls",
+      user_action_requests: "https://platform.example.test/base/gateway/v1/user-action-requests",
+      capability_actions: "https://platform.example.test/base/gateway/v1/capability-actions",
+    });
 
     const updatedTurn = await getTurnById(tenantId, turn.id);
     const invocation = await getInvocationById(

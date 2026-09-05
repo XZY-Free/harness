@@ -16,6 +16,7 @@ import {
   retryDispatchedInvocationCommand,
 } from "@/lib/runtime/command-dispatcher";
 import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
+import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
@@ -25,17 +26,6 @@ import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/executio
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 import { eq } from "drizzle-orm";
-
-const GATEWAY_ENDPOINTS = {
-  events: "in-process://events",
-  cancel: "in-process://cancel",
-  resume: "in-process://resume",
-  steer: "in-process://steer",
-  tools: "in-process://gateway/v1/tools",
-  tool_calls: "in-process://gateway/v1/tool-calls",
-  user_action_requests: "in-process://gateway/v1/user-action-requests",
-  capability_actions: "in-process://gateway/v1/capability-actions",
-};
 
 let hostedApplicationServiceForTest: HostedRuntimeApplicationService | null = null;
 
@@ -133,7 +123,9 @@ async function resolveTransport(
       return {
         runtimeEndpoint: endpoint,
         auth,
-        gatewayEndpoints: GATEWAY_ENDPOINTS,
+        gatewayEndpoints: buildGatewayEndpoints({
+          external: context.runtimeRevision.runtimeEvidenceKind === "external_endpoint",
+        }),
         governanceConfig: {
           revision_id: binding.governanceConfigRevisionId,
           config_digest: binding.governanceConfigDigest,
