@@ -27,6 +27,9 @@ function project(group: VitestGroup, serial = false) {
             environment: "node" as const,
             pool: "forks" as const,
             poolOptions: { forks: { singleFork: true } },
+            fileParallelism: false,
+            maxWorkers: 1,
+            minWorkers: 1,
             hookTimeout: 60_000,
             testTimeout: 60_000,
           }

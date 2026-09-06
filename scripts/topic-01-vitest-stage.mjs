@@ -15,6 +15,7 @@ const args = [
   "vitest",
   "run",
   ...groups.flatMap((group) => ["--project", group]),
+  ...(groups.includes("db") ? ["--maxWorkers=1", "--minWorkers=1", "--no-file-parallelism"] : []),
   "--reporter=default",
   "--reporter=json",
   `--outputFile.json=${rawResult}`,
