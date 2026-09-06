@@ -134,6 +134,7 @@
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/event-ingress-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -175,6 +176,7 @@
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/event-ingress-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
@@ -2611,6 +2613,7 @@
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/job/job-control-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
@@ -2664,6 +2667,7 @@
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/job/job-control-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
@@ -4892,6 +4896,7 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/invocation-queries.ts"
       ],
       "productionReaders": [
@@ -4911,6 +4916,7 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -4956,6 +4962,7 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/invocation-queries.ts",
         "lib/agents/calls/application/project-host-actions.ts",
         "lib/context/context-handle.ts",
@@ -4973,6 +4980,7 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5071,6 +5079,7 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/production-resume-harness-invocation.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts"
@@ -5083,6 +5092,7 @@
         "lib/identity/recovery-consistency-checker.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/production-resume-harness-invocation.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5123,6 +5133,7 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/production-resume-harness-invocation.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5133,6 +5144,7 @@
         "lib/identity/recovery-consistency-checker.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/production-resume-harness-invocation.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5312,7 +5324,8 @@
         "lib/capability/tool-execution-worker.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/observability/harness-execution-trace.ts",
-        "lib/permission/permission-queries.ts"
+        "lib/permission/permission-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -5354,6 +5367,7 @@
         "lib/identity/recovery-consistency-checker.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/permission-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -5571,6 +5585,7 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5587,6 +5602,7 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5624,6 +5640,7 @@
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5638,6 +5655,7 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/observability/harness-execution-trace.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -5708,14 +5726,17 @@
       "productionWriters": [
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts"
       ],
       "productionReaders": [
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts",
-        "lib/runtime/continuation/production-invocation-continuation-worker.ts"
+        "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+        "lib/runtime/event-ingress-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -5750,12 +5771,15 @@
         "lib/persistence/schema/user-action-request.ts#userActionRequestTable",
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts",
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
+        "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts",
         "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+        "lib/runtime/event-ingress-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
