@@ -836,6 +836,7 @@ async function mapUserActionRequested(
       typeof payload.agent_call_id !== "string" ||
       typeof payload.agent_call_event_id !== "string" ||
       typeof payload.action_id !== "string" ||
+      typeof payload.harness_action_id !== "string" ||
       typeof payload.task_id !== "string" ||
       typeof payload.context_id !== "string"
     ) {
@@ -882,7 +883,7 @@ async function mapUserActionRequested(
     if (
       !call ||
       !callEvent ||
-      call.sourceRef !== payload.action_id ||
+      call.sourceRef !== payload.harness_action_id ||
       call.externalTaskRef !== payload.task_id ||
       !call.agentSessionBindingId
     ) {

@@ -394,6 +394,51 @@ export const enterpriseUserConfig = {
   },
 } as const;
 
+/**
+ * 外部 Agent 的宿主交互配置。
+ *
+ * 这些均为平台侧策略：Agent Revision 只能声明希望使用的能力，不能自行延长确认时间、
+ * 放宽外链域名或伪造人工支持入口。空 allowlist 一律拒绝外链与人工入口。
+ */
+export const agentHostControlConfig = {
+  get confirmationTtlMs(): number {
+    const seconds = Number.parseInt(
+      optionalEnv("SNOW_EXTERNAL_AGENT_CONFIRMATION_TTL_SECONDS", "900"),
+      10,
+    );
+    return Number.isInteger(seconds) && seconds >= 60 && seconds <= 86_400
+      ? seconds * 1_000
+      : 900_000;
+  },
+
+  get externalAllowedHosts(): string[] {
+    return optionalEnv("SNOW_HOST_ACTION_EXTERNAL_ALLOWED_HOSTS", "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value))
+      .filter((value, index, values) => values.indexOf(value) === index);
+  },
+
+  get humanSupportUrl(): string | null {
+    const raw = optionalEnv("SNOW_HUMAN_SUPPORT_URL", "").trim();
+    if (!raw) return null;
+    try {
+      const parsed = new URL(raw);
+      if (
+        parsed.protocol !== "https:" ||
+        parsed.username ||
+        parsed.password ||
+        !this.externalAllowedHosts.includes(parsed.hostname.toLowerCase())
+      ) {
+        return null;
+      }
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  },
+} as const;
+
 export const appConfig = {
   /** 当前部署环境。 */
   env: APP_ENV,

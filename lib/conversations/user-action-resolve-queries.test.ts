@@ -438,3 +438,48 @@ describe("resolveGenericUserAction input submit 按 inputSchemaJson 校验（RED
     await expectRejectedWithoutConsumption({ text: 1 });
   });
 });
+
+describe("外部 Agent confirmation 过期", () => {
+  it("过期确认不得恢复 Invocation，必须等待外部 Agent 创建新的 proposal", async () => {
+    const seeded = await seedWaitingInputRequest();
+    await db
+      .update(userActionRequestTable)
+      .set({
+        requestType: "confirmation",
+        purpose: "a2a_confirmation",
+        inputSchemaJson: null,
+        promptJson: {
+          kind: "user_action.requested",
+          proposal_id: "proposal-expired-1",
+          title: "提交申请",
+        },
+        expiresAt: new Date(Date.now() - 1_000),
+      })
+      .where(eq(userActionRequestTable.id, seeded.requestId));
+
+    await expect(
+      resolveGenericUserAction({
+        tenantId: TENANT,
+        requestId: seeded.requestId,
+        resolution: "approve",
+        resolvedBy: "user-1",
+      }),
+    ).rejects.toMatchObject({ currentState: "expired" });
+
+    const [request] = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.id, seeded.requestId));
+    expect(request?.requestState).toBe("pending");
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, seeded.invocationId));
+    expect(invocation?.executionState).toBe("waiting_user");
+    const commands = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.invocationId, seeded.invocationId));
+    expect(commands).toHaveLength(0);
+  });
+});

@@ -13,6 +13,10 @@
  * - 不实现 resume/cancel。
  */
 import { createHash } from "node:crypto";
+import {
+  AgentRevisionContractRequirementsError,
+  assertAgentRevisionContractRequirements,
+} from "@/lib/agents/application/agent-revision-contract-requirements";
 import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
 import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
@@ -250,6 +254,25 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     tenantId,
     binding.agentRevisionId,
   );
+  try {
+    assertAgentRevisionContractRequirements({
+      enterprisePolicy,
+      hostControlPolicy,
+      contexts: contract.contexts.map((context) => ({
+        key: context.contextKind,
+        necessity: context.necessity,
+      })),
+      interaction: {
+        inputRequired: contractSnapshot.inputRequired,
+        resume: contractSnapshot.resume,
+      },
+    });
+  } catch (error) {
+    if (error instanceof AgentRevisionContractRequirementsError) {
+      throw new AgentCallStartError("AGENT_CALL_CONTRACT_REQUIREMENTS_MISMATCH", error.message);
+    }
+    throw error;
+  }
 
   // 5. 上下文：trusted environment tenant 必须等于 call tenant；required missing/denied 网络前失败。
   const env = command.contextEnvironment;

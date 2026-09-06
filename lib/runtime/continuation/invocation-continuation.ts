@@ -58,6 +58,7 @@ export function classifyInvocationContinuationError(error: unknown): {
           "state_invalid",
           "context_missing",
           "context_tenant_mismatch",
+          "contract_invalid",
         ].includes(code))
     ) {
       return {

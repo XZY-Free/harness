@@ -42,10 +42,12 @@ describe("AgentActionExecutor", () => {
     }
   });
 
-  async function seed(providerScenario: "completed" | "long_running" | "input_required") {
+  async function seed(
+    providerScenario: "completed" | "long_running" | "input_required" | "confirmation_chain",
+  ) {
     const scenario = await seedAgentCallExecutionScenario({
       providerScenario,
-      ...(providerScenario === "input_required"
+      ...(providerScenario === "input_required" || providerScenario === "confirmation_chain"
         ? {
             contract: {
               ...EXECUTION_FIXTURE_CONTRACT,
@@ -55,6 +57,15 @@ describe("AgentActionExecutor", () => {
                 resume: true,
               },
             },
+            ...(providerScenario === "confirmation_chain"
+              ? {
+                  agentInterfaceRequirements: {
+                    host_controls: {
+                      confirmation_action_keys: ["hr.leave.submit"],
+                    },
+                  },
+                }
+              : {}),
           }
         : {}),
     });
@@ -297,7 +308,8 @@ describe("AgentActionExecutor", () => {
     expect(requestedEvents[0]?.payloadJson).toMatchObject({
       request_id: request?.id,
       agent_call_id: callId,
-      action_id: action.actionId,
+      action_id: request?.harnessActionId,
+      harness_action_id: action.actionId,
       task_id: (request?.promptJson as Record<string, unknown>)?.task_id,
       context_id: (request?.promptJson as Record<string, unknown>)?.context_id,
     });
@@ -321,7 +333,7 @@ describe("AgentActionExecutor", () => {
     expect(resumedTurn?.turnState).toBe("running");
     expect(resolved.resumeCommand.commandPayloadJson).toMatchObject({
       agent_call_id: callId,
-      action_id: action.actionId,
+      action_id: request?.harnessActionId,
       task_id: (request?.promptJson as Record<string, unknown>)?.task_id,
       context_id: (request?.promptJson as Record<string, unknown>)?.context_id,
       resume_payload: { text: "2026-09-01" },
@@ -343,5 +355,126 @@ describe("AgentActionExecutor", () => {
     });
     expect(await db.select().from(agentCallTable)).toHaveLength(1);
     expect(changedPreferredAgentId).not.toBe(scenario.agentId);
+  });
+
+  it("同一 AgentCall 可连续产生两次 confirmation，分别落为 UAR 并两次复用同一 task/context", async () => {
+    const scenario = await seed("confirmation_chain");
+    const executionSubject = executionSubjectFromUserIdentity(scenario.tenantId, randomUUID());
+    const execute = createAgentActionExecutor({
+      tenantId: scenario.tenantId,
+      executionSubject,
+      resolveRoute,
+      transportChannel: "hosted",
+    });
+    const action = {
+      actionId: "action-agent-confirmation-chain",
+      stepNo: 1,
+      actionType: "agent.call" as const,
+      purposeCode: "submit_leave",
+      shortPurpose: "提交请假",
+      payload: { agentId: scenario.agentId, task: "提交我的年假申请" },
+    };
+    const context = {
+      invocationId: scenario.parentInvocationId,
+      tenantId: scenario.tenantId,
+      threadId: scenario.threadId,
+      turnId: scenario.turnId,
+      actionDigest: `sha256:${"e".repeat(64)}`,
+    };
+
+    const started = await execute(action, context);
+    const callId = started.pending?.callId;
+    expect(callId).toBeTruthy();
+
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const [call] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, callId!));
+      if (call?.state === "waiting_user") break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    await createProductionInvocationContinuationWorker(
+      "agent-action-executor-confirmation-chain-first",
+    ).pollOnce();
+    let requests = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.invocationId, scenario.parentInvocationId));
+    expect(requests).toHaveLength(1);
+    const firstRequest = requests[0]!;
+    expect(firstRequest).toMatchObject({
+      requestType: "confirmation",
+      purpose: "a2a_confirmation",
+      requestState: "pending",
+    });
+    expect(firstRequest.harnessActionId).not.toBe(action.actionId);
+    expect(firstRequest.expiresAt?.getTime()).toBeGreaterThan(Date.now());
+    expect(firstRequest.promptJson).toMatchObject({
+      agent_call_id: callId,
+      harness_action_id: action.actionId,
+      proposal_id: "proposal-1",
+    });
+
+    const firstResolution = await resolveGenericUserAction({
+      tenantId: scenario.tenantId,
+      requestId: firstRequest.id,
+      resolution: "approve",
+      resolvedBy: executionSubject.subjectId,
+    });
+    const afterFirstResume = await resumeAgentCallFromUserAction({
+      tenantId: scenario.tenantId,
+      request: firstResolution.request,
+      responseRedactedJson: null,
+      executionSubject,
+    });
+    expect(afterFirstResume).toMatchObject({ resumed: true, callId, state: "waiting_user" });
+
+    await createProductionInvocationContinuationWorker(
+      "agent-action-executor-confirmation-chain-second",
+    ).pollOnce();
+    requests = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.invocationId, scenario.parentInvocationId));
+    expect(requests).toHaveLength(2);
+    const secondRequest = requests.find((request) => request.id !== firstRequest.id);
+    expect(secondRequest).toMatchObject({
+      requestType: "confirmation",
+      purpose: "a2a_confirmation",
+      requestState: "pending",
+    });
+    expect(secondRequest?.harnessActionId).not.toBe(firstRequest.harnessActionId);
+    expect(secondRequest?.promptJson).toMatchObject({
+      agent_call_id: callId,
+      harness_action_id: action.actionId,
+      proposal_id: "proposal-2",
+    });
+
+    const secondResolution = await resolveGenericUserAction({
+      tenantId: scenario.tenantId,
+      requestId: secondRequest?.id as string,
+      resolution: "deny",
+      resolvedBy: executionSubject.subjectId,
+    });
+    await expect(
+      resumeAgentCallFromUserAction({
+        tenantId: scenario.tenantId,
+        request: secondResolution.request,
+        responseRedactedJson: null,
+        executionSubject,
+      }),
+    ).resolves.toMatchObject({ resumed: true, callId, state: "completed" });
+
+    expect(await db.select().from(agentCallTable)).toHaveLength(1);
+    expect(scenario.provider.captured).toHaveLength(3);
+    const firstPrompt = firstRequest.promptJson as Record<string, unknown>;
+    expect(scenario.provider.captured[1]).toMatchObject({
+      resume: true,
+      taskId: firstPrompt.task_id,
+      contextId: firstPrompt.context_id,
+    });
+    expect(scenario.provider.captured[2]).toMatchObject({
+      resume: true,
+      taskId: firstPrompt.task_id,
+      contextId: firstPrompt.context_id,
+    });
   });
 });

@@ -16,12 +16,16 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { type ApiAudience, apiError, generateRequestId } from "@/lib/http";
 import type { NormalizedEnterpriseUserProfile } from "@/lib/identity/enterprise-user";
 import {
+  type SelectedEnterpriseUserAdapter,
+  getEnterpriseUserAdapter,
+} from "@/lib/identity/enterprise-user-adapter";
+import {
   type EnterpriseUserProfileStatus,
   syncEnterpriseUserProfile,
 } from "@/lib/identity/enterprise-user-sync";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { getUserIdentityBySubject, upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   type WorkloadCallerType,
   type WorkloadTokenClaims,
@@ -56,11 +60,20 @@ export interface CurrentUserContext extends Principal {
 /** 认证失败错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
 export class AuthenticationError extends Error {
   constructor(
-    public readonly code: "missing_identity" | "missing_email" | "tenant_suspended",
+    public readonly code:
+      | "missing_identity"
+      | "missing_email"
+      | "tenant_suspended"
+      | "user_disabled",
     message: string,
   ) {
     super(message);
   }
+}
+
+/** Resolver 注入仅用于受控测试；生产始终从唯一注册表选择正式适配器。 */
+export interface ResolvePrincipalOptions {
+  enterpriseUserAdapter?: SelectedEnterpriseUserAdapter;
 }
 
 /**
@@ -119,6 +132,7 @@ function resolveRawIdentity(headers: Headers): {
 export async function resolvePrincipal(
   headers: Headers,
   audience: ApiAudience = "employee",
+  options: ResolvePrincipalOptions = {},
 ): Promise<Principal> {
   const tenant = await ensureDefaultTenant();
   if (tenant.status !== "active") {
@@ -126,13 +140,19 @@ export async function resolvePrincipal(
   }
 
   const { externalSubject, email, displayName } = resolveRawIdentity(headers);
+  const adapter = options.enterpriseUserAdapter ?? getEnterpriseUserAdapter();
 
-  const identity = await upsertUserIdentity({
-    tenantId: tenant.id,
-    externalSubject,
-    email,
-    displayName,
-  });
+  // 开源默认模式保留既有标准身份漂移更新。企业模式中原始 SSO 只用于定位主体，
+  // 不能在私有目录成功验证之前更新 email/displayName/status，更不能重启 disabled 身份。
+  const identity =
+    adapter.kind === "default"
+      ? await upsertUserIdentity({
+          tenantId: tenant.id,
+          externalSubject,
+          email,
+          displayName,
+        })
+      : await getUserIdentityBySubject(tenant.id, externalSubject);
 
   const synced = await syncEnterpriseUserProfile({
     subject: {
@@ -142,8 +162,15 @@ export async function resolvePrincipal(
       email,
       displayName,
     },
-    userIdentityId: identity.id,
+    ...(identity ? { userIdentityId: identity.id } : {}),
+    adapter,
   });
+
+  // Employee Principal 是全部员工业务 API 的统一门禁；已停用用户不能建立绑定、
+  // 不能继续业务请求，也不能借适配器失败走 stale 路径恢复为 active。
+  if (audience === "employee" && synced.userIdentity.status === "disabled") {
+    throw new AuthenticationError("user_disabled", "当前用户已停用");
+  }
 
   // 同步后使用适配器确认过的标准字段建立绑定，避免企业资料漂移后绑定显示名落后。
   await upsertPrincipalBinding({
@@ -157,7 +184,7 @@ export async function resolvePrincipal(
   return {
     tenantId: tenant.id,
     tenantKey: tenant.key,
-    userIdentityId: identity.id,
+    userIdentityId: synced.userIdentity.id,
     externalSubject,
     email: synced.userIdentity.email,
     displayName: synced.userIdentity.displayName,

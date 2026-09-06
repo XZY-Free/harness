@@ -7,6 +7,11 @@ import {
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
 import {
+  AgentRevisionContractRequirementsError,
+  assertAgentRevisionContractRequirements,
+} from "@/lib/agents/application/agent-revision-contract-requirements";
+import {
+  type HostControlCapabilityPolicy,
   HostControlProtocolError,
   parseHostControlCapabilityPolicy,
 } from "@/lib/agents/calls/transport/a2a/host-control-contract";
@@ -58,6 +63,7 @@ import {
   recordAuditEvent,
 } from "@/lib/identity/audit";
 import {
+  type EnterpriseUserAccessPolicy,
   EnterpriseUserAccessPolicyError,
   parseEnterpriseUserAccessPolicy,
 } from "@/lib/identity/enterprise-user-access-policy";
@@ -208,9 +214,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   if (!validateBody(body)) {
     return schemaInvalidTable(requestId, "请求体非法：缺少必填字段或字段类型错误");
   }
+  let enterprisePolicy: EnterpriseUserAccessPolicy;
+  let hostControlPolicy: HostControlCapabilityPolicy;
   try {
-    parseEnterpriseUserAccessPolicy(body.agent_interface_requirements);
-    parseHostControlCapabilityPolicy(body.agent_interface_requirements);
+    enterprisePolicy = parseEnterpriseUserAccessPolicy(body.agent_interface_requirements);
+    hostControlPolicy = parseHostControlCapabilityPolicy(body.agent_interface_requirements);
   } catch (error) {
     if (
       error instanceof EnterpriseUserAccessPolicyError ||
@@ -223,14 +231,38 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // 5.5 校验绑定的 AgentContractSnapshot 存在、属于当前租户且属于同一 Agent
   // （跨租户/跨 Agent/缺失引用 → 400，且在 Revision 插入前拒绝）
-  const boundSnapshot = await mysqlAgentContractStore.transaction((session) =>
-    session.findContractSnapshotById(principal.tenantId, body.agent_contract_snapshot_id),
-  );
-  if (!boundSnapshot || boundSnapshot.agentId !== agentId) {
+  const boundContract = await mysqlAgentContractStore.transaction(async (session) => {
+    const snapshot = await session.findContractSnapshotById(
+      principal.tenantId,
+      body.agent_contract_snapshot_id,
+    );
+    if (!snapshot) return null;
+    return {
+      snapshot,
+      contexts: await session.listInvocationContexts(principal.tenantId, snapshot.id),
+    };
+  });
+  if (!boundContract || boundContract.snapshot.agentId !== agentId) {
     return schemaInvalidTable(
       requestId,
       `AgentContractSnapshot 不存在或不属于该 Agent: ${body.agent_contract_snapshot_id}`,
     );
+  }
+  try {
+    assertAgentRevisionContractRequirements({
+      enterprisePolicy,
+      hostControlPolicy,
+      contexts: boundContract.contexts,
+      interaction: {
+        inputRequired: boundContract.snapshot.inputRequired,
+        resume: boundContract.snapshot.resume,
+      },
+    });
+  } catch (error) {
+    if (error instanceof AgentRevisionContractRequirementsError) {
+      return schemaInvalidTable(requestId, error.message);
+    }
+    throw error;
   }
 
   // 6. 计算请求 hash + 幂等守卫

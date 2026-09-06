@@ -22,7 +22,7 @@
  *   构建输出隔离到 `.next-e2e`，不污染开发者的 `.next`。
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
@@ -31,6 +31,15 @@ import { startE2eModelServer } from "./e2e-model-server.mts";
 
 /** e2e 构建产物目录：与开发者的 .next 隔离。 */
 const E2E_DIST_DIR = ".next-e2e";
+
+/**
+ * Playwright 的浏览器测试与 webServer 是两个进程。仅在本机 E2E 运行期间把
+ * testcontainers 连接串写到受限临时文件，供跨端测试使用同一个真实 MySQL 构造
+ * 测试前置事实；不是应用配置，也不会进入构建产物或版本控制。
+ */
+function e2eRuntimeDescriptorPath(port: string): string {
+  return resolve(process.env.TMPDIR ?? "/tmp", `snow-harness-e2e-${port}.json`);
+}
 
 /**
  * 解析 .env 文件为键值对（只支持 KEY=VALUE 与 # 注释，够用即可）。
@@ -129,6 +138,18 @@ async function main(): Promise<void> {
 
   const port = process.env.SNOW_E2E_PORT ?? "3100";
   const env = childEnv(connectionString, modelServer.baseUrl, port);
+  const runtimeDescriptor = e2eRuntimeDescriptorPath(port);
+  writeFileSync(runtimeDescriptor, JSON.stringify({ databaseUrl: connectionString }), {
+    mode: 0o600,
+  });
+  chmodSync(runtimeDescriptor, 0o600);
+  const removeRuntimeDescriptor = () => {
+    try {
+      unlinkSync(runtimeDescriptor);
+    } catch {
+      // 不掩盖主进程的失败；测试临时文件会在下一轮启动前被覆盖。
+    }
+  };
 
   // 引导正式执行链（Runtime/Publication/Route/Projection 全走正式服务，Agent 表保持 0 行）。
   console.log("[e2e] 正在引导正式执行链...");
@@ -156,6 +177,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`[e2e] 收到 ${signal}，开始关闭...`);
     dev.kill("SIGTERM");
+    removeRuntimeDescriptor();
     await modelServer.close().catch(() => {});
     try {
       await container.stop();
@@ -172,6 +194,7 @@ async function main(): Promise<void> {
   dev.on("exit", (code) => {
     console.log(`[e2e] Dev server 退出，code=${code}`);
     void modelServer.close().catch(() => {});
+    removeRuntimeDescriptor();
     container
       .stop()
       .catch((err) => console.error("[e2e] MySQL 停止失败：", err))

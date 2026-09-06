@@ -28,7 +28,7 @@ describe("HostActionItem", () => {
           label: "打开",
           description: "查看当前会话",
           target_key: "thread.current",
-          web_path: "/threads",
+          web_path: "/chat/thread-1",
           url: null,
         })}
       />,
@@ -39,7 +39,7 @@ describe("HostActionItem", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
-  it("外链使用新窗口和 noopener，人工帮助入口无业务副作用", () => {
+  it("外链与人工支持均使用已投影的可信入口，并且不自动执行", () => {
     render(
       <HostActionItem
         item={item({
@@ -70,13 +70,13 @@ describe("HostActionItem", () => {
           description: null,
           target_key: null,
           web_path: null,
-          url: null,
+          url: "https://support.example.com/help",
         })}
       />,
     );
-    expect(screen.getByText("当前未配置人工入口")).toBeTruthy();
-    expect(
-      (screen.getByRole("button", { name: "当前未配置人工入口" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    const supportLink = screen.getByRole("link", { name: "联系支持" });
+    expect(supportLink.getAttribute("href")).toBe("https://support.example.com/help");
+    expect(supportLink.getAttribute("target")).toBe("_blank");
+    expect(supportLink.getAttribute("rel")).toBe("noopener noreferrer");
   });
 });

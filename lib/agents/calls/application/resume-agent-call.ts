@@ -1,3 +1,8 @@
+import {
+  AgentRevisionContractRequirementsError,
+  assertAgentRevisionContractRequirements,
+} from "@/lib/agents/application/agent-revision-contract-requirements";
+
 /**
  * resumeAgentCall — 恢复既有 AgentCall 子执行。
  *
@@ -70,6 +75,7 @@ export class AgentCallResumeError extends Error {
       | "context_missing"
       | "context_tenant_mismatch"
       | "enterprise_context_disabled"
+      | "contract_invalid"
       | "input_invalid"
       | "transport",
   ) {
@@ -150,6 +156,25 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
     tenantId,
     binding.agentRevisionId,
   );
+  try {
+    assertAgentRevisionContractRequirements({
+      enterprisePolicy,
+      hostControlPolicy,
+      contexts: contract.contexts.map((context) => ({
+        key: context.contextKind,
+        necessity: context.necessity,
+      })),
+      interaction: {
+        inputRequired: capabilities.inputRequired,
+        resume: capabilities.resume,
+      },
+    });
+  } catch (error) {
+    if (error instanceof AgentRevisionContractRequirementsError) {
+      throw new AgentCallResumeError(error.message, "contract_invalid");
+    }
+    throw error;
+  }
   if (enterprisePolicy.profileRequirement !== "none") {
     if (!env?.executionSubject || env.executionSubject.subjectType !== "user") {
       throw new AgentCallResumeError("resume 缺少可信用户主体", "context_missing");

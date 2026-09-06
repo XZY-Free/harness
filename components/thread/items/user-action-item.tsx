@@ -30,7 +30,7 @@ import type { ClientItem } from "@/lib/client/types";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { cn } from "@/lib/utils";
 import { Check, CircleAlert, FilePenLine } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 interface UserActionItemProps {
   /** 当前 Thread id；用于构造 :resolve 路径。 */
@@ -67,6 +67,8 @@ interface UserActionContent {
   prompt?: string;
   /** Agent input-required 的安全目录名称。 */
   agent_display_name?: string | null;
+  /** 外部 Agent confirmation 经过服务端协议校验后的安全预览。 */
+  preview?: Record<string, unknown>;
   resolution?: UserActionResolution;
   /** confirmation 类型：等待确认的目标文件。 */
   target_path?: string;
@@ -223,6 +225,59 @@ function normalizeFieldValue(field: InputFieldDef, raw: string): NormalizedField
   return { ok: true, omit: false, value: trimmed };
 }
 
+/** 历史数据也按受限结构显示，永不把未知对象当 HTML、链接或可执行内容处理。 */
+function isStructuredPreview(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0 &&
+    Object.keys(value).length <= 8
+  );
+}
+
+function previewText(value: string): string {
+  return value.length > 500 ? `${value.slice(0, 500)}…` : value;
+}
+
+function PreviewValue({ value, depth = 0 }: { value: unknown; depth?: number }): ReactNode {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return previewText(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (depth >= 2) return "已省略嵌套内容";
+  if (Array.isArray(value)) {
+    return (
+      <ul className="space-y-0.5">
+        {value.slice(0, 12).map((entry, index) => (
+          <li
+            key={`${depth}:${index}:${typeof entry === "string" ? entry : JSON.stringify(entry)}`}
+            className="break-words"
+          >
+            <PreviewValue value={entry} depth={depth + 1} />
+          </li>
+        ))}
+        {value.length > 12 ? <li>已省略其余项目</li> : null}
+      </ul>
+    );
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).slice(0, 8);
+    return (
+      <dl className="space-y-1 border-l border-border pl-2">
+        {entries.map(([key, nested]) => (
+          <div key={key} className="grid grid-cols-[minmax(0,auto)_1fr] gap-x-2">
+            <dt className="max-w-32 truncate text-muted-foreground">{previewText(key)}</dt>
+            <dd className="min-w-0 break-words">
+              <PreviewValue value={nested} depth={depth + 1} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return "—";
+}
+
 export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const content = item.content as UserActionContent;
 
@@ -272,6 +327,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     [content.prompt, content.summary, content.reason].find(
       (value) => typeof value === "string" && value.trim().length > 0,
     ) ?? "需要你的操作";
+  const preview = isStructuredPreview(content.preview) ? content.preview : null;
 
   // input 类型的字段（schema 缺失/空/不支持/非法 pattern → ok=false，fail-closed）
   const inputSchema = useMemo(
@@ -635,6 +691,25 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
             </span>
           )}
         </div>
+
+        {preview && content.request_type === "confirmation" ? (
+          <section
+            aria-label="操作预览"
+            className="mx-[17px] mb-3 rounded-[var(--radius-sm)] border border-border bg-background/60 px-3 py-2 text-2xs"
+          >
+            <h3 className="mb-1 font-medium text-foreground">操作预览</h3>
+            <dl className="space-y-1">
+              {Object.entries(preview).map(([key, value]) => (
+                <div key={key} className="grid grid-cols-[minmax(0,auto)_1fr] gap-x-3">
+                  <dt className="max-w-36 truncate text-muted-foreground">{previewText(key)}</dt>
+                  <dd className="min-w-0 break-words text-foreground">
+                    <PreviewValue value={value} />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
 
         {/* Authority 引用缺失：fail-closed，所有操作不可用，绝不 fallback 到 item.id */}
         {showActions && !requestId && (

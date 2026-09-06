@@ -98,18 +98,8 @@ export function buildAgentCallContextMetadata(
   environment: PlatformContextEnvironment,
   enterprisePolicy: EnterpriseUserAccessPolicy = { profileRequirement: "none", allowedFields: [] },
 ): Record<string, unknown> {
-  const effectiveContract =
-    enterprisePolicy.profileRequirement === "none" ||
-    contract.contexts.some((context) => context.contextKind === "enterprise_user_context")
-      ? contract
-      : {
-          contexts: [
-            ...contract.contexts,
-            { contextKind: "enterprise_user_context", necessity: "required" as const },
-          ],
-        };
   const bundle = buildInvocationContextBundle({
-    contract: effectiveContract,
+    contract,
     environment,
     policyFilter: externalAgentContextPolicyFilter(
       enterprisePolicy.profileRequirement === "none"

@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
  */
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { hrAgentContract } from "@/lib/agents/test-support/hr-agent-contract";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
@@ -158,6 +159,59 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions（AgentContractSnapshot
       },
       "idem-contract-rev-host-controls-invalid-001",
     );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("REQUEST_SCHEMA_INVALID");
+    expect(await countRevisions(agentId)).toBe(0);
+  });
+
+  it("企业资料要求与冻结合同未声明 required enterprise_user_context 时拒绝创建", async () => {
+    const response = await buildPost(
+      agentId,
+      {
+        ...baseRevisionBody(),
+        agent_contract_snapshot_id: snapshotId,
+        agent_interface_requirements: {
+          enterprise_user_context: {
+            profile_requirement: "fresh_required",
+            allowed_fields: ["employeeNo"],
+          },
+        },
+      },
+      "idem-contract-rev-enterprise-context-mismatch-001",
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("REQUEST_SCHEMA_INVALID");
+    expect(await countRevisions(agentId)).toBe(0);
+  });
+
+  it("confirmation 能力与不支持 input-required/resume 的冻结合同不一致时拒绝创建", async () => {
+    const incompatibleContract = {
+      ...hrAgentContract,
+      interaction: {
+        ...hrAgentContract.interaction,
+        input_required: false,
+        resume: false,
+      },
+    };
+    const incompatibleSnapshot = await seedAgentContractSnapshot({
+      tenantId,
+      agentId,
+      createdBy: userIdentityId,
+      contract: incompatibleContract,
+    });
+    const response = await buildPost(
+      agentId,
+      {
+        ...baseRevisionBody(),
+        agent_contract_snapshot_id: incompatibleSnapshot.id,
+        agent_interface_requirements: {
+          host_controls: { confirmation_action_keys: ["hr.leave.submit"] },
+        },
+      },
+      "idem-contract-rev-confirmation-capability-mismatch-001",
+    );
+
     expect(response.status).toBe(400);
     expect((await response.json()).error.code).toBe("REQUEST_SCHEMA_INVALID");
     expect(await countRevisions(agentId)).toBe(0);

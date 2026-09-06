@@ -34,7 +34,7 @@ function needsDatabase(path, source) {
 
 function groupFor(path, source, db) {
   if (path.startsWith("e2e/") && path.includes(".spec.")) {
-    if (path === "e2e/cross-client.spec.ts") return "e2e-cross-client";
+    if (path.includes("cross-client")) return "e2e-cross-client";
     if (path.includes("desktop")) return "e2e-desktop";
     return "e2e-web";
   }

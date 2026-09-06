@@ -207,6 +207,10 @@ export interface ExecutionScenario {
  * 调用方负责 afterEach 删除 process.env[credentialEnvVar] 并关闭 provider。
  */
 export async function seedAgentCallExecutionScenario(options?: {
+  /** 复用已有真实租户（跨端 E2E 需要和浏览器登录用户处于同一租户）；缺省新建测试租户。 */
+  tenantId?: string;
+  /** Thread owner 的可信 UserIdentity id；缺省生成独立测试 owner。 */
+  threadOwnerUserId?: string;
   /**
    * 正式冻结完成后，仅为 startAgentCall fail-closed 测试篡改已持久化 binding。
    * 不得用于绕过 finalizeAgentCall Authority 校验。
@@ -222,12 +226,14 @@ export async function seedAgentCallExecutionScenario(options?: {
   providerScenario?: Parameters<typeof startA2ATestProvider>[0];
   /** 覆盖合同（默认 execution_subject=required；可传含 required 数据型 context 的反例合同）。 */
   contract?: unknown;
+  /** AgentRevision 读取的正式接口要求；用于测试 Host Control 等 Revision 能力边界。 */
+  agentInterfaceRequirements?: Record<string, unknown>;
   logicalCallKey?: string;
   sourceRef?: string;
   now?: Date;
 }): Promise<ExecutionScenario> {
   const now = options?.now ?? new Date("2026-08-29T00:00:00.000Z");
-  const tenantId = await seedTenant();
+  const tenantId = options?.tenantId ?? (await seedTenant());
   const parentInvocationId = await seedInvocation(tenantId);
   const threadId = randomUUID();
   const turnId = randomUUID();
@@ -235,7 +241,7 @@ export async function seedAgentCallExecutionScenario(options?: {
   await db.insert(threadTable).values({
     id: threadId,
     tenantId,
-    ownerUserId: randomUUID(),
+    ownerUserId: options?.threadOwnerUserId ?? randomUUID(),
     lifecycleState: "active",
     lastActivityAt: now,
     lastTurnSequence: 1,
@@ -282,7 +288,9 @@ export async function seedAgentCallExecutionScenario(options?: {
     modelPolicyJson: { default: "exec-model" },
     permissionRequirementsJson: {},
     delegationPolicyJson: {},
-    agentInterfaceRequirementsJson: { required: ["event_stream"] },
+    agentInterfaceRequirementsJson: options?.agentInterfaceRequirements ?? {
+      required: ["event_stream"],
+    },
     createdBy: "exec-fixture",
   });
   const publication = await publishTrustedAgentRevisionForTest({

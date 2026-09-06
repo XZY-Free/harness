@@ -10,6 +10,7 @@
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import type { EnterpriseUserAdapter } from "@/lib/identity/enterprise-user-adapter";
 import {
   getPrincipalBinding,
   listPrincipalBindingsByUser,
@@ -357,6 +358,40 @@ describe("resolver", () => {
     const second = await resolvePrincipal(new Headers());
     expect(second.userIdentityId).toBe(first.userIdentityId);
     expect(second.tenantId).toBe(first.tenantId);
+  });
+
+  it("企业适配器不可用时不得用原始 SSO 覆盖已停用身份，且 employee Principal 必须拒绝", async () => {
+    setAuthMode("trusted-headers");
+    const tenant = await ensureDefaultTenant();
+    const disabled = await upsertUserIdentity({
+      tenantId: tenant.id,
+      externalSubject: "employee-disabled-1",
+      email: "directory-record@example.test",
+      displayName: "目录中的停用用户",
+      status: "disabled",
+    });
+    const failingEnterpriseAdapter: EnterpriseUserAdapter = {
+      kind: "enterprise",
+      async fetchFullProfile() {
+        throw new Error("private directory is unavailable");
+      },
+    };
+    const headers = new Headers({
+      "x-snow-user-id": "employee-disabled-1",
+      "x-snow-user-email": "untrusted-sso@example.test",
+      "x-snow-user-name": "Untrusted SSO name",
+    });
+
+    await expect(
+      resolvePrincipal(headers, "employee", { enterpriseUserAdapter: failingEnterpriseAdapter }),
+    ).rejects.toMatchObject({ code: "user_disabled" });
+
+    const after = await getUserIdentityById(disabled.id);
+    expect(after).toMatchObject({
+      status: "disabled",
+      email: "directory-record@example.test",
+      displayName: "目录中的停用用户",
+    });
   });
 
   it("trusted-headers 模式从 header 解析身份", async () => {

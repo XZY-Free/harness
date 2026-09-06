@@ -20,7 +20,7 @@
  * message/send（resume）同步返回完整 Task（kind:"task"，id/contextId/status/artifacts）。
  *
  * 场景：completed / chunks / input_required / long_running / failed /
- * rejected / malformed / subject_echo。场景由测试显式选择，Provider 按 A2A wire
+ * rejected / malformed / subject_echo / confirmation_chain。场景由测试显式选择，Provider 按 A2A wire
  * 语义响应。
  */
 import { randomUUID } from "node:crypto";
@@ -54,6 +54,7 @@ export type A2ATestProviderScenario =
   | "completed"
   | "chunks"
   | "input_required"
+  | "confirmation_chain"
   | "long_running"
   | "failed"
   | "rejected"
@@ -158,6 +159,7 @@ export async function startA2ATestProvider(
   const rpcMethods: string[] = [];
   let scenario: A2ATestProviderScenario = initialScenario;
   let resumeCorrelationCorrupted = false;
+  let confirmationEpisodes = 0;
   let expectedBearerToken: string | null = null;
   // 官方非流式 message/send 返回完整 Task（默认冻结）。
   let resumeResponseShape: "status-update" | "task" = "task";
@@ -348,32 +350,67 @@ export async function startA2ATestProvider(
           const resumeTaskId = message.taskId ?? "task-1";
           const resumeContextId = message.contextId ?? "ctx-1";
           const result =
-            resumeResponseShape === "task"
-              ? {
-                  kind: "task",
-                  id: corrupted(resumeTaskId),
-                  contextId: corrupted(resumeContextId),
-                  status: { state: "completed" },
-                  artifacts: [
-                    {
-                      artifactId: "art-final",
-                      name: "answer",
-                      parts: [
-                        { kind: "text", text: "申请已提交完成" },
-                        { kind: "data", data: { result: { status: "ok" } } },
-                      ],
+            scenario === "confirmation_chain" && confirmationEpisodes === 0
+              ? (() => {
+                  confirmationEpisodes += 1;
+                  return {
+                    kind: "task",
+                    id: corrupted(resumeTaskId),
+                    contextId: corrupted(resumeContextId),
+                    status: { state: "input-required" },
+                    artifacts: [
+                      {
+                        artifactId: "art-confirmation-2",
+                        name: "confirmation",
+                        parts: [
+                          { kind: "text", text: "请确认第二项操作" },
+                          {
+                            kind: "data",
+                            data: {
+                              host_controls: {
+                                version: "1",
+                                confirmation: {
+                                  proposal_id: "proposal-2",
+                                  action_key: "hr.leave.submit",
+                                  title: "确认第二项请假操作",
+                                  summary: "将提交第二项请假信息",
+                                  impact: "进入审批流程",
+                                  preview: { days: 2, leave_type: "年假" },
+                                },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  };
+                })()
+              : resumeResponseShape === "task"
+                ? {
+                    kind: "task",
+                    id: corrupted(resumeTaskId),
+                    contextId: corrupted(resumeContextId),
+                    status: { state: "completed" },
+                    artifacts: [
+                      {
+                        artifactId: "art-final",
+                        name: "answer",
+                        parts: [
+                          { kind: "text", text: "申请已提交完成" },
+                          { kind: "data", data: { result: { status: "ok" } } },
+                        ],
+                      },
+                    ],
+                  }
+                : {
+                    kind: "status-update",
+                    taskId: corrupted(resumeTaskId),
+                    contextId: corrupted(resumeContextId),
+                    status: {
+                      state: "completed",
+                      message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
                     },
-                  ],
-                }
-              : {
-                  kind: "status-update",
-                  taskId: corrupted(resumeTaskId),
-                  contextId: corrupted(resumeContextId),
-                  status: {
-                    state: "completed",
-                    message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
-                  },
-                };
+                  };
           res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id ?? 1, result }));
           return;
         }
@@ -384,6 +421,7 @@ export async function startA2ATestProvider(
           completed: "completed",
           chunks: "completed",
           input_required: "input-required",
+          confirmation_chain: "input-required",
           long_running: "working",
           incremental: "completed",
           failed: "failed",
@@ -519,6 +557,42 @@ export async function startA2ATestProvider(
           artifactUpdate("art-question", "请提供申请日期");
           statusUpdate("input-required");
           break;
+        case "confirmation_chain":
+          statusUpdate("working");
+          frame({
+            jsonrpc: "2.0",
+            id: rpc.id ?? 1,
+            result: {
+              kind: "artifact-update",
+              taskId,
+              contextId,
+              artifact: {
+                artifactId: "art-confirmation-1",
+                name: "confirmation",
+                parts: [
+                  { kind: "text", text: "请确认请假申请" },
+                  {
+                    kind: "data",
+                    data: {
+                      host_controls: {
+                        version: "1",
+                        confirmation: {
+                          proposal_id: "proposal-1",
+                          action_key: "hr.leave.submit",
+                          title: "提交请假申请",
+                          summary: "将提交三天年假",
+                          impact: "会创建一条请假记录",
+                          preview: { days: 3, leave_type: "年假" },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          });
+          statusUpdate("input-required");
+          break;
         case "long_running":
           statusUpdate("working");
           // 不发终态、不关闭 SSE；只由显式 cancel 或测试 teardown 结束。
@@ -605,6 +679,7 @@ export async function startA2ATestProvider(
       resumeResponseShape = "task";
       cardProtocolVersion = "0.3.0";
       cardStreaming = true;
+      confirmationEpisodes = 0;
       scenario = "input_required";
     },
     setScenario(next: A2ATestProviderScenario) {

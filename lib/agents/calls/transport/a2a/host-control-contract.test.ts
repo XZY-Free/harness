@@ -9,7 +9,7 @@ const policy = parseHostControlCapabilityPolicy({
   host_controls: {
     confirmation_action_keys: ["hr.leave.submit"],
     ui_action_types: ["navigate", "open_external_link", "offer_human_support"],
-    ui_action_target_keys: ["thread.current", "settings.profile"],
+    ui_action_target_keys: ["thread.current"],
   },
 });
 
@@ -112,7 +112,7 @@ describe("A2A host_controls 合同", () => {
     );
     expect(parsed).toEqual({
       kind: "ui_actions",
-      actions: [expect.objectContaining({ web_path: "/threads", url: null })],
+      actions: [expect.objectContaining({ web_path: null, url: null })],
     });
 
     expect(() =>
@@ -169,6 +169,66 @@ describe("A2A host_controls 合同", () => {
         ),
       ).toThrow(HostControlProtocolError);
     }
+  });
+
+  it("外链和人工支持只在平台明确登记可信域名与真实入口时生成", () => {
+    const externalAction = {
+      host_controls: {
+        version: "1",
+        ui_actions: [
+          {
+            action_id: "external-1",
+            action_type: "open_external_link",
+            title: "打开文档",
+            label: "查看文档",
+            description: null,
+            target_key: null,
+            url: "https://docs.example.test/leave",
+          },
+        ],
+      },
+    };
+    expect(() => parseHostControls(externalAction, "completed", policy)).toThrow(
+      HostControlProtocolError,
+    );
+    expect(
+      parseHostControls(externalAction, "completed", policy, {
+        externalAllowedHosts: ["docs.example.test"],
+        humanSupportUrl: "https://support.example.test/help",
+      }),
+    ).toMatchObject({
+      kind: "ui_actions",
+      actions: [expect.objectContaining({ url: "https://docs.example.test/leave" })],
+    });
+
+    const support = parseHostControls(
+      {
+        host_controls: {
+          version: "1",
+          ui_actions: [
+            {
+              action_id: "support-1",
+              action_type: "offer_human_support",
+              title: "联系人工支持",
+              label: "联系支持",
+              description: null,
+              target_key: null,
+              url: null,
+            },
+          ],
+        },
+      },
+      "completed",
+      policy,
+      {
+        externalAllowedHosts: ["support.example.test"],
+        humanSupportUrl: "https://support.example.test/help",
+      },
+    );
+    expect(support).toMatchObject({
+      kind: "ui_actions",
+      actions: [expect.objectContaining({ url: "https://support.example.test/help" })],
+    });
   });
 
   it("completed 不接受 confirmation，input-required 不接受 ui_actions", () => {

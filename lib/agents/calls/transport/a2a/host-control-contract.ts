@@ -4,6 +4,7 @@
  * 外部 Agent 只能提交结构化提议；本模块把它收敛成 SnowHarness 可持久化的安全 DTO。
  * 不从文本猜动作，不接受客户端声明的 authorized，不携带内部 ID、凭证或企业权限。
  */
+import { agentHostControlConfig } from "@/lib/config";
 import { isSafeExternalUrl } from "@/lib/external/url-safety";
 
 export const HOST_CONTROL_VERSION = "1" as const;
@@ -38,19 +39,37 @@ export interface HostAction {
   client_support: { web: boolean; desktop: boolean };
 }
 
+/**
+ * 平台侧 Host Action 策略。它不属于 Agent Revision：Revision 只能声明能力，不能
+ * 增加可信外链、替换人工支持入口或越过部署方的域名边界。
+ */
+export interface HostActionPlatformPolicy {
+  externalAllowedHosts: readonly string[];
+  humanSupportUrl: string | null;
+}
+
 export type ParsedHostControls =
   | { kind: "confirmation"; proposal: ConfirmationProposal }
   | { kind: "ui_actions"; actions: HostAction[] };
 
 export const HOST_ACTION_TARGET_CATALOG: Readonly<
-  Record<string, { webPath: string; desktop: boolean }>
+  Record<string, { desktop: boolean; requiredPrincipalPermission: "thread_owner" }>
 > = Object.freeze({
-  "thread.current": { webPath: "/threads", desktop: true },
-  "settings.profile": { webPath: "/settings/profile", desktop: true },
+  // 路径依赖当前 thread，不能在解析 Agent 输出时静态决定；投影时按已认证的
+  // executionSubject 与真实 Thread owner 计算 /chat/:threadId。
+  "thread.current": { desktop: true, requiredPrincipalPermission: "thread_owner" },
 });
 
 export function defaultHostControlCapabilityPolicy(): HostControlCapabilityPolicy {
   return { confirmationActionKeys: [], uiActionTypes: [], uiActionTargetKeys: [] };
+}
+
+/** 部署配置的惰性快照；空 allowlist 维持外链与人工支持 fail-closed。 */
+export function defaultHostActionPlatformPolicy(): HostActionPlatformPolicy {
+  return {
+    externalAllowedHosts: agentHostControlConfig.externalAllowedHosts,
+    humanSupportUrl: agentHostControlConfig.humanSupportUrl,
+  };
 }
 
 /** 从 AgentRevision 的接口要求读取 Host Control 能力；未声明即全拒绝。 */
@@ -93,6 +112,7 @@ export function parseHostControls(
   data: unknown,
   stage: "input-required" | "completed",
   policy: HostControlCapabilityPolicy = defaultHostControlCapabilityPolicy(),
+  platformPolicy: HostActionPlatformPolicy = defaultHostActionPlatformPolicy(),
 ): ParsedHostControls | null {
   if (!isRecord(data) || data.host_controls === undefined) return null;
   const controls = data.host_controls;
@@ -138,7 +158,9 @@ export function parseHostControls(
   ) {
     throw new HostControlProtocolError("ui_actions 数量必须为 1-3");
   }
-  const actions = controls.ui_actions.map((value) => parseHostAction(value, policy));
+  const actions = controls.ui_actions.map((value) =>
+    parseHostAction(value, policy, platformPolicy),
+  );
   const ids = new Set(actions.map((action) => action.action_id));
   if (ids.size !== actions.length)
     throw new HostControlProtocolError("ui_actions.action_id 不得重复");
@@ -177,7 +199,11 @@ function parseConfirmationProposal(value: unknown): ConfirmationProposal {
   };
 }
 
-function parseHostAction(value: unknown, policy: HostControlCapabilityPolicy): HostAction {
+function parseHostAction(
+  value: unknown,
+  policy: HostControlCapabilityPolicy,
+  platformPolicy: HostActionPlatformPolicy,
+): HostAction {
   if (!isRecord(value)) throw new HostControlProtocolError("ui_action 必须是对象");
   assertExactKeys(value, [
     "action_id",
@@ -224,7 +250,8 @@ function parseHostAction(value: unknown, policy: HostControlCapabilityPolicy): H
       description,
       target_key: targetKey,
       url: null,
-      web_path: target.webPath,
+      // 仅保存 catalog key。真实路径必须在投影事务中，经 executionSubject 授权后生成。
+      web_path: null,
       client_support: { web: true, desktop: target.desktop },
     };
   }
@@ -234,7 +261,8 @@ function parseHostAction(value: unknown, policy: HostControlCapabilityPolicy): H
       !url ||
       !isSafeExternalUrl(url) ||
       !isHttpsUrl(url) ||
-      hasCredentials(url)
+      hasCredentials(url) ||
+      !isTrustedExternalUrl(url, platformPolicy.externalAllowedHosts)
     ) {
       throw new HostControlProtocolError("open_external_link.url 不符合 HTTPS 外链安全策略");
     }
@@ -250,8 +278,11 @@ function parseHostAction(value: unknown, policy: HostControlCapabilityPolicy): H
       client_support: { web: true, desktop: true },
     };
   }
-  if (targetKey !== null || url !== null) {
+  if (targetKey !== null || url !== null || !platformPolicy.humanSupportUrl) {
     throw new HostControlProtocolError("offer_human_support 不允许携带 target 或 url");
+  }
+  if (!isTrustedExternalUrl(platformPolicy.humanSupportUrl, platformPolicy.externalAllowedHosts)) {
+    throw new HostControlProtocolError("offer_human_support 未配置可信人工入口");
   }
   return {
     action_id: actionId,
@@ -260,10 +291,29 @@ function parseHostAction(value: unknown, policy: HostControlCapabilityPolicy): H
     label,
     description,
     target_key: null,
-    url: null,
+    // Agent 只声明“提供人工支持”；真实入口完全来自平台配置。
+    url: platformPolicy.humanSupportUrl,
     web_path: null,
     client_support: { web: true, desktop: true },
   };
+}
+
+/**
+ * 仅接受部署方完全登记的 HTTPS host；不做子域泛化，避免 `trusted.example` 被
+ * `evil.trusted.example` 或同形 host 绕过。解析与持久化投影复用同一规则。
+ */
+export function isTrustedExternalUrl(value: string, allowedHosts: readonly string[]): boolean {
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.username.length === 0 &&
+      parsed.password.length === 0 &&
+      allowedHosts.includes(parsed.hostname.toLowerCase())
+    );
+  } catch {
+    return false;
+  }
 }
 
 function readStringList(value: unknown, name: string): string[] {

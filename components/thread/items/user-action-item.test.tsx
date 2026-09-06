@@ -329,3 +329,44 @@ describe("UserActionItem input schema omitted/required 语义与 fail-closed", (
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("UserActionItem external confirmation preview", () => {
+  it("以通用只读结构展示外部 Agent 已校验的 preview，不执行任何动作", () => {
+    render(
+      <UserActionItem
+        threadId="thread-1"
+        item={{
+          id: "confirmation-item-1",
+          turn_id: "turn-1",
+          item_sequence: 1,
+          item_type: "user_action",
+          item_state: "pending",
+          content: {
+            kind: "user_action.requested",
+            request_type: "confirmation",
+            purpose: "a2a_confirmation",
+            state: "pending",
+            request_id: "confirmation-request-1",
+            title: "提交请假申请",
+            summary: "将提交三天年假",
+            impact: "会创建一条请假记录",
+            preview: {
+              leave_type: "年假",
+              days: 3,
+              dates: ["2026-09-10", "2026-09-12"],
+              reviewer: { name: "王经理" },
+            },
+          },
+          created_at: "2026-09-06T00:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("操作预览")).toBeTruthy();
+    expect(screen.getByText("年假")).toBeTruthy();
+    expect(screen.getByText("3")).toBeTruthy();
+    expect(screen.getByText("2026-09-10")).toBeTruthy();
+    expect(screen.getByText("王经理")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "确认" })).toBeTruthy();
+  });
+});

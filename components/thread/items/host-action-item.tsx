@@ -60,18 +60,17 @@ export function HostActionItem({ item }: { readonly item: ClientItem }) {
             {label}
           </a>
         ) : null}
-        {content.action_type === "offer_human_support" ? (
-          <>
-            <p className="text-muted-foreground text-xs">当前未配置人工入口</p>
-            <Button
-              type="button"
-              disabled
-              data-host-action-id={content.action_id}
-              aria-label="当前未配置人工入口"
-            >
-              当前未配置
-            </Button>
-          </>
+        {content.action_type === "offer_human_support" && content.url ? (
+          <a
+            className={cn(buttonVariants())}
+            data-host-action-id={content.action_id}
+            aria-label={label}
+            href={content.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {label}
+          </a>
         ) : null}
       </div>
     </section>

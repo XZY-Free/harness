@@ -338,7 +338,13 @@ describe("createA2AAgentTransport — start message/stream wire + 归一化（04
     const data = (completed?.payload as Record<string, unknown>).data as Record<string, unknown>;
     expect(data.host_controls).toEqual({
       version: "1",
-      ui_actions: [expect.objectContaining({ web_path: "/threads", url: null })],
+      ui_actions: [
+        expect.objectContaining({
+          target_key: "thread.current",
+          web_path: null,
+          url: null,
+        }),
+      ],
     });
   });
 

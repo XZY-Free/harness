@@ -182,6 +182,7 @@ export function createAgentActionExecutor(
           invocationId: context.invocationId,
           agentCallId: disposition.callId,
           actions: hostActions,
+          executionSubject: params.executionSubject,
         });
       }
       return {
