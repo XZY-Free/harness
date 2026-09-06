@@ -52,6 +52,7 @@ export function classifyInvocationContinuationError(error: unknown): {
     if (
       named.name === "AgentCallAttemptConflictError" ||
       named.name === "HostControlProtocolError" ||
+      named.name === "A2AConfirmationProposalConflictError" ||
       (named.name === "AgentCallResumeError" &&
         [
           "binding_not_found",

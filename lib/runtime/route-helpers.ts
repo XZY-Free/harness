@@ -33,6 +33,7 @@ import {
   IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
 import {
+  A2AConfirmationProposalConflictError,
   IngressBatchEmptyError,
   IngressCandidateTypeUnsupportedError,
   IngressSequenceStartMismatchError,
@@ -133,6 +134,16 @@ export async function ingressErrorToResponse(
       details: {
         invocation_id: error.invocationId,
         candidate_type: error.candidateType,
+      },
+    });
+  }
+  if (error instanceof A2AConfirmationProposalConflictError) {
+    return apiError("A2A_CONFIRMATION_PROPOSAL_CONFLICT", error.message, {
+      requestId,
+      details: {
+        invocation_id: error.invocationId,
+        action_id: error.actionId,
+        proposal_id: error.proposalId,
       },
     });
   }

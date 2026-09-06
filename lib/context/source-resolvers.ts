@@ -14,7 +14,8 @@ import {
   searchKnowledgeEvidence,
 } from "@/lib/context/knowledge-queries";
 import { listActiveMemoryEntriesByScopes } from "@/lib/context/memory-queries";
-import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
+import { isDirectRecentContextItemEligible } from "@/lib/context/recent-item-context-policy";
+import { listRecentContextItemsByThread } from "@/lib/conversations/thread-item-queries";
 /**
  * Context 源解析器（阶段 7 S07-C01 / S07-C04 / S07-C05）。
  *
@@ -151,9 +152,9 @@ export class RecentItemsResolver implements SourceResolver {
       };
     }
 
-    const items = await listItemsByThread(ctx.tenantId, ctx.threadId, {
+    const items = await listRecentContextItemsByThread(ctx.tenantId, ctx.threadId, {
       limit: this.limit,
-      includeSuperseded: false,
+      triggerItemId: ctx.triggerItemId,
     });
 
     if (items.length === 0) {
@@ -167,13 +168,22 @@ export class RecentItemsResolver implements SourceResolver {
 
     const query = ctx.query?.trim().toLocaleLowerCase() ?? "";
     const maxItems = Math.max(0, ctx.maxItems ?? this.limit);
-    const selectedItems = items
-      .filter((item) => {
-        if (item.id === ctx.triggerItemId) return true;
-        if (!query) return true;
-        return extractItemText(item.contentJson).toLocaleLowerCase().includes(query);
-      })
-      .slice(0, maxItems);
+    const eligibleItems = items.filter((item) => isDirectRecentContextItemEligible(item));
+    const triggerItem = ctx.triggerItemId
+      ? eligibleItems.find((item) => item.id === ctx.triggerItemId)
+      : undefined;
+    const matchingItems = eligibleItems.filter((item) => {
+      if (item.id === ctx.triggerItemId) return false;
+      if (!query) return true;
+      return extractItemText(item.contentJson).toLocaleLowerCase().includes(query);
+    });
+    // Keep the trigger independently mandatory, even when it is older than the
+    // recent window or does not match the optional text filter.
+    const recentLimit = triggerItem ? Math.max(0, maxItems - 1) : maxItems;
+    const selectedItems = [
+      ...matchingItems.slice(Math.max(0, matchingItems.length - recentLimit)),
+      ...(triggerItem ? [triggerItem] : []),
+    ].sort((left, right) => left.itemSequence - right.itemSequence);
     if (selectedItems.length === 0) {
       return {
         sourceType: this.sourceType,
@@ -269,12 +279,9 @@ function itemTypeToFragmentKind(itemType: string): ContextFragment["kind"] {
     case "assistant_message":
       return "user";
     case "tool_call":
-    case "tool_result":
       return "tool";
-    case "plan":
-      return "user";
     default:
-      return "user";
+      throw new Error(`Item 类型不可直接进入 recent_items：${itemType}`);
   }
 }
 

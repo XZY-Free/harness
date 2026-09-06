@@ -440,7 +440,7 @@ describe("resolveGenericUserAction input submit 按 inputSchemaJson 校验（RED
 });
 
 describe("外部 Agent confirmation 过期", () => {
-  it("过期确认不得恢复 Invocation，必须等待外部 Agent 创建新的 proposal", async () => {
+  it("过期确认统一收口为 expired/cancelled，不恢复 Invocation", async () => {
     const seeded = await seedWaitingInputRequest();
     await db
       .update(userActionRequestTable)
@@ -470,12 +470,30 @@ describe("外部 Agent confirmation 过期", () => {
       .select()
       .from(userActionRequestTable)
       .where(eq(userActionRequestTable.id, seeded.requestId));
-    expect(request?.requestState).toBe("pending");
+    expect(request?.requestState).toBe("expired");
     const [invocation] = await db
       .select()
       .from(invocationTable)
       .where(eq(invocationTable.id, seeded.invocationId));
-    expect(invocation?.executionState).toBe("waiting_user");
+    expect(invocation?.executionState).toBe("cancelled");
+    expect(invocation?.errorCode).toBe("USER_ACTION_EXPIRED");
+    const [turn] = await db.select().from(turnTable).where(eq(turnTable.id, seeded.turnId));
+    expect(turn?.turnState).toBe("cancelled");
+    const [item] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, request?.itemId ?? ""));
+    expect(item?.itemState).toBe("cancelled");
+    const expiredEvents = await db
+      .select()
+      .from(threadEventTable)
+      .where(
+        and(
+          eq(threadEventTable.threadId, seeded.threadId),
+          eq(threadEventTable.eventType, "user_action.expired"),
+        ),
+      );
+    expect(expiredEvents).toHaveLength(1);
     const commands = await db
       .select()
       .from(invocationCommandTable)

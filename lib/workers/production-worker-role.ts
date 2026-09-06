@@ -1,5 +1,6 @@
 import { createToolExecutionWorker } from "@/lib/capability/tool-execution-worker";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
+import { createUserActionExpiryWorker } from "@/lib/permission/user-action-expiry-worker";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
@@ -59,19 +60,35 @@ export function createProductionWorkerRole(role: DurableWorkerRole): ProductionW
     }),
   );
   const continuationWorker = createProductionInvocationContinuationWorker();
+  const userActionExpiryWorker = createUserActionExpiryWorker();
   return {
     role,
-    pollOnce: () => Promise.all([projectionWorker.pollOnce(), continuationWorker.pollOnce()]),
+    pollOnce: () =>
+      Promise.all([
+        projectionWorker.pollOnce(),
+        continuationWorker.pollOnce(),
+        userActionExpiryWorker.pollOnce(),
+      ]),
     stop() {
       projectionWorker.stop();
       continuationWorker.stop();
+      userActionExpiryWorker.stop();
     },
   };
 }
 
 export const WORKER_REQUIRED_TABLES: Record<DurableWorkerRole, readonly string[]> = {
   "hosted-provisioning-worker": ["HostedProvisioningRequest"],
-  "control-plane-outbox-worker": ["ControlPlaneOutboxEvent", "ControlPlaneEventDelivery"],
+  "control-plane-outbox-worker": [
+    "ControlPlaneOutboxEvent",
+    "ControlPlaneEventDelivery",
+    "UserActionRequest",
+    "Thread",
+    "ThreadItem",
+    "ThreadEvent",
+    "Turn",
+    "Invocation",
+  ],
   "runtime-dispatch-retry-worker": ["InvocationAttempt", "InvocationCommand"],
   "tool-execution-worker": ["ToolCall", "ToolExecutionAttempt"],
 };

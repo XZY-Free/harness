@@ -24,6 +24,10 @@ import { type DbOrTx, db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
 import { issueGrant } from "@/lib/permission/permission-queries";
 import {
+  expireDueUserActionRequests,
+  expireUserActionRequest,
+} from "@/lib/permission/user-action-expiry-queries";
+import {
   ALLOWED_RESOLUTIONS_BY_TYPE,
   type NewUserActionRequest,
   USER_ACTION_REQUEST_STATES,
@@ -36,7 +40,21 @@ import {
   type UserActionResolution,
   userActionRequestTable,
 } from "@/lib/persistence/schema/user-action-request";
-import { and, asc, desc, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
@@ -445,6 +463,7 @@ export async function resolveUserActionRequest(
 
   // 过期检查（扫描任务可能尚未运行）
   if (current.expiresAt && current.expiresAt.getTime() <= Date.now()) {
+    await expireUserActionRequest({ tenantId: input.tenantId, requestId: current.id });
     throw new UserActionAlreadyResolvedError(current.id, "expired");
   }
 
@@ -495,6 +514,10 @@ export async function resolveUserActionRequest(
         eq(userActionRequestTable.tenantId, input.tenantId),
         eq(userActionRequestTable.requestState, "pending"),
         eq(userActionRequestTable.versionNo, current.versionNo),
+        or(
+          isNull(userActionRequestTable.expiresAt),
+          gt(userActionRequestTable.expiresAt, new Date()),
+        ),
       ),
     );
 
@@ -502,6 +525,14 @@ export async function resolveUserActionRequest(
   if (affected === 0) {
     // 并发场景：另一个事务已经 resolve
     const after = await getUserActionRequestById(input.tenantId, current.id);
+    if (
+      after?.requestState === "pending" &&
+      after.expiresAt &&
+      after.expiresAt.getTime() <= Date.now()
+    ) {
+      await expireUserActionRequest({ tenantId: input.tenantId, requestId: current.id });
+      throw new UserActionAlreadyResolvedError(current.id, "expired");
+    }
     throw new UserActionAlreadyResolvedError(
       current.id,
       after?.requestState ?? current.requestState,
@@ -585,6 +616,7 @@ export async function completeAuthCallback(
     throw new UserActionAlreadyResolvedError(current.id, current.requestState);
   }
   if (current.expiresAt && current.expiresAt.getTime() <= Date.now()) {
+    await expireUserActionRequest({ tenantId: input.tenantId, requestId: current.id });
     throw new UserActionAlreadyResolvedError(current.id, "expired");
   }
 
@@ -624,12 +656,24 @@ export async function completeAuthCallback(
         eq(userActionRequestTable.tenantId, input.tenantId),
         eq(userActionRequestTable.requestState, "pending"),
         eq(userActionRequestTable.versionNo, current.versionNo),
+        or(
+          isNull(userActionRequestTable.expiresAt),
+          gt(userActionRequestTable.expiresAt, new Date()),
+        ),
       ),
     );
 
   const affected = updateResult[0]?.affectedRows ?? 0;
   if (affected === 0) {
     const after = await getUserActionRequestById(input.tenantId, current.id);
+    if (
+      after?.requestState === "pending" &&
+      after.expiresAt &&
+      after.expiresAt.getTime() <= Date.now()
+    ) {
+      await expireUserActionRequest({ tenantId: input.tenantId, requestId: current.id });
+      throw new UserActionAlreadyResolvedError(current.id, "expired");
+    }
     throw new UserActionAlreadyResolvedError(
       current.id,
       after?.requestState ?? current.requestState,
@@ -646,26 +690,12 @@ export async function completeAuthCallback(
 // ─── markExpiredUserActionRequests ────────────────────────
 
 /**
- * 批量标记过期请求：pending + expiresAt < now → expired。
- *
- * 用于扫描任务（cron）清理超时未解析的请求。
- * 返回受影响行数。
+ * 兼容旧调用名，但实际执行逐请求事务收口；不再使用无事件的批量 UPDATE。
+ * 返回本轮真正完成过期生命周期的请求数。
  */
 export async function markExpiredUserActionRequests(now: Date = new Date()): Promise<number> {
-  const result = await db
-    .update(userActionRequestTable)
-    .set({
-      requestState: "expired",
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(userActionRequestTable.requestState, "pending"),
-        isNotNull(userActionRequestTable.expiresAt),
-        lt(userActionRequestTable.expiresAt, now),
-      ),
-    );
-  return result[0]?.affectedRows ?? 0;
+  const result = await expireDueUserActionRequests({ now });
+  return result.expired;
 }
 
 // ─── listStaleExpiredUserActionRequests ───────────────────
@@ -685,7 +715,7 @@ export async function listStaleExpiredUserActionRequests(
         eq(userActionRequestTable.tenantId, tenantId),
         eq(userActionRequestTable.requestState, "pending"),
         isNotNull(userActionRequestTable.expiresAt),
-        lt(userActionRequestTable.expiresAt, now),
+        lte(userActionRequestTable.expiresAt, now),
       ),
     )
     .orderBy(asc(userActionRequestTable.expiresAt));

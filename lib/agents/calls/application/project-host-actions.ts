@@ -87,7 +87,7 @@ export async function projectAgentHostActions(params: {
         authorId: null,
         contentJson: content,
         contentHash,
-        contextPolicy: "include",
+        contextPolicy: "exclude",
         invocationId: params.invocationId,
         supersededByItemId: null,
         createdAt: new Date(),

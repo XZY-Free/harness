@@ -4,6 +4,7 @@ import {
   EnterpriseUserAdapterRegistry,
   type EnterpriseUserAdapterSubject,
 } from "@/lib/identity/enterprise-user-adapter";
+import { assertEnterpriseUserAdapterReady } from "@/lib/identity/enterprise-user-bootstrap";
 import { describe, expect, it, vi } from "vitest";
 
 const subject: EnterpriseUserAdapterSubject = {
@@ -66,5 +67,14 @@ describe("EnterpriseUserAdapterRegistry", () => {
     expect(() => registry.registerEnterpriseAdapter(enterpriseAdapter)).toThrow(
       EnterpriseUserAdapterConfigurationError,
     );
+  });
+
+  it("bootstrap readiness 在 default 放行、enterprise 未注册时失败关闭", () => {
+    expect(() =>
+      assertEnterpriseUserAdapterReady(new EnterpriseUserAdapterRegistry("default")),
+    ).not.toThrow();
+    expect(() =>
+      assertEnterpriseUserAdapterReady(new EnterpriseUserAdapterRegistry("enterprise")),
+    ).toThrowError(expect.objectContaining({ code: "enterprise_user_adapter_not_registered" }));
   });
 });

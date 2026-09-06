@@ -45,6 +45,10 @@
       "http": 503,
       "retryable": true
     },
+    "A2A_CONFIRMATION_PROPOSAL_CONFLICT": {
+      "http": 409,
+      "retryable": false
+    },
     "ACTIVE_LEGAL_HOLD": {
       "http": 409,
       "retryable": false

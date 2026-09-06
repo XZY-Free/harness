@@ -31,6 +31,7 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   TOOL_PERMISSION_CONFIRMATION_PURPOSE,
   createUserActionRequest,
@@ -59,12 +60,17 @@ import {
   type RuntimeEventIngress,
   runtimeEventIngressTable,
 } from "@/lib/persistence/schema/executions";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
   EventPayloadHashConflictError,
   IngressInvocationNotFoundError,
   IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
 import { HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
+import {
+  buildConfirmationActionId,
+  computeConfirmationProposalSemanticDigest,
+} from "@/lib/runtime/harness-loop/confirmation-proposal-identity";
 import {
   getInvocationById,
   setInvocationOutputItem,
@@ -261,6 +267,22 @@ export class IngressCandidateTypeUnsupportedError extends Error {
   ) {
     super(`Ingress 候选事件类型不支持：invocationId=${invocationId} type=${candidateType}`);
     this.name = "IngressCandidateTypeUnsupportedError";
+  }
+}
+
+/** 同一业务确认提议的语义发生变化时，必须失败关闭且不新建用户决策。 */
+export class A2AConfirmationProposalConflictError extends Error {
+  public readonly code = "A2A_CONFIRMATION_PROPOSAL_CONFLICT";
+
+  constructor(
+    public readonly invocationId: string,
+    public readonly actionId: string,
+    public readonly proposalId: string,
+  ) {
+    super(
+      `A2A confirmation proposal conflict：invocationId=${invocationId} actionId=${actionId} proposalId=${proposalId}`,
+    );
+    this.name = "A2AConfirmationProposalConflictError";
   }
 }
 
@@ -921,6 +943,46 @@ async function mapUserActionRequested(
     throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
   }
 
+  const confirmationProposal =
+    requestTypeRaw === "confirmation" && payload.purpose === "a2a_confirmation"
+      ? parseConfirmationProposal(payload)
+      : null;
+  if (payload.agent_call_id !== undefined && payload.purpose === "a2a_confirmation") {
+    if (!confirmationProposal || typeof payload.proposal_semantic_digest !== "string") {
+      throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+    }
+    const expectedActionId = buildConfirmationActionId({
+      agentCallId: payload.agent_call_id as string,
+      taskId: payload.task_id as string,
+      contextId: payload.context_id as string,
+      proposalId: confirmationProposal.proposal_id,
+    });
+    const expectedSemanticDigest = computeConfirmationProposalSemanticDigest(confirmationProposal);
+    if (
+      payload.action_id !== expectedActionId ||
+      payload.proposal_semantic_digest !== expectedSemanticDigest
+    ) {
+      throw new A2AConfirmationProposalConflictError(
+        ctx.invocation.id,
+        typeof payload.action_id === "string" ? payload.action_id : "invalid",
+        confirmationProposal.proposal_id,
+      );
+    }
+  }
+
+  // Business idempotency is checked before creating a new Projection. A replay
+  // with another transport event reuses the original decision/card and never
+  // refreshes its expiry or creates a second continuation owner.
+  if (confirmationProposal && typeof payload.action_id === "string") {
+    const reused = await reuseExistingConfirmationRequest(
+      tx,
+      ctx,
+      payload.action_id,
+      confirmationProposal,
+    );
+    if (reused) return reused;
+  }
+
   // 1. 创建 user_action Item Projection（pending）。
   const itemSeq = await allocateItemSequence(tx, ctx.threadId);
   const item = await createThreadItem(tx, {
@@ -941,28 +1003,56 @@ async function mapUserActionRequested(
   // 2. 创建 UserActionRequest Authority（同事务；UserActionRequest=Authority，Item=Projection，§21.1）。
   const purpose =
     typeof payload.purpose === "string" && payload.purpose.length > 0 ? payload.purpose : null;
-  const { request: uar } = await createUserActionRequest(
-    {
-      tenantId: ctx.tenantId,
-      threadId: ctx.threadId,
-      turnId: ctx.turnId,
-      invocationId: ctx.invocation.id,
-      harnessActionId:
-        typeof payload.action_id === "string" && payload.action_id.length > 0
-          ? payload.action_id
-          : null,
-      itemId: item.id,
-      requestType: requestTypeRaw,
-      purpose,
-      promptJson: {
-        kind: "user_action.requested",
-        ...payload,
-      },
-      inputSchemaJson: requestTypeRaw === "input" ? (payload.input_schema ?? null) : null,
-      expiresAt: payload.expires_at ? new Date(payload.expires_at as string) : undefined,
-    },
-    { tx }, // §22：与 Item/Event/Invocation/Turn 状态变更同事务，禁止回落到全局 db。
-  );
+  let uar: Awaited<ReturnType<typeof createUserActionRequest>>["request"];
+  try {
+    uar = (
+      await createUserActionRequest(
+        {
+          tenantId: ctx.tenantId,
+          threadId: ctx.threadId,
+          turnId: ctx.turnId,
+          invocationId: ctx.invocation.id,
+          harnessActionId:
+            typeof payload.action_id === "string" && payload.action_id.length > 0
+              ? payload.action_id
+              : null,
+          itemId: item.id,
+          requestType: requestTypeRaw,
+          purpose,
+          promptJson: {
+            kind: "user_action.requested",
+            ...payload,
+          },
+          inputSchemaJson: requestTypeRaw === "input" ? (payload.input_schema ?? null) : null,
+          expiresAt: payload.expires_at ? new Date(payload.expires_at as string) : undefined,
+        },
+        { tx }, // §22：与 Item/Event/Invocation/Turn 状态变更同事务，禁止回落到全局 db。
+      )
+    ).request;
+  } catch (error) {
+    if (
+      !isMysqlDuplicateEntryError(error) ||
+      !confirmationProposal ||
+      typeof payload.action_id !== "string"
+    ) {
+      throw error;
+    }
+    // The database unique key is the final guard. Remove the loser projection,
+    // then re-read the winner so a race is still an idempotent replay.
+    await tx.delete(threadItemTable).where(eq(threadItemTable.id, item.id));
+    const reused = await reuseExistingConfirmationRequest(
+      tx,
+      ctx,
+      payload.action_id,
+      confirmationProposal,
+    );
+    if (reused) return reused;
+    throw new A2AConfirmationProposalConflictError(
+      ctx.invocation.id,
+      payload.action_id,
+      confirmationProposal.proposal_id,
+    );
+  }
 
   // 2.5 Authority 引用回填：创建 UAR 得到 id 后，在同一事务把 request_id 写入 Item 的
   // 最终 contentJson 并重算 contentHash。Item 仍是唯一 Projection（不复制业务事实，
@@ -1032,6 +1122,120 @@ async function mapUserActionRequested(
     threadSequence: userActionEvent.eventSequence,
     itemId: item.id,
   };
+}
+
+async function reuseExistingConfirmationRequest(
+  tx: Tx,
+  ctx: {
+    tenantId: string;
+    invocation: Invocation;
+    threadId: string;
+    turnId: string | null;
+  },
+  actionId: string,
+  proposal: {
+    proposal_id: string;
+    action_key: string;
+    title: string;
+    summary: string;
+    impact: string;
+    preview: Record<string, unknown>;
+  },
+): Promise<CandidateMappingResult | null> {
+  if (!ctx.turnId) return null;
+  const [existingRequest] = await tx
+    .select()
+    .from(userActionRequestTable)
+    .where(
+      and(
+        eq(userActionRequestTable.tenantId, ctx.tenantId),
+        eq(userActionRequestTable.invocationId, ctx.invocation.id),
+        eq(userActionRequestTable.harnessActionId, actionId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!existingRequest) return null;
+
+  const existingProposal = parseConfirmationProposal(existingRequest.promptJson);
+  const existingDigest = existingProposal
+    ? computeConfirmationProposalSemanticDigest(existingProposal)
+    : null;
+  if (
+    existingRequest.requestType !== "confirmation" ||
+    existingRequest.purpose !== "a2a_confirmation" ||
+    !existingProposal ||
+    existingDigest !== computeConfirmationProposalSemanticDigest(proposal)
+  ) {
+    throw new A2AConfirmationProposalConflictError(
+      ctx.invocation.id,
+      actionId,
+      proposal.proposal_id,
+    );
+  }
+
+  const [existingEvent] = await tx
+    .select({ id: threadEventTable.id, eventSequence: threadEventTable.eventSequence })
+    .from(threadEventTable)
+    .where(
+      and(
+        eq(threadEventTable.threadId, ctx.threadId),
+        eq(threadEventTable.turnId, ctx.turnId),
+        eq(threadEventTable.invocationId, ctx.invocation.id),
+        eq(threadEventTable.itemId, existingRequest.itemId ?? ""),
+        eq(threadEventTable.eventType, "user_action.requested"),
+      ),
+    )
+    .orderBy(asc(threadEventTable.eventSequence))
+    .limit(1);
+  if (!existingEvent || !existingRequest.itemId) {
+    throw new A2AConfirmationProposalConflictError(
+      ctx.invocation.id,
+      actionId,
+      proposal.proposal_id,
+    );
+  }
+  return {
+    threadEventId: existingEvent.id,
+    threadSequence: existingEvent.eventSequence,
+    itemId: existingRequest.itemId,
+  };
+}
+
+function parseConfirmationProposal(value: unknown): {
+  proposal_id: string;
+  action_key: string;
+  title: string;
+  summary: string;
+  impact: string;
+  preview: Record<string, unknown>;
+} | null {
+  const record = asRecord(value);
+  const preview = asRecord(record?.preview);
+  if (
+    typeof record?.proposal_id !== "string" ||
+    typeof record.action_key !== "string" ||
+    typeof record.title !== "string" ||
+    typeof record.summary !== "string" ||
+    typeof record.impact !== "string" ||
+    !preview
+  ) {
+    return null;
+  }
+  return {
+    proposal_id: record.proposal_id,
+    action_key: record.action_key,
+    title: record.title,
+    summary: record.summary,
+    impact: record.impact,
+    preview,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 /** execution.completed：invocation.completed ThreadEvent + 终态。 */

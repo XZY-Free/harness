@@ -32,6 +32,7 @@ export const API_ERROR_CODES = {
   AGENT_CONTRACT_SNAPSHOT_MISSING: { http: 409, retryable: false },
   AGENT_CONTEXT_REQUIREMENT_UNSATISFIED: { http: 422, retryable: false },
   AGENT_ROUTE_UNAVAILABLE: { http: 503, retryable: true },
+  A2A_CONFIRMATION_PROPOSAL_CONFLICT: { http: 409, retryable: false },
   ARTIFACT_ATTESTATION_FAILED: { http: 422, retryable: false },
   ARTIFACT_ATTESTATION_REVOKED: { http: 409, retryable: false },
   ARTIFACT_BINDING_MISMATCH: { http: 409, retryable: false },

@@ -42,7 +42,7 @@ describe("coordinateAgentInputRequired", () => {
     expect(first.harness_action_id).toBe(base.sourceRef);
   });
 
-  it("确认提议用事件与 proposal 的稳定幂等键，且由平台写入不可为空的过期时间", () => {
+  it("确认提议用 AgentCall/task/context/proposal 的稳定幂等键，且由平台写入不可为空的过期时间", () => {
     const first = buildAgentInputRequiredRuntimePayload({
       ...base,
       inputEventId: "agent-event-confirm-1",
@@ -80,6 +80,7 @@ describe("coordinateAgentInputRequired", () => {
       expires_at: "2026-09-06T00:15:00.000Z",
     });
     expect(first.action_id).not.toBe(base.sourceRef);
-    expect(second.action_id).not.toBe(first.action_id);
+    expect(second.action_id).toBe(first.action_id);
+    expect(second.action_id).toMatch(/^a2a-confirm:v1:[a-z0-9_-]+$/);
   });
 });

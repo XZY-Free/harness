@@ -331,7 +331,7 @@ export async function updateInvocationState(
     newState === "lost"
   ) {
     updates.finishedAt = options?.finishedAt ?? now;
-    if (newState === "failed" || newState === "lost") {
+    if (newState === "failed" || newState === "lost" || newState === "cancelled") {
       if (options?.errorCode !== undefined) {
         updates.errorCode = options.errorCode;
       }

@@ -38,6 +38,7 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { issueGrant } from "@/lib/permission/permission-queries";
+import { expireUserActionRequest } from "@/lib/permission/user-action-expiry-queries";
 import {
   TOOL_PERMISSION_CONFIRMATION_PURPOSE,
   UserActionAlreadyResolvedError,
@@ -45,6 +46,7 @@ import {
   UserActionResolutionMismatchError,
   UserActionStateError,
   UserActionValidationError,
+  getUserActionRequestById,
 } from "@/lib/permission/user-action-queries";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import {
@@ -137,6 +139,13 @@ export interface ResolveGenericUserActionResult {
   readonly grantId?: string;
 }
 
+class UserActionDeadlineReachedError extends Error {
+  constructor(public readonly requestId: string) {
+    super(`UserActionRequest 已过期，需要执行统一过期收口：${requestId}`);
+    this.name = "UserActionDeadlineReachedError";
+  }
+}
+
 /**
  * 解析非 handoff 的 UserAction 请求（员工 :resolve 接口入口）。
  *
@@ -175,426 +184,452 @@ export async function resolveGenericUserAction(
   const actorType: ThreadEventActorType = params.actorType ?? "user";
   const now = new Date();
 
-  const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE UserActionRequest
-    const [request] = await tx
-      .select()
-      .from(userActionRequestTable)
-      .where(
-        and(
-          eq(userActionRequestTable.tenantId, params.tenantId),
-          eq(userActionRequestTable.id, params.requestId),
-        ),
-      )
-      .for("update")
-      .limit(1);
-    if (!request) {
-      throw new UserActionNotFoundError(
-        `UserActionRequest 不存在或跨租户不可见: ${params.requestId}`,
-      );
-    }
+  const preflight = await getUserActionRequestById(params.tenantId, params.requestId);
+  if (preflight?.requestState === "pending" && preflight.expiresAt && preflight.expiresAt <= now) {
+    await expireUserActionRequest({
+      tenantId: params.tenantId,
+      requestId: params.requestId,
+      now,
+    });
+    throw new UserActionAlreadyResolvedError(params.requestId, "expired");
+  }
 
-    // 校验 pending 状态
-    if (request.requestState !== "pending") {
-      throw new UserActionAlreadyResolvedError(request.id, request.requestState);
-    }
-
-    // 过期检查
-    if (request.expiresAt && request.expiresAt.getTime() <= Date.now()) {
-      throw new UserActionAlreadyResolvedError(request.id, "expired");
-    }
-
-    // 校验 resolution 与 request_type 兼容
-    if (!ALLOWED_RESOLUTIONS_BY_TYPE[request.requestType].includes(params.resolution)) {
-      throw new UserActionResolutionMismatchError(request.requestType, params.resolution);
-    }
-
-    // 校验非 auth + approve（auth approve 由 completeAuthCallback 写入）
-    if (request.requestType === "auth" && params.resolution === "approve") {
-      throw new UserActionValidationError(
-        "auth 类型 approve 只能由可信 callback 写入；:resolve 接口仅接受 cancel",
-      );
-    }
-
-    // input + submit 必须提供 responseRedactedJson，且在锁定 pending UAR 后、
-    // 任何 UPDATE/事件/命令写入前，按 inputSchemaJson 真实校验（Ajv）。
-    if (request.requestType === "input" && params.resolution === "submit") {
-      if (!params.responseRedactedJson || typeof params.responseRedactedJson !== "object") {
-        throw new UserActionValidationError(
-          "input 类型 submit 必须提供 responseRedactedJson（对象）",
-        );
-      }
-      validateInputResponseAgainstSchema(request.inputSchemaJson, params.responseRedactedJson);
-    }
-
-    // 2. SELECT FOR UPDATE Thread（锁定事件流 + 乐观锁基线）
-    const [thread] = await tx
-      .select()
-      .from(threadTable)
-      .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, request.threadId)))
-      .for("update")
-      .limit(1);
-    if (!thread) {
-      throw new ThreadNotFoundError(request.threadId);
-    }
-
-    // 3. SELECT FOR UPDATE Invocation（必须 waiting_user）
-    const [invocation] = await tx
-      .select()
-      .from(invocationTable)
-      .where(
-        and(
-          eq(invocationTable.tenantId, params.tenantId),
-          eq(invocationTable.id, request.invocationId),
-        ),
-      )
-      .for("update")
-      .limit(1);
-    if (!invocation) {
-      throw new UserActionStateError(`Invocation ${request.invocationId} 不存在或跨租户不可见`);
-    }
-    if (invocation.executionState !== "waiting_user") {
-      throw new UserActionStateError(
-        `Invocation ${request.invocationId} executionState=${invocation.executionState}，仅 waiting_user 可 resolve`,
-      );
-    }
-
-    // 4. 原子 UPDATE UserActionRequest: pending → resolved
-    const updateResult = await tx
-      .update(userActionRequestTable)
-      .set({
-        requestState: "resolved",
-        resolution: params.resolution,
-        resolvedBy: params.resolvedBy,
-        resolvedAt: now,
-        responseRedactedJson: params.responseRedactedJson ?? null,
-        versionNo: request.versionNo + 1,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(userActionRequestTable.id, request.id),
-          eq(userActionRequestTable.tenantId, params.tenantId),
-          eq(userActionRequestTable.requestState, "pending"),
-          eq(userActionRequestTable.versionNo, request.versionNo),
-        ),
-      );
-    if ((updateResult[0]?.affectedRows ?? 0) === 0) {
-      const [after] = await tx
+  let result: ResolveGenericUserActionResult;
+  try {
+    result = await db.transaction(async (tx) => {
+      // 1. SELECT FOR UPDATE UserActionRequest
+      const [request] = await tx
         .select()
         .from(userActionRequestTable)
-        .where(eq(userActionRequestTable.id, request.id))
-        .limit(1);
-      throw new UserActionAlreadyResolvedError(
-        request.id,
-        after?.requestState ?? request.requestState,
-      );
-    }
-
-    // 5. grant + approve 时创建 Grant + 回填 grant_id
-    let grantId: string | undefined;
-    if (request.requestType === "grant" && params.resolution === "approve") {
-      // 从 promptJson 提取 grant 参数（由请求发起方写入）
-      const prompt = request.promptJson as {
-        user_id?: string;
-        scope?: readonly string[];
-        credential_ref_id?: string;
-        grant_expires_at?: string;
-      };
-      const grantUserId = prompt.user_id ?? params.resolvedBy;
-      const grantScope = prompt.scope;
-      const grantCredentialRefId = prompt.credential_ref_id;
-      if (!grantScope || !Array.isArray(grantScope) || grantScope.length === 0) {
-        throw new UserActionValidationError(
-          "grant 类型 approve 时 promptJson.scope 必须是非空数组",
-        );
-      }
-      if (!grantCredentialRefId) {
-        throw new UserActionValidationError(
-          "grant 类型 approve 时 promptJson.credential_ref_id 必填",
-        );
-      }
-      const grantExpiresAt = prompt.grant_expires_at ? new Date(prompt.grant_expires_at) : null;
-      if (grantExpiresAt && grantExpiresAt.getTime() <= Date.now()) {
-        throw new UserActionValidationError(
-          "grant 类型 promptJson.grant_expires_at 必须是未来时间",
-        );
-      }
-      const grant = await issueGrant(
-        {
-          tenantId: params.tenantId,
-          userId: grantUserId,
-          grantType: "user_consent",
-          scope: [...grantScope],
-          credentialRefId: grantCredentialRefId,
-          issuedBy: params.resolvedBy,
-          expiresAt: grantExpiresAt,
-        },
-        { tx }, // §22.1：与 UAR 解析同事务，禁止 issueGrant 回落到全局 db。
-      );
-      grantId = grant.id;
-      await tx
-        .update(userActionRequestTable)
-        .set({ grantId, updatedAt: now })
-        .where(eq(userActionRequestTable.id, request.id));
-    }
-
-    // §20.3 deny：Policy pause 的 tool_permission_confirmation 被员工 deny →
-    // ToolCall paused → cancelled，errorCode=USER_DENIED。不生成 Grant
-    // （requestType=confirmation 本就不走 grant 分支）。与 UAR 解析同事务。
-    if (request.purpose === TOOL_PERMISSION_CONFIRMATION_PURPOSE && params.resolution === "deny") {
-      if (!request.toolCallId) {
-        throw new UserActionValidationError(
-          "tool_permission_confirmation deny 必须关联 ToolCallId",
-        );
-      }
-      await updateToolCallState(
-        {
-          tenantId: params.tenantId,
-          toolCallId: request.toolCallId,
-          toState: "cancelled",
-          errorCode: "USER_DENIED",
-        },
-        tx,
-      );
-    }
-
-    // 请求与可见卡片同事务推进；不把用户填写内容复制进公开时间线。
-    if (request.itemId) {
-      const [item] = await tx
-        .select()
-        .from(threadItemTable)
         .where(
           and(
-            eq(threadItemTable.id, request.itemId),
-            eq(threadItemTable.threadId, request.threadId),
-            eq(threadItemTable.turnId, request.turnId),
-            eq(threadItemTable.invocationId, request.invocationId),
-            eq(threadItemTable.itemType, "user_action"),
+            eq(userActionRequestTable.tenantId, params.tenantId),
+            eq(userActionRequestTable.id, params.requestId),
           ),
         )
         .for("update")
         .limit(1);
-      if (!item) throw new UserActionStateError("操作卡片与请求不匹配");
-      const content = {
-        ...(item.contentJson as Record<string, unknown>),
-        state: "resolved",
-        resolution: params.resolution,
-      };
-      await tx
-        .update(threadItemTable)
+      if (!request) {
+        throw new UserActionNotFoundError(
+          `UserActionRequest 不存在或跨租户不可见: ${params.requestId}`,
+        );
+      }
+
+      // 校验 pending 状态
+      if (request.requestState !== "pending") {
+        throw new UserActionAlreadyResolvedError(request.id, request.requestState);
+      }
+
+      // 过期检查
+      if (request.expiresAt && request.expiresAt.getTime() <= Date.now()) {
+        throw new UserActionDeadlineReachedError(request.id);
+      }
+
+      // 校验 resolution 与 request_type 兼容
+      if (!ALLOWED_RESOLUTIONS_BY_TYPE[request.requestType].includes(params.resolution)) {
+        throw new UserActionResolutionMismatchError(request.requestType, params.resolution);
+      }
+
+      // 校验非 auth + approve（auth approve 由 completeAuthCallback 写入）
+      if (request.requestType === "auth" && params.resolution === "approve") {
+        throw new UserActionValidationError(
+          "auth 类型 approve 只能由可信 callback 写入；:resolve 接口仅接受 cancel",
+        );
+      }
+
+      // input + submit 必须提供 responseRedactedJson，且在锁定 pending UAR 后、
+      // 任何 UPDATE/事件/命令写入前，按 inputSchemaJson 真实校验（Ajv）。
+      if (request.requestType === "input" && params.resolution === "submit") {
+        if (!params.responseRedactedJson || typeof params.responseRedactedJson !== "object") {
+          throw new UserActionValidationError(
+            "input 类型 submit 必须提供 responseRedactedJson（对象）",
+          );
+        }
+        validateInputResponseAgainstSchema(request.inputSchemaJson, params.responseRedactedJson);
+      }
+
+      // 2. SELECT FOR UPDATE Thread（锁定事件流 + 乐观锁基线）
+      const [thread] = await tx
+        .select()
+        .from(threadTable)
+        .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, request.threadId)))
+        .for("update")
+        .limit(1);
+      if (!thread) {
+        throw new ThreadNotFoundError(request.threadId);
+      }
+
+      // 3. SELECT FOR UPDATE Invocation（必须 waiting_user）
+      const [invocation] = await tx
+        .select()
+        .from(invocationTable)
+        .where(
+          and(
+            eq(invocationTable.tenantId, params.tenantId),
+            eq(invocationTable.id, request.invocationId),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!invocation) {
+        throw new UserActionStateError(`Invocation ${request.invocationId} 不存在或跨租户不可见`);
+      }
+      if (invocation.executionState !== "waiting_user") {
+        throw new UserActionStateError(
+          `Invocation ${request.invocationId} executionState=${invocation.executionState}，仅 waiting_user 可 resolve`,
+        );
+      }
+
+      // 4. 原子 UPDATE UserActionRequest: pending → resolved
+      const updateResult = await tx
+        .update(userActionRequestTable)
         .set({
-          itemState: "completed",
-          contentJson: content,
-          contentHash: computeEventPayloadHash(content),
+          requestState: "resolved",
+          resolution: params.resolution,
+          resolvedBy: params.resolvedBy,
+          resolvedAt: now,
+          responseRedactedJson: params.responseRedactedJson ?? null,
+          versionNo: request.versionNo + 1,
           updatedAt: now,
         })
-        .where(eq(threadItemTable.id, item.id));
-    }
+        .where(
+          and(
+            eq(userActionRequestTable.id, request.id),
+            eq(userActionRequestTable.tenantId, params.tenantId),
+            eq(userActionRequestTable.requestState, "pending"),
+            eq(userActionRequestTable.versionNo, request.versionNo),
+          ),
+        );
+      if ((updateResult[0]?.affectedRows ?? 0) === 0) {
+        const [after] = await tx
+          .select()
+          .from(userActionRequestTable)
+          .where(eq(userActionRequestTable.id, request.id))
+          .limit(1);
+        throw new UserActionAlreadyResolvedError(
+          request.id,
+          after?.requestState ?? request.requestState,
+        );
+      }
 
-    // 6. UPDATE Invocation: waiting_user → running
-    const updatedInvocation = await updateInvocationState(
-      tx,
-      params.tenantId,
-      invocation.id,
-      "running",
-    );
+      // 5. grant + approve 时创建 Grant + 回填 grant_id
+      let grantId: string | undefined;
+      if (request.requestType === "grant" && params.resolution === "approve") {
+        // 从 promptJson 提取 grant 参数（由请求发起方写入）
+        const prompt = request.promptJson as {
+          user_id?: string;
+          scope?: readonly string[];
+          credential_ref_id?: string;
+          grant_expires_at?: string;
+        };
+        const grantUserId = prompt.user_id ?? params.resolvedBy;
+        const grantScope = prompt.scope;
+        const grantCredentialRefId = prompt.credential_ref_id;
+        if (!grantScope || !Array.isArray(grantScope) || grantScope.length === 0) {
+          throw new UserActionValidationError(
+            "grant 类型 approve 时 promptJson.scope 必须是非空数组",
+          );
+        }
+        if (!grantCredentialRefId) {
+          throw new UserActionValidationError(
+            "grant 类型 approve 时 promptJson.credential_ref_id 必填",
+          );
+        }
+        const grantExpiresAt = prompt.grant_expires_at ? new Date(prompt.grant_expires_at) : null;
+        if (grantExpiresAt && grantExpiresAt.getTime() <= Date.now()) {
+          throw new UserActionValidationError(
+            "grant 类型 promptJson.grant_expires_at 必须是未来时间",
+          );
+        }
+        const grant = await issueGrant(
+          {
+            tenantId: params.tenantId,
+            userId: grantUserId,
+            grantType: "user_consent",
+            scope: [...grantScope],
+            credentialRefId: grantCredentialRefId,
+            issuedBy: params.resolvedBy,
+            expiresAt: grantExpiresAt,
+          },
+          { tx }, // §22.1：与 UAR 解析同事务，禁止 issueGrant 回落到全局 db。
+        );
+        grantId = grant.id;
+        await tx
+          .update(userActionRequestTable)
+          .set({ grantId, updatedAt: now })
+          .where(eq(userActionRequestTable.id, request.id));
+      }
 
-    const turnUpdate = await tx
-      .update(turnTable)
-      .set({
-        turnState: "running",
-        activeInvocationId: invocation.id,
-        versionNo: sql`${turnTable.versionNo} + 1`,
-      })
-      .where(
-        and(
-          eq(turnTable.id, request.turnId),
-          eq(turnTable.threadId, request.threadId),
-          eq(turnTable.turnState, "waiting_user"),
-        ),
+      // §20.3 deny：Policy pause 的 tool_permission_confirmation 被员工 deny →
+      // ToolCall paused → cancelled，errorCode=USER_DENIED。不生成 Grant
+      // （requestType=confirmation 本就不走 grant 分支）。与 UAR 解析同事务。
+      if (
+        request.purpose === TOOL_PERMISSION_CONFIRMATION_PURPOSE &&
+        params.resolution === "deny"
+      ) {
+        if (!request.toolCallId) {
+          throw new UserActionValidationError(
+            "tool_permission_confirmation deny 必须关联 ToolCallId",
+          );
+        }
+        await updateToolCallState(
+          {
+            tenantId: params.tenantId,
+            toolCallId: request.toolCallId,
+            toState: "cancelled",
+            errorCode: "USER_DENIED",
+          },
+          tx,
+        );
+      }
+
+      // 请求与可见卡片同事务推进；不把用户填写内容复制进公开时间线。
+      if (request.itemId) {
+        const [item] = await tx
+          .select()
+          .from(threadItemTable)
+          .where(
+            and(
+              eq(threadItemTable.id, request.itemId),
+              eq(threadItemTable.threadId, request.threadId),
+              eq(threadItemTable.turnId, request.turnId),
+              eq(threadItemTable.invocationId, request.invocationId),
+              eq(threadItemTable.itemType, "user_action"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!item) throw new UserActionStateError("操作卡片与请求不匹配");
+        const content = {
+          ...(item.contentJson as Record<string, unknown>),
+          state: "resolved",
+          resolution: params.resolution,
+        };
+        await tx
+          .update(threadItemTable)
+          .set({
+            itemState: "completed",
+            contentJson: content,
+            contentHash: computeEventPayloadHash(content),
+            updatedAt: now,
+          })
+          .where(eq(threadItemTable.id, item.id));
+      }
+
+      // 6. UPDATE Invocation: waiting_user → running
+      const updatedInvocation = await updateInvocationState(
+        tx,
+        params.tenantId,
+        invocation.id,
+        "running",
       );
-    if (turnUpdate[0].affectedRows !== 1) {
-      throw new UserActionStateError(`Turn ${request.turnId} 不是可恢复的 waiting_user 状态`);
-    }
 
-    // 7. UPDATE Thread: lastActivityAt + versionNo 递增
-    await tx
-      .update(threadTable)
-      .set({
-        lastActivityAt: now,
-        versionNo: thread.versionNo + 1,
-        updatedAt: now,
-      })
-      .where(eq(threadTable.id, thread.id));
+      const turnUpdate = await tx
+        .update(turnTable)
+        .set({
+          turnState: "running",
+          activeInvocationId: invocation.id,
+          versionNo: sql`${turnTable.versionNo} + 1`,
+        })
+        .where(
+          and(
+            eq(turnTable.id, request.turnId),
+            eq(turnTable.threadId, request.threadId),
+            eq(turnTable.turnState, "waiting_user"),
+          ),
+        );
+      if (turnUpdate[0].affectedRows !== 1) {
+        throw new UserActionStateError(`Turn ${request.turnId} 不是可恢复的 waiting_user 状态`);
+      }
 
-    // 8. allocateEventSequences(1) → 写入 user_action.resolved Event
-    const startSeq = await allocateEventSequences(tx, thread.id, 1);
-    const userActionResolvedEvent = await insertThreadEvent(tx, thread.id, startSeq, {
-      eventType: "user_action.resolved",
-      turnId: request.turnId,
-      itemId: request.itemId ?? undefined,
-      invocationId: request.invocationId,
-      actorType,
-      actorId: params.actorId ?? params.resolvedBy,
-      payload: {
+      // 7. UPDATE Thread: lastActivityAt + versionNo 递增
+      await tx
+        .update(threadTable)
+        .set({
+          lastActivityAt: now,
+          versionNo: thread.versionNo + 1,
+          updatedAt: now,
+        })
+        .where(eq(threadTable.id, thread.id));
+
+      // 8. allocateEventSequences(1) → 写入 user_action.resolved Event
+      const startSeq = await allocateEventSequences(tx, thread.id, 1);
+      const userActionResolvedEvent = await insertThreadEvent(tx, thread.id, startSeq, {
+        eventType: "user_action.resolved",
+        turnId: request.turnId,
+        itemId: request.itemId ?? undefined,
+        invocationId: request.invocationId,
+        actorType,
+        actorId: params.actorId ?? params.resolvedBy,
+        payload: {
+          request_id: request.id,
+          request_type: request.requestType,
+          purpose: request.purpose,
+          resolution: params.resolution,
+          resolved_by: params.resolvedBy,
+          ...(grantId ? { grant_id: grantId } : {}),
+          ...(params.responseRedactedJson ? { has_response: true } : {}),
+        },
+        idempotencyKey: params.idempotencyKey
+          ? `${params.idempotencyKey}:user-action-resolved`
+          : undefined,
+        correlationId: params.correlationId,
+      });
+      const events: ThreadEvent[] = [userActionResolvedEvent];
+
+      // 9. INSERT InvocationCommand (resume)
+      const resumeCommandId = randomUUID();
+      const resumePayload = {
         request_id: request.id,
         request_type: request.requestType,
         purpose: request.purpose,
         resolution: params.resolution,
-        resolved_by: params.resolvedBy,
+        resumed_by: params.resolvedBy,
         ...(grantId ? { grant_id: grantId } : {}),
         ...(params.responseRedactedJson ? { has_response: true } : {}),
-      },
-      idempotencyKey: params.idempotencyKey
-        ? `${params.idempotencyKey}:user-action-resolved`
-        : undefined,
-      correlationId: params.correlationId,
-    });
-    const events: ThreadEvent[] = [userActionResolvedEvent];
+        ...agentCallResumeRefs(request.promptJson),
+        // input+submit：精确脱敏响应对象 + 内部来源标记（post-authority Resume 凭证，
+        // 其他类型不发明 resume_payload）。
+        ...(request.requestType === "input" && params.resolution === "submit"
+          ? {
+              resume_source: "user_action_resolution",
+              resume_payload: params.responseRedactedJson,
+            }
+          : {}),
+        ...(request.requestType === "confirmation" &&
+        request.purpose === "a2a_confirmation" &&
+        (params.resolution === "approve" || params.resolution === "deny")
+          ? { resume_source: "user_action_confirmation" }
+          : {}),
+      };
+      const resumePayloadHash = computeEventPayloadHash(resumePayload);
+      const agentRefs = agentCallResumeRefs(request.promptJson);
+      const agentCallId = agentRefs.agent_call_id;
+      const durableAgentResume =
+        typeof agentCallId === "string" &&
+        ((request.requestType === "input" &&
+          request.purpose === "a2a_input_required" &&
+          params.resolution === "submit") ||
+          (request.requestType === "confirmation" &&
+            request.purpose === "a2a_confirmation" &&
+            (params.resolution === "approve" || params.resolution === "deny")));
+      await tx.insert(invocationCommandTable).values({
+        id: resumeCommandId,
+        invocationId: invocation.id,
+        threadId: thread.id,
+        turnId: request.turnId,
+        commandType: "resume",
+        commandPayloadJson: resumePayload,
+        commandPayloadHash: resumePayloadHash,
+        // Agent UAR 先由 durable continuation 恢复同一外部 Agent；父 Runtime 不能抢跑。
+        commandState: durableAgentResume ? "acknowledged" : "queued",
+        runtimeExecutionRef: null,
+        idempotencyKey: params.idempotencyKey ?? null,
+        errorCode: null,
+        errorMessage: null,
+        dispatchedAt: null,
+        acknowledgedAt: durableAgentResume ? now : null,
+        failedAt: null,
+      });
 
-    // 9. INSERT InvocationCommand (resume)
-    const resumeCommandId = randomUUID();
-    const resumePayload = {
-      request_id: request.id,
-      request_type: request.requestType,
-      purpose: request.purpose,
-      resolution: params.resolution,
-      resumed_by: params.resolvedBy,
-      ...(grantId ? { grant_id: grantId } : {}),
-      ...(params.responseRedactedJson ? { has_response: true } : {}),
-      ...agentCallResumeRefs(request.promptJson),
-      // input+submit：精确脱敏响应对象 + 内部来源标记（post-authority Resume 凭证，
-      // 其他类型不发明 resume_payload）。
-      ...(request.requestType === "input" && params.resolution === "submit"
-        ? {
-            resume_source: "user_action_resolution",
-            resume_payload: params.responseRedactedJson,
-          }
-        : {}),
-      ...(request.requestType === "confirmation" &&
-      request.purpose === "a2a_confirmation" &&
-      (params.resolution === "approve" || params.resolution === "deny")
-        ? { resume_source: "user_action_confirmation" }
-        : {}),
-    };
-    const resumePayloadHash = computeEventPayloadHash(resumePayload);
-    const agentRefs = agentCallResumeRefs(request.promptJson);
-    const agentCallId = agentRefs.agent_call_id;
-    const durableAgentResume =
-      typeof agentCallId === "string" &&
-      ((request.requestType === "input" &&
-        request.purpose === "a2a_input_required" &&
-        params.resolution === "submit") ||
-        (request.requestType === "confirmation" &&
-          request.purpose === "a2a_confirmation" &&
-          (params.resolution === "approve" || params.resolution === "deny")));
-    await tx.insert(invocationCommandTable).values({
-      id: resumeCommandId,
-      invocationId: invocation.id,
-      threadId: thread.id,
-      turnId: request.turnId,
-      commandType: "resume",
-      commandPayloadJson: resumePayload,
-      commandPayloadHash: resumePayloadHash,
-      // Agent UAR 先由 durable continuation 恢复同一外部 Agent；父 Runtime 不能抢跑。
-      commandState: durableAgentResume ? "acknowledged" : "queued",
-      runtimeExecutionRef: null,
-      idempotencyKey: params.idempotencyKey ?? null,
-      errorCode: null,
-      errorMessage: null,
-      dispatchedAt: null,
-      acknowledgedAt: durableAgentResume ? now : null,
-      failedAt: null,
-    });
+      if (durableAgentResume && agentCallId) {
+        const [call] = await tx
+          .select({ id: agentCallTable.id, versionNo: agentCallTable.versionNo })
+          .from(agentCallTable)
+          .where(
+            and(
+              eq(agentCallTable.id, agentCallId),
+              eq(agentCallTable.tenantId, params.tenantId),
+              eq(agentCallTable.parentInvocationId, invocation.id),
+              eq(agentCallTable.state, "waiting_user"),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!call) throw new UserActionStateError("Agent UserAction 与 waiting AgentCall 不匹配");
+        const continuationId = randomUUID();
+        const append = resolveOutboxAppend({
+          id: continuationId,
+          tenantId: params.tenantId,
+          eventKey: `user-action:${request.id}:agent-resume`,
+          eventType: "agent_call.continuation.requested",
+          aggregateId: call.id,
+          aggregateVersion: call.versionNo,
+          payload: {
+            parent_invocation_id: invocation.id,
+            agent_call_id: call.id,
+            source_version: call.versionNo,
+            kind: "resume_agent_after_user_response",
+            user_action_request_id: request.id,
+          },
+          occurredAt: now,
+        });
+        await tx.insert(controlPlaneOutboxEvent).values({
+          ...append,
+          schemaVersion: "1.0",
+          availableAt: now,
+        });
+        await tx.insert(controlPlaneEventDelivery).values({
+          id: randomUUID(),
+          eventId: continuationId,
+          consumerName: "invocation_continuation",
+          state: "pending",
+          attemptCount: 0,
+          nextAttemptAt: now,
+          createdAt: now,
+        });
+      }
 
-    if (durableAgentResume && agentCallId) {
-      const [call] = await tx
-        .select({ id: agentCallTable.id, versionNo: agentCallTable.versionNo })
-        .from(agentCallTable)
-        .where(
-          and(
-            eq(agentCallTable.id, agentCallId),
-            eq(agentCallTable.tenantId, params.tenantId),
-            eq(agentCallTable.parentInvocationId, invocation.id),
-            eq(agentCallTable.state, "waiting_user"),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!call) throw new UserActionStateError("Agent UserAction 与 waiting AgentCall 不匹配");
-      const continuationId = randomUUID();
-      const append = resolveOutboxAppend({
-        id: continuationId,
+      // 10. 回读 Thread / UserActionRequest / InvocationCommand
+      const [refreshedThread] = await tx
+        .select()
+        .from(threadTable)
+        .where(eq(threadTable.id, thread.id))
+        .limit(1);
+      if (!refreshedThread) {
+        throw new Error(`resolveGenericUserAction: Thread 行未找到（id=${thread.id}）`);
+      }
+
+      const [refreshedRequest] = await tx
+        .select()
+        .from(userActionRequestTable)
+        .where(eq(userActionRequestTable.id, request.id))
+        .limit(1);
+      if (!refreshedRequest) {
+        throw new Error(`resolveGenericUserAction: UserActionRequest 行未找到（id=${request.id}）`);
+      }
+
+      const [resumeCommand] = await tx
+        .select()
+        .from(invocationCommandTable)
+        .where(eq(invocationCommandTable.id, resumeCommandId))
+        .limit(1);
+      if (!resumeCommand) {
+        throw new Error(
+          `resolveGenericUserAction: InvocationCommand 行未找到（id=${resumeCommandId}）`,
+        );
+      }
+
+      return {
+        request: refreshedRequest,
+        events,
+        thread: refreshedThread,
+        invocation: updatedInvocation,
+        resumeCommand,
+        ...(grantId ? { grantId } : {}),
+      };
+    });
+  } catch (error) {
+    if (error instanceof UserActionDeadlineReachedError) {
+      await expireUserActionRequest({
         tenantId: params.tenantId,
-        eventKey: `user-action:${request.id}:agent-resume`,
-        eventType: "agent_call.continuation.requested",
-        aggregateId: call.id,
-        aggregateVersion: call.versionNo,
-        payload: {
-          parent_invocation_id: invocation.id,
-          agent_call_id: call.id,
-          source_version: call.versionNo,
-          kind: "resume_agent_after_user_response",
-          user_action_request_id: request.id,
-        },
-        occurredAt: now,
+        requestId: error.requestId,
+        now,
       });
-      await tx.insert(controlPlaneOutboxEvent).values({
-        ...append,
-        schemaVersion: "1.0",
-        availableAt: now,
-      });
-      await tx.insert(controlPlaneEventDelivery).values({
-        id: randomUUID(),
-        eventId: continuationId,
-        consumerName: "invocation_continuation",
-        state: "pending",
-        attemptCount: 0,
-        nextAttemptAt: now,
-        createdAt: now,
-      });
+      throw new UserActionAlreadyResolvedError(error.requestId, "expired");
     }
-
-    // 10. 回读 Thread / UserActionRequest / InvocationCommand
-    const [refreshedThread] = await tx
-      .select()
-      .from(threadTable)
-      .where(eq(threadTable.id, thread.id))
-      .limit(1);
-    if (!refreshedThread) {
-      throw new Error(`resolveGenericUserAction: Thread 行未找到（id=${thread.id}）`);
-    }
-
-    const [refreshedRequest] = await tx
-      .select()
-      .from(userActionRequestTable)
-      .where(eq(userActionRequestTable.id, request.id))
-      .limit(1);
-    if (!refreshedRequest) {
-      throw new Error(`resolveGenericUserAction: UserActionRequest 行未找到（id=${request.id}）`);
-    }
-
-    const [resumeCommand] = await tx
-      .select()
-      .from(invocationCommandTable)
-      .where(eq(invocationCommandTable.id, resumeCommandId))
-      .limit(1);
-    if (!resumeCommand) {
-      throw new Error(
-        `resolveGenericUserAction: InvocationCommand 行未找到（id=${resumeCommandId}）`,
-      );
-    }
-
-    return {
-      request: refreshedRequest,
-      events,
-      thread: refreshedThread,
-      invocation: updatedInvocation,
-      resumeCommand,
-      ...(grantId ? { grantId } : {}),
-    };
-  });
+    throw error;
+  }
 
   return result;
 }

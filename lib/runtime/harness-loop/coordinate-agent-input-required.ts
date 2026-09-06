@@ -16,6 +16,10 @@ import {
   getIngressByProducerEventId,
   ingressEventBatch,
 } from "@/lib/runtime/event-ingress-queries";
+import {
+  buildConfirmationActionId,
+  computeConfirmationProposalSemanticDigest,
+} from "@/lib/runtime/harness-loop/confirmation-proposal-identity";
 import { and, desc, eq } from "drizzle-orm";
 
 export interface CoordinateAgentInputRequiredResult {
@@ -37,6 +41,7 @@ interface AgentInputRequiredRuntimePayload {
   summary?: string;
   impact?: string;
   preview?: Record<string, unknown>;
+  proposal_semantic_digest?: string;
   expires_at?: string;
   agent_call_id: string;
   agent_display_name: string | null;
@@ -48,9 +53,8 @@ interface AgentInputRequiredRuntimePayload {
 /**
  * 由已落库 A2A input-required 事件构造 Parent UAR 载荷。
  *
- * 同一 AgentCall 可以多次等待用户：UAR 的 `(invocationId, harnessActionId)` 需要按
- * input event（确认还带 proposal）区分；父 Harness action 另存于 harness_action_id，
- * 只用于校验关联，不能覆盖 episode 幂等键。
+ * 普通 input 的幂等键按 input event 区分；confirmation 的幂等键按外部业务提议区分。
+ * 父 Harness action 另存于 harness_action_id，只用于校验关联。
  */
 export function buildAgentInputRequiredRuntimePayload(params: {
   callId: string;
@@ -91,7 +95,11 @@ export function buildAgentInputRequiredRuntimePayload(params: {
   return {
     request_type: "confirmation",
     purpose: "a2a_confirmation",
-    ...confirmationPrompt(params.confirmation, params.callId, params.inputEventId),
+    ...confirmationPrompt(params.confirmation, {
+      agentCallId: params.callId,
+      taskId: params.externalTaskRef,
+      contextId: params.externalContextRef,
+    }),
     expires_at: new Date(params.now.getTime() + ttlMs).toISOString(),
     ...common,
   };
@@ -207,25 +215,35 @@ export async function coordinateAgentInputRequired(
 
 function confirmationPrompt(
   proposal: ConfirmationProposal,
-  callId: string,
-  inputEventId: string,
+  identity: { agentCallId: string; taskId: string; contextId: string },
 ): Pick<
   AgentInputRequiredRuntimePayload,
-  "action_id" | "proposal_id" | "action_key" | "title" | "summary" | "impact" | "preview"
+  | "action_id"
+  | "proposal_id"
+  | "action_key"
+  | "title"
+  | "summary"
+  | "impact"
+  | "preview"
+  | "proposal_semantic_digest"
 > {
   return {
-    action_id: episodeActionId("confirm", callId, inputEventId, proposal.proposal_id),
+    action_id: buildConfirmationActionId({ ...identity, proposalId: proposal.proposal_id }),
     proposal_id: proposal.proposal_id,
     action_key: proposal.action_key,
     title: proposal.title,
     summary: proposal.summary,
     impact: proposal.impact,
     preview: proposal.preview,
+    proposal_semantic_digest: computeConfirmationProposalSemanticDigest(proposal),
   };
 }
 
-function episodeActionId(kind: "input" | "confirm", ...parts: string[]): string {
-  const digest = createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 32);
+function episodeActionId(kind: "input", callId: string, inputEventId: string): string {
+  const digest = createHash("sha256")
+    .update(`${callId}\u0000${inputEventId}`)
+    .digest("hex")
+    .slice(0, 32);
   return `a2a-${kind}:${digest}`;
 }
 

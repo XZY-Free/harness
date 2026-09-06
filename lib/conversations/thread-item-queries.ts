@@ -23,7 +23,14 @@ import {
   threadItemTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+
+const DIRECT_CONTEXT_ITEM_TYPES = [
+  "user_message",
+  "user_guidance",
+  "assistant_message",
+  "tool_call",
+] as const;
 
 /** 按 id 获取 Item（跨租户隔离）。不存在返回 null。 */
 export async function getItemById(tenantId: string, itemId: string): Promise<ThreadItem | null> {
@@ -80,6 +87,55 @@ export async function listItemsByThread(
     .limit(limit);
 
   return rows.map((r) => r.item);
+}
+
+/**
+ * 查询可直接投影到模型上下文的最近 Item。
+ *
+ * 该查询故意不改变 listItemsByThread 的历史升序语义：先从数据库取最新的
+ * eligible N，再恢复为上下文需要的时间顺序；triggerItemId 另查并合并，避免
+ * 当前触发 Item 因超出最近窗口而丢失。
+ */
+export async function listRecentContextItemsByThread(
+  tenantId: string,
+  threadId: string,
+  options?: { limit?: number; triggerItemId?: string },
+): Promise<ThreadItem[]> {
+  const limit = Math.min(Math.max(options?.limit ?? 20, 0), 200);
+  const baseConditions = [
+    eq(threadTable.tenantId, tenantId),
+    eq(threadItemTable.threadId, threadId),
+    eq(threadItemTable.itemState, "completed"),
+    eq(threadItemTable.contextPolicy, "include"),
+    inArray(threadItemTable.itemType, DIRECT_CONTEXT_ITEM_TYPES),
+  ];
+
+  const recentPromise =
+    limit === 0
+      ? Promise.resolve([] as ThreadItem[])
+      : db
+          .select({ item: threadItemTable })
+          .from(threadItemTable)
+          .innerJoin(threadTable, eq(threadItemTable.threadId, threadTable.id))
+          .where(and(...baseConditions))
+          .orderBy(desc(threadItemTable.itemSequence))
+          .limit(limit)
+          .then((rows) => rows.map((row) => row.item));
+
+  const triggerPromise = options?.triggerItemId
+    ? db
+        .select({ item: threadItemTable })
+        .from(threadItemTable)
+        .innerJoin(threadTable, eq(threadItemTable.threadId, threadTable.id))
+        .where(and(...baseConditions, eq(threadItemTable.id, options.triggerItemId)))
+        .limit(1)
+        .then((rows) => rows.map((row) => row.item))
+    : Promise.resolve([] as ThreadItem[]);
+
+  const [recent, trigger] = await Promise.all([recentPromise, triggerPromise]);
+  const byId = new Map<string, ThreadItem>();
+  for (const item of [...recent, ...trigger]) byId.set(item.id, item);
+  return [...byId.values()].sort((left, right) => left.itemSequence - right.itemSequence);
 }
 
 /**

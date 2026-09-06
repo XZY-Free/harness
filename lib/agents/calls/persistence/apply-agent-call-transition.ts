@@ -559,6 +559,9 @@ function buildCallUpdates(
   } else if (command.authority === "local_failure") {
     updates.errorCode = command.errorCode ?? "AGENT_CALL_LOCAL_FAILURE";
     updates.errorSummary = command.errorSummary ?? null;
+  } else if (command.authority === "local_cancel") {
+    updates.errorCode = command.errorCode ?? "AGENT_CALL_LOCAL_CANCEL";
+    updates.errorSummary = command.errorSummary ?? null;
   }
   return updates;
 }
