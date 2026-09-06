@@ -30,6 +30,7 @@ function project(group: VitestGroup, serial = false) {
             fileParallelism: false,
             maxWorkers: 1,
             minWorkers: 1,
+            setupFiles: ["./lib/db/test/file-setup.ts"],
             hookTimeout: 60_000,
             testTimeout: 60_000,
           }

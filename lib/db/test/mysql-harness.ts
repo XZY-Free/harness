@@ -83,6 +83,14 @@ function getResetPool(): mysql.Pool {
   return resetPool;
 }
 
+/** 关闭当前测试文件的 reset pool，并清空只在文件内有效的表名缓存。 */
+export async function closeTestMysqlPools(): Promise<void> {
+  const currentPool = resetPool;
+  resetPool = null;
+  cachedTableNames = null;
+  await currentPool?.end();
+}
+
 /**
  * 清空所有业务表（per-test 隔离）。
  *

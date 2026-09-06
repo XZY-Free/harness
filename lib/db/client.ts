@@ -36,6 +36,14 @@ if (!globalForDb.__snowMysqlPool) {
 
 export const db = drizzle(pool, { schema, mode: "default" });
 
+/** 关闭当前测试文件的业务连接池，避免 Vitest 文件隔离造成连接池累积。 */
+export async function closeDbPool(): Promise<void> {
+  const currentPool = globalForDb.__snowMysqlPool;
+  if (!currentPool) return;
+  globalForDb.__snowMysqlPool = undefined;
+  await currentPool.end();
+}
+
 /**
  * DB 或事务的公共查询接口类型。
  *
