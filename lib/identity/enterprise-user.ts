@@ -1,7 +1,7 @@
 /**
  * 企业用户资料领域合同。
  *
- * 本模块只处理部署方 EnterpriseUserAdapter 返回的完整资料快照：校验、规范化与指纹。
+ * 本模块只处理部署方企业资料来源返回的资料快照：校验、规范化与指纹。
  * 不包含任何企业目录连接器、凭证或网络调用。
  */
 import { computeCanonicalDigest, rfc8785Canonicalize } from "@/lib/crypto/rfc-8785-canonicalize";
@@ -151,15 +151,22 @@ export function normalizeEnterpriseUserProfile(
   return { externalSubject, email, displayName, status, sourceSystem, attributes };
 }
 
-/** 指纹只针对规范化的可信业务事实；绝不接收 HTTP 响应、token 或验证时间。 */
+export interface EnterpriseProfileFingerprintInput {
+  tenantId: string;
+  userIdentityId: string;
+  externalSubject: string;
+  sourceSystem: string;
+  attributes: Partial<Record<EnterpriseAttributeKey, string | number | boolean | JsonValue>>;
+}
+
+/** 指纹只针对租户内用户的可信企业事实；绝不接收邮箱、状态、token 或验证时间。 */
 export function computeEnterpriseProfileFingerprint(
-  profile: NormalizedEnterpriseUserProfile,
+  profile: EnterpriseProfileFingerprintInput,
 ): string {
   return computeCanonicalDigest({
+    tenantId: profile.tenantId,
+    userIdentityId: profile.userIdentityId,
     externalSubject: profile.externalSubject,
-    email: profile.email,
-    displayName: profile.displayName,
-    status: profile.status,
     sourceSystem: profile.sourceSystem,
     attributes: Object.fromEntries(
       Object.entries(profile.attributes)

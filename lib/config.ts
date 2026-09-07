@@ -379,26 +379,10 @@ export const authConfig = {
 } as const;
 
 /**
- * 企业用户资料适配器选择。具体 enterprise 实现由部署方在启动时注册；主仓不提供
- * 企业目录连接器。该配置是唯一的适配器选择 Authority。
- */
-export const enterpriseUserConfig = {
-  get adapterMode(): "default" | "enterprise" {
-    const raw = optionalEnv("SNOW_ENTERPRISE_USER_ADAPTER", "default");
-    if (raw !== "default" && raw !== "enterprise") {
-      throw new Error(
-        `[config] 无效的 SNOW_ENTERPRISE_USER_ADAPTER="${raw}"，可选值：default | enterprise`,
-      );
-    }
-    return raw;
-  },
-} as const;
-
-/**
  * 外部 Agent 的宿主交互配置。
  *
  * 这些均为平台侧策略：Agent Revision 只能声明希望使用的能力，不能自行延长确认时间、
- * 放宽外链域名或伪造人工支持入口。空 allowlist 一律拒绝外链与人工入口。
+ * 放宽外链域名。空 allowlist 一律拒绝外链。
  */
 export const agentHostControlConfig = {
   get confirmationTtlMs(): number {

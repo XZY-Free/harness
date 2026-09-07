@@ -8,7 +8,7 @@ import { agentHostControlConfig } from "@/lib/config";
 import { isSafeExternalUrl } from "@/lib/external/url-safety";
 
 export const HOST_CONTROL_VERSION = "1" as const;
-export const HOST_ACTION_TYPES = ["navigate", "open_external_link", "offer_human_support"] as const;
+export const HOST_ACTION_TYPES = ["navigate", "open_external_link"] as const;
 export type HostActionType = (typeof HOST_ACTION_TYPES)[number];
 
 export interface HostControlCapabilityPolicy {
@@ -41,7 +41,7 @@ export interface HostAction {
 
 /**
  * 平台侧 Host Action 策略。它不属于 Agent Revision：Revision 只能声明能力，不能
- * 增加可信外链、替换人工支持入口或越过部署方的域名边界。
+ * 增加可信外链或越过部署方的域名边界。
  */
 export interface HostActionPlatformPolicy {
   externalAllowedHosts: readonly string[];
@@ -63,7 +63,7 @@ export function defaultHostControlCapabilityPolicy(): HostControlCapabilityPolic
   return { confirmationActionKeys: [], uiActionTypes: [], uiActionTargetKeys: [] };
 }
 
-/** 部署配置的惰性快照；空 allowlist 维持外链与人工支持 fail-closed。 */
+/** 部署配置的惰性快照；空 allowlist 维持外链 fail-closed。 */
 export function defaultHostActionPlatformPolicy(): HostActionPlatformPolicy {
   return {
     externalAllowedHosts: agentHostControlConfig.externalAllowedHosts,
@@ -293,24 +293,7 @@ function parseHostAction(
       client_support: { web: true, desktop: true },
     };
   }
-  if (targetKey !== null || !url) {
-    throw new HostActionRejectedError("offer_human_support 必须携带 Agent 提供的安全 URL");
-  }
-  if (!isTrustedExternalUrl(url, platformPolicy.externalAllowedHosts)) {
-    throw new HostActionRejectedError("offer_human_support.url 不符合 HTTPS 外链安全策略");
-  }
-  return {
-    action_id: actionId,
-    action_type: typedAction,
-    title,
-    label,
-    description,
-    target_key: null,
-    // 入口属于具体 Agent；平台只负责通用 URL 安全校验与 allowlist。
-    url,
-    web_path: null,
-    client_support: { web: true, desktop: true },
-  };
+  throw new HostControlProtocolError("ui_action.action_type 不受支持");
 }
 
 /**

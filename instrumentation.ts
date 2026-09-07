@@ -24,10 +24,10 @@ export async function register() {
 
     // 企业用户模式必须在迁移、健康检查和请求服务前完成私有适配器装配；
     // 开源主仓不提供具体目录连接器，也不自动回退默认适配器。
-    const { assertEnterpriseUserAdapterReady } = await import(
-      "./lib/identity/enterprise-user-bootstrap"
+    const { assertIdentityExtensionsReady } = await import(
+      "./lib/identity/identity-extension-bootstrap"
     );
-    assertEnterpriseUserAdapterReady();
+    await assertIdentityExtensionsReady();
 
     // 启动时应用 db 迁移（替代已退役的 ensureSchema 裸 DDL），确保表结构就绪
     const { runMigrations } = await import("./lib/db/migrate");

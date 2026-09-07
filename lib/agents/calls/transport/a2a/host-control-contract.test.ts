@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const policy = parseHostControlCapabilityPolicy({
   host_controls: {
     confirmation_action_keys: ["hr.leave.submit"],
-    ui_action_types: ["navigate", "open_external_link", "offer_human_support"],
+    ui_action_types: ["navigate", "open_external_link"],
     ui_action_target_keys: ["thread.current"],
   },
 });
@@ -171,7 +171,7 @@ describe("A2A host_controls 合同", () => {
     }
   });
 
-  it("外链和人工支持 URL 都来自 Agent，并共用平台 allowlist", () => {
+  it("外链来自 Agent，并受平台 allowlist 约束", () => {
     const externalAction = {
       host_controls: {
         version: "1",
@@ -201,58 +201,29 @@ describe("A2A host_controls 合同", () => {
       actions: [expect.objectContaining({ url: "https://docs.example.test/leave" })],
     });
 
-    const support = parseHostControls(
-      {
-        host_controls: {
-          version: "1",
-          ui_actions: [
-            {
-              action_id: "support-1",
-              action_type: "offer_human_support",
-              title: "联系人工支持",
-              label: "联系支持",
-              description: null,
-              target_key: null,
-              url: "https://support-a.example.test/help",
-            },
-          ],
+    expect(() =>
+      parseHostControls(
+        {
+          host_controls: {
+            version: "1",
+            ui_actions: [
+              {
+                action_id: "unsupported-1",
+                action_type: "offer_human_support",
+                title: "联系支持",
+                label: "联系支持",
+                description: null,
+                target_key: null,
+                url: "https://docs.example.test/help",
+              },
+            ],
+          },
         },
-      },
-      "completed",
-      policy,
-      {
-        externalAllowedHosts: ["support-a.example.test", "support-b.example.test"],
-      },
-    );
-    expect(support).toMatchObject({
-      kind: "ui_actions",
-      actions: [expect.objectContaining({ url: "https://support-a.example.test/help" })],
-    });
-
-    const secondSupport = parseHostControls(
-      {
-        host_controls: {
-          version: "1",
-          ui_actions: [
-            {
-              action_id: "support-2",
-              action_type: "offer_human_support",
-              title: "联系另一人工入口",
-              label: "联系支持",
-              description: null,
-              target_key: null,
-              url: "https://support-b.example.test/help",
-            },
-          ],
-        },
-      },
-      "completed",
-      policy,
-      { externalAllowedHosts: ["support-a.example.test", "support-b.example.test"] },
-    );
-    expect(secondSupport).toMatchObject({
-      actions: [expect.objectContaining({ url: "https://support-b.example.test/help" })],
-    });
+        "completed",
+        policy,
+        { externalAllowedHosts: ["docs.example.test"] },
+      ),
+    ).toThrow(HostControlProtocolError);
   });
 
   it("completed 不接受 confirmation，input-required 不接受 ui_actions", () => {

@@ -7,7 +7,12 @@
 import { randomUUID } from "node:crypto";
 
 import { type DbOrTx, db } from "@/lib/db/client";
-import type { JsonValue } from "@/lib/identity/enterprise-user";
+import {
+  ENTERPRISE_ATTRIBUTE_CATALOG,
+  type EnterpriseAttributeKey,
+  type JsonValue,
+  type NormalizedEnterpriseUserProfile,
+} from "@/lib/identity/enterprise-user";
 import {
   type EnterpriseAttributeValueType,
   type EnterpriseProfileSyncState,
@@ -31,6 +36,27 @@ export interface EnterpriseUserAttributeInput {
 export interface EnterpriseUserProfileFacts {
   attributes: UserExtensionAttribute[];
   syncState: EnterpriseProfileSyncState | null;
+}
+
+export function attributesFromRows(
+  rows: UserExtensionAttribute[],
+): NormalizedEnterpriseUserProfile["attributes"] {
+  const attributes: NormalizedEnterpriseUserProfile["attributes"] = {};
+  for (const row of rows) {
+    if (!(row.attributeKey in ENTERPRISE_ATTRIBUTE_CATALOG)) continue;
+    const key = row.attributeKey as EnterpriseAttributeKey;
+    if (row.valueType === "string" && row.stringValue !== null) attributes[key] = row.stringValue;
+    if (row.valueType === "number" && row.numberValue !== null) {
+      attributes[key] = Number(row.numberValue);
+    }
+    if (row.valueType === "boolean" && row.booleanValue !== null) {
+      attributes[key] = row.booleanValue;
+    }
+    if (row.valueType === "json" && row.jsonValue !== null) {
+      attributes[key] = row.jsonValue as JsonValue;
+    }
+  }
+  return attributes;
 }
 
 /** 在指定租户内确认 userIdentity 存在，避免扩展表成为跨租户旁路。 */
@@ -194,7 +220,8 @@ export async function upsertEnterpriseProfileSyncState(
   input: {
     profileFingerprint: string;
     lastVerifiedAt: Date;
-    stale: boolean;
+    freshUntil: Date;
+    staleUntil: Date;
     lastSyncErrorCode: string | null;
     sourceSystem: string;
   },
@@ -229,6 +256,20 @@ export async function upsertEnterpriseProfileSyncState(
     .limit(1);
   if (!created) throw new Error("企业资料同步元数据创建后无法读取");
   return created;
+}
+
+/** 只记录本次失败分类；不得把旧成功资料重新整行写回。 */
+export async function recordEnterpriseProfileSyncFailure(
+  tenantId: string,
+  userIdentityId: string,
+  errorCode: string,
+  client: DbOrTx = db,
+): Promise<void> {
+  await assertTenantUser(tenantId, userIdentityId, client);
+  await client
+    .update(enterpriseProfileSyncState)
+    .set({ lastSyncErrorCode: errorCode, updatedAt: new Date() })
+    .where(eq(enterpriseProfileSyncState.userIdentityId, userIdentityId));
 }
 
 function attributeValueSlots(

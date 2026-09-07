@@ -19,10 +19,13 @@ import {
 } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import {
   EnterpriseUserContextRequirementError,
-  buildEnterpriseUserContext,
-  loadCurrentEnterpriseUserProfile,
   loadEnterpriseUserAccessPolicy,
 } from "@/lib/identity/enterprise-user-access-policy";
+import { getIdentityExtensions } from "@/lib/identity/identity-extension-bootstrap";
+import {
+  assertEnterpriseUserContextStillAcceptable,
+  prepareEnterpriseUserContext,
+} from "@/lib/identity/prepare-enterprise-user-context";
 import { OutboundCredentialError } from "@/lib/identity/resolve-outbound-credential";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
@@ -99,22 +102,33 @@ export function createAgentActionExecutor(
           params.tenantId,
           resolved.agentRevisionId,
         );
+        const identityExtensions = await getIdentityExtensions();
         const enterpriseUserContext =
           enterprisePolicy.profileRequirement === "none"
             ? undefined
-            : buildEnterpriseUserContext(
-                enterprisePolicy,
-                params.executionSubject.subjectType === "user"
-                  ? await loadCurrentEnterpriseUserProfile(
-                      params.tenantId,
-                      params.executionSubject.subjectId,
-                    )
-                  : {
-                      profileStatus: "unavailable" as const,
-                      lastVerifiedAt: null,
-                      attributes: {},
-                    },
-              );
+            : params.executionSubject.subjectType === "user"
+              ? await prepareEnterpriseUserContext({
+                  tenantId: params.tenantId,
+                  userIdentityId: params.executionSubject.subjectId,
+                  policy: enterprisePolicy,
+                  source: identityExtensions.profileSource,
+                })
+              : await prepareEnterpriseUserContext({
+                  tenantId: params.tenantId,
+                  userIdentityId: "service-subject",
+                  policy: enterprisePolicy,
+                });
+        if (
+          enterprisePolicy.profileRequirement !== "none" &&
+          params.executionSubject.subjectType === "user"
+        ) {
+          await assertEnterpriseUserContextStillAcceptable({
+            tenantId: params.tenantId,
+            userIdentityId: params.executionSubject.subjectId,
+            policy: enterprisePolicy,
+            source: identityExtensions.profileSource,
+          });
+        }
         const created = await createAgentCall({
           tenantId: params.tenantId,
           parentInvocationId: context.invocationId,

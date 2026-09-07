@@ -7176,13 +7176,19 @@
           "notNull": true,
           "autoincrement": false
         },
-        "stale": {
-          "name": "stale",
-          "type": "boolean",
+        "freshUntil": {
+          "name": "freshUntil",
+          "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": false
+        },
+        "staleUntil": {
+          "name": "staleUntil",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
         "lastSyncErrorCode": {
           "name": "lastSyncErrorCode",

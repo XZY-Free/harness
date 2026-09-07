@@ -73,17 +73,15 @@ describe("projectHostActionForThread", () => {
     ).toThrow("Host Action 外链非法");
   });
 
-  it("人工帮助入口使用 Agent 提供的 URL，不读取平台业务 URL 配置", () => {
-    expect(
+  it("拒绝已删除的专用支持动作", () => {
+    expect(() =>
       projectHostActionForThread(
-        action({
-          action_id: "support-a",
+        {
+          ...action(),
           action_type: "offer_human_support",
-          title: "联系人工支持",
-          label: "联系支持",
           target_key: null,
           url: "https://support.example.test/help-a",
-        }),
+        } as unknown as HostAction,
         {
           tenantId: "tenant-1",
           threadId: "thread-1",
@@ -92,9 +90,6 @@ describe("projectHostActionForThread", () => {
           platformPolicy,
         },
       ),
-    ).toMatchObject({
-      action_type: "offer_human_support",
-      url: "https://support.example.test/help-a",
-    });
+    ).toThrow("Host Action 类型非法");
   });
 });

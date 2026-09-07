@@ -1760,7 +1760,8 @@
         "`userIdentityId` varchar(36) NOT NULL",
         "`profileFingerprint` varchar(72) NOT NULL",
         "`lastVerifiedAt` datetime(3) NOT NULL",
-        "`stale` boolean NOT NULL DEFAULT false",
+        "`freshUntil` datetime(3) NOT NULL",
+        "`staleUntil` datetime(3) NOT NULL",
         "`sourceSystem` varchar(128) NOT NULL",
         "`updatedAt` datetime(3) NOT NULL",
         "CONSTRAINT `EnterpriseProfileSyncState_id` PRIMARY KEY(`id`)",
@@ -4838,6 +4839,7 @@
       "productionReaders": [
         "app/admin/api/v1/operations/gateway-protection/route.ts",
         "lib/db/seed.ts",
+        "lib/identity/prepare-enterprise-user-context.ts",
         "lib/identity/resolver.ts",
         "lib/identity/tenant-bootstrap.ts",
         "lib/identity/tenant-queries.ts",
@@ -4867,6 +4869,7 @@
         "lib/workers/production-worker-process.ts",
         "app/admin/api/v1/operations/gateway-protection/route.ts",
         "lib/db/seed.ts",
+        "lib/identity/prepare-enterprise-user-context.ts",
         "lib/identity/resolver.ts",
         "lib/identity/tenant-bootstrap.ts",
         "lib/identity/tenant-queries.ts",
@@ -5842,8 +5845,8 @@
         "lib/identity/user-identity-queries.ts"
       ],
       "productionReaders": [
+        "lib/identity/accept-enterprise-profile-observation.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
-        "lib/identity/enterprise-user-sync.ts",
         "lib/identity/resolver.ts",
         "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",
@@ -5873,8 +5876,8 @@
       "evidence": [
         "lib/persistence/schema/identity.ts#userIdentity",
         "lib/identity/user-identity-queries.ts",
+        "lib/identity/accept-enterprise-profile-observation.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
-        "lib/identity/enterprise-user-sync.ts",
         "lib/identity/resolver.ts",
         "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",

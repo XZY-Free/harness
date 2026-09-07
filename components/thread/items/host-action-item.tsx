@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 interface HostActionContent {
   kind?: "host_action";
   action_id?: string;
-  action_type?: "navigate" | "open_external_link" | "offer_human_support";
+  action_type?: "navigate" | "open_external_link";
   title?: string;
   label?: string;
   description?: string | null;
@@ -49,18 +49,6 @@ export function HostActionItem({ item }: { readonly item: ClientItem }) {
           </Button>
         ) : null}
         {content.action_type === "open_external_link" && content.url ? (
-          <a
-            className={cn(buttonVariants())}
-            data-host-action-id={content.action_id}
-            aria-label={label}
-            href={content.url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {label}
-          </a>
-        ) : null}
-        {content.action_type === "offer_human_support" && content.url ? (
           <a
             className={cn(buttonVariants())}
             data-host-action-id={content.action_id}

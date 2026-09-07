@@ -166,7 +166,8 @@ export const enterpriseProfileSyncState = mysqlTable(
       .references(() => userIdentity.id),
     profileFingerprint: varchar("profileFingerprint", { length: 72 }).notNull(),
     lastVerifiedAt: datetime("lastVerifiedAt", { mode: "date", fsp: 3 }).notNull(),
-    stale: boolean("stale").notNull().default(false),
+    freshUntil: datetime("freshUntil", { mode: "date", fsp: 3 }).notNull(),
+    staleUntil: datetime("staleUntil", { mode: "date", fsp: 3 }).notNull(),
     /** 仅稳定分类；不得保存上游错误消息或响应。 */
     lastSyncErrorCode: varchar("lastSyncErrorCode", { length: 96 }),
     sourceSystem: varchar("sourceSystem", { length: 128 }).notNull(),

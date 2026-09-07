@@ -10,7 +10,6 @@
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import type { EnterpriseUserAdapter } from "@/lib/identity/enterprise-user-adapter";
 import {
   getPrincipalBinding,
   listPrincipalBindingsByUser,
@@ -370,21 +369,15 @@ describe("resolver", () => {
       displayName: "目录中的停用用户",
       status: "disabled",
     });
-    const failingEnterpriseAdapter: EnterpriseUserAdapter = {
-      kind: "enterprise",
-      async resolveUser() {
-        return { status: "unavailable" };
-      },
-    };
     const headers = new Headers({
       "x-snow-user-id": "employee-disabled-1",
       "x-snow-user-email": "untrusted-sso@example.test",
       "x-snow-user-name": "Untrusted SSO name",
     });
 
-    await expect(
-      resolvePrincipal(headers, "employee", { enterpriseUserAdapter: failingEnterpriseAdapter }),
-    ).rejects.toMatchObject({ code: "user_disabled" });
+    await expect(resolvePrincipal(headers, "employee")).rejects.toMatchObject({
+      code: "user_disabled",
+    });
 
     const after = await getUserIdentityById(disabled.id);
     expect(after).toMatchObject({

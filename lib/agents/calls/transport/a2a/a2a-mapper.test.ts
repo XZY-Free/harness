@@ -29,7 +29,7 @@ describe("A2A completed Host Action 投影边界", () => {
                     ui_actions: [
                       {
                         action_id: "unsafe-support",
-                        action_type: "offer_human_support",
+                        action_type: "open_external_link",
                         title: "联系支持",
                         label: "联系支持",
                         description: null,
@@ -47,7 +47,7 @@ describe("A2A completed Host Action 投影边界", () => {
       createA2AArtifactCache(),
       {
         confirmationActionKeys: [],
-        uiActionTypes: ["offer_human_support"],
+        uiActionTypes: ["open_external_link"],
         uiActionTargetKeys: [],
       },
     );

@@ -181,12 +181,5 @@ function assertHostAction(action: HostAction, platformPolicy: HostActionPlatform
     ) {
       throw new Error("Host Action 外链非法");
     }
-  } else if (
-    action.target_key !== null ||
-    action.web_path !== null ||
-    !action.url ||
-    !isTrustedExternalUrl(action.url, platformPolicy.externalAllowedHosts)
-  ) {
-    throw new Error("Host Action 人工帮助入口负载非法");
   }
 }

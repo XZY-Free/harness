@@ -10,9 +10,6 @@ import {
   type EnterpriseAttributeKey,
   type JsonValue,
 } from "@/lib/identity/enterprise-user";
-import { getEnterpriseUserProfileFacts } from "@/lib/identity/enterprise-user-profile-queries";
-import { attributesFromRows } from "@/lib/identity/enterprise-user-sync";
-import { getUserIdentityForTenant } from "@/lib/identity/user-identity-queries";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { and, eq } from "drizzle-orm";
 
@@ -121,29 +118,6 @@ export async function loadEnterpriseUserAccessPolicy(
     .limit(1);
   if (!row) throw new EnterpriseUserAccessPolicyError("AgentRevision 不存在或不属于当前租户");
   return parseEnterpriseUserAccessPolicy(row.requirements);
-}
-
-/** 读取当前用户的最新可信企业资料状态；不接受客户端字段。 */
-export async function loadCurrentEnterpriseUserProfile(
-  tenantId: string,
-  userIdentityId: string,
-): Promise<CurrentEnterpriseUserProfile> {
-  const identity = await getUserIdentityForTenant(userIdentityId, tenantId);
-  if (!identity) return { profileStatus: "unavailable", lastVerifiedAt: null, attributes: {} };
-  const facts = await getEnterpriseUserProfileFacts(tenantId, identity.id);
-  const profileStatus =
-    identity.status === "disabled"
-      ? "disabled"
-      : facts?.syncState === null || !facts?.syncState
-        ? "unavailable"
-        : facts.syncState.stale
-          ? "stale"
-          : "fresh";
-  return {
-    profileStatus,
-    lastVerifiedAt: facts?.syncState?.lastVerifiedAt ?? null,
-    attributes: attributesFromRows(facts?.attributes ?? []),
-  };
 }
 
 /** 按 exact Revision 的 allowlist 生成可冻结、可公开的企业用户上下文。 */

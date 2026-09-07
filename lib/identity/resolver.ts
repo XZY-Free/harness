@@ -11,18 +11,20 @@
  *
  * audience=runtime/gateway/admin 的 Workload Token 验证见 resolveWorkloadPrincipal。
  */
-import { authConfig } from "@/lib/config";
-import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { type ApiAudience, apiError, generateRequestId } from "@/lib/http";
+import { acceptEnterpriseProfileObservation } from "@/lib/identity/accept-enterprise-profile-observation";
+import type { UserAuthenticationProvider } from "@/lib/identity/authentication-provider";
+import type {
+  EnterpriseProfileObservation,
+  EnterpriseProfileSource,
+  EnterpriseProfileSourceResult,
+} from "@/lib/identity/enterprise-profile-source";
 import type { NormalizedEnterpriseUserProfile } from "@/lib/identity/enterprise-user";
 import {
-  type SelectedEnterpriseUserAdapter,
-  getEnterpriseUserAdapter,
-} from "@/lib/identity/enterprise-user-adapter";
-import {
-  type EnterpriseUserProfileStatus,
-  syncEnterpriseUserProfile,
-} from "@/lib/identity/enterprise-user-sync";
+  attributesFromRows,
+  getEnterpriseUserProfileFacts,
+} from "@/lib/identity/enterprise-user-profile-queries";
+import { getIdentityExtensions } from "@/lib/identity/identity-extension-bootstrap";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { getUserIdentityBySubject, upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -57,12 +59,23 @@ export interface CurrentUserContext extends Principal {
   enterpriseAttributes: NormalizedEnterpriseUserProfile["attributes"];
 }
 
+export type EnterpriseUserProfileStatus = "fresh" | "stale" | "unavailable" | "disabled";
+
+interface ResolvedEnterpriseProfile {
+  userIdentity: Awaited<ReturnType<typeof upsertUserIdentity>>;
+  profileStatus: EnterpriseUserProfileStatus;
+  lastVerifiedAt: Date | null;
+  profileFingerprint: string | null;
+  attributes: NormalizedEnterpriseUserProfile["attributes"];
+}
+
 /** 认证失败错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
 export class AuthenticationError extends Error {
   constructor(
     public readonly code:
       | "missing_identity"
       | "missing_email"
+      | "authentication_denied"
       | "tenant_suspended"
       | "user_disabled",
     message: string,
@@ -71,9 +84,10 @@ export class AuthenticationError extends Error {
   }
 }
 
-/** Resolver 注入仅用于受控测试；生产始终从唯一注册表选择正式适配器。 */
+/** Resolver 注入仅用于受控测试；生产始终从唯一注册表选择正式认证提供器。 */
 export interface ResolvePrincipalOptions {
-  enterpriseUserAdapter?: SelectedEnterpriseUserAdapter;
+  /** 仅用于受控测试和静态私有装配；生产默认使用冻结扩展。 */
+  authenticationProvider?: UserAuthenticationProvider;
   /** 仅认证链传入的已验证 claims；不得来自请求体、Agent 或用户提交数据。 */
   trustedAuthenticationClaims?: Readonly<Record<string, unknown>>;
 }
@@ -92,39 +106,6 @@ export function authErrorResponse(
   return null;
 }
 
-function headerValue(headers: Headers, name: string): string | null {
-  const value = headers.get(name);
-  return value?.trim() ? value.trim() : null;
-}
-
-/** 从 header 解析原始身份（dev 或 trusted-headers）。 */
-function resolveRawIdentity(headers: Headers): {
-  externalSubject: string;
-  email: string;
-  displayName: string | null;
-} {
-  if (authConfig.mode === "dev") {
-    return {
-      externalSubject: DEFAULT_USER_ID,
-      email: DEFAULT_USER_EMAIL,
-      displayName: DEFAULT_USER_NAME,
-    };
-  }
-
-  const externalSubject = headerValue(headers, authConfig.externalIdHeader);
-  const email = headerValue(headers, authConfig.emailHeader);
-  const displayName = headerValue(headers, authConfig.nameHeader);
-
-  if (!externalSubject) {
-    throw new AuthenticationError("missing_identity", "缺少 SSO 用户标识");
-  }
-  if (!email) {
-    throw new AuthenticationError("missing_email", "缺少 SSO 用户邮箱");
-  }
-
-  return { externalSubject, email, displayName };
-}
-
 /**
  * 从请求解析 可信主体（HTTP route 入口用）。
  *
@@ -141,41 +122,51 @@ export async function resolvePrincipal(
     throw new AuthenticationError("tenant_suspended", "租户已被暂停");
   }
 
-  const { externalSubject, email, displayName } = resolveRawIdentity(headers);
-  const adapter = options.enterpriseUserAdapter ?? getEnterpriseUserAdapter();
-
-  // 开源默认模式保留既有标准身份漂移更新。企业模式中原始 SSO 只用于定位主体，
-  // 不能在私有目录成功验证之前更新 email/displayName/status，更不能重启 disabled 身份。
-  const identity =
-    adapter.kind === "default"
-      ? await upsertUserIdentity({
-          tenantId: tenant.id,
-          externalSubject,
-          email,
-          displayName,
-        })
-      : await getUserIdentityBySubject(tenant.id, externalSubject);
-
-  const synced = await syncEnterpriseUserProfile({
-    subject: {
-      tenantId: tenant.id,
-      tenantKey: tenant.key,
-      externalSubject,
-      email,
-      displayName,
-    },
-    ...(identity ? { userIdentityId: identity.id } : {}),
-    adapter,
-    trustedAuthenticationClaims: options.trustedAuthenticationClaims,
+  const extension = await getIdentityExtensions();
+  const authenticationProvider = options.authenticationProvider ?? extension.authenticationProvider;
+  const authentication = await authenticationProvider.authenticate({ headers });
+  if (authentication.status === "unauthenticated") {
+    throw new AuthenticationError("missing_identity", "缺少 SSO 用户标识");
+  }
+  if (authentication.status === "denied") {
+    const code = authentication.reason.includes("邮箱") ? "missing_email" : "authentication_denied";
+    throw new AuthenticationError(code, authentication.reason);
+  }
+  const { externalSubject, email, displayName, trustedAuthenticationClaims } =
+    authentication.evidence;
+  const existingIdentity = await getUserIdentityBySubject(tenant.id, externalSubject);
+  const identity = await upsertUserIdentity({
+    tenantId: tenant.id,
+    externalSubject,
+    email: existingIdentity?.status === "disabled" ? existingIdentity.email : email,
+    displayName:
+      existingIdentity?.status === "disabled" ? existingIdentity.displayName : displayName,
+    status: existingIdentity?.status ?? "active",
   });
+  const synced = extension.profileSource
+    ? await resolveConfiguredProfile({
+        tenant,
+        userIdentity: identity,
+        source: extension.profileSource,
+        observation: authentication.evidence.enterpriseProfileObservation,
+        trustedAuthenticationClaims:
+          options.trustedAuthenticationClaims ?? trustedAuthenticationClaims,
+      })
+    : {
+        userIdentity: identity,
+        profileStatus: "unavailable" as const,
+        lastVerifiedAt: null,
+        profileFingerprint: null,
+        attributes: {},
+      };
 
   // Employee Principal 是全部员工业务 API 的统一门禁；已停用用户不能建立绑定、
-  // 不能继续业务请求，也不能借适配器失败走 stale 路径恢复为 active。
+  // 不能继续业务请求，也不能借认证或资料来源失败走 stale 路径恢复为 active。
   if (audience === "employee" && synced.userIdentity.status === "disabled") {
     throw new AuthenticationError("user_disabled", "当前用户已停用");
   }
 
-  // 同步后使用适配器确认过的标准字段建立绑定，避免企业资料漂移后绑定显示名落后。
+  // 同步后使用认证链确认过的标准字段建立绑定，避免身份资料漂移后绑定显示名落后。
   await upsertPrincipalBinding({
     tenantId: tenant.id,
     subjectType: "user",
@@ -195,6 +186,73 @@ export async function resolvePrincipal(
     profileStatus: synced.profileStatus,
     lastVerifiedAt: synced.lastVerifiedAt,
     enterpriseAttributes: synced.attributes,
+  };
+}
+
+async function resolveConfiguredProfile(params: {
+  tenant: { id: string; key: string };
+  userIdentity: Awaited<ReturnType<typeof upsertUserIdentity>>;
+  source: NonNullable<Awaited<ReturnType<typeof getIdentityExtensions>>["profileSource"]>;
+  observation?: EnterpriseProfileObservation;
+  trustedAuthenticationClaims: Readonly<Record<string, unknown>>;
+}): Promise<ResolvedEnterpriseProfile> {
+  const now = new Date();
+  let result: EnterpriseProfileSourceResult | undefined = params.observation
+    ? { status: "observed" as const, observation: params.observation }
+    : undefined;
+  if (!result && params.source.observe) {
+    result = await params.source.observe({
+      subject: {
+        tenantId: params.tenant.id,
+        tenantKey: params.tenant.key,
+        externalSubject: params.userIdentity.externalSubject,
+      },
+      signal: new AbortController().signal,
+      now,
+      trustedAuthenticationClaims: params.trustedAuthenticationClaims,
+    });
+  }
+  if (result?.status === "observed") {
+    await acceptEnterpriseProfileObservation({
+      observation: result.observation,
+      source: params.source,
+      now,
+    });
+  }
+  const facts = await getEnterpriseUserProfileFacts(params.tenant.id, params.userIdentity.id);
+  const state = facts?.syncState;
+  if (!state || !params.source.trusted) {
+    return {
+      userIdentity: params.userIdentity,
+      profileStatus: "unavailable" as const,
+      lastVerifiedAt: state?.lastVerifiedAt ?? null,
+      profileFingerprint: state?.profileFingerprint ?? null,
+      attributes: {},
+    };
+  }
+  const freshUntil = new Date(
+    Math.min(
+      state.freshUntil.getTime(),
+      state.lastVerifiedAt.getTime() + params.source.maxFreshAgeMs,
+    ),
+  );
+  const staleUntil = new Date(
+    Math.min(state.staleUntil.getTime(), freshUntil.getTime() + params.source.maxStaleAgeMs),
+  );
+  const profileStatus: EnterpriseUserProfileStatus =
+    params.userIdentity.status === "disabled"
+      ? "disabled"
+      : now < freshUntil
+        ? "fresh"
+        : now < staleUntil
+          ? "stale"
+          : "unavailable";
+  return {
+    userIdentity: params.userIdentity,
+    profileStatus,
+    lastVerifiedAt: state.lastVerifiedAt,
+    profileFingerprint: state.profileFingerprint,
+    attributes: attributesFromRows(facts.attributes),
   };
 }
 

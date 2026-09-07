@@ -39,7 +39,7 @@ describe("HostActionItem", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
-  it("外链与人工支持均使用已投影的可信入口，并且不自动执行", () => {
+  it("外链使用已投影的可信入口，并且不自动执行", () => {
     render(
       <HostActionItem
         item={item({
@@ -58,25 +58,5 @@ describe("HostActionItem", () => {
     expect(link.getAttribute("href")).toBe("https://docs.example.com/help");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
-
-    cleanup();
-    render(
-      <HostActionItem
-        item={item({
-          action_id: "action-3",
-          action_type: "offer_human_support",
-          title: "联系人工支持",
-          label: "联系支持",
-          description: null,
-          target_key: null,
-          web_path: null,
-          url: "https://support.example.com/help",
-        })}
-      />,
-    );
-    const supportLink = screen.getByRole("link", { name: "联系支持" });
-    expect(supportLink.getAttribute("href")).toBe("https://support.example.com/help");
-    expect(supportLink.getAttribute("target")).toBe("_blank");
-    expect(supportLink.getAttribute("rel")).toBe("noopener noreferrer");
   });
 });

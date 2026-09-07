@@ -72,9 +72,19 @@ describe("enterprise-user profile normalization", () => {
     const reorderedNormalized = normalizeEnterpriseUserProfile(reordered);
 
     expect(reorderedNormalized).toEqual(normalized);
-    expect(computeEnterpriseProfileFingerprint(reorderedNormalized)).toBe(
-      computeEnterpriseProfileFingerprint(normalized),
-    );
+    const fingerprintInput = {
+      tenantId: "tenant-1",
+      userIdentityId: "user-1",
+      externalSubject: normalized.externalSubject,
+      sourceSystem: normalized.sourceSystem,
+      attributes: normalized.attributes,
+    };
+    expect(
+      computeEnterpriseProfileFingerprint({
+        ...fingerprintInput,
+        attributes: reorderedNormalized.attributes,
+      }),
+    ).toBe(computeEnterpriseProfileFingerprint(fingerprintInput));
   });
 
   it("把企业 disabled 与 inactive 统一映射为 SnowHarness disabled", () => {
@@ -106,6 +116,34 @@ describe("enterprise-user profile normalization", () => {
           attributes: { ...profile.attributes, jobLevel: 5 },
         }),
       "enterprise_profile_attribute_type_invalid",
+    );
+  });
+
+  it("企业事实指纹不因邮箱、显示名或平台状态变化而变化", () => {
+    const normalized = normalizeEnterpriseUserProfile(profile);
+    const renamed = normalizeEnterpriseUserProfile({
+      ...profile,
+      email: "new-address@example.test",
+      displayName: "新名称",
+      status: "disabled",
+    });
+
+    expect(
+      computeEnterpriseProfileFingerprint({
+        tenantId: "tenant-1",
+        userIdentityId: "user-1",
+        externalSubject: renamed.externalSubject,
+        sourceSystem: renamed.sourceSystem,
+        attributes: renamed.attributes,
+      }),
+    ).toBe(
+      computeEnterpriseProfileFingerprint({
+        tenantId: "tenant-1",
+        userIdentityId: "user-1",
+        externalSubject: normalized.externalSubject,
+        sourceSystem: normalized.sourceSystem,
+        attributes: normalized.attributes,
+      }),
     );
   });
 });

@@ -43,10 +43,8 @@ import {
   AgentTransportError,
 } from "@/lib/agents/calls/transport/agent-transport";
 import type { PlatformContextEnvironment } from "@/lib/context/enrichment/build-invocation-context-bundle";
-import {
-  loadCurrentEnterpriseUserProfile,
-  loadEnterpriseUserAccessPolicy,
-} from "@/lib/identity/enterprise-user-access-policy";
+import { loadEnterpriseUserAccessPolicy } from "@/lib/identity/enterprise-user-access-policy";
+import { getUserIdentityForTenant } from "@/lib/identity/user-identity-queries";
 
 /** resumeAgentCall 冻结 API 入参。 */
 export interface ResumeAgentCallCommand {
@@ -179,11 +177,11 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
     if (!env?.executionSubject || env.executionSubject.subjectType !== "user") {
       throw new AgentCallResumeError("resume 缺少可信用户主体", "context_missing");
     }
-    const currentProfile = await loadCurrentEnterpriseUserProfile(
-      tenantId,
+    const currentIdentity = await getUserIdentityForTenant(
       env.executionSubject.subjectId,
+      tenantId,
     );
-    if (currentProfile.profileStatus === "disabled") {
+    if (currentIdentity?.status === "disabled") {
       throw new AgentCallResumeError(
         "企业用户已停用，禁止恢复原 AgentCall",
         "enterprise_context_disabled",
