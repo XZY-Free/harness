@@ -418,25 +418,6 @@ export const agentHostControlConfig = {
       .filter((value) => /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value))
       .filter((value, index, values) => values.indexOf(value) === index);
   },
-
-  get humanSupportUrl(): string | null {
-    const raw = optionalEnv("SNOW_HUMAN_SUPPORT_URL", "").trim();
-    if (!raw) return null;
-    try {
-      const parsed = new URL(raw);
-      if (
-        parsed.protocol !== "https:" ||
-        parsed.username ||
-        parsed.password ||
-        !this.externalAllowedHosts.includes(parsed.hostname.toLowerCase())
-      ) {
-        return null;
-      }
-      return parsed.toString();
-    } catch {
-      return null;
-    }
-  },
 } as const;
 
 export const appConfig = {

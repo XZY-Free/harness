@@ -372,8 +372,8 @@ describe("resolver", () => {
     });
     const failingEnterpriseAdapter: EnterpriseUserAdapter = {
       kind: "enterprise",
-      async fetchFullProfile() {
-        throw new Error("private directory is unavailable");
+      async resolveUser() {
+        return { status: "unavailable" };
       },
     };
     const headers = new Headers({

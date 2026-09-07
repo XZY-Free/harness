@@ -20,7 +20,7 @@
  * message/send（resume）同步返回完整 Task（kind:"task"，id/contextId/status/artifacts）。
  *
  * 场景：completed / chunks / input_required / long_running / failed /
- * rejected / malformed / subject_echo / confirmation_chain。场景由测试显式选择，Provider 按 A2A wire
+ * rejected / malformed / subject_echo / confirmation_chain / confirmation_resolution。场景由测试显式选择，Provider 按 A2A wire
  * 语义响应。
  */
 import { randomUUID } from "node:crypto";
@@ -60,6 +60,7 @@ export type A2ATestProviderScenario =
   | "rejected"
   | "malformed"
   | "subject_echo"
+  | "confirmation_resolution"
   | "incremental";
 
 /** Provider 收到的 message/stream|message/send 请求（供测试断言 wire 事实）。 */
@@ -77,6 +78,8 @@ export interface CapturedA2ARequest {
   responseContextId?: string;
   /** message.parts 文本。 */
   text: string;
+  /** confirmation resume 的公开解析事实（测试观测，不进入生产代码）。 */
+  confirmationResolution?: "approve" | "deny";
   /** resume message/send 时为 true。 */
   resume: boolean;
 }
@@ -128,7 +131,7 @@ interface RpcRequest {
       kind?: string;
       messageId?: string;
       role?: string;
-      parts?: Array<{ kind?: string; text?: string }>;
+      parts?: Array<{ kind?: string; text?: string; data?: unknown }>;
       contextId?: string;
       taskId?: string;
       metadata?: Record<string, unknown>;
@@ -330,6 +333,7 @@ export async function startA2ATestProvider(
         .filter((p) => p.kind === "text")
         .map((p) => p.text ?? "")
         .join("");
+      const confirmationResolution = readConfirmationResolution(message.parts);
       const capturedRequest: CapturedA2ARequest = {
         method: rpc.method ?? "",
         messageMetadata: message.metadata,
@@ -337,6 +341,7 @@ export async function startA2ATestProvider(
         taskId: message.taskId,
         text,
         resume: message.taskId !== undefined,
+        ...(confirmationResolution ? { confirmationResolution } : {}),
       };
       captured.push(capturedRequest);
 
@@ -385,7 +390,7 @@ export async function startA2ATestProvider(
                     ],
                   };
                 })()
-              : resumeResponseShape === "task"
+              : scenario === "confirmation_resolution"
                 ? {
                     kind: "task",
                     id: corrupted(resumeTaskId),
@@ -393,24 +398,50 @@ export async function startA2ATestProvider(
                     status: { state: "completed" },
                     artifacts: [
                       {
-                        artifactId: "art-final",
+                        artifactId: "art-confirmation-resolution",
                         name: "answer",
                         parts: [
-                          { kind: "text", text: "申请已提交完成" },
-                          { kind: "data", data: { result: { status: "ok" } } },
+                          {
+                            kind: "text",
+                            text:
+                              confirmationResolution === "deny"
+                                ? "已按你的选择未执行"
+                                : "已按你的选择执行",
+                          },
+                          { kind: "data", data: { resolution: confirmationResolution ?? null } },
                         ],
                       },
                     ],
                   }
-                : {
-                    kind: "status-update",
-                    taskId: corrupted(resumeTaskId),
-                    contextId: corrupted(resumeContextId),
-                    status: {
-                      state: "completed",
-                      message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
-                    },
-                  };
+                : resumeResponseShape === "task"
+                  ? {
+                      kind: "task",
+                      id: corrupted(resumeTaskId),
+                      contextId: corrupted(resumeContextId),
+                      status: { state: "completed" },
+                      artifacts: [
+                        {
+                          artifactId: "art-final",
+                          name: "answer",
+                          parts: [
+                            { kind: "text", text: "申请已提交完成" },
+                            { kind: "data", data: { result: { status: "ok" } } },
+                          ],
+                        },
+                      ],
+                    }
+                  : {
+                      kind: "status-update",
+                      taskId: corrupted(resumeTaskId),
+                      contextId: corrupted(resumeContextId),
+                      status: {
+                        state: "completed",
+                        message: {
+                          role: "agent",
+                          parts: [{ kind: "text", text: "已收到补充信息" }],
+                        },
+                      },
+                    };
           res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id ?? 1, result }));
           return;
         }
@@ -422,6 +453,7 @@ export async function startA2ATestProvider(
           chunks: "completed",
           input_required: "input-required",
           confirmation_chain: "input-required",
+          confirmation_resolution: "input-required",
           long_running: "working",
           incremental: "completed",
           failed: "failed",
@@ -558,6 +590,7 @@ export async function startA2ATestProvider(
           statusUpdate("input-required");
           break;
         case "confirmation_chain":
+        case "confirmation_resolution":
           statusUpdate("working");
           frame({
             jsonrpc: "2.0",
@@ -693,4 +726,19 @@ export async function startA2ATestProvider(
       );
     },
   };
+}
+
+function readConfirmationResolution(
+  parts: Array<{ kind?: string; text?: string; data?: unknown }> | undefined,
+): "approve" | "deny" | undefined {
+  const serialized = JSON.stringify(parts ?? []);
+  if (serialized.includes('"resolution":"approve"')) return "approve";
+  if (serialized.includes('"resolution":"deny"')) return "deny";
+  const dataPart = parts?.find((part) => part.kind === "data");
+  const data = dataPart?.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const controls = (data as Record<string, unknown>).host_controls;
+  if (!controls || typeof controls !== "object" || Array.isArray(controls)) return undefined;
+  const resolution = (controls as Record<string, unknown>).confirmation_resolution;
+  return resolution === "approve" || resolution === "deny" ? resolution : undefined;
 }

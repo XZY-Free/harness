@@ -74,6 +74,8 @@ export class AuthenticationError extends Error {
 /** Resolver 注入仅用于受控测试；生产始终从唯一注册表选择正式适配器。 */
 export interface ResolvePrincipalOptions {
   enterpriseUserAdapter?: SelectedEnterpriseUserAdapter;
+  /** 仅认证链传入的已验证 claims；不得来自请求体、Agent 或用户提交数据。 */
+  trustedAuthenticationClaims?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -164,6 +166,7 @@ export async function resolvePrincipal(
     },
     ...(identity ? { userIdentityId: identity.id } : {}),
     adapter,
+    trustedAuthenticationClaims: options.trustedAuthenticationClaims,
   });
 
   // Employee Principal 是全部员工业务 API 的统一门禁；已停用用户不能建立绑定、

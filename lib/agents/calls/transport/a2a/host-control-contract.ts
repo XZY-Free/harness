@@ -45,7 +45,6 @@ export interface HostAction {
  */
 export interface HostActionPlatformPolicy {
   externalAllowedHosts: readonly string[];
-  humanSupportUrl: string | null;
 }
 
 export type ParsedHostControls =
@@ -68,7 +67,6 @@ export function defaultHostControlCapabilityPolicy(): HostControlCapabilityPolic
 export function defaultHostActionPlatformPolicy(): HostActionPlatformPolicy {
   return {
     externalAllowedHosts: agentHostControlConfig.externalAllowedHosts,
-    humanSupportUrl: agentHostControlConfig.humanSupportUrl,
   };
 }
 
@@ -158,9 +156,17 @@ export function parseHostControls(
   ) {
     throw new HostControlProtocolError("ui_actions 数量必须为 1-3");
   }
-  const actions = controls.ui_actions.map((value) =>
-    parseHostAction(value, policy, platformPolicy),
-  );
+  const actions: HostAction[] = [];
+  for (const value of controls.ui_actions) {
+    try {
+      actions.push(parseHostAction(value, policy, platformPolicy));
+    } catch (error) {
+      // 一个结构合法但不满足 URL 安全策略的动作不能拖垮同一 completed 结果中的
+      // 普通文本/数据；结构协议错误仍然整体 fail closed。
+      if (error instanceof HostActionRejectedError) continue;
+      throw error;
+    }
+  }
   const ids = new Set(actions.map((action) => action.action_id));
   if (ids.size !== actions.length)
     throw new HostControlProtocolError("ui_actions.action_id 不得重复");
@@ -173,6 +179,16 @@ export class HostControlProtocolError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "HostControlProtocolError";
+  }
+}
+
+/** 单个 Host Action 被安全策略拒绝；只允许在 completed ui_actions 中被过滤。 */
+export class HostActionRejectedError extends Error {
+  readonly code = "host_action_rejected";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "HostActionRejectedError";
   }
 }
 
@@ -234,7 +250,9 @@ function parseHostAction(
       ? null
       : boundedString(value.target_key, "target_key", 128);
   const url =
-    value.url === undefined || value.url === null ? null : boundedString(value.url, "url", 2_048);
+    value.url === undefined || value.url === null
+      ? null
+      : boundedString(value.url, "url", 2_048, false);
 
   if (typedAction === "navigate") {
     if (!targetKey || url !== null || !policy.uiActionTargetKeys.includes(targetKey)) {
@@ -259,12 +277,9 @@ function parseHostAction(
     if (
       targetKey !== null ||
       !url ||
-      !isSafeExternalUrl(url) ||
-      !isHttpsUrl(url) ||
-      hasCredentials(url) ||
       !isTrustedExternalUrl(url, platformPolicy.externalAllowedHosts)
     ) {
-      throw new HostControlProtocolError("open_external_link.url 不符合 HTTPS 外链安全策略");
+      throw new HostActionRejectedError("open_external_link.url 不符合 HTTPS 外链安全策略");
     }
     return {
       action_id: actionId,
@@ -278,11 +293,11 @@ function parseHostAction(
       client_support: { web: true, desktop: true },
     };
   }
-  if (targetKey !== null || url !== null || !platformPolicy.humanSupportUrl) {
-    throw new HostControlProtocolError("offer_human_support 不允许携带 target 或 url");
+  if (targetKey !== null || !url) {
+    throw new HostActionRejectedError("offer_human_support 必须携带 Agent 提供的安全 URL");
   }
-  if (!isTrustedExternalUrl(platformPolicy.humanSupportUrl, platformPolicy.externalAllowedHosts)) {
-    throw new HostControlProtocolError("offer_human_support 未配置可信人工入口");
+  if (!isTrustedExternalUrl(url, platformPolicy.externalAllowedHosts)) {
+    throw new HostActionRejectedError("offer_human_support.url 不符合 HTTPS 外链安全策略");
   }
   return {
     action_id: actionId,
@@ -291,8 +306,8 @@ function parseHostAction(
     label,
     description,
     target_key: null,
-    // Agent 只声明“提供人工支持”；真实入口完全来自平台配置。
-    url: platformPolicy.humanSupportUrl,
+    // 入口属于具体 Agent；平台只负责通用 URL 安全校验与 allowlist。
+    url,
     web_path: null,
     client_support: { web: true, desktop: true },
   };
@@ -303,6 +318,7 @@ function parseHostAction(
  * `evil.trusted.example` 或同形 host 绕过。解析与持久化投影复用同一规则。
  */
 export function isTrustedExternalUrl(value: string, allowedHosts: readonly string[]): boolean {
+  if (!isSafeExternalUrl(value)) return false;
   try {
     const parsed = new URL(value);
     return (
@@ -334,11 +350,13 @@ function readStringList(value: unknown, name: string): string[] {
   return values;
 }
 
-function boundedString(value: unknown, name: string, max: number): string {
+function boundedString(value: unknown, name: string, max: number, rejectSecrets = true): string {
   if (typeof value !== "string" || value.trim().length === 0 || value.length > max) {
     throw new HostControlProtocolError(`${name} 必须是非空且不超过 ${max} 字符的字符串`);
   }
-  if (hasSecretLikeText(value)) throw new HostControlProtocolError(`${name} 含禁止的敏感内容`);
+  if (rejectSecrets && hasSecretLikeText(value)) {
+    throw new HostControlProtocolError(`${name} 含禁止的敏感内容`);
+  }
   return value.trim();
 }
 
@@ -373,23 +391,6 @@ function hasSecretLikeText(value: string): boolean {
   return /(?:bearer\s+|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential|private[_-]?key|tenant[_-]?id|invocation[_-]?id|user[_-]?id)/i.test(
     value,
   );
-}
-
-function hasCredentials(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.username.length > 0 || parsed.password.length > 0;
-  } catch {
-    return true;
-  }
-}
-
-function isHttpsUrl(value: string): boolean {
-  try {
-    return new URL(value).protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

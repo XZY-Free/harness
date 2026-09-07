@@ -19,7 +19,7 @@ import {
   normalizeEnterpriseUserProfile,
 } from "@/lib/identity/enterprise-user";
 import {
-  EnterpriseUserAdapterConfigurationError,
+  type EnterpriseUserAdapterContext,
   type EnterpriseUserAdapterSubject,
   type SelectedEnterpriseUserAdapter,
   getEnterpriseUserAdapter,
@@ -42,7 +42,7 @@ import { and, eq } from "drizzle-orm";
 export type EnterpriseUserProfileStatus = "fresh" | "stale" | "unavailable" | "disabled";
 
 export type EnterpriseUserSyncErrorCode =
-  | "enterprise_adapter_fetch_failed"
+  | "enterprise_adapter_unavailable"
   | "enterprise_profile_subject_mismatch"
   | "enterprise_profile_identity_mismatch"
   | "enterprise_profile_incomplete"
@@ -74,6 +74,8 @@ export async function syncEnterpriseUserProfile(params: {
   subject: EnterpriseUserAdapterSubject;
   userIdentityId?: string;
   adapter?: SelectedEnterpriseUserAdapter;
+  /** 认证链产生的可信 claims；仅传给 Adapter，不落库、不进审计、不进日志。 */
+  trustedAuthenticationClaims?: Readonly<Record<string, unknown>>;
   now?: Date;
 }): Promise<EnterpriseUserSyncResult> {
   const adapter = params.adapter ?? getEnterpriseUserAdapter();
@@ -96,30 +98,40 @@ export async function syncEnterpriseUserProfile(params: {
     };
   }
 
-  let rawProfile: EnterpriseUserProfileSnapshot;
-  try {
-    rawProfile = await adapter.fetchFullProfile(params.subject);
-  } catch (error) {
-    if (error instanceof EnterpriseUserAdapterConfigurationError) throw error;
-    return markSyncFailure({
+  const adapterContext: EnterpriseUserAdapterContext = {
+    subject: params.subject,
+    trustedAuthenticationClaims: params.trustedAuthenticationClaims ?? {},
+  };
+  const adapterResult = await adapter.resolveUser(adapterContext);
+  if (adapterResult.status === "unavailable") {
+    return recordSyncUnavailable({
       ...params,
-      code: "enterprise_adapter_fetch_failed",
-      message: "企业用户适配器读取失败",
+      code: "enterprise_adapter_unavailable",
+      message: "企业用户适配器未提供当前可用资料",
     });
   }
+  if (adapterResult.status === "stale") {
+    return reuseLastKnownProfile(params);
+  }
+
+  const rawProfile: EnterpriseUserProfileSnapshot = adapterResult.profile;
 
   let profile: NormalizedEnterpriseUserProfile;
   try {
     profile = normalizeEnterpriseUserProfile(rawProfile);
   } catch (error) {
     if (error instanceof EnterpriseProfileValidationError) {
-      return markSyncFailure({ ...params, code: error.code, message: "企业用户资料校验失败" });
+      return recordSyncUnavailable({
+        ...params,
+        code: error.code,
+        message: "企业用户资料校验失败",
+      });
     }
     throw error;
   }
 
   if (profile.externalSubject !== params.subject.externalSubject) {
-    return markSyncFailure({
+    return recordSyncUnavailable({
       ...params,
       code: "enterprise_profile_subject_mismatch",
       message: "企业用户资料主体与可信认证主体不一致",
@@ -228,10 +240,11 @@ export async function syncEnterpriseUserProfile(params: {
   });
 }
 
-async function markSyncFailure(params: {
+async function recordSyncUnavailable(params: {
   subject: EnterpriseUserAdapterSubject;
   userIdentityId?: string;
   adapter?: SelectedEnterpriseUserAdapter;
+  trustedAuthenticationClaims?: Readonly<Record<string, unknown>>;
   now?: Date;
   code: EnterpriseUserSyncErrorCode;
   message: string;
@@ -245,7 +258,6 @@ async function markSyncFailure(params: {
   }
 
   const facts = await getEnterpriseUserProfileFacts(params.subject.tenantId, identity.id);
-  const now = params.now ?? new Date();
   await db.transaction(async (tx) => {
     if (facts?.syncState) {
       await upsertEnterpriseProfileSyncState(
@@ -254,7 +266,7 @@ async function markSyncFailure(params: {
         {
           profileFingerprint: facts.syncState.profileFingerprint,
           lastVerifiedAt: facts.syncState.lastVerifiedAt,
-          stale: true,
+          stale: facts.syncState.stale,
           lastSyncErrorCode: params.code,
           sourceSystem: facts.syncState.sourceSystem,
         },
@@ -279,11 +291,63 @@ async function markSyncFailure(params: {
 
   return {
     userIdentity: identity,
-    profileStatus:
-      identity.status === "disabled" ? "disabled" : facts?.syncState ? "stale" : "unavailable",
+    profileStatus: identity.status === "disabled" ? "disabled" : "unavailable",
     lastVerifiedAt: facts?.syncState?.lastVerifiedAt ?? null,
     profileFingerprint: facts?.syncState?.profileFingerprint ?? null,
-    attributes: attributesFromRows(facts?.attributes ?? []),
+    attributes: {},
+  };
+}
+
+/**
+ * Adapter 明确允许复用最后一次成功资料时，Core 才能把请求标记为 stale 并投影旧字段。
+ * 没有可复用事实时仍然 fail closed 为 unavailable，不能凭空制造企业资料。
+ */
+async function reuseLastKnownProfile(params: {
+  subject: EnterpriseUserAdapterSubject;
+  userIdentityId?: string;
+  adapter?: SelectedEnterpriseUserAdapter;
+  trustedAuthenticationClaims?: Readonly<Record<string, unknown>>;
+  now?: Date;
+}): Promise<EnterpriseUserSyncResult> {
+  const identity = await readIdentity(params.subject.tenantId, params.subject.externalSubject);
+  if (!identity || (params.userIdentityId && identity.id !== params.userIdentityId)) {
+    throw new EnterpriseUserProfileSyncError(
+      "enterprise_profile_identity_mismatch",
+      "企业资料无法复用且当前标准身份不存在",
+    );
+  }
+
+  const facts = await getEnterpriseUserProfileFacts(params.subject.tenantId, identity.id);
+  const syncState = facts?.syncState;
+  if (!syncState) {
+    return recordSyncUnavailable({
+      ...params,
+      code: "enterprise_adapter_unavailable",
+      message: "适配器允许复用资料，但当前用户没有最后成功资料",
+    });
+  }
+
+  await db.transaction(async (tx) => {
+    await upsertEnterpriseProfileSyncState(
+      params.subject.tenantId,
+      identity.id,
+      {
+        profileFingerprint: syncState.profileFingerprint,
+        lastVerifiedAt: syncState.lastVerifiedAt,
+        stale: true,
+        lastSyncErrorCode: null,
+        sourceSystem: syncState.sourceSystem,
+      },
+      tx,
+    );
+  });
+
+  return {
+    userIdentity: identity,
+    profileStatus: identity.status === "disabled" ? "disabled" : "stale",
+    lastVerifiedAt: syncState.lastVerifiedAt,
+    profileFingerprint: syncState.profileFingerprint,
+    attributes: attributesFromRows(facts.attributes),
   };
 }
 

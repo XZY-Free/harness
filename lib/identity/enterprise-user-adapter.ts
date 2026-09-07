@@ -20,14 +20,35 @@ export interface EnterpriseUserAdapterSubject {
   displayName: string | null;
 }
 
+/**
+ * 认证链已经验证的上下文。claims 只在本次适配器调用中可见，禁止进入企业用户表、审计或日志。
+ * 企业部署方可以把 SSO claims、员工中心查询结果或组合后的可信资料放在这里；Core 不解释其来源。
+ */
+export interface EnterpriseUserAdapterContext {
+  readonly subject: EnterpriseUserAdapterSubject;
+  readonly trustedAuthenticationClaims: Readonly<Record<string, unknown>>;
+}
+
+export type EnterpriseUserAdapterResult =
+  | {
+      readonly status: "fresh";
+      readonly profile: EnterpriseUserProfileSnapshot;
+    }
+  | {
+      readonly status: "stale";
+      readonly useLastKnownProfile: true;
+    }
+  | {
+      readonly status: "unavailable";
+    };
+
 export interface EnterpriseUserAdapter {
   readonly kind: "enterprise";
-  fetchFullProfile(subject: EnterpriseUserAdapterSubject): Promise<EnterpriseUserProfileSnapshot>;
+  resolveUser(context: EnterpriseUserAdapterContext): Promise<EnterpriseUserAdapterResult>;
 }
 
 interface DefaultEnterpriseUserAdapter {
   readonly kind: "default";
-  fetchFullProfile(subject: EnterpriseUserAdapterSubject): Promise<EnterpriseUserProfileSnapshot>;
 }
 
 export type SelectedEnterpriseUserAdapter = EnterpriseUserAdapter | DefaultEnterpriseUserAdapter;
@@ -74,16 +95,6 @@ export class EnterpriseUserAdapterRegistry {
 
 const defaultEnterpriseUserAdapter: DefaultEnterpriseUserAdapter = {
   kind: "default",
-  async fetchFullProfile(subject) {
-    return {
-      externalSubject: subject.externalSubject,
-      email: subject.email,
-      displayName: subject.displayName,
-      status: "active",
-      sourceSystem: "snowharness-default",
-      attributes: {},
-    };
-  },
 };
 
 let runtimeRegistry: EnterpriseUserAdapterRegistry | null = null;

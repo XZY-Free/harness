@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 
 const platformPolicy = {
   externalAllowedHosts: ["docs.example.test", "support.example.test"],
-  humanSupportUrl: "https://support.example.test/help",
 };
 
 function action(overrides: Partial<HostAction> = {}): HostAction {
@@ -72,5 +71,30 @@ describe("projectHostActionForThread", () => {
         },
       ),
     ).toThrow("Host Action 外链非法");
+  });
+
+  it("人工帮助入口使用 Agent 提供的 URL，不读取平台业务 URL 配置", () => {
+    expect(
+      projectHostActionForThread(
+        action({
+          action_id: "support-a",
+          action_type: "offer_human_support",
+          title: "联系人工支持",
+          label: "联系支持",
+          target_key: null,
+          url: "https://support.example.test/help-a",
+        }),
+        {
+          tenantId: "tenant-1",
+          threadId: "thread-1",
+          threadOwnerUserId: "user-1",
+          executionSubject: { tenantId: "tenant-1", subjectType: "user", subjectId: "user-1" },
+          platformPolicy,
+        },
+      ),
+    ).toMatchObject({
+      action_type: "offer_human_support",
+      url: "https://support.example.test/help-a",
+    });
   });
 });

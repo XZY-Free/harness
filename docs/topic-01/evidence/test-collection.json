@@ -7,15 +7,15 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 285,
-    "db": 110,
+    "unit": 286,
+    "db": 111,
     "integration": 10,
     "contract": 28,
     "e2e-web": 3,
     "e2e-desktop": 1,
     "e2e-cross-client": 2
   },
-  "total": 439,
+  "total": 441,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -1790,6 +1790,17 @@
     },
     {
       "file": "lib/agents/calls/transport/a2a-provider-blackbox.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/agents/calls/transport/a2a/a2a-mapper.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -3891,6 +3902,17 @@
     },
     {
       "file": "lib/runtime/continuation/invocation-continuation.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/continuation/production-invocation-continuation-worker.db.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,

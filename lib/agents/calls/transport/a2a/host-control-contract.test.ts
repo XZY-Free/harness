@@ -139,14 +139,14 @@ describe("A2A host_controls 合同", () => {
     ).toThrow(HostControlProtocolError);
   });
 
-  it("外链只接受 HTTPS，拒绝明文、内网和 userinfo", () => {
+  it("外链只接受 HTTPS，拒绝明文、内网和 userinfo；单个动作被过滤", () => {
     for (const url of [
       "http://example.com",
       "https://localhost/path",
       "https://user:password@example.com/path",
       "javascript:alert(1)",
     ]) {
-      expect(() =>
+      expect(
         parseHostControls(
           {
             host_controls: {
@@ -167,11 +167,11 @@ describe("A2A host_controls 合同", () => {
           "completed",
           policy,
         ),
-      ).toThrow(HostControlProtocolError);
+      ).toEqual({ kind: "ui_actions", actions: [] });
     }
   });
 
-  it("外链和人工支持只在平台明确登记可信域名与真实入口时生成", () => {
+  it("外链和人工支持 URL 都来自 Agent，并共用平台 allowlist", () => {
     const externalAction = {
       host_controls: {
         version: "1",
@@ -188,13 +188,13 @@ describe("A2A host_controls 合同", () => {
         ],
       },
     };
-    expect(() => parseHostControls(externalAction, "completed", policy)).toThrow(
-      HostControlProtocolError,
-    );
+    expect(parseHostControls(externalAction, "completed", policy)).toEqual({
+      kind: "ui_actions",
+      actions: [],
+    });
     expect(
       parseHostControls(externalAction, "completed", policy, {
         externalAllowedHosts: ["docs.example.test"],
-        humanSupportUrl: "https://support.example.test/help",
       }),
     ).toMatchObject({
       kind: "ui_actions",
@@ -213,7 +213,7 @@ describe("A2A host_controls 合同", () => {
               label: "联系支持",
               description: null,
               target_key: null,
-              url: null,
+              url: "https://support-a.example.test/help",
             },
           ],
         },
@@ -221,13 +221,37 @@ describe("A2A host_controls 合同", () => {
       "completed",
       policy,
       {
-        externalAllowedHosts: ["support.example.test"],
-        humanSupportUrl: "https://support.example.test/help",
+        externalAllowedHosts: ["support-a.example.test", "support-b.example.test"],
       },
     );
     expect(support).toMatchObject({
       kind: "ui_actions",
-      actions: [expect.objectContaining({ url: "https://support.example.test/help" })],
+      actions: [expect.objectContaining({ url: "https://support-a.example.test/help" })],
+    });
+
+    const secondSupport = parseHostControls(
+      {
+        host_controls: {
+          version: "1",
+          ui_actions: [
+            {
+              action_id: "support-2",
+              action_type: "offer_human_support",
+              title: "联系另一人工入口",
+              label: "联系支持",
+              description: null,
+              target_key: null,
+              url: "https://support-b.example.test/help",
+            },
+          ],
+        },
+      },
+      "completed",
+      policy,
+      { externalAllowedHosts: ["support-a.example.test", "support-b.example.test"] },
+    );
+    expect(secondSupport).toMatchObject({
+      actions: [expect.objectContaining({ url: "https://support-b.example.test/help" })],
     });
   });
 

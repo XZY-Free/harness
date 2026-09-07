@@ -4,7 +4,9 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
 import {
   type EnterpriseUserAdapter,
+  type EnterpriseUserAdapterContext,
   EnterpriseUserAdapterRegistry,
+  type EnterpriseUserAdapterResult,
 } from "@/lib/identity/enterprise-user-adapter";
 import {
   getEnterpriseUserProfileFacts,
@@ -100,31 +102,41 @@ describe("enterprise user profile snapshot sync", () => {
     return { tenant, identity };
   }
 
-  function registeredAdapter(profile: Record<string, unknown>): EnterpriseUserAdapter {
+  function registeredAdapter(
+    result: EnterpriseUserAdapterResult,
+    onResolve?: (context: EnterpriseUserAdapterContext) => void,
+  ): EnterpriseUserAdapter {
     const registry = new EnterpriseUserAdapterRegistry("enterprise");
     registry.registerEnterpriseAdapter({
       kind: "enterprise",
-      async fetchFullProfile() {
-        return profile as never;
+      async resolveUser(context) {
+        onResolve?.(context);
+        return result;
       },
     });
     return registry.resolve() as EnterpriseUserAdapter;
   }
 
+  function freshResult(profile: Record<string, unknown>): EnterpriseUserAdapterResult {
+    return { status: "fresh", profile: profile as never };
+  }
+
   it("完整快照首次写入、同指纹不制造审计噪音、变化删除消失字段", async () => {
     const { tenant, identity } = await seedIdentity("employee-sync-1");
-    const adapter = registeredAdapter({
-      externalSubject: "employee-sync-1",
-      email: "new@example.test",
-      displayName: "新名称",
-      status: "active",
-      sourceSystem: "deployment-private-directory",
-      attributes: {
-        employeeNo: "E-001",
-        departmentCode: "D-01",
-        dataScopes: { plants: ["P1"] },
-      },
-    });
+    const adapter = registeredAdapter(
+      freshResult({
+        externalSubject: "employee-sync-1",
+        email: "new@example.test",
+        displayName: "新名称",
+        status: "active",
+        sourceSystem: "deployment-private-directory",
+        attributes: {
+          employeeNo: "E-001",
+          departmentCode: "D-01",
+          dataScopes: { plants: ["P1"] },
+        },
+      }),
+    );
 
     const first = await syncEnterpriseUserProfile({
       subject: {
@@ -157,14 +169,16 @@ describe("enterprise user profile snapshot sync", () => {
     expect(second.profileFingerprint).toBe(first.profileFingerprint);
     expect(await listAuditEvents({ tenantId: tenant.id, targetId: identity.id })).toHaveLength(1);
 
-    const changedAdapter = registeredAdapter({
-      externalSubject: "employee-sync-1",
-      email: "new@example.test",
-      displayName: "新名称",
-      status: "disabled",
-      sourceSystem: "deployment-private-directory",
-      attributes: { employeeNo: "E-002" },
-    });
+    const changedAdapter = registeredAdapter(
+      freshResult({
+        externalSubject: "employee-sync-1",
+        email: "new@example.test",
+        displayName: "新名称",
+        status: "disabled",
+        sourceSystem: "deployment-private-directory",
+        attributes: { employeeNo: "E-002" },
+      }),
+    );
     const changed = await syncEnterpriseUserProfile({
       subject: {
         tenantId: tenant.id,
@@ -184,16 +198,23 @@ describe("enterprise user profile snapshot sync", () => {
     expect(await listAuditEvents({ tenantId: tenant.id, targetId: identity.id })).toHaveLength(2);
   });
 
-  it("同步失败保留最后验证事实并标记 stale；首次失败返回 unavailable", async () => {
+  it("stale 只能由 Adapter 明确授权；unavailable 不得把旧事实自动标记为 stale", async () => {
     const existing = await seedIdentity("employee-sync-2");
-    const successAdapter = registeredAdapter({
-      externalSubject: "employee-sync-2",
-      email: existing.identity.email,
-      displayName: existing.identity.displayName,
-      status: "active",
-      sourceSystem: "deployment-private-directory",
-      attributes: { employeeNo: "E-002" },
-    });
+    const trustedClaims = { employee_number: "E-002", private_scope: "not-persisted" };
+    let receivedContext: EnterpriseUserAdapterContext | undefined;
+    const successAdapter = registeredAdapter(
+      freshResult({
+        externalSubject: "employee-sync-2",
+        email: existing.identity.email,
+        displayName: existing.identity.displayName,
+        status: "active",
+        sourceSystem: "deployment-private-directory",
+        attributes: { employeeNo: "E-002" },
+      }),
+      (context) => {
+        receivedContext = context;
+      },
+    );
     await syncEnterpriseUserProfile({
       subject: {
         tenantId: existing.tenant.id,
@@ -204,13 +225,33 @@ describe("enterprise user profile snapshot sync", () => {
       },
       userIdentityId: existing.identity.id,
       adapter: successAdapter,
+      trustedAuthenticationClaims: trustedClaims,
       now: new Date("2026-09-05T04:00:00.000Z"),
     });
 
-    const failingAdapter = registeredAdapter({});
-    failingAdapter.fetchFullProfile = async () => {
-      throw new Error("deployment-private failure");
-    };
+    expect(receivedContext?.trustedAuthenticationClaims).toEqual(trustedClaims);
+    expect(
+      JSON.stringify(await getEnterpriseUserProfileFacts(existing.tenant.id, existing.identity.id)),
+    ).not.toContain("not-persisted");
+
+    const unavailableAfterSuccess = await syncEnterpriseUserProfile({
+      subject: {
+        tenantId: existing.tenant.id,
+        tenantKey: existing.tenant.key,
+        externalSubject: "employee-sync-2",
+        email: existing.identity.email,
+        displayName: existing.identity.displayName,
+      },
+      userIdentityId: existing.identity.id,
+      adapter: registeredAdapter({ status: "unavailable" }),
+    });
+    expect(unavailableAfterSuccess.profileStatus).toBe("unavailable");
+    expect(unavailableAfterSuccess.attributes).toEqual({});
+    expect(
+      (await getEnterpriseUserProfileFacts(existing.tenant.id, existing.identity.id))?.syncState,
+    ).toMatchObject({ stale: false, lastSyncErrorCode: "enterprise_adapter_unavailable" });
+
+    const staleAdapter = registeredAdapter({ status: "stale", useLastKnownProfile: true });
     const stale = await syncEnterpriseUserProfile({
       subject: {
         tenantId: existing.tenant.id,
@@ -220,7 +261,7 @@ describe("enterprise user profile snapshot sync", () => {
         displayName: existing.identity.displayName,
       },
       userIdentityId: existing.identity.id,
-      adapter: failingAdapter,
+      adapter: staleAdapter,
     });
     expect(stale.profileStatus).toBe("stale");
     expect(stale.attributes).toEqual({ employeeNo: "E-002" });
@@ -228,10 +269,11 @@ describe("enterprise user profile snapshot sync", () => {
       (await getEnterpriseUserProfileFacts(existing.tenant.id, existing.identity.id))?.syncState,
     ).toMatchObject({
       stale: true,
-      lastSyncErrorCode: "enterprise_adapter_fetch_failed",
+      lastSyncErrorCode: null,
     });
 
     const firstFailure = await seedIdentity("employee-sync-3");
+    const unavailableAdapter = registeredAdapter({ status: "unavailable" });
     const unavailable = await syncEnterpriseUserProfile({
       subject: {
         tenantId: firstFailure.tenant.id,
@@ -241,7 +283,7 @@ describe("enterprise user profile snapshot sync", () => {
         displayName: firstFailure.identity.displayName,
       },
       userIdentityId: firstFailure.identity.id,
-      adapter: failingAdapter,
+      adapter: unavailableAdapter,
     });
     expect(unavailable.profileStatus).toBe("unavailable");
     expect(

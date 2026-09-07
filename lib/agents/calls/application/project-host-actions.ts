@@ -184,8 +184,7 @@ function assertHostAction(action: HostAction, platformPolicy: HostActionPlatform
   } else if (
     action.target_key !== null ||
     action.web_path !== null ||
-    !platformPolicy.humanSupportUrl ||
-    action.url !== platformPolicy.humanSupportUrl ||
+    !action.url ||
     !isTrustedExternalUrl(action.url, platformPolicy.externalAllowedHosts)
   ) {
     throw new Error("Host Action 人工帮助入口负载非法");
