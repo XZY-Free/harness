@@ -72,12 +72,22 @@ function renderSidebar(matches: boolean) {
 }
 
 describe("Web 侧栏 overlay drawer 行为", () => {
-  it("用项目文件夹建立会话层级，而不是把会话平铺成无图标文本", () => {
+  it("空数据时不伪造项目层级，会话直接进入真实会话列表", () => {
     renderSidebar(false);
-    expect(screen.getByText("项目")).toBeTruthy();
-    const project = screen.getByLabelText("SnowHarness 项目");
-    expect(project.querySelector(".lucide-folder")).not.toBeNull();
-    expect(project.textContent).toContain("SnowHarness");
+    expect(screen.queryByText("项目")).toBeNull();
+    expect(screen.queryByLabelText("SnowHarness 项目")).toBeNull();
+    expect(screen.getByRole("link", { name: /会话一/ })).toBeTruthy();
+  });
+
+  it("账号菜单移除未实现的设置入口，并使用与输入区一致的轻量浮层", () => {
+    renderSidebar(false);
+    fireEvent.click(screen.getByRole("button", { name: "用户" }));
+
+    expect(screen.queryByText("设置")).toBeNull();
+    expect(screen.getByText("退出登录")).toBeTruthy();
+    expect(document.querySelector('[data-slot="dropdown-menu-content"]')?.className).toContain(
+      "rounded-[18px]",
+    );
   });
 
   it("会话等待用户决定时在侧栏显示低干扰的需要输入状态", () => {

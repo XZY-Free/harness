@@ -5,11 +5,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { Folder, LogOut, PanelLeft, Plus, Search, Settings, User } from "lucide-react";
+import { LogOut, PanelLeft, Plus, Search, User } from "lucide-react";
 /**
  * Desktop 会话侧栏（W3-2）。
  *
@@ -246,19 +245,6 @@ export function DesktopSidebar({
             </Link>
           </div>
 
-          {/* 项目层级：当前产品中的会话统一归入 SnowHarness 项目。 */}
-          <div className="px-4 pt-3 pb-1.5">
-            <h2 className="font-medium text-[11px] text-foreground-subtle">项目</h2>
-          </div>
-
-          <div
-            aria-label="SnowHarness 项目"
-            className="mx-3 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-sidebar-foreground"
-          >
-            <Folder aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate font-medium">SnowHarness</span>
-          </div>
-
           {/* 会话列表 */}
           <ThreadGroupList threads={threads} currentThreadId={currentThreadId} surface={surface} />
 
@@ -271,19 +257,13 @@ export function DesktopSidebar({
                 </div>
                 <span className="truncate text-sm text-foreground">{userName ?? "用户"}</span>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="w-48">
+              <DropdownMenuContent
+                side="top"
+                align="start"
+                sideOffset={10}
+                className="w-[212px] rounded-[18px] border border-foreground/[0.08] bg-popover/95 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_24px_60px_-24px_rgba(15,23,42,0.30),0_8px_20px_-12px_rgba(15,23,42,0.20)] ring-1 ring-inset ring-white/65 backdrop-blur-xl dark:ring-white/10"
+              >
                 <DropdownMenuItem
-                  onSelect={() => {
-                    /* W3-5 后接入设置面板；现阶段无操作 */
-                  }}
-                >
-                  <Settings className="size-4" />
-                  设置
-                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘,</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
                   onSelect={async () => {
                     const desktop = (
                       window as unknown as {
@@ -294,8 +274,9 @@ export function DesktopSidebar({
                       await desktop.auth.logout();
                     }
                   }}
+                  className="min-h-10 gap-2.5 rounded-[11px] px-3 py-2 text-[13px] text-foreground/85 focus:bg-destructive/[0.06] focus:text-destructive"
                 >
-                  <LogOut className="size-4" />
+                  <LogOut className="size-[15px] text-muted-foreground group-focus/dropdown-menu-item:text-destructive" />
                   退出登录
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -324,7 +305,7 @@ function ThreadGroupList({
 }) {
   return (
     <nav
-      className="flex-1 overflow-y-auto px-3 pt-0.5 pl-7 [-webkit-app-region:no-drag]"
+      className="flex-1 overflow-y-auto px-3 pt-3 [-webkit-app-region:no-drag]"
       aria-label="会话列表"
     >
       {threads.map((t) => (
