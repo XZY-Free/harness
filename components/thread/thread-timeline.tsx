@@ -340,7 +340,7 @@ export function ThreadTimeline({
       aria-atomic="false"
     >
       {showMessageLocator && <MessageLocator items={visibleItems} scrollContainerRef={scrollRef} />}
-      <div ref={contentRef} className="message-track flex min-w-0 flex-col">
+      <div ref={contentRef} className="message-track flex min-h-full min-w-0 flex-col">
         {shouldVirtualize ? (
           <div
             style={{
@@ -405,7 +405,7 @@ export function ThreadTimeline({
 
         {/* 空状态 */}
         {segments.length === 0 && (
-          <div className="flex flex-col items-center gap-2 py-12 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-center">
             <p className="text-muted-foreground text-sm">还没有消息</p>
             <p className="text-foreground-subtle text-xs">发送第一条消息开始对话</p>
           </div>

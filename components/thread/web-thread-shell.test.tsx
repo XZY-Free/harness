@@ -105,6 +105,8 @@ describe("WebThreadShell 透传平台默认模型", () => {
 
     await screen.findByTestId("new-thread-page");
     expect(screen.getByTestId("new-thread-page").dataset.defaultModelRef).toBe("deepseek-v4-flash");
+    expect(screen.getByTestId("web-thread-shell").className).toContain("fixed");
+    expect(screen.getByTestId("web-thread-shell").className).toContain("inset-0");
   });
 
   it("已有会话把 shell.default_model_ref 传给 ThreadPage", async () => {

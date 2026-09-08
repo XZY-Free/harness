@@ -6,13 +6,13 @@
  * 职责：
  * - 管理侧栏 collapsed 状态。
  * - 监听 ⌘\ 快捷键切换。
- * - 响应式：窗口宽度 <1180px 时自动收起。
+ * - 响应式：窗口宽度 <1360px 时自动收起。
  */
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 interface SidebarContextValue {
   readonly collapsed: boolean;
-  /** 是否处于 <1180px 断点（侧栏此时为 overlay drawer）。 */
+  /** 是否处于 <1360px 断点（侧栏此时为 overlay drawer）。 */
   readonly isNarrow: boolean;
   readonly toggle: () => void;
   readonly setCollapsed: (v: boolean) => void;
@@ -44,9 +44,10 @@ export function SidebarProvider({
     return () => window.removeEventListener("keydown", handler);
   }, [toggle]);
 
-  // 响应式：窗口 <1180px 自动收起（overlay drawer），≥1180px 恢复为固定侧栏
+  // 响应式：窗口 <1360px 自动收起（overlay drawer），≥1360px 恢复为固定侧栏。
+  // 给 760px 对话轨道与 276px 侧栏之间保留足够呼吸空间，避免中等窗口被固定栏挤压。
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1179px)");
+    const mq = window.matchMedia("(max-width: 1359px)");
     const onChange = (e: MediaQueryListEvent | MediaQueryList) => {
       setCollapsed(e.matches);
       setIsNarrow(e.matches);

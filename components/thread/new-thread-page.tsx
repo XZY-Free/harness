@@ -59,9 +59,10 @@ export function NewThreadPage({
         )}
       >
         <div
+          data-testid="new-thread-titlebar-drag-zone"
           aria-hidden="true"
           className={cn(
-            "absolute inset-y-0 right-0 [-webkit-app-region:drag]",
+            "absolute inset-y-0 right-14 [-webkit-app-region:drag]",
             sidebar?.collapsed && surface === "desktop" ? "left-40" : "left-0",
           )}
         />

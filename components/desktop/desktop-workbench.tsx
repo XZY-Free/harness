@@ -228,14 +228,14 @@ export function DesktopWorkbench({
       aria-label="任务工作台"
       aria-hidden={!isOpen}
       className={cn(
-        "relative flex h-full shrink-0 overflow-hidden bg-background transition-[width] duration-200 ease-out",
+        "relative flex h-full shrink-0 overflow-hidden bg-background transition-[width] duration-200 ease-out max-[899px]:absolute max-[899px]:inset-y-0 max-[899px]:right-0 max-[899px]:z-30",
         isOpen ? "p-3 pl-0" : "p-0",
       )}
-      style={{ width: isOpen ? width : 0 }}
+      style={{ width: isOpen ? width : 0, maxWidth: "calc(100vw - 56px)" }}
     >
       <div
         className={cn(
-          "flex h-full min-w-[320px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-[opacity,transform] duration-200 ease-out",
+          "flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-[opacity,transform] duration-200 ease-out",
           isOpen ? "translate-x-0 opacity-100" : "translate-x-2 opacity-0",
         )}
       >

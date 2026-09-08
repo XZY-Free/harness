@@ -197,8 +197,8 @@ export function DesktopSidebar({
       <aside
         aria-label="会话侧栏"
         className={cn(
-          // <1180px 一律 overlay drawer（不参与主布局）；≥1180px 为固定侧栏（参与布局）。
-          "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out max-[1179px]:fixed max-[1179px]:inset-y-0 max-[1179px]:left-0 max-[1179px]:z-30",
+          // <1360px 一律 overlay drawer（不参与主布局）；≥1360px 为固定侧栏（参与布局）。
+          "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out max-[1359px]:fixed max-[1359px]:inset-y-0 max-[1359px]:left-0 max-[1359px]:z-30",
           collapsed ? "w-0" : "w-[276px]",
         )}
       >

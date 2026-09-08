@@ -40,7 +40,7 @@ function createMatchMedia(initialMatches: boolean) {
   const listeners = new Set<(e: MediaQueryListEvent) => void>();
   const mql = {
     matches: initialMatches,
-    media: "(max-width: 1179px)",
+    media: "(max-width: 1359px)",
     addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
     removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),
@@ -98,12 +98,12 @@ describe("Web 侧栏 overlay drawer 行为", () => {
     expect(screen.getByRole("link", { name: "会话二" }).textContent).not.toContain("需要用户输入");
   });
 
-  it("≥1180px（固定侧栏）不渲染 backdrop", () => {
+  it("≥1360px（固定侧栏）不渲染 backdrop", () => {
     renderSidebar(false);
     expect(screen.queryByRole("button", { name: "关闭会话侧栏" })).toBeNull();
   });
 
-  it("低于 1180px：展开为 overlay drawer 时出现 backdrop，点击 backdrop 关闭", () => {
+  it("低于 1360px：展开为 overlay drawer 时出现 backdrop，点击 backdrop 关闭", () => {
     const { mql } = renderSidebar(true);
     // 窄屏初始收起（drawer 关闭），无 backdrop
     expect(screen.queryByRole("button", { name: "关闭会话侧栏" })).toBeNull();
@@ -120,7 +120,7 @@ describe("Web 侧栏 overlay drawer 行为", () => {
     expect(screen.queryByRole("button", { name: "关闭会话侧栏" })).toBeNull();
   });
 
-  it("低于 1180px：overlay drawer 中选择会话后自动关闭", () => {
+  it("低于 1360px：overlay drawer 中选择会话后自动关闭", () => {
     renderSidebar(true);
     fireEvent.click(screen.getByRole("button", { name: "展开侧栏" }));
     expect(screen.getByRole("button", { name: "关闭会话侧栏" })).toBeTruthy();

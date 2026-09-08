@@ -356,6 +356,8 @@ describe("DesktopWorkbench", () => {
     expect(workbench.getAttribute("aria-hidden")).toBe("true");
     expect(workbench.getAttribute("style")).toContain("width: 0px");
     expect(workbench.className).toContain("transition-[width]");
+    expect(workbench.className).toContain("max-[899px]:absolute");
+    expect(workbench.getAttribute("style")).toContain("max-width: calc(100vw - 56px)");
   });
 
   it("空工作台以居中的轻量入口代替任务提示和底部固定按钮", () => {

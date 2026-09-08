@@ -109,7 +109,10 @@ describe("ThreadInput Stop 按钮 capability 门禁（05 §10）", () => {
 describe("消息轨道与输入轨道拆分", () => {
   it("ThreadTimeline 使用独立消息轨道 .message-track，不再使用 composer 轨道或旧共享类", () => {
     const { container } = render(<ThreadTimeline items={[]} streamStatus="idle" />);
-    firstByClass(container, "message-track");
+    const messageTrack = firstByClass(container, "message-track");
+    expect(messageTrack.className).toContain("min-h-full");
+    expect(screen.getByText("还没有消息").parentElement?.className).toContain("flex-1");
+    expect(screen.getByText("还没有消息").parentElement?.className).toContain("justify-center");
     expect(container.querySelector(".composer-track")).toBeNull();
     expect(container.querySelector(".conversation-content")).toBeNull();
   });
@@ -166,6 +169,13 @@ describe("消息轨道与输入轨道拆分", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开任务工作台" }));
     expect(screen.getByLabelText("任务工作台").getAttribute("aria-hidden")).toBe("false");
     expect(screen.getByText("开始对话后，文件和需要确认的操作会显示在这里。")).toBeTruthy();
+  });
+
+  it("新会话标题栏拖拽区给右侧工作台按钮保留真实点击区域", () => {
+    stubModelsFetch();
+    render(<NewThreadPage agents={[]} onSubmit={async () => true} surface="web" />);
+
+    expect(screen.getByTestId("new-thread-titlebar-drag-zone").className).toContain("right-14");
   });
 });
 

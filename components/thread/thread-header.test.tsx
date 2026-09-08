@@ -13,7 +13,7 @@ function createMatchMedia(initialMatches: boolean) {
   const listeners = new Set<(e: MediaQueryListEvent) => void>();
   const mql = {
     matches: initialMatches,
-    media: "(max-width: 1179px)",
+    media: "(max-width: 1359px)",
     addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
     removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),

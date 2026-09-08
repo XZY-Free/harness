@@ -12,7 +12,7 @@ function createMatchMedia(initialMatches: boolean) {
   const listeners = new Set<(e: MediaQueryListEvent) => void>();
   const mql = {
     matches: initialMatches,
-    media: "(max-width: 1179px)",
+    media: "(max-width: 1359px)",
     addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
     removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),
@@ -38,7 +38,7 @@ function Harness() {
 }
 
 describe("SidebarProvider 响应式状态机", () => {
-  it("低于 1180px 断点自动收起；跨断点缩放时状态跟随 matchMedia", () => {
+  it("低于 1360px 断点自动收起；跨断点缩放时状态跟随 matchMedia", () => {
     const mql = createMatchMedia(true);
     vi.stubGlobal(
       "matchMedia",
@@ -53,7 +53,7 @@ describe("SidebarProvider 响应式状态机", () => {
     expect(screen.getByTestId("collapsed").textContent).toBe("true");
     expect(screen.getByTestId("narrow").textContent).toBe("true");
 
-    // 放大到 ≥1180px：展开且退出 overlay 断点
+    // 放大到 ≥1360px：展开且退出 overlay 断点
     act(() => mql.dispatch(false));
     expect(screen.getByTestId("collapsed").textContent).toBe("false");
     expect(screen.getByTestId("narrow").textContent).toBe("false");
