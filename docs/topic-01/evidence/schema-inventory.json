@@ -5845,6 +5845,7 @@
         "lib/identity/user-identity-queries.ts"
       ],
       "productionReaders": [
+        "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/identity/accept-enterprise-profile-observation.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
         "lib/identity/resolver.ts",
@@ -5876,6 +5877,7 @@
       "evidence": [
         "lib/persistence/schema/identity.ts#userIdentity",
         "lib/identity/user-identity-queries.ts",
+        "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/identity/accept-enterprise-profile-observation.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
         "lib/identity/resolver.ts",
