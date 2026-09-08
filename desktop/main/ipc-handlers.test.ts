@@ -174,7 +174,7 @@ describe("registerIpcHandlers (device:register 闭环)", () => {
     expect(instances[0].connect).toHaveBeenCalledTimes(1);
   });
 
-  it("幂等：已注册时复用租户并 ensureConnected，不重复 fetch", async () => {
+  it("幂等：本地已注册时仍由服务端重新确认并确保 Bridge 连接", async () => {
     const identity = makeIdentity(null);
     const lifecycle = new DesktopBridgeLifecycle(identity, {
       serverUrl: "ws://localhost:3002",
@@ -185,7 +185,13 @@ describe("registerIpcHandlers (device:register 闭环)", () => {
     });
     // 预先注册（applyTenantId 创建 client，但不调用 connect）
     lifecycle.applyTenantId(TID);
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ ok: true, data: { deviceId: identity.deviceId, tenantId: TID } }),
+        ),
+      );
     const keychain = makeKeychain();
     const ipc = makeIpcMain();
     registerIpcHandlers(ipc, capabilities, makeRegistrationPayload(), lifecycle, keychain);
@@ -193,7 +199,8 @@ describe("registerIpcHandlers (device:register 闭环)", () => {
     const result = await ipc.invoke("desktop:device:register", makeEvent(fetchImpl));
 
     expect(result).toEqual({ ok: true, tenantId: TID });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(keychain.set).not.toHaveBeenCalled();
     // 确保 Bridge 连接
     expect(instances.length).toBe(1);
     expect(instances[0].connect).toHaveBeenCalledTimes(1);

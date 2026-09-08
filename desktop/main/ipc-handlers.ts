@@ -108,13 +108,9 @@ export function registerIpcHandlers(
   // - main 用发起 renderer 的 Electron Session fetch 同源注册端点（不信任 renderer 传 tenantId）
   // - 请求体由主进程的 registration payload 构造，tenantId 由 Server 从认证主体解析
   // - 校验 HTTP/JSON、响应 deviceId 等于本机 identity.deviceId、tenantId 为合法非空 UUID
-  // - 成功：回填 Keychain 并立即创建/连接 Bridge（无需重启）；失败保持 disconnected，可重试，无默认租户
+  // - 每次启动都由服务端幂等确认，避免本地已注册标记在服务端清库/迁移后变成陈旧状态
+  // - 租户变化时回填 Keychain 并重建 Bridge；租户未变时直接确保连接
   ipcMain.handle("desktop:device:register", async (event): Promise<DesktopDeviceRegisterResult> => {
-    // 幂等：已注册则确保 Bridge 连接，不重复注册
-    if (bridgeLifecycle.isRegistered()) {
-      bridgeLifecycle.ensureConnected();
-      return { ok: true, tenantId: bridgeLifecycle.getIdentity().tenantId ?? undefined };
-    }
     const identity = bridgeLifecycle.getIdentity();
     const serverOrigin = capabilities.serverOrigin;
     const url = `${serverOrigin}/api/desktop/devices/register`;
@@ -153,6 +149,10 @@ export function registerIpcHandlers(
     }
     if (typeof tenantId !== "string" || !isValidTenantId(tenantId)) {
       return { ok: false, code: "invalid_tenant", message: "注册响应的 tenantId 非法" };
+    }
+    if (identity.tenantId === tenantId) {
+      bridgeLifecycle.ensureConnected();
+      return { ok: true, tenantId };
     }
     // 校验通过：先构造不可变候选身份并持久化到 Keychain，成功后才提交内存态并连接。
     // 保存失败时原 identity.tenantId 仍为 null、lifecycle 不创建 client，可重试。
