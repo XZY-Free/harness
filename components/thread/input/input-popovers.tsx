@@ -134,7 +134,7 @@ function SelectorPopoverHeader({
   query,
   onQueryChange,
 }: {
-  readonly title: "优先助手" | "模型";
+  readonly title: "选择助手" | "模型";
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
 }) {
@@ -261,7 +261,7 @@ export function AgentSelectorPopover({
       }}
     >
       <PopoverTrigger
-        aria-label={currentAgent?.displayName ?? "优先助手"}
+        aria-label={currentAgent?.displayName ?? "选择助手"}
         disabled={disabled}
         className="group rounded-full outline-none"
       >
@@ -275,7 +275,7 @@ export function AgentSelectorPopover({
             data-slot="agent-label"
             className="max-w-[72px] truncate font-medium leading-none tracking-[-0.005em] sm:max-w-[104px]"
           >
-            {currentAgent?.displayName ?? "优先助手"}
+            {currentAgent?.displayName ?? "选择助手"}
           </span>
           <ChevronDown
             className="size-[13px] shrink-0 stroke-[1.75] transition-transform duration-150 group-data-[popup-open]:rotate-180"
@@ -289,9 +289,9 @@ export function AgentSelectorPopover({
         side="top"
         sideOffset={10}
       >
-        <SelectorPopoverHeader title="优先助手" query={query} onQueryChange={setQuery} />
+        <SelectorPopoverHeader title="选择助手" query={query} onQueryChange={setQuery} />
         <p className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
-          当前问题需要时优先咨询；简单问题可能直接回答。
+          当前任务会优先使用所选助手；未选择时由系统按能力匹配。
         </p>
         <div className="max-h-72 overflow-y-auto px-2 pb-2">
           {currentAgentId && (

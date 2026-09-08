@@ -189,7 +189,7 @@ describe("ThreadTimeline Agent 使用事实", () => {
 
     render(<ThreadTimeline items={[userItem]} turns={[turn]} streamStatus="open" />);
 
-    expect(screen.getByText("优先助手：人力助手")).toBeTruthy();
+    expect(screen.getByText("助手：人力助手")).toBeTruthy();
     expect(screen.getByText("已收到人力助手结果")).toBeTruthy();
   });
 
@@ -209,7 +209,7 @@ describe("ThreadTimeline Agent 使用事实", () => {
 
     render(<ThreadTimeline items={[userItem]} turns={[turn]} streamStatus="open" />);
 
-    expect(screen.getByText("优先助手：人力助手")).toBeTruthy();
+    expect(screen.getByText("助手：人力助手")).toBeTruthy();
     expect(screen.queryByText(/正在咨询|已收到.*结果/)).toBeNull();
   });
 });

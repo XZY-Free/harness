@@ -35,7 +35,7 @@ export function UserMessageItem({ item, agentUse = null }: UserMessageItemProps)
         <div className="prose-markdown text-foreground">{displayText}</div>
         {agentUse && (
           <div className="mt-1.5 text-2xs text-muted-foreground">
-            优先助手：{agentUse.display_name ?? agentUse.agent_id}
+            助手：{agentUse.display_name ?? agentUse.agent_id}
           </div>
         )}
         {isGuidance && (
