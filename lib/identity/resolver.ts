@@ -13,11 +13,13 @@
  */
 import { type ApiAudience, apiError, generateRequestId } from "@/lib/http";
 import { acceptEnterpriseProfileObservation } from "@/lib/identity/accept-enterprise-profile-observation";
-import type { UserAuthenticationProvider } from "@/lib/identity/authentication-provider";
+import type {
+  AuthenticatedUserEvidence,
+  UserAuthenticationProvider,
+} from "@/lib/identity/authentication-provider";
 import type {
   EnterpriseProfileObservation,
   EnterpriseProfileSource,
-  EnterpriseProfileSourceResult,
 } from "@/lib/identity/enterprise-profile-source";
 import type { NormalizedEnterpriseUserProfile } from "@/lib/identity/enterprise-user";
 import {
@@ -88,8 +90,11 @@ export class AuthenticationError extends Error {
 export interface ResolvePrincipalOptions {
   /** 仅用于受控测试和静态私有装配；生产默认使用冻结扩展。 */
   authenticationProvider?: UserAuthenticationProvider;
-  /** 仅认证链传入的已验证 claims；不得来自请求体、Agent 或用户提交数据。 */
-  trustedAuthenticationClaims?: Readonly<Record<string, unknown>>;
+}
+
+interface AcceptAuthenticatedEvidenceOptions {
+  tenant?: Awaited<ReturnType<typeof ensureDefaultTenant>>;
+  profileSource?: EnterpriseProfileSource;
 }
 
 /**
@@ -132,8 +137,27 @@ export async function resolvePrincipal(
     const code = authentication.reason.includes("邮箱") ? "missing_email" : "authentication_denied";
     throw new AuthenticationError(code, authentication.reason);
   }
-  const { externalSubject, email, displayName, trustedAuthenticationClaims } =
-    authentication.evidence;
+  return acceptAuthenticatedEvidence(authentication.evidence, audience, {
+    tenant,
+    profileSource: extension.profileSource,
+  });
+}
+
+/**
+ * 接纳认证提供器已经验证过的证据，并完成 Core 身份、企业资料与主体绑定写入。
+ * callback 入口必须直接调用本函数，不能再调用 authenticate 重新认证。
+ */
+export async function acceptAuthenticatedEvidence(
+  evidence: AuthenticatedUserEvidence,
+  audience: ApiAudience = "employee",
+  options: AcceptAuthenticatedEvidenceOptions = {},
+): Promise<Principal> {
+  const tenant = options.tenant ?? (await ensureDefaultTenant());
+  if (tenant.status !== "active") {
+    throw new AuthenticationError("tenant_suspended", "租户已被暂停");
+  }
+
+  const { externalSubject, email, displayName } = evidence;
   const existingIdentity = await getUserIdentityBySubject(tenant.id, externalSubject);
   const identity = await upsertUserIdentity({
     tenantId: tenant.id,
@@ -141,16 +165,13 @@ export async function resolvePrincipal(
     email: existingIdentity?.status === "disabled" ? existingIdentity.email : email,
     displayName:
       existingIdentity?.status === "disabled" ? existingIdentity.displayName : displayName,
-    status: existingIdentity?.status ?? "active",
   });
-  const synced = extension.profileSource
+  const synced = options.profileSource
     ? await resolveConfiguredProfile({
         tenant,
         userIdentity: identity,
-        source: extension.profileSource,
-        observation: authentication.evidence.enterpriseProfileObservation,
-        trustedAuthenticationClaims:
-          options.trustedAuthenticationClaims ?? trustedAuthenticationClaims,
+        source: options.profileSource,
+        observation: evidence.enterpriseProfileObservation,
       })
     : {
         userIdentity: identity,
@@ -194,28 +215,17 @@ async function resolveConfiguredProfile(params: {
   userIdentity: Awaited<ReturnType<typeof upsertUserIdentity>>;
   source: NonNullable<Awaited<ReturnType<typeof getIdentityExtensions>>["profileSource"]>;
   observation?: EnterpriseProfileObservation;
-  trustedAuthenticationClaims: Readonly<Record<string, unknown>>;
 }): Promise<ResolvedEnterpriseProfile> {
   const now = new Date();
-  let result: EnterpriseProfileSourceResult | undefined = params.observation
-    ? { status: "observed" as const, observation: params.observation }
-    : undefined;
-  if (!result && params.source.observe) {
-    result = await params.source.observe({
-      subject: {
+  if (params.observation) {
+    await acceptEnterpriseProfileObservation({
+      observation: params.observation,
+      source: params.source,
+      expectedSubject: {
         tenantId: params.tenant.id,
-        tenantKey: params.tenant.key,
+        userIdentityId: params.userIdentity.id,
         externalSubject: params.userIdentity.externalSubject,
       },
-      signal: new AbortController().signal,
-      now,
-      trustedAuthenticationClaims: params.trustedAuthenticationClaims,
-    });
-  }
-  if (result?.status === "observed") {
-    await acceptEnterpriseProfileObservation({
-      observation: result.observation,
-      source: params.source,
       now,
     });
   }

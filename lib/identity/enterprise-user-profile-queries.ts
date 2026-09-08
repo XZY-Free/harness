@@ -24,6 +24,12 @@ import {
 } from "@/lib/persistence/schema/identity";
 import { and, eq } from "drizzle-orm";
 
+/**
+ * 已开启事务的类型。组合快照读取只接受事务边界，绝不接受全局 db 池；
+ * 需要通读整份事实的调用方必须拥有事务并在其上调用事务助手。
+ */
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export type EnterpriseUserAttributeValue = string | number | boolean | JsonValue;
 
 export interface EnterpriseUserAttributeInput {
@@ -75,30 +81,75 @@ async function assertTenantUser(
   }
 }
 
-/** 读取当前企业资料；不存在身份时返回 null，跨租户不暴露存在性。 */
+/**
+ * 读取当前企业资料的完整快照（公共入口，自持短事务）。
+ *
+ * 在事务内以当前读 FOR SHARE 锁定精确的 (tenantId, userIdentityId) UserIdentity，
+ * 再于同一事务内顺序读取属性与同步元数据，保证 "完整 A 或完整 B" 的原子可见性。
+ * 不存在身份时返回 null，跨租户不暴露存在性。
+ */
 export async function getEnterpriseUserProfileFacts(
   tenantId: string,
   userIdentityId: string,
-  client: DbOrTx = db,
 ): Promise<EnterpriseUserProfileFacts | null> {
-  const [identity] = await client
+  return db.transaction((tx) =>
+    getEnterpriseUserProfileFactsInTransaction(tx, tenantId, userIdentityId),
+  );
+}
+
+/**
+ * 事务内读取完整资料快照。调用方必须已拥有事务（且通常已锁定 UserIdentity）。
+ * 本函数在同一事务内以当前读 FOR SHARE 再确认/锁定 UserIdentity，再顺序读取属性与同步元数据，
+ * 绝不使用全局 db。返回 null 时不暴露跨租户存在性。
+ */
+export async function getEnterpriseUserProfileFactsInTransaction(
+  tx: DbTransaction,
+  tenantId: string,
+  userIdentityId: string,
+): Promise<EnterpriseUserProfileFacts | null> {
+  // 同事务已持有 FOR UPDATE 时，兼容地再取 OF SHARE 是安全的（锁已被本事务拥有）。
+  const [identity] = await tx
     .select({ id: userIdentity.id })
     .from(userIdentity)
     .where(and(eq(userIdentity.id, userIdentityId), eq(userIdentity.tenantId, tenantId)))
+    .for("share")
     .limit(1);
   if (!identity) return null;
 
-  const [attributes, syncState] = await Promise.all([
-    client
-      .select()
-      .from(userExtensionAttribute)
-      .where(eq(userExtensionAttribute.userIdentityId, userIdentityId)),
-    getEnterpriseProfileSyncState(tenantId, userIdentityId, client),
-  ]);
+  const attributes = await tx
+    .select()
+    .from(userExtensionAttribute)
+    .where(eq(userExtensionAttribute.userIdentityId, userIdentityId))
+    .for("share");
+
+  const syncState = await getEnterpriseProfileSyncStateInTransaction(tx, tenantId, userIdentityId);
   return { attributes, syncState };
 }
 
-/** 按租户读取同步元数据。 */
+/** 事务内当前读单份同步元数据；保持租户/身份校验，不使用全局 db。 */
+async function getEnterpriseProfileSyncStateInTransaction(
+  tx: DbTransaction,
+  tenantId: string,
+  userIdentityId: string,
+): Promise<EnterpriseProfileSyncState | null> {
+  const [identity] = await tx
+    .select({ id: userIdentity.id })
+    .from(userIdentity)
+    .where(and(eq(userIdentity.id, userIdentityId), eq(userIdentity.tenantId, tenantId)))
+    .for("share")
+    .limit(1);
+  if (!identity) return null;
+
+  const [state] = await tx
+    .select()
+    .from(enterpriseProfileSyncState)
+    .where(eq(enterpriseProfileSyncState.userIdentityId, userIdentityId))
+    .for("share")
+    .limit(1);
+  return state ?? null;
+}
+
+/** 按租户读取同步元数据（纯技术读取，不承诺组合快照）。 */
 export async function getEnterpriseProfileSyncState(
   tenantId: string,
   userIdentityId: string,

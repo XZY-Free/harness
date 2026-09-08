@@ -16,6 +16,7 @@ describe("AgentCall 冻结状态转换矩阵", () => {
     ["running", "call.completed", "completed", "resume_parent"],
     ["running", "call.failed", "failed", "resume_parent"],
     ["running", "call.cancelled", "cancelled", "resume_parent"],
+    ["queued", "call.cancelled", "cancelled", "resume_parent"],
     ["waiting_user", "user_response_accepted", "running", "resume_agent_or_parent"],
     ["waiting_user", "call.cancelled", "cancelled", "resume_parent"],
   ] as const)("允许 %s + %s", (state, input, target, continuationKind) => {
@@ -29,7 +30,6 @@ describe("AgentCall 冻结状态转换矩阵", () => {
   it.each([
     ["queued", "call.completed"],
     ["queued", "call.failed"],
-    ["queued", "call.cancelled"],
     ["waiting_user", "call.completed"],
     ["waiting_user", "call.failed"],
     ["waiting_user", "call.started"],

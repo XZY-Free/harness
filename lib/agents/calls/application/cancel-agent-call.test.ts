@@ -83,6 +83,24 @@ describe("cancelAgentCall 冻结能力真值", () => {
     expect(scenario.provider.rpcMethods).toContain("tasks/cancel");
   });
 
+  it("F06 queued AgentCall 在出站前取消时只写本地 cancelled，不发送远端 tasks/cancel", async () => {
+    const scenario = await seedAgentCallExecutionScenario({ providerScenario: "long_running" });
+    cleanups.push(async () => {
+      delete process.env[scenario.credentialEnvVar];
+      await scenario.provider.close();
+    });
+
+    const [result] = await cancelActiveAgentCalls({
+      tenantId: scenario.tenantId,
+      parentInvocationId: scenario.parentInvocationId,
+    });
+    expect(result).toMatchObject({
+      remoteCancellation: "cancelled",
+      call: { id: scenario.callId, state: "cancelled" },
+    });
+    expect(scenario.provider.rpcMethods).not.toContain("tasks/cancel");
+  });
+
   it("cancel=false 不发伪取消，AgentCall 保持 active 并明确远端可能继续", async () => {
     const scenario = await seed(false);
 

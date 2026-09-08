@@ -1,4 +1,4 @@
-import { type DbOrTx, db } from "@/lib/db/client";
+import { db } from "@/lib/db/client";
 import { recordAuditEvent } from "@/lib/identity/audit";
 import {
   type EnterpriseProfileObservation,
@@ -11,8 +11,9 @@ import {
   computeEnterpriseProfileFingerprint,
 } from "@/lib/identity/enterprise-user";
 import {
+  type DbTransaction,
   deleteEnterpriseUserAttribute,
-  getEnterpriseUserProfileFacts,
+  getEnterpriseUserProfileFactsInTransaction,
   upsertEnterpriseProfileSyncState,
   upsertEnterpriseUserAttribute,
 } from "@/lib/identity/enterprise-user-profile-queries";
@@ -39,11 +40,19 @@ export interface AcceptedEnterpriseProfile {
   readonly staleUntil: Date;
 }
 
+/** 可信预期主体：必须由已认证证据 + Core 映射身份派生，绝不来自观察/请求体。 */
+export interface TrustedEnterpriseSubject {
+  readonly tenantId: string;
+  readonly userIdentityId: string;
+  readonly externalSubject: string;
+}
+
 export async function acceptEnterpriseProfileObservation(params: {
   observation: EnterpriseProfileObservation;
   source: EnterpriseProfileSource;
+  expectedSubject: TrustedEnterpriseSubject;
   now?: Date;
-  client?: DbOrTx;
+  client?: DbTransaction;
 }): Promise<AcceptedEnterpriseProfile> {
   let observation: ReturnType<typeof validateEnterpriseProfileObservation>;
   try {
@@ -59,14 +68,27 @@ export async function acceptEnterpriseProfileObservation(params: {
     );
   }
 
-  const execute = async (tx: DbOrTx): Promise<AcceptedEnterpriseProfile> => {
+  // 观察必须锚定到可信预期主体：观察自报 tenantId/externalSubject 不能决定写入目标。
+  // 校验在任何企业属性/同步元数据/审计写入之前完成。
+  if (
+    observation.tenantId !== params.expectedSubject.tenantId ||
+    observation.externalSubject !== params.expectedSubject.externalSubject
+  ) {
+    throw new EnterpriseProfileAcceptanceError(
+      "subject_mismatch",
+      "企业资料观察与预期可信主体不一致",
+    );
+  }
+
+  const execute = async (tx: DbTransaction): Promise<AcceptedEnterpriseProfile> => {
+    // 只按可信预期主体定位/锁定 UserIdentity，绝不用观察自报主体做目标选择。
     const [identity] = await tx
       .select()
       .from(userIdentity)
       .where(
         and(
-          eq(userIdentity.tenantId, observation.tenantId),
-          eq(userIdentity.externalSubject, observation.externalSubject),
+          eq(userIdentity.tenantId, params.expectedSubject.tenantId),
+          eq(userIdentity.id, params.expectedSubject.userIdentityId),
         ),
       )
       .for("update")
@@ -74,7 +96,13 @@ export async function acceptEnterpriseProfileObservation(params: {
     if (!identity) {
       throw new EnterpriseProfileAcceptanceError(
         "identity_missing",
-        "企业资料观察对应的标准身份不存在",
+        "企业资料观察对应的预期主体不存在",
+      );
+    }
+    if (identity.externalSubject !== params.expectedSubject.externalSubject) {
+      throw new EnterpriseProfileAcceptanceError(
+        "subject_mismatch",
+        "企业资料观察与预期主体的标准身份不一致",
       );
     }
 
@@ -85,7 +113,11 @@ export async function acceptEnterpriseProfileObservation(params: {
       sourceSystem: observation.sourceSystem,
       attributes: observation.attributes,
     });
-    const facts = await getEnterpriseUserProfileFacts(observation.tenantId, identity.id, tx);
+    const facts = await getEnterpriseUserProfileFactsInTransaction(
+      tx,
+      observation.tenantId,
+      identity.id,
+    );
     const previous = facts?.syncState;
     if (
       previous &&

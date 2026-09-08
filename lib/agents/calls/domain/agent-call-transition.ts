@@ -56,6 +56,13 @@ export function decideAgentCallTransition(input: {
   if (state === "queued" && transitionInput === "call.started") {
     return { outcome: "applied", targetState: "running" };
   }
+  if (state === "queued" && transitionInput === "call.cancelled") {
+    return {
+      outcome: "applied",
+      targetState: "cancelled",
+      continuationKind: "resume_parent",
+    };
+  }
   if (state === "running" && transitionInput === "call.input_required") {
     return {
       outcome: "applied",

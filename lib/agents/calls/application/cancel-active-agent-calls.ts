@@ -19,7 +19,7 @@ export async function cancelActiveAgentCalls(params: {
       and(
         eq(agentCallTable.tenantId, params.tenantId),
         eq(agentCallTable.parentInvocationId, params.parentInvocationId),
-        inArray(agentCallTable.state, ["running", "waiting_user"]),
+        inArray(agentCallTable.state, ["queued", "running", "waiting_user"]),
       ),
     );
   const results: CancelAgentCallResult[] = [];

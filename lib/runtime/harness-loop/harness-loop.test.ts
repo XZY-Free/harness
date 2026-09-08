@@ -193,6 +193,46 @@ describe("HarnessLoop", () => {
     );
   });
 
+  it("F06 将 Invocation 的实际绝对期限透传给行动执行器", async () => {
+    const deadlineAt = new Date("2026-09-08T10:00:00.000Z");
+    const tool = vi.fn(async (_action: unknown, context: { deadlineAt?: Date }) => ({
+      authorityRef: "effect:deadline",
+      observation: {
+        observationType: "tool" as const,
+        summary: "期限已接收",
+        sourceRefs: ["effect:deadline"],
+        data: {},
+      },
+    }));
+    const loop = new HarnessLoop(
+      baseParams({
+        actionDeadlineAt: deadlineAt,
+        decisionPort: decisionPort([
+          {
+            actionId: "tool-deadline",
+            stepNo: 1,
+            actionType: "tool.call",
+            purposeCode: "query",
+            shortPurpose: "查询期限",
+            payload: { toolId: "leave", operationId: "balance", arguments: {} },
+          },
+          {
+            actionId: "respond-deadline",
+            stepNo: 2,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "完成回答",
+            payload: { evidenceRefs: [] },
+          },
+        ]),
+        executors: { "tool.call": tool },
+      }),
+    );
+
+    await expect(loop.run()).resolves.toMatchObject({ completed: true });
+    expect(tool).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ deadlineAt }));
+  });
+
   it("模型决策期间到达的 steer 在下一次 decision 中只出现一次", async () => {
     const views: Array<any> = [];
     const guidance = {

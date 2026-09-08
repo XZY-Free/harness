@@ -1,6 +1,7 @@
 import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import type { AuthenticationResult } from "@/lib/identity/authentication-provider";
 import { getIdentityExtensions } from "@/lib/identity/identity-extension-bootstrap";
+import { acceptAuthenticatedEvidence, authErrorResponse } from "@/lib/identity/resolver";
 import type { NextRequest } from "next/server";
 
 type AuthOperation = "login" | "callback" | "logout";
@@ -23,7 +24,7 @@ async function handle(
   const operation = await readOperation(context);
   if (!operation) return apiError("REQUEST_SCHEMA_INVALID", "认证操作不受支持", { requestId });
 
-  const { authenticationProvider } = await getIdentityExtensions();
+  const { authenticationProvider, profileSource } = await getIdentityExtensions();
   if (operation === "login") {
     if (method !== "GET") {
       return apiError("REQUEST_SCHEMA_INVALID", "login 只支持 GET", { requestId });
@@ -50,6 +51,25 @@ async function handle(
       });
     }
     const result = await authenticationProvider.callback(request);
+    if (result.status === "authenticated") {
+      try {
+        const principal = await acceptAuthenticatedEvidence(result.evidence, "employee", {
+          profileSource,
+        });
+        return apiSuccess({
+          authenticated: true,
+          user: {
+            externalSubject: principal.externalSubject,
+            email: principal.email,
+            displayName: principal.displayName,
+          },
+        });
+      } catch (error) {
+        const response = authErrorResponse(error, requestId);
+        if (response) return response;
+        throw error;
+      }
+    }
     return authenticationResultResponse(result, requestId);
   }
 
@@ -80,16 +100,6 @@ function isInternalReturnTo(value: string): boolean {
 }
 
 function authenticationResultResponse(result: AuthenticationResult, requestId: string): Response {
-  if (result.status === "authenticated") {
-    return apiSuccess({
-      authenticated: true,
-      user: {
-        externalSubject: result.evidence.externalSubject,
-        email: result.evidence.email,
-        displayName: result.evidence.displayName,
-      },
-    });
-  }
   if (result.status === "denied") {
     return apiError("ACCESS_DENIED", result.reason, { requestId });
   }

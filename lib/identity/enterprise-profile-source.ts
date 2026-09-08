@@ -22,7 +22,14 @@ export interface EnterpriseProfileSourceSubject {
 export interface EnterpriseProfileSourceContext {
   readonly subject: EnterpriseProfileSourceSubject;
   readonly signal: AbortSignal;
+  /** 此次共享刷新操作的绝对截止；适配器必须向下游请求继续传递。 */
+  readonly deadlineAt: Date;
   readonly now: Date;
+  /** 已取得的标准身份只读视图；不含 token、原始 claims 或企业资料。 */
+  readonly currentIdentity: {
+    readonly email: string;
+    readonly displayName: string | null;
+  };
   readonly trustedAuthenticationClaims: Readonly<Record<string, unknown>>;
 }
 

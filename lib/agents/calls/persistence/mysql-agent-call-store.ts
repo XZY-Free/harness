@@ -21,6 +21,8 @@ import {
 import {
   AgentCallBindingAlreadyExistsError,
   type AgentCallBindingConfigInput,
+  bindingConfigFromCandidate,
+  computeAgentCallBindingHash,
 } from "@/lib/agents/calls/domain/agent-call-binding";
 import type {
   AgentCallStore,
@@ -30,19 +32,24 @@ import { lockAndValidateAgentCallAuthority } from "@/lib/agents/calls/persistenc
 import { recordCapabilityUseInSession } from "@/lib/capability/capability-use-queries";
 import { db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
+import { EnterpriseUserContextRequirementError } from "@/lib/identity/enterprise-user-access-policy";
+import { finalizeEnterpriseUserContextCandidate } from "@/lib/identity/prepare-enterprise-user-context";
 import {
   agentCallAttemptTable,
   agentCallBindingTable,
   agentCallTable,
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
+import { userIdentity } from "@/lib/persistence/schema/identity";
 import { and, desc, eq } from "drizzle-orm";
 
 export function createMysqlAgentCallStore(
   dependencies: {
     recordCapabilityUse: typeof recordCapabilityUseInSession;
+    now?: () => Date;
   } = { recordCapabilityUse: recordCapabilityUseInSession },
 ): AgentCallStore {
+  const clock = dependencies.now ?? (() => new Date());
   return {
     finalizeAgentCall: (input) =>
       db.transaction(async (tx) => {
@@ -86,8 +93,13 @@ export function createMysqlAgentCallStore(
             };
           }
         }
-        const call = await doCreate(tx, input, dependencies.recordCapabilityUse);
-        return { call, binding: input.bindingCandidate, status: "created" };
+        const finalizedInput = await finalizeEnterpriseUserContext(tx, input, clock());
+        const call = await doCreate(tx, finalizedInput, dependencies.recordCapabilityUse);
+        return {
+          call,
+          binding: bindingConfigFromCandidate(finalizedInput.bindingCandidate),
+          status: "created",
+        };
       }),
 
     getById: async ({ callId, tenantId }) => {
@@ -421,6 +433,63 @@ export class AgentCallAttemptConflictError extends Error {
 }
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function finalizeEnterpriseUserContext(
+  tx: Transaction,
+  input: StoreAgentCallInput,
+  now: Date,
+): Promise<StoreAgentCallInput> {
+  const evidence = input.bindingCandidate.enterpriseUserContextEvidence;
+  const publicContext = input.bindingCandidate.enterpriseUserContext;
+  if (!evidence) {
+    if (publicContext) {
+      throw new EnterpriseUserContextRequirementError(
+        "enterprise_user_context_unavailable",
+        "企业资料候选缺少最终复核证据",
+      );
+    }
+    return input;
+  }
+  if (!publicContext || evidence.tenantId !== input.tenantId) {
+    throw new EnterpriseUserContextRequirementError(
+      "enterprise_user_context_unavailable",
+      "企业资料候选主体与调用不一致",
+    );
+  }
+
+  // 当前合法身份属于本地 Authority；只锁定精确用户行，不重新读取企业资料 B。
+  const [identity] = await tx
+    .select({ id: userIdentity.id, status: userIdentity.status })
+    .from(userIdentity)
+    .where(
+      and(
+        eq(userIdentity.id, evidence.userIdentityId),
+        eq(userIdentity.tenantId, evidence.tenantId),
+      ),
+    )
+    .limit(1)
+    .for("share");
+  if (!identity || identity.status === "disabled") {
+    throw new EnterpriseUserContextRequirementError(
+      "enterprise_user_context_disabled",
+      "当前用户身份不可用于企业资料访问",
+    );
+  }
+
+  const finalizedPublicContext = finalizeEnterpriseUserContextCandidate(
+    { publicContext, evidence },
+    now,
+  );
+  const bindingCandidate = {
+    ...input.bindingCandidate,
+    enterpriseUserContext: finalizedPublicContext,
+  };
+  return {
+    ...input,
+    bindingCandidate,
+    bindingHash: computeAgentCallBindingHash(bindingCandidate),
+  };
+}
 
 async function doCreate(
   tx: Transaction,

@@ -30,6 +30,7 @@ import type {
 } from "@/lib/runtime/harness-loop/loop";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
+import { observeInvocationCancellation } from "@/lib/runtime/invocation-cancellation-signal";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import {
   releaseInvocationExecutionLease,
@@ -125,8 +126,21 @@ export const resumeHarnessInvocation = createResumeHarnessInvocation({
     });
     const controller = new AbortController();
     const abortForLeaseLoss = () => controller.abort(abortSignal.reason);
+    const invocationCancellation = observeInvocationCancellation({
+      tenantId,
+      invocationId: invocation.id,
+    });
+    const abortForInvocationCancellation = () =>
+      controller.abort(invocationCancellation.signal.reason);
     if (abortSignal.aborted) abortForLeaseLoss();
     else abortSignal.addEventListener("abort", abortForLeaseLoss, { once: true });
+    if (invocationCancellation.signal.aborted) abortForInvocationCancellation();
+    else {
+      invocationCancellation.signal.addEventListener("abort", abortForInvocationCancellation, {
+        once: true,
+      });
+    }
+    await invocationCancellation.refresh();
     const loop = new HostedHarnessLoop({
       invocationId: invocation.id,
       tenantId,
@@ -194,6 +208,7 @@ export const resumeHarnessInvocation = createResumeHarnessInvocation({
           });
         }),
       modelRef: overrides?.modelRef ?? binding.modelId,
+      deadlineAt: new Date((invocation.startedAt ?? new Date()).getTime() + 600 * 1000),
       abortSignal: controller.signal,
     });
     const running = loop.run();
@@ -203,6 +218,8 @@ export const resumeHarnessInvocation = createResumeHarnessInvocation({
       return await running;
     } finally {
       abortSignal.removeEventListener("abort", abortForLeaseLoss);
+      invocationCancellation.signal.removeEventListener("abort", abortForInvocationCancellation);
+      invocationCancellation.dispose();
       if (liveHostedRunners.get(invocation.id) === liveRunner) {
         liveHostedRunners.delete(invocation.id);
       }

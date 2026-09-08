@@ -2,14 +2,19 @@ import { randomUUID } from "node:crypto";
 import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
 import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
+import { buildAgentCallLogicalKey } from "@/lib/agents/calls/domain/agent-call";
 import { computeAgentCallBindingHash } from "@/lib/agents/calls/domain/agent-call-binding";
 import {
   createMysqlAgentCallStore,
   mysqlAgentCallStore,
 } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
+import { recordCapabilityUseInSession } from "@/lib/capability/capability-use-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { acceptEnterpriseProfileObservation } from "@/lib/identity/accept-enterprise-profile-observation";
+import type { EnterpriseProfileSource } from "@/lib/identity/enterprise-profile-source";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   agentCallAttemptTable,
   agentCallBindingTable,
@@ -31,6 +36,7 @@ import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligib
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { and, count, eq } from "drizzle-orm";
+import mysql from "mysql2/promise";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const NOW = new Date("2026-08-29T00:00:00.000Z");
@@ -245,6 +251,262 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
           ),
         ),
     ).toHaveLength(1);
+  });
+
+  it("F05-B 最终新建必须复核实际候选 A；A 到期时不得用数据库中的 fresh B 代证", async () => {
+    const scenario = await seed();
+    const preparedAt = new Date("2026-08-29T00:00:00.000Z");
+    const finalNow = new Date("2026-08-29T00:20:00.000Z");
+    const identity = await upsertUserIdentity({
+      tenantId: scenario.tenantId,
+      externalSubject: "employee-f05-b",
+      email: "employee-f05-b@example.test",
+      displayName: "F05-B User",
+    });
+    const source: EnterpriseProfileSource = {
+      sourceSystem: "directory",
+      trusted: true,
+      maxFreshAgeMs: 30 * 60_000,
+      maxStaleAgeMs: 30 * 60_000,
+    };
+
+    // 数据库中的 B 在最终化时仍 fresh；错误实现若重新读取 B，会错误放行已经到期的 A。
+    await acceptEnterpriseProfileObservation({
+      observation: {
+        tenantId: scenario.tenantId,
+        externalSubject: identity.externalSubject,
+        sourceSystem: source.sourceSystem,
+        attributes: { employeeNo: "B-NEW" },
+        verifiedAt: new Date("2026-08-29T00:19:00.000Z"),
+        freshUntil: new Date("2026-08-29T00:49:00.000Z"),
+        staleUntil: new Date("2026-08-29T01:19:00.000Z"),
+      },
+      source,
+      expectedSubject: {
+        tenantId: scenario.tenantId,
+        userIdentityId: identity.id,
+        externalSubject: identity.externalSubject,
+      },
+      now: new Date("2026-08-29T00:19:00.000Z"),
+    });
+
+    const bindingCandidate = {
+      ...scenario.binding,
+      enterpriseUserContext: {
+        context_version: "1" as const,
+        profile_status: "fresh" as const,
+        last_verified_at: preparedAt.toISOString(),
+        fields: { employeeNo: "A-OLD" },
+      },
+      // 这是候选 A 自己的本地期限证据；只在进程内传到最终化，不得持久化或外发。
+      enterpriseUserContextEvidence: {
+        tenantId: scenario.tenantId,
+        userIdentityId: identity.id,
+        profileRequirement: "fresh_required" as const,
+        sourceSystem: source.sourceSystem,
+        profileFingerprint: `sha256:${"a".repeat(64)}`,
+        lastVerifiedAt: preparedAt,
+        freshUntil: new Date("2026-08-29T00:10:00.000Z"),
+        staleUntil: finalNow,
+        maxFreshAgeMs: source.maxFreshAgeMs,
+        maxStaleAgeMs: source.maxStaleAgeMs,
+      },
+    };
+    const storeDependencies = {
+      recordCapabilityUse: recordCapabilityUseInSession,
+      now: () => finalNow,
+    };
+    const create = createCreateAgentCall({
+      store: createMysqlAgentCallStore(storeDependencies),
+      now: () => preparedAt,
+    });
+    const actionId = `f05-expired-a:${randomUUID()}`;
+
+    await expect(
+      create(commandFor(scenario, { actionId, bindingCandidate })),
+    ).rejects.toMatchObject({ code: "enterprise_user_context_unavailable" });
+    expect(
+      await db
+        .select()
+        .from(agentCallTable)
+        .where(
+          eq(agentCallTable.logicalCallKey, buildAgentCallLogicalKey(actionId, scenario.agentId)),
+        ),
+    ).toHaveLength(0);
+  });
+
+  it("F05-B stale_allowed 在最终时刻冻结同一候选 A，并同步更新状态标签与 hash", async () => {
+    const scenario = await seed();
+    const identity = await upsertUserIdentity({
+      tenantId: scenario.tenantId,
+      externalSubject: "employee-f05-stale",
+      email: "employee-f05-stale@example.test",
+      displayName: "F05 Stale User",
+    });
+    const preparedAt = new Date("2026-08-29T00:00:00.000Z");
+    const finalNow = new Date("2026-08-29T00:15:00.000Z");
+    const bindingCandidate = {
+      ...scenario.binding,
+      enterpriseUserContext: {
+        context_version: "1" as const,
+        profile_status: "fresh" as const,
+        last_verified_at: preparedAt.toISOString(),
+        fields: { employeeNo: "A-FROZEN" },
+      },
+      enterpriseUserContextEvidence: {
+        tenantId: scenario.tenantId,
+        userIdentityId: identity.id,
+        profileRequirement: "stale_allowed" as const,
+        sourceSystem: "directory",
+        profileFingerprint: `sha256:${"b".repeat(64)}`,
+        lastVerifiedAt: preparedAt,
+        freshUntil: new Date("2026-08-29T00:10:00.000Z"),
+        staleUntil: new Date("2026-08-29T00:30:00.000Z"),
+        maxFreshAgeMs: 30 * 60_000,
+        maxStaleAgeMs: 30 * 60_000,
+      },
+    };
+    const store = createMysqlAgentCallStore({
+      recordCapabilityUse: recordCapabilityUseInSession,
+      now: () => finalNow,
+    });
+    const create = createCreateAgentCall({ store, now: () => preparedAt });
+    const actionId = `f05-stale-a:${randomUUID()}`;
+
+    const result = await create(commandFor(scenario, { actionId, bindingCandidate }));
+    const binding = await store.getBinding({ callId: result.call.id, tenantId: scenario.tenantId });
+    expect(binding?.enterpriseUserContext).toEqual({
+      ...bindingCandidate.enterpriseUserContext,
+      profile_status: "stale",
+    });
+    const [stored] = await db
+      .select({ bindingHash: agentCallBindingTable.bindingHash })
+      .from(agentCallBindingTable)
+      .where(eq(agentCallBindingTable.callId, result.call.id));
+    expect(stored?.bindingHash).toBe(
+      computeAgentCallBindingHash({
+        ...bindingCandidate,
+        enterpriseUserContext: {
+          ...bindingCandidate.enterpriseUserContext,
+          profile_status: "stale",
+        },
+      }),
+    );
+    expect(JSON.stringify(binding)).not.toContain("enterpriseUserContextEvidence");
+  });
+
+  it("F05-B 已持久化调用重放不因候选后来过期而重新复核", async () => {
+    const scenario = await seed();
+    const identity = await upsertUserIdentity({
+      tenantId: scenario.tenantId,
+      externalSubject: "employee-f05-replay",
+      email: "employee-f05-replay@example.test",
+      displayName: "F05 Replay User",
+    });
+    const preparedAt = new Date("2026-08-29T00:00:00.000Z");
+    let clockNow = new Date("2026-08-29T00:05:00.000Z");
+    const bindingCandidate = {
+      ...scenario.binding,
+      enterpriseUserContext: {
+        context_version: "1" as const,
+        profile_status: "fresh" as const,
+        last_verified_at: preparedAt.toISOString(),
+        fields: { employeeNo: "REPLAY" },
+      },
+      enterpriseUserContextEvidence: {
+        tenantId: scenario.tenantId,
+        userIdentityId: identity.id,
+        profileRequirement: "fresh_required" as const,
+        sourceSystem: "directory",
+        profileFingerprint: `sha256:${"c".repeat(64)}`,
+        lastVerifiedAt: preparedAt,
+        freshUntil: new Date("2026-08-29T00:10:00.000Z"),
+        staleUntil: new Date("2026-08-29T00:30:00.000Z"),
+        maxFreshAgeMs: 30 * 60_000,
+        maxStaleAgeMs: 30 * 60_000,
+      },
+    };
+    const store = createMysqlAgentCallStore({
+      recordCapabilityUse: recordCapabilityUseInSession,
+      now: () => clockNow,
+    });
+    const create = createCreateAgentCall({ store, now: () => preparedAt });
+    const actionId = `f05-replay:${randomUUID()}`;
+
+    const first = await create(commandFor(scenario, { actionId, bindingCandidate }));
+    clockNow = new Date("2026-08-29T01:00:00.000Z");
+    const replay = await create(commandFor(scenario, { actionId, bindingCandidate }));
+
+    expect(first.status).toBe("created");
+    expect(replay).toMatchObject({ status: "replayed", call: { id: first.call.id } });
+  });
+
+  it("F05-B 最终事务等待 Authority 锁期间到期，必须使用释放锁后的时钟拒绝", async () => {
+    const scenario = await seed();
+    const identity = await upsertUserIdentity({
+      tenantId: scenario.tenantId,
+      externalSubject: "employee-f05-lock",
+      email: "employee-f05-lock@example.test",
+      displayName: "F05 Lock User",
+    });
+    const preparedAt = new Date("2026-08-29T00:00:00.000Z");
+    let clockNow = new Date("2026-08-29T00:05:00.000Z");
+    const bindingCandidate = {
+      ...scenario.binding,
+      enterpriseUserContext: {
+        context_version: "1" as const,
+        profile_status: "fresh" as const,
+        last_verified_at: preparedAt.toISOString(),
+        fields: { employeeNo: "LOCKED-A" },
+      },
+      enterpriseUserContextEvidence: {
+        tenantId: scenario.tenantId,
+        userIdentityId: identity.id,
+        profileRequirement: "fresh_required" as const,
+        sourceSystem: "directory",
+        profileFingerprint: `sha256:${"d".repeat(64)}`,
+        lastVerifiedAt: preparedAt,
+        freshUntil: new Date("2026-08-29T00:10:00.000Z"),
+        staleUntil: new Date("2026-08-29T00:30:00.000Z"),
+        maxFreshAgeMs: 30 * 60_000,
+        maxStaleAgeMs: 30 * 60_000,
+      },
+    };
+    const store = createMysqlAgentCallStore({
+      recordCapabilityUse: recordCapabilityUseInSession,
+      now: () => clockNow,
+    });
+    const create = createCreateAgentCall({ store, now: () => preparedAt });
+    const blocker = await mysql.createConnection(process.env.DATABASE_URL!);
+    await blocker.beginTransaction();
+    try {
+      await blocker.execute("SELECT `id` FROM `Invocation` WHERE `id` = ? FOR UPDATE", [
+        scenario.parentInvocationId,
+      ]);
+      const pending = create(
+        commandFor(scenario, {
+          actionId: `f05-lock-expiry:${randomUUID()}`,
+          bindingCandidate,
+        }),
+      );
+      const state = await Promise.race([
+        pending.then(
+          () => "settled",
+          () => "settled",
+        ),
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 100)),
+      ]);
+      expect(state).toBe("pending");
+
+      clockNow = new Date("2026-08-29T00:10:00.000Z");
+      await blocker.commit();
+      await expect(pending).rejects.toMatchObject({
+        code: "enterprise_user_context_unavailable",
+      });
+    } finally {
+      await blocker.rollback().catch(() => undefined);
+      await blocker.end();
+    }
   });
 
   it("Resolve 后 Publication withdraw，最终事务 fail closed 且不写 Call", async () => {

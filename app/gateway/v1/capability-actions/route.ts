@@ -30,6 +30,7 @@ import {
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
 import type { HarnessNextAction } from "@/lib/runtime/harness-loop/types";
+import { observeInvocationCancellation } from "@/lib/runtime/invocation-cancellation-signal";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import {
   type ExecutionSubject,
@@ -423,13 +424,20 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
   let execution: HarnessActionExecutionResult;
+  const invocationCancellation = observeInvocationCancellation({
+    tenantId: principal.tenantId,
+    invocationId: principal.invocationId,
+  });
   try {
+    await invocationCancellation.refresh();
     execution = await executor(body.action as never, {
       invocationId: principal.invocationId,
       tenantId: principal.tenantId,
       threadId: invocation.threadId ?? "",
       turnId: invocation.turnId,
       actionDigest: digest,
+      deadlineAt: new Date(principal.expiresAt),
+      abortSignal: invocationCancellation.signal,
     });
   } catch (error) {
     const reportedCode = getErrorCode(error);
@@ -464,6 +472,8 @@ export async function POST(request: Request): Promise<Response> {
     return apiError(errorCode, error instanceof Error ? error.message : String(error), {
       requestId,
     });
+  } finally {
+    invocationCancellation.dispose();
   }
   if (execution.pending) {
     await auditCapabilityAction({

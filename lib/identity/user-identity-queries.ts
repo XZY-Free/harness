@@ -7,7 +7,7 @@
  */
 import { type DbOrTx, db } from "@/lib/db/client";
 import { userIdentity } from "@/lib/persistence/schema/identity";
-import type { UserIdentity, UserIdentityStatus } from "@/lib/persistence/schema/identity";
+import type { UserIdentity } from "@/lib/persistence/schema/identity";
 import { and, eq } from "drizzle-orm";
 
 /** 按 (tenantId, externalSubject) upsert 用户身份。 */
@@ -16,17 +16,9 @@ export async function upsertUserIdentity(params: {
   externalSubject: string;
   email: string;
   displayName: string | null;
-  status?: UserIdentityStatus;
   client?: DbOrTx;
 }): Promise<UserIdentity> {
-  const {
-    tenantId,
-    externalSubject: subject,
-    email,
-    displayName,
-    status = "active",
-    client = db,
-  } = params;
+  const { tenantId, externalSubject: subject, email, displayName, client = db } = params;
 
   const [existing] = await client
     .select()
@@ -36,27 +28,34 @@ export async function upsertUserIdentity(params: {
 
   if (existing) {
     // email / displayName 漂移才轻量 update，避免无谓写入。
-    if (
-      existing.email !== email ||
-      existing.displayName !== displayName ||
-      existing.status !== status
-    ) {
+    // 普通展示更新不拥有 status 写权限：status 只由已授权的停用写入者维护，
+    // 比较与写入都不得包含 status，否则会把并发停用错误恢复为 active。
+    if (existing.email !== email || existing.displayName !== displayName) {
       await client
         .update(userIdentity)
-        .set({ email, displayName, status, updatedAt: new Date() })
+        .set({ email, displayName, updatedAt: new Date() })
         .where(eq(userIdentity.id, existing.id));
-      return { ...existing, email, displayName, status };
+      // 回查权威行，避免用旧快照拼装出偏离数据库的 status。
+      const [updated] = await client
+        .select()
+        .from(userIdentity)
+        .where(eq(userIdentity.id, existing.id))
+        .limit(1);
+      if (!updated) {
+        throw new Error("无法回查已更新的用户身份");
+      }
+      return updated;
     }
     return existing;
   }
 
-  // INSERT IGNORE + 回查（并发竞态下也只建一行）。
+  // INSERT IGNORE + 回查（并发竞态下也只建一行）。首次创建保持既有规则：status=active。
   await client.insert(userIdentity).ignore().values({
     tenantId,
     externalSubject: subject,
     email,
     displayName,
-    status,
+    status: "active",
   });
 
   const [created] = await client

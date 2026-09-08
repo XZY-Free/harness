@@ -84,6 +84,8 @@ export interface HarnessActionExecutionContext {
   threadId: string;
   turnId: string;
   actionDigest: string;
+  /** 上游运行时的真实绝对截止；行动内的短等待必须继续取更早值。 */
+  deadlineAt?: Date;
   abortSignal?: AbortSignal;
 }
 
@@ -135,6 +137,8 @@ export interface HarnessLoopParams {
   recoveryPort?: HarnessLoopRecoveryPort;
   limits?: Partial<HarnessLoopLimits>;
   emitTextDelta?: (delta: string) => Promise<void>;
+  /** Invocation 的绝对期限，传给每一项行动执行。 */
+  actionDeadlineAt?: Date;
   abortSignal?: AbortSignal;
   modelRef: string;
 }
@@ -359,6 +363,7 @@ export class HarnessLoop {
       threadId: this.params.threadId,
       turnId: this.params.turnId,
       actionDigest: historyEntry.actionDigest,
+      deadlineAt: this.params.actionDeadlineAt,
       abortSignal: this.params.abortSignal,
     });
     this.throwIfCancelled();

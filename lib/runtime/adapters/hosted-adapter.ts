@@ -365,6 +365,8 @@ export interface HostedHarnessLoopParams {
   modelRef?: string;
   /** live Hosted runner 的取消信号；durable cancel 由应用服务触发。 */
   abortSignal?: AbortSignal;
+  /** Invocation 的绝对期限；每个 Harness action 必须继续向下透传。 */
+  deadlineAt?: Date;
   /** 关联标识（X-Request-Id / traceparent）。 */
   correlationId?: string | null;
 }
@@ -491,6 +493,7 @@ export class HostedHarnessLoop {
           }
         : undefined,
       modelRef: this.params.modelRef ?? "unknown",
+      actionDeadlineAt: this.params.deadlineAt,
       abortSignal: this.params.abortSignal,
       eventWriter: {
         write: (type, payload) => this.sendEvent(ingressClient, type, payload),
@@ -671,6 +674,9 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           recoveryPort: params.recoveryPort,
           transientEventBatchSink: params.transientEventBatchSink,
           modelRef: params.modelRef,
+          deadlineAt: new Date(
+            Date.now() + (startParams.executionLimits?.max_invocation_seconds ?? 600) * 1000,
+          ),
           correlationId: startParams.correlationId,
         };
         const loop = new HostedHarnessLoop(loopParams);

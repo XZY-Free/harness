@@ -24,6 +24,7 @@ import {
   type EnterpriseAttributeKey,
 } from "@/lib/identity/enterprise-user";
 import type { EnterpriseUserPublicContext } from "@/lib/identity/enterprise-user-access-policy";
+import type { EnterpriseUserContextCandidateEvidence } from "@/lib/identity/prepare-enterprise-user-context";
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const AGENT_IDENTITY_MODES = ["none", "bearer"] as const;
@@ -81,7 +82,10 @@ export interface AgentCallBindingConfigInput {
 }
 
 /** Resolver/Application 提交给最终事务的候选；事务成功前不代表已冻结事实。 */
-export type AgentCallBindingCandidate = AgentCallBindingConfigInput;
+export interface AgentCallBindingCandidate extends AgentCallBindingConfigInput {
+  /** 仅供最终新建分支复核；不进入 binding hash、数据库或外部协议。 */
+  enterpriseUserContextEvidence?: EnterpriseUserContextCandidateEvidence;
+}
 
 export interface AgentCallBinding extends AgentCallBindingConfigInput {
   callId: string;
@@ -115,8 +119,17 @@ export function computeAgentCallBindingHash(input: AgentCallBindingConfigInput):
   if (!Number.isInteger(input.projectionVersionNo) || input.projectionVersionNo <= 0) {
     throw new AgentCallBindingEvidenceError("projectionVersionNo 必须为正整数");
   }
-  const canonical = JSON.stringify(sortKeys(input));
+  const canonical = JSON.stringify(sortKeys(bindingConfigFromCandidate(input)));
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+/** 从暂存候选中剥离只在进程内使用的复核证据。 */
+export function bindingConfigFromCandidate(
+  input: AgentCallBindingConfigInput | AgentCallBindingCandidate,
+): AgentCallBindingConfigInput {
+  const { enterpriseUserContextEvidence: _evidence, ...binding } =
+    input as AgentCallBindingCandidate;
+  return binding;
 }
 
 /**

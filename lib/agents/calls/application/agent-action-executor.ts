@@ -1,3 +1,4 @@
+import { cancelAgentCall } from "@/lib/agents/calls/application/cancel-agent-call";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
 import { projectAgentHostActions } from "@/lib/agents/calls/application/project-host-actions";
 import {
@@ -22,10 +23,7 @@ import {
   loadEnterpriseUserAccessPolicy,
 } from "@/lib/identity/enterprise-user-access-policy";
 import { getIdentityExtensions } from "@/lib/identity/identity-extension-bootstrap";
-import {
-  assertEnterpriseUserContextStillAcceptable,
-  prepareEnterpriseUserContext,
-} from "@/lib/identity/prepare-enterprise-user-context";
+import { prepareEnterpriseUserContext } from "@/lib/identity/prepare-enterprise-user-context";
 import { OutboundCredentialError } from "@/lib/identity/resolve-outbound-credential";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
@@ -64,6 +62,7 @@ export function createAgentActionExecutor(
         "Agent action 与执行器租户不一致",
       );
     }
+    await throwIfAgentActionCancelled(context.abortSignal);
 
     try {
       const logicalCallKey = buildAgentCallLogicalKey(action.actionId, action.payload.agentId);
@@ -81,6 +80,7 @@ export function createAgentActionExecutor(
           routeScopeKey: params.routeScopeKey ?? "default",
           businessKey: { threadId: context.threadId },
         });
+        await throwIfAgentActionCancelled(context.abortSignal);
         const frozenAgent = params.capabilityCatalog?.agents.find(
           (entry) => entry.agentId === action.payload.agentId,
         );
@@ -103,7 +103,7 @@ export function createAgentActionExecutor(
           resolved.agentRevisionId,
         );
         const identityExtensions = await getIdentityExtensions();
-        const enterpriseUserContext =
+        const enterpriseUserContextCandidate =
           enterprisePolicy.profileRequirement === "none"
             ? undefined
             : params.executionSubject.subjectType === "user"
@@ -112,23 +112,17 @@ export function createAgentActionExecutor(
                   userIdentityId: params.executionSubject.subjectId,
                   policy: enterprisePolicy,
                   source: identityExtensions.profileSource,
+                  deadlineAt: context.deadlineAt,
+                  signal: context.abortSignal,
                 })
               : await prepareEnterpriseUserContext({
                   tenantId: params.tenantId,
                   userIdentityId: "service-subject",
                   policy: enterprisePolicy,
+                  deadlineAt: context.deadlineAt,
+                  signal: context.abortSignal,
                 });
-        if (
-          enterprisePolicy.profileRequirement !== "none" &&
-          params.executionSubject.subjectType === "user"
-        ) {
-          await assertEnterpriseUserContextStillAcceptable({
-            tenantId: params.tenantId,
-            userIdentityId: params.executionSubject.subjectId,
-            policy: enterprisePolicy,
-            source: identityExtensions.profileSource,
-          });
-        }
+        await throwIfAgentActionCancelled(context.abortSignal);
         const created = await createAgentCall({
           tenantId: params.tenantId,
           parentInvocationId: context.invocationId,
@@ -137,10 +131,16 @@ export function createAgentActionExecutor(
           transportChannel: params.transportChannel,
           bindingCandidate: {
             ...resolved.bindingCandidate,
-            ...(enterpriseUserContext ? { enterpriseUserContext } : {}),
+            ...(enterpriseUserContextCandidate
+              ? {
+                  enterpriseUserContext: enterpriseUserContextCandidate.publicContext,
+                  enterpriseUserContextEvidence: enterpriseUserContextCandidate.evidence,
+                }
+              : {}),
           },
         });
         call = created.call;
+        await throwIfAgentActionCancelled(context.abortSignal, call);
       } else if (
         call.agentId !== action.payload.agentId ||
         call.sourceType !== "harness_planned" ||
@@ -148,6 +148,7 @@ export function createAgentActionExecutor(
       ) {
         throw new AgentCallIdempotencyConflictError(context.invocationId, logicalCallKey);
       }
+      await throwIfAgentActionCancelled(context.abortSignal, call);
       const current = await startAgentCall({
         tenantId: params.tenantId,
         callId: call.id,
@@ -160,6 +161,7 @@ export function createAgentActionExecutor(
           locale: "zh-CN",
         },
       });
+      await throwIfAgentActionCancelled(context.abortSignal, current);
       const disposition = toAgentCallDisposition(current);
       if (disposition.outcome === "pending" || disposition.outcome === "waiting_user") {
         return {
@@ -245,6 +247,20 @@ export function createAgentActionExecutor(
       );
     }
   };
+}
+
+async function throwIfAgentActionCancelled(
+  signal: AbortSignal | undefined,
+  call?: { id: string; tenantId: string },
+): Promise<void> {
+  if (!signal?.aborted) return;
+  if (call) {
+    await cancelAgentCall({ tenantId: call.tenantId, callId: call.id }).catch(() => undefined);
+  }
+  throw new AgentActionExecutionError(
+    "AGENT_ACTION_CANCELLED",
+    "父执行已取消，停止 AgentCall 创建与出站",
+  );
 }
 
 function readHostActions(value: unknown): HostAction[] {

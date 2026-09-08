@@ -52,7 +52,7 @@ export class AgentCallCancelError extends Error {
   }
 }
 
-const CANCELLABLE_STATES = new Set(["running", "waiting_user"]);
+const CANCELLABLE_STATES = new Set(["queued", "running", "waiting_user"]);
 
 /**
  * 取消既有 AgentCall（running / waiting_user → cancelled，A2A tasks/cancel）。
@@ -71,13 +71,30 @@ export async function cancelAgentCall(
   const binding = await agentCallStore.getBinding({ callId, tenantId });
   if (!binding) throw new AgentCallCancelError("AgentCallBinding 不存在", "binding_not_found");
 
-  // 2. 状态校验：只允许 running / waiting_user 取消；已终态幂等返回。
+  // 2. 状态校验：queued 尚未出站，直接本地取消；运行中才走远端取消。
   if (isTerminal(call.state)) return { call, remoteCancellation: "already_terminal" };
   if (!CANCELLABLE_STATES.has(call.state)) {
     throw new AgentCallCancelError(
       `AgentCall 当前状态 ${call.state} 不可取消（期望 running/waiting_user）`,
       "state_invalid",
     );
+  }
+
+  if (call.state === "queued") {
+    const transition = await transitionAgentCall({
+      callId,
+      tenantId,
+      input: "call.cancelled",
+      authority: "local_cancel",
+      errorCode: "AGENT_CALL_CANCELLED_BEFORE_DISPATCH",
+      errorSummary: "父执行在 AgentCall 出站前已取消",
+    });
+    if (transition.outcome === "rejected") {
+      throw new AgentCallCancelError("排队中的 AgentCall 取消被拒绝", "state_invalid");
+    }
+    const updated = await agentCallStore.getById({ callId, tenantId });
+    if (!updated) throw new AgentCallCancelError("AgentCall 读取失败", "call_not_found");
+    return { call: updated, remoteCancellation: "cancelled" };
   }
 
   // 3. exact frozen Contract cancel=false：不发伪取消，保留 active child 真值。

@@ -146,6 +146,46 @@ describe("AgentActionExecutor", () => {
     });
   });
 
+  it("F06 父执行已取消时在创建和出站前停止，不留下 AgentCall 或远端请求", async () => {
+    const scenario = await seed("long_running");
+    const execute = createAgentActionExecutor({
+      tenantId: scenario.tenantId,
+      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      resolveRoute,
+      transportChannel: "hosted",
+    });
+    const controller = new AbortController();
+    controller.abort(new DOMException("parent cancelled", "AbortError"));
+
+    await expect(
+      execute(
+        {
+          actionId: "f06-cancel-before-dispatch",
+          stepNo: 1,
+          actionType: "agent.call",
+          purposeCode: "query_balance",
+          shortPurpose: "查询年假余额",
+          payload: { agentId: scenario.agentId, task: "不应出站" },
+        },
+        {
+          invocationId: scenario.parentInvocationId,
+          tenantId: scenario.tenantId,
+          threadId: scenario.threadId,
+          turnId: scenario.turnId,
+          actionDigest: `sha256:${"f".repeat(64)}`,
+          abortSignal: controller.signal,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "AGENT_ACTION_CANCELLED" });
+    expect(scenario.provider.captured).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(agentCallTable)
+        .where(eq(agentCallTable.parentInvocationId, scenario.parentInvocationId)),
+    ).toHaveLength(0);
+  });
+
   it("AgentCall 完成后只返回 Agent Observation", async () => {
     const scenario = await seed("completed");
     const execute = createAgentActionExecutor({
