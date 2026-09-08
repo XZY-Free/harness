@@ -49,6 +49,22 @@ function runThemeInit(
 }
 
 describe("themeInitScript", () => {
+  it("子路径部署时从 basePath 加载主题初始化脚本", () => {
+    vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
+    try {
+      const markup = renderToStaticMarkup(
+        <RootLayout>
+          <div>content</div>
+        </RootLayout>,
+      );
+      expect(markup).toMatch(
+        /<script[^>]*id="theme-init"[^>]*src="\/snowharness\/theme-init\.js"[^>]*><\/script>/,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("员工 Web 与 Desktop 没有保存主题时都默认使用浅色", () => {
     expect(runThemeInit("/desktop/chat/thread-1", null, true)).toEqual(["light"]);
     expect(runThemeInit("/chat/new", null, true)).toEqual(["light"]);

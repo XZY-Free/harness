@@ -13,11 +13,13 @@ export const metadata: Metadata = {
  * 默认使用浅色并尊重已保存的显式选择，Studio 的保存值不污染员工界面。
  */
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const basePath = process.env.NEXT_PUBLIC_SNOW_BASE_PATH ?? "";
+
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head />
       <body>
-        <Script id="theme-init" src="/theme-init.js" strategy="beforeInteractive" />
+        <Script id="theme-init" src={`${basePath}/theme-init.js`} strategy="beforeInteractive" />
         {children}
       </body>
     </html>
