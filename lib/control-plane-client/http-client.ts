@@ -1,3 +1,4 @@
+import { apiPath } from "@/lib/api-fetch";
 import type { ApiErrorCode } from "@/lib/error-codes";
 
 export interface ApiClientConfig {
@@ -47,7 +48,7 @@ function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
 }
 
 function joinUrl(baseUrl: string, path: string): string {
-  if (!baseUrl) return path;
+  if (!baseUrl) return apiPath(path);
   return `${baseUrl.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
 }
 

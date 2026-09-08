@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api-fetch";
 import { Unlink } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -60,7 +61,7 @@ export function SkillSyncMeta({
     setUnsyncing(true);
     setError(null);
     try {
-      const res = await fetch(`/studio/api/skills/${skillId}/unsync`, { method: "POST" });
+      const res = await apiFetch(`/studio/api/skills/${skillId}/unsync`, { method: "POST" });
       const body = await res.json();
       if (!res.ok) {
         setError(body?.error?.message ?? "停止同步失败，请稍后重试");

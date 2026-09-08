@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { apiFetch } from "@/lib/api-fetch";
 import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -61,7 +62,7 @@ export function SkillCreator() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/studio/api/skills", {
+      const res = await apiFetch("/studio/api/skills", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

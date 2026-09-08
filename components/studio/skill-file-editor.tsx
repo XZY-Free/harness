@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
 import { FileText, Save, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -39,14 +40,14 @@ export function SkillFileEditor({
   const [message, setMessage] = useState<Message | null>(null);
 
   async function loadFiles() {
-    const res = await fetch(`/studio/api/skills/${skillId}/files`);
+    const res = await apiFetch(`/studio/api/skills/${skillId}/files`);
     const body = await res.json();
     if (res.ok) setFiles(body.data?.files ?? []);
   }
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/studio/api/skills/${skillId}/files`)
+    apiFetch(`/studio/api/skills/${skillId}/files`)
       .then(async (response) => ({ ok: response.ok, body: await response.json() }))
       .then(({ ok, body }) => {
         if (!cancelled && ok) setFiles(body.data?.files ?? []);
@@ -62,7 +63,7 @@ export function SkillFileEditor({
   async function openFile(path: string) {
     setMessage(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/studio/api/skills/${skillId}/files?path=${encodeURIComponent(path)}`,
       );
       const body = await res.json();
@@ -92,7 +93,7 @@ export function SkillFileEditor({
     setBusyAction("save");
     setMessage(null);
     try {
-      const res = await fetch(`/studio/api/skills/${skillId}/files`, {
+      const res = await apiFetch(`/studio/api/skills/${skillId}/files`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ path: current, content }),
@@ -116,7 +117,7 @@ export function SkillFileEditor({
     setBusyAction("publish");
     setMessage(null);
     try {
-      const res = await fetch(`/studio/api/skills/${skillId}/versions`, {
+      const res = await apiFetch(`/studio/api/skills/${skillId}/versions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: `${skillName} 新版本` }),

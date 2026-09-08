@@ -2,6 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api-fetch";
 import { RotateCcw, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -20,7 +21,7 @@ async function postAction(
   kind: "publish" | "rollback",
 ): Promise<{ ok: boolean; message?: string }> {
   try {
-    const res = await fetch(`/studio/api/skills/${skillId}/${kind}`, {
+    const res = await apiFetch(`/studio/api/skills/${skillId}/${kind}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ versionId }),

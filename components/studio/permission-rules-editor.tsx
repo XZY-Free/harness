@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { apiFetch } from "@/lib/api-fetch";
 
 type Decision = "allow" | "pause" | "block";
 
@@ -117,7 +118,7 @@ export function PermissionRulesEditor({
     setNotice(null);
 
     try {
-      const response = await fetch("/studio/api/permission-rules", {
+      const response = await apiFetch("/studio/api/permission-rules", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

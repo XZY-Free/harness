@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
 
 /**
@@ -108,7 +109,7 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
     setMessage(null);
     try {
       const roleIds = [...(draft[selected.id] ?? [])];
-      const res = await fetch(`/studio/api/settings/users/${selected.id}/roles`, {
+      const res = await apiFetch(`/studio/api/settings/users/${selected.id}/roles`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roleIds }),

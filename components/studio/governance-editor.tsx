@@ -7,6 +7,7 @@ import { StudioSettingsSection } from "@/components/studio/studio-settings-secti
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { apiFetch } from "@/lib/api-fetch";
 
 interface GovernanceConfigShape {
   protectedPaths: string[];
@@ -104,7 +105,7 @@ export function GovernanceEditor({
     };
 
     try {
-      const response = await fetch("/studio/api/governance", {
+      const response = await apiFetch("/studio/api/governance", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

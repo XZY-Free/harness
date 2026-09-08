@@ -13,6 +13,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api-fetch";
 import { Archive } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -32,7 +33,7 @@ export function SkillDeleteButton({
   async function del() {
     setBusy(true);
     try {
-      const res = await fetch(`/studio/api/skills/${skillId}`, { method: "DELETE" });
+      const res = await apiFetch(`/studio/api/skills/${skillId}`, { method: "DELETE" });
       if (res.ok) {
         setOpen(false);
         router.push("/studio/skills");

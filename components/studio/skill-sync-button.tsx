@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api-fetch";
 import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -20,7 +21,7 @@ export function SkillSyncButton() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/studio/api/skills/sync", { method: "POST" });
+      const res = await apiFetch("/studio/api/skills/sync", { method: "POST" });
       const body = await res.json();
       if (!res.ok) {
         setError(body?.error?.message ?? "同步失败，请稍后重试");
