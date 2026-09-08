@@ -6,7 +6,7 @@ import { ThreadPage } from "@/components/thread/thread-page";
 import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread-session";
 import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
 import { getDesktopBridge, getDesktopCapabilities } from "@/lib/desktop/capabilities";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { parseDesktopRoute } from "../desktop-route";
 import { navigateDesktop, usePathname } from "../next-navigation";
 
@@ -25,6 +25,7 @@ function DesktopShell() {
   const [error, setError] = useState<string | null>(null);
   const [newThreadError, setNewThreadError] = useState<string | null>(null);
   const newThreadSession = useRef(createNewThreadSession()).current;
+  const viewerId = shell?.viewer_id;
 
   useEffect(() => {
     let active = true;
@@ -47,7 +48,7 @@ function DesktopShell() {
   // main 用本机 Session fetch 同源注册端点；已注册则复用现有租户并确保 Bridge 连接。
   // 注册失败静默保持 disconnected，不打扰用户，后续可重试。
   useEffect(() => {
-    if (!shell) return;
+    if (!viewerId) return;
     const bridge = getDesktopBridge();
     if (!bridge) return;
     let active = true;
@@ -61,7 +62,7 @@ function DesktopShell() {
     return () => {
       active = false;
     };
-  }, [shell]);
+  }, [viewerId]);
 
   const submitNewThread = async ({
     text,
@@ -91,6 +92,22 @@ function DesktopShell() {
     }
   };
 
+  const handleLatestTurnStateChange = useCallback(
+    (currentThreadId: string, state: string | null) => {
+      setShell((current) =>
+        current
+          ? {
+              ...current,
+              threads: current.threads.map((thread) =>
+                thread.id === currentThreadId ? { ...thread, latest_turn_state: state } : thread,
+              ),
+            }
+          : current,
+      );
+    },
+    [],
+  );
+
   if (error) return <DesktopError>{error}</DesktopError>;
   if (!shell) return <DesktopError>正在连接服务器…</DesktopError>;
   if (route.kind === "not-found") return <DesktopError>页面不存在。</DesktopError>;
@@ -99,6 +116,7 @@ function DesktopShell() {
   const threads = shell.threads.map((thread) => ({
     id: thread.id,
     title: thread.title,
+    latest_turn_state: thread.latest_turn_state,
   }));
   // Agent 目录为空是合法状态；无 Agent 时不阻断会话创建，也不 fallback 第一个 Agent。
   return (
@@ -125,6 +143,7 @@ function DesktopShell() {
               variant="desktop"
               viewerId={shell.viewer_id}
               defaultModelRef={shell.default_model_ref}
+              onLatestTurnStateChange={handleLatestTurnStateChange}
             />
           )}
         </main>

@@ -131,6 +131,24 @@ describe("DesktopWorkbench", () => {
     expect(screen.getByText("产品方案.md")).not.toBeNull();
   });
 
+  it("待确认状态只用中性层级，不把整个确认流程染成警告色", () => {
+    render(
+      <DesktopWorkbench
+        threadId="thread-1"
+        viewerId="user-1"
+        activeGoal={goal}
+        latestTurn={latestTurn}
+        items={items}
+        onLocateItem={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("等待确认").parentElement?.querySelector(".bg-warning")).toBeNull();
+    expect(
+      screen.getByText("确认发布方案").closest("button")?.querySelector(".text-warning"),
+    ).toBeNull();
+  });
+
   it("从加号打开文件，并使用真实文件树选择文件", () => {
     render(
       <DesktopWorkbench

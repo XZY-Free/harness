@@ -62,6 +62,7 @@ export async function GET(request: Request): Promise<Response> {
       threads: threads.map((thread) => ({
         id: thread.id,
         title: thread.title,
+        latest_turn_state: thread.latestTurnState,
       })),
       default_model_ref: aiConfig.chatModel,
     },

@@ -13,7 +13,18 @@ vi.mock("@/lib/client/new-thread-session", () => ({
   createNewThreadSession: mocks.createNewThreadSession,
 }));
 vi.mock("@/components/thread/sidebar/desktop-sidebar", () => ({
-  DesktopSidebar: () => <div data-testid="desktop-sidebar" />,
+  DesktopSidebar: ({
+    threads,
+  }: {
+    readonly threads: readonly {
+      readonly id: string;
+      readonly latest_turn_state?: string | null;
+    }[];
+  }) => (
+    <div data-testid="desktop-sidebar">
+      {threads.map((thread) => `${thread.id}:${thread.latest_turn_state ?? "none"}`).join(",")}
+    </div>
+  ),
 }));
 vi.mock("@/components/thread/new-thread-page", () => ({
   NewThreadPage: ({
@@ -38,8 +49,23 @@ vi.mock("@/components/thread/new-thread-page", () => ({
   ),
 }));
 vi.mock("@/components/thread/thread-page", () => ({
-  ThreadPage: ({ defaultModelRef }: { readonly defaultModelRef?: string }) => (
-    <div data-testid="thread-page" data-default-model-ref={defaultModelRef ?? ""} />
+  ThreadPage: ({
+    defaultModelRef,
+    threadId,
+    onLatestTurnStateChange,
+  }: {
+    readonly defaultModelRef?: string;
+    readonly threadId: string;
+    readonly onLatestTurnStateChange?: (threadId: string, state: string | null) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="thread-page"
+      data-default-model-ref={defaultModelRef ?? ""}
+      onClick={() => onLatestTurnStateChange?.(threadId, null)}
+    >
+      更新会话状态
+    </button>
   ),
 }));
 
@@ -98,5 +124,22 @@ describe("WebThreadShell 透传平台默认模型", () => {
     expect(router.replace).not.toHaveBeenCalled();
     // 地址栏经 history.replaceState 更新
     expect(window.location.pathname).toBe("/chat/created-1");
+  });
+
+  it("当前会话离开等待状态后立即清除侧栏需要输入标记", async () => {
+    mocks.loadThreadShell.mockResolvedValue({
+      viewer_id: "viewer-1",
+      threads: [{ id: "thread-1", title: "等待确认", latest_turn_state: "waiting_user" }],
+      default_model_ref: "deepseek-v4-flash",
+    });
+    render(<WebThreadShell threadId="thread-1" />);
+
+    expect((await screen.findByTestId("desktop-sidebar")).textContent).toContain(
+      "thread-1:waiting_user",
+    );
+    fireEvent.click(screen.getByTestId("thread-page"));
+    await waitFor(() =>
+      expect(screen.getByTestId("desktop-sidebar").textContent).toContain("thread-1:none"),
+    );
   });
 });

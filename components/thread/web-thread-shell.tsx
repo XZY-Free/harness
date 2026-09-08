@@ -7,7 +7,7 @@ import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
 import { ThreadPage } from "@/components/thread/thread-page";
 import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread-session";
 import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function WebThreadShell({ threadId }: { readonly threadId: string | null }) {
   const session = useRef(createNewThreadSession()).current;
@@ -36,6 +36,22 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
     };
   }, []);
 
+  const handleLatestTurnStateChange = useCallback(
+    (currentThreadId: string, state: string | null) => {
+      setShell((current) =>
+        current
+          ? {
+              ...current,
+              threads: current.threads.map((thread) =>
+                thread.id === currentThreadId ? { ...thread, latest_turn_state: state } : thread,
+              ),
+            }
+          : current,
+      );
+    },
+    [],
+  );
+
   if (!shell && !error) {
     return (
       <output aria-label="会话页面加载中" className="flex h-dvh items-center justify-center">
@@ -54,6 +70,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
   const threads = shell.threads.map((thread) => ({
     id: thread.id,
     title: thread.title,
+    latest_turn_state: thread.latest_turn_state,
   }));
 
   const submitNewThread = async (submission: ClientNewThreadSubmission): Promise<boolean> => {
@@ -97,6 +114,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
               key={activeThreadId}
               threadId={activeThreadId}
               defaultModelRef={shell.default_model_ref}
+              onLatestTurnStateChange={handleLatestTurnStateChange}
             />
           )}
         </main>

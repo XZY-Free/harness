@@ -278,7 +278,7 @@ export function DesktopWorkbench({
                 {tab !== "task" && <TabIcon tab={tab} />}
                 <span className="truncate">{tabLabel(tab)}</span>
                 {tab === "review" && pendingReviews.length > 0 && (
-                  <span className="rounded-full bg-warning/15 px-1.5 text-2xs text-warning">
+                  <span className="rounded-full bg-muted px-1.5 text-2xs text-muted-foreground">
                     {pendingReviews.length}
                   </span>
                 )}
@@ -416,7 +416,7 @@ function TaskPane({
             className={cn(
               "size-1.5 rounded-full",
               statusTone === "running" && "animate-gentle-pulse bg-primary",
-              statusTone === "waiting" && "bg-warning",
+              statusTone === "waiting" && "bg-muted-foreground",
               statusTone === "success" && "bg-success",
               statusTone === "error" && "bg-destructive",
               (statusTone === "stopped" || statusTone === "idle") && "bg-muted-foreground",
@@ -442,7 +442,10 @@ function TaskPane({
                 onClick={() => onLocateItem(review.itemId)}
                 className="flex w-full items-start gap-2 rounded-lg border border-border p-3 text-left transition hover:bg-muted"
               >
-                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-warning" strokeWidth={1.5} />
+                <CheckCircle2
+                  className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                  strokeWidth={1.5}
+                />
                 <span className="min-w-0">
                   <span className="block truncate text-foreground text-sm">{review.title}</span>
                   {review.summary && (
@@ -587,7 +590,7 @@ function ReviewPane({
             )}
           >
             <span className="block truncate">{item.title}</span>
-            {item.pending && <span className="text-2xs text-warning">等待确认</span>}
+            {item.pending && <span className="text-2xs text-muted-foreground">等待确认</span>}
           </button>
         ))}
       </div>

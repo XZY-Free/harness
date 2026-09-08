@@ -41,4 +41,21 @@ describe("GET /api/v1/threads（Desktop/Web shell）", () => {
     expect(body.default_model_ref).toBe(aiConfig.chatModel);
     expect(body.default_model_ref.length).toBeGreaterThan(0);
   });
+
+  it("把每个会话的最新 Turn 状态投影给侧栏，首次加载即可识别需要用户输入", async () => {
+    mocks.listThreadsForUser.mockResolvedValue([
+      { id: "thread-waiting", title: "等待确认", latestTurnState: "waiting_user" },
+      { id: "thread-empty", title: "空会话", latestTurnState: null },
+    ]);
+
+    const response = await GET(new Request("http://localhost/api/v1/threads") as never);
+    const body = (await response.json()) as {
+      threads: Array<{ id: string; latest_turn_state: string | null }>;
+    };
+
+    expect(body.threads).toEqual([
+      { id: "thread-waiting", title: "等待确认", latest_turn_state: "waiting_user" },
+      { id: "thread-empty", title: "空会话", latest_turn_state: null },
+    ]);
+  });
 });

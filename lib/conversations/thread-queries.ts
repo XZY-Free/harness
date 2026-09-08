@@ -29,8 +29,10 @@ import {
   type ThreadEvent,
   type ThreadEventActorType,
   type ThreadLifecycleState,
+  type TurnState,
   threadEventTable,
   threadTable,
+  turnTable,
 } from "@/lib/persistence/schema/conversation";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
@@ -146,11 +148,15 @@ export async function requireThread(tenantId: string, threadId: string): Promise
 }
 
 /** 列出用户所有 Thread（跨租户隔离，默认不含 deleted）。 */
+export type ThreadWithLatestTurnState = Thread & {
+  readonly latestTurnState: TurnState | null;
+};
+
 export async function listThreadsForUser(
   tenantId: string,
   ownerUserId: string,
   options?: { lifecycleState?: ThreadLifecycleState; includeDeleted?: boolean },
-): Promise<Thread[]> {
+): Promise<ThreadWithLatestTurnState[]> {
   const conditions = [eq(threadTable.tenantId, tenantId), eq(threadTable.ownerUserId, ownerUserId)];
   if (options?.lifecycleState) {
     conditions.push(eq(threadTable.lifecycleState, options.lifecycleState));
@@ -158,11 +164,19 @@ export async function listThreadsForUser(
   if (!options?.includeDeleted) {
     conditions.push(isNull(threadTable.deletedAt));
   }
-  return db
-    .select()
+  const rows = await db
+    .select({ thread: threadTable, latestTurnState: turnTable.turnState })
     .from(threadTable)
+    .leftJoin(
+      turnTable,
+      and(
+        eq(turnTable.threadId, threadTable.id),
+        eq(turnTable.turnSequence, threadTable.lastTurnSequence),
+      ),
+    )
     .where(and(...conditions))
     .orderBy(desc(threadTable.lastActivityAt));
+  return rows.map(({ thread, latestTurnState }) => ({ ...thread, latestTurnState }));
 }
 
 /**

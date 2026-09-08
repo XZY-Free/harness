@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   useThread: vi.fn(),
   useThreadDetail: vi.fn(),
   useThreadSettings: vi.fn(),
+  timelineItems: [] as string[],
 }));
 
 vi.mock("@/components/hooks/use-thread", () => ({ useThread: mocks.useThread }));
@@ -24,7 +25,17 @@ vi.mock("@/components/thread/thread-header", () => ({
   ThreadHeader: () => <div />,
   deriveTaskStatus: () => ({ tone: "idle", label: "空闲" }),
 }));
-vi.mock("@/components/thread/thread-timeline", () => ({ ThreadTimeline: () => <div /> }));
+vi.mock("@/components/thread/thread-timeline", () => ({
+  ThreadTimeline: ({ items }: { readonly items: readonly { readonly id: string }[] }) => {
+    mocks.timelineItems = items.map((item) => item.id);
+    return <div data-testid="thread-timeline" data-item-ids={mocks.timelineItems.join(",")} />;
+  },
+}));
+vi.mock("@/components/thread/items/user-action-item", () => ({
+  UserActionItem: ({ item }: { readonly item: { readonly id: string } }) => (
+    <div data-testid={`user-action-${item.id}`} />
+  ),
+}));
 vi.mock("@/components/thread/turn-failure-notice", () => ({ TurnFailureNotice: () => null }));
 vi.mock("@/components/desktop/desktop-workbench", () => ({
   DesktopWorkbench: ({ isOpen }: { readonly isOpen?: boolean }) => (
@@ -98,6 +109,72 @@ describe("ThreadPage Desktop 输出区", () => {
     render(<ThreadPage threadId="t-1" variant="desktop" />);
     expect(screen.getByTestId("workbench").dataset.open).toBe("true");
     expect(screen.getByRole("button", { name: "收起任务工作台" })).toBeTruthy();
+  });
+});
+
+describe("ThreadPage 待用户操作面板", () => {
+  const pendingAction = {
+    id: "action-pending",
+    turn_id: "turn-1",
+    item_sequence: 2,
+    item_type: "user_action" as const,
+    item_state: "pending" as const,
+    content: {
+      request_type: "confirmation",
+      request_id: "request-1",
+      state: "pending",
+    },
+    created_at: "2026-09-08T00:00:00.000Z",
+  };
+
+  it.each(["web", "desktop"] as const)(
+    "%s 把当前待确认操作放到输入区正上方，不留在历史时间线顶部",
+    (surface) => {
+      mocks.useThread.mockReturnValue({
+        items: [pendingAction],
+        streamStatus: "open",
+        reconnectAttempt: 0,
+        reconnectMax: 5,
+        snapshotStatus: "ready",
+        visibleError: null,
+        lastAppliedEventSequence: 1,
+        resnapshot: vi.fn(),
+      });
+
+      render(<ThreadPage threadId="t-1" variant={surface === "desktop" ? "desktop" : "web"} />);
+
+      const dock = screen.getByTestId("pending-user-action-dock");
+      const action = screen.getByTestId("user-action-action-pending");
+      const input = screen.getByTestId("thread-input-frame");
+      expect(dock.contains(action)).toBe(true);
+      expect(screen.getByTestId("thread-timeline").dataset.itemIds).toBe("");
+      expect(dock.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    },
+  );
+
+  it("已处理操作留在会话历史中，不再占用输入区上方", () => {
+    mocks.useThread.mockReturnValue({
+      items: [
+        {
+          ...pendingAction,
+          id: "action-resolved",
+          item_state: "completed",
+          content: { ...pendingAction.content, state: "resolved", resolution: "approve" },
+        },
+      ],
+      streamStatus: "open",
+      reconnectAttempt: 0,
+      reconnectMax: 5,
+      snapshotStatus: "ready",
+      visibleError: null,
+      lastAppliedEventSequence: 2,
+      resnapshot: vi.fn(),
+    });
+
+    render(<ThreadPage threadId="t-1" />);
+
+    expect(screen.queryByTestId("pending-user-action-dock")).toBeNull();
+    expect(screen.getByTestId("thread-timeline").dataset.itemIds).toBe("action-resolved");
   });
 });
 

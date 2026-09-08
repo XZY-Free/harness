@@ -171,6 +171,27 @@ describe("Thread CRUD", () => {
     expect(list[1]?.id).toBe(threadB.id);
   });
 
+  it("listThreadsForUser 同步返回每个会话最新 Turn 状态，空会话为 null", async () => {
+    const { thread: waitingThread } = await seedThread(tenantId, ownerId, agentId);
+    const { thread: emptyThread } = await seedThread(tenantId, ownerId, agentId);
+    const accepted = await acceptUserMessageTurn({
+      tenantId,
+      threadId: waitingThread.id,
+      ownerUserId: ownerId,
+      content: { text: "需要确认的操作" },
+      actorId: ownerId,
+    });
+    await updateTurnState(tenantId, accepted.turn.id, "queued", 1);
+    await updateTurnState(tenantId, accepted.turn.id, "running", 2);
+    await updateTurnState(tenantId, accepted.turn.id, "waiting_user", 3);
+
+    const list = await listThreadsForUser(tenantId, ownerId);
+    const waiting = list.find((item) => item.id === waitingThread.id);
+    const empty = list.find((item) => item.id === emptyThread.id);
+    expect(waiting?.latestTurnState).toBe("waiting_user");
+    expect(empty?.latestTurnState).toBeNull();
+  });
+
   it("listThreadsForUser 默认不含 deleted", async () => {
     const { thread: threadA } = await seedThread(tenantId, ownerId, agentId);
     const { thread: threadB } = await seedThread(tenantId, ownerId, agentId);

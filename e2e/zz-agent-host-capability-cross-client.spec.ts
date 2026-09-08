@@ -6,11 +6,20 @@
  * → 同一 AgentCall/task/context 恢复并产生第二个 confirmation。
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { E2E_PORT } from "../playwright.config";
 import { launchDesktopApp } from "./support/launch-desktop";
+
+const captureUi = process.env.SNOW_CAPTURE_UI === "1";
+const captureDir = resolve(process.cwd(), "output/user-action-design-qa");
+
+async function capture(page: import("@playwright/test").Page, name: string): Promise<void> {
+  if (!captureUi) return;
+  mkdirSync(captureDir, { recursive: true });
+  await page.screenshot({ path: resolve(captureDir, name), fullPage: true });
+}
 
 function e2eRuntimeDescriptorPath(): string {
   return resolve(process.env.TMPDIR ?? "/tmp", `snow-harness-e2e-${E2E_PORT}.json`);
@@ -111,6 +120,7 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
 
   try {
     // 先打开真实 Web 会话，再由真实 AgentCall/A2A 事件写入用户确认请求。
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/chat/${scenario.threadId}`);
     await expect(page.getByLabel("消息输入框")).toBeEnabled({ timeout: 90_000 });
 
@@ -155,37 +165,76 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
     await continuationWorker.pollOnce();
 
     // Web 不刷新，必须通过真实 Timeline/SSE 收到外部 Agent 的结构化确认。
-    await expect(
-      page.getByLabel("对话时间线").getByText("提交请假申请", { exact: true }),
-    ).toBeVisible({
+    const webPanel = page.getByRole("region", { name: "需要用户确认" });
+    await expect(webPanel.getByText("提交请假申请", { exact: true })).toBeVisible({
       timeout: 90_000,
     });
-    await expect(page.getByLabel("操作预览")).toBeVisible();
-    await expect(page.getByText("年假", { exact: true })).toBeVisible();
+    await expect(webPanel.getByText("年假", { exact: true })).toBeHidden();
+    await expect(page.getByRole("link", { name: /需要用户输入/ })).toBeVisible();
+    await capture(page, "01-web-confirmation-collapsed.png");
+
+    await webPanel.getByRole("button", { name: "查看操作详情" }).click();
+    await expect(webPanel.getByRole("region", { name: "操作详情" })).toBeVisible();
+    await expect(webPanel.getByText("年假", { exact: true })).toBeVisible();
+    await capture(page, "02-web-confirmation-expanded.png");
 
     const desktopWindow = await desktop.app.firstWindow();
     const rendererOrigin = new URL(desktopWindow.url()).origin;
     await desktopWindow.goto(`${rendererOrigin}/desktop/chat/${scenario.threadId}`);
-    await expect(
-      desktopWindow.getByLabel("对话时间线").getByText("提交请假申请", { exact: true }),
-    ).toBeVisible({ timeout: 90_000 });
-    await desktopWindow.getByRole("button", { name: "确认", exact: true }).click();
+    const desktopPanel = desktopWindow.getByRole("region", { name: "需要用户确认" });
+    await expect(desktopPanel.getByText("提交请假申请", { exact: true })).toBeVisible({
+      timeout: 90_000,
+    });
+    await expect(desktopWindow.getByRole("link", { name: /需要用户输入/ })).toBeVisible();
+
+    for (const size of [
+      { width: 1280, height: 900 },
+      { width: 1170, height: 760 },
+      { width: 1024, height: 700 },
+    ]) {
+      await desktop.app.evaluate(({ BrowserWindow }, nextSize) => {
+        const mainWindow = BrowserWindow.getAllWindows()[0];
+        if (!mainWindow) throw new Error("Desktop 主窗口不存在");
+        mainWindow.setSize(nextSize.width, nextSize.height);
+      }, size);
+      // 等待 macOS 窗口重排与 200ms 响应式过渡完成，截图不能混入 resize 中间帧。
+      await desktopWindow.waitForTimeout(350);
+      await expect(desktopPanel).toBeVisible();
+      await expect(desktopPanel.getByRole("button", { name: /确认并继续/ })).toBeVisible();
+      if (size.width < 1180) {
+        expect(
+          await desktopWindow
+            .locator('aside[aria-label="会话侧栏"]')
+            .evaluate((element) => element.getBoundingClientRect().width),
+        ).toBe(0);
+      }
+      expect(
+        await desktopWindow.evaluate(
+          () => document.documentElement.scrollWidth <= globalThis.innerWidth,
+        ),
+      ).toBe(true);
+      await capture(desktopWindow, `03-desktop-confirmation-${size.width}x${size.height}.png`);
+    }
+
+    await desktop.app.evaluate(({ BrowserWindow }) => {
+      const mainWindow = BrowserWindow.getAllWindows()[0];
+      if (!mainWindow) throw new Error("Desktop 主窗口不存在");
+      mainWindow.setSize(1280, 900);
+    });
+    await desktopPanel.getByRole("button", { name: "查看操作详情" }).click();
+    await expect(desktopPanel.getByRole("region", { name: "操作详情" })).toBeVisible();
+    await capture(desktopWindow, "04-desktop-confirmation-expanded.png");
+    await desktopPanel.getByRole("button", { name: /确认并继续/ }).click();
 
     // Desktop 经正式 :resolve API 写 Authority；两端均不刷新，Web 由 Event 收敛。
     await expect(
-      desktopWindow
-        .getByRole("log", { name: "对话时间线" })
-        .locator("span")
-        .filter({ hasText: "已同意" })
-        .first(),
+      desktopWindow.getByRole("region", { name: "用户操作记录" }).getByText("已同意"),
     ).toBeVisible({ timeout: 90_000 });
     await expect(
-      page
-        .getByRole("log", { name: "对话时间线" })
-        .locator("span")
-        .filter({ hasText: "已同意" })
-        .first(),
+      page.getByRole("region", { name: "用户操作记录" }).getByText("已同意"),
     ).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByRole("link", { name: /需要用户输入/ })).toHaveCount(0);
+    await capture(page, "05-web-confirmation-resolved.png");
 
     const [resolvedFirst] = await harness.db
       .select()

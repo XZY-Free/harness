@@ -41,8 +41,9 @@ import { useThreadDetail } from "@/components/hooks/use-thread-detail";
 import { useThreadSettings } from "@/components/hooks/use-thread-settings";
 import { cn } from "@/lib/utils";
 import { PanelRight } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DesktopWorkbench } from "../desktop/desktop-workbench";
+import { UserActionItem } from "./items/user-action-item";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
 import { ThreadHeader, deriveTaskStatus } from "./thread-header";
 import { ThreadInput } from "./thread-input";
@@ -57,6 +58,8 @@ interface ThreadPageProps {
   readonly viewerId?: string;
   /** 平台默认模型（shell.default_model_ref）；用于既有 Thread 未配模型时的即时展示。 */
   readonly defaultModelRef?: string;
+  /** 最新 Turn 状态变化时同步侧栏快捷状态。 */
+  readonly onLatestTurnStateChange?: (threadId: string, state: string | null) => void;
 }
 
 export function ThreadPage({
@@ -64,6 +67,7 @@ export function ThreadPage({
   variant = "web",
   viewerId,
   defaultModelRef,
+  onLatestTurnStateChange,
 }: ThreadPageProps) {
   const sidebar = useOptionalSidebar();
   const {
@@ -84,6 +88,33 @@ export function ThreadPage({
   const { patchSettings, busy: settingsBusy } = useThreadSettings({ threadId });
   const [locateItem, setLocateItem] = useState<{ itemId: string; requestId: number } | null>(null);
   const [workbenchOpen, setWorkbenchOpen] = useState(variant === "desktop");
+
+  useEffect(() => {
+    if (loading) return;
+    onLatestTurnStateChange?.(threadId, latestTurn?.turn_state ?? null);
+  }, [loading, latestTurn?.turn_state, onLatestTurnStateChange, threadId]);
+
+  const { timelineItems, pendingUserActions } = useMemo(() => {
+    const history = [] as (typeof items)[number][];
+    const pending = [] as (typeof items)[number][];
+    for (const item of items) {
+      if (item.item_type !== "user_action" || item.item_state !== "pending") {
+        history.push(item);
+        continue;
+      }
+      const content =
+        item.content && typeof item.content === "object"
+          ? (item.content as { state?: unknown; expires_at?: unknown })
+          : null;
+      const expiresAt =
+        typeof content?.expires_at === "string" ? Date.parse(content.expires_at) : Number.NaN;
+      const expired =
+        content?.state === "expired" || (Number.isFinite(expiresAt) && expiresAt <= Date.now());
+      if (content?.state === "resolved" || expired) history.push(item);
+      else pending.push(item);
+    }
+    return { timelineItems: history, pendingUserActions: pending };
+  }, [items]);
 
   // SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）
   useEffect(() => {
@@ -142,7 +173,7 @@ export function ThreadPage({
             className={cn(
               "size-1.5 rounded-full",
               taskStatus.tone === "running" && "animate-gentle-pulse bg-primary",
-              taskStatus.tone === "waiting" && "bg-warning",
+              taskStatus.tone === "waiting" && "bg-muted-foreground",
               taskStatus.tone === "success" && "bg-success",
               taskStatus.tone === "error" && "bg-destructive",
               taskStatus.tone === "stopped" && "bg-muted-foreground",
@@ -262,6 +293,20 @@ export function ThreadPage({
     </fieldset>
   );
 
+  const pendingUserActionDock = pendingUserActions.length > 0 && (
+    <div
+      data-testid="pending-user-action-dock"
+      className="z-10 shrink-0 bg-background pt-2"
+      aria-label="等待你的操作"
+    >
+      <div className="composer-track max-h-[48vh] space-y-2 overflow-y-auto">
+        {pendingUserActions.map((item) => (
+          <UserActionItem key={item.id} threadId={threadId} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+
   // 正常状态 / 首次加载骨架（Web）
   const mainContent = (
     <div
@@ -275,7 +320,7 @@ export function ThreadPage({
       ) : (
         <>
           <ThreadTimeline
-            items={items}
+            items={timelineItems}
             streamStatus={streamStatus}
             reconnectAttempt={reconnectAttempt}
             reconnectMax={reconnectMax}
@@ -287,6 +332,7 @@ export function ThreadPage({
             turnState={latestTurn?.turn_state}
             errorCode={latestTurn?.error_code}
           />
+          {pendingUserActionDock}
         </>
       )}
       {inputArea}
@@ -313,7 +359,7 @@ export function ThreadPage({
             ) : (
               <>
                 <ThreadTimeline
-                  items={items}
+                  items={timelineItems}
                   streamStatus={streamStatus}
                   reconnectAttempt={reconnectAttempt}
                   reconnectMax={reconnectMax}
@@ -327,6 +373,7 @@ export function ThreadPage({
                   turnState={latestTurn?.turn_state}
                   errorCode={latestTurn?.error_code}
                 />
+                {pendingUserActionDock}
               </>
             )}
             {inputArea}

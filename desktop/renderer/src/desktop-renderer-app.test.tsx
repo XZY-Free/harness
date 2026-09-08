@@ -16,13 +16,20 @@ vi.mock("@/components/thread/thread-page", () => ({
   ThreadPage: ({
     threadId,
     defaultModelRef,
+    onLatestTurnStateChange,
   }: {
     readonly threadId: string;
     readonly defaultModelRef?: string;
+    readonly onLatestTurnStateChange?: (threadId: string, state: string | null) => void;
   }) => (
-    <div data-testid="desktop-thread-page" data-default-model-ref={defaultModelRef ?? ""}>
+    <button
+      type="button"
+      data-testid="desktop-thread-page"
+      data-default-model-ref={defaultModelRef ?? ""}
+      onClick={() => onLatestTurnStateChange?.(threadId, null)}
+    >
       会话 {threadId}
-    </div>
+    </button>
   ),
 }));
 vi.mock("@/components/thread/new-thread-page", () => ({
@@ -50,8 +57,14 @@ vi.mock("@/components/thread/new-thread-page", () => ({
   ),
 }));
 vi.mock("@/components/thread/sidebar/desktop-sidebar", () => ({
-  DesktopSidebar: ({ threads }: { readonly threads: readonly { id: string }[] }) => (
-    <div data-testid="desktop-thread-list">{threads.map((thread) => thread.id).join(",")}</div>
+  DesktopSidebar: ({
+    threads,
+  }: {
+    readonly threads: readonly { id: string; latest_turn_state?: string | null }[];
+  }) => (
+    <div data-testid="desktop-thread-list">
+      {threads.map((thread) => `${thread.id}:${thread.latest_turn_state ?? "none"}`).join(",")}
+    </div>
   ),
 }));
 
@@ -146,6 +159,29 @@ describe("DesktopRendererApp", () => {
     render(<DesktopRendererApp />);
     const threadPage = await screen.findByTestId("desktop-thread-page");
     expect(threadPage.dataset.defaultModelRef).toBe("deepseek-v4-flash");
+  });
+
+  it("当前会话完成用户操作后同步清除桌面侧栏等待标记", async () => {
+    const threadId = "6c34a4f3-1b47-4acb-9b2e-7bdbff3e04cf";
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          viewer_id: "viewer-1",
+          threads: [{ id: threadId, title: "等待确认", latest_turn_state: "waiting_user" }],
+          default_model_ref: "deepseek-v4-flash",
+        }),
+      ),
+    );
+    window.history.replaceState(null, "", `/desktop/chat/${threadId}`);
+    render(<DesktopRendererApp />);
+
+    expect((await screen.findByTestId("desktop-thread-list")).textContent).toContain(
+      `${threadId}:waiting_user`,
+    );
+    fireEvent.click(screen.getByTestId("desktop-thread-page"));
+    await waitFor(() =>
+      expect(screen.getByTestId("desktop-thread-list").textContent).toContain(`${threadId}:none`),
+    );
   });
 
   it("shell 加载成功后发起设备注册，成功后连接 Bridge（幂等、无视觉噪音）", async () => {

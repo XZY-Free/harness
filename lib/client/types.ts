@@ -21,6 +21,8 @@ import type { DesktopOperationCategory, DesktopOperationResult } from "@/lib/des
 export interface ClientThreadSummary {
   readonly id: string;
   readonly title: string | null;
+  /** 侧栏快速状态；null 表示会话尚无 Turn。 */
+  readonly latest_turn_state?: string | null;
 }
 
 export interface ClientAgentSummary {

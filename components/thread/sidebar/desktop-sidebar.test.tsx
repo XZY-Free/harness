@@ -53,7 +53,7 @@ function createMatchMedia(initialMatches: boolean) {
 }
 
 const threads = [
-  { id: "t-1", title: "会话一" },
+  { id: "t-1", title: "会话一", latest_turn_state: "waiting_user" as const },
   { id: "t-2", title: "会话二" },
 ];
 
@@ -78,6 +78,14 @@ describe("Web 侧栏 overlay drawer 行为", () => {
     const project = screen.getByLabelText("SnowHarness 项目");
     expect(project.querySelector(".lucide-folder")).not.toBeNull();
     expect(project.textContent).toContain("SnowHarness");
+  });
+
+  it("会话等待用户决定时在侧栏显示低干扰的需要输入状态", () => {
+    renderSidebar(false);
+    const thread = screen.getByRole("link", { name: /会话一/ });
+    expect(thread.textContent).toContain("需要用户输入");
+    expect(thread.querySelector('[data-thread-status="needs-input"]')).not.toBeNull();
+    expect(screen.getByRole("link", { name: "会话二" }).textContent).not.toContain("需要用户输入");
   });
 
   it("≥1180px（固定侧栏）不渲染 backdrop", () => {
@@ -107,7 +115,7 @@ describe("Web 侧栏 overlay drawer 行为", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开侧栏" }));
     expect(screen.getByRole("button", { name: "关闭会话侧栏" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("link", { name: "会话一" }));
+    fireEvent.click(screen.getByRole("link", { name: /会话一/ }));
     expect(screen.queryByRole("button", { name: "关闭会话侧栏" })).toBeNull();
   });
 });

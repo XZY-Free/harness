@@ -57,6 +57,13 @@ afterEach(() => {
 });
 
 describe("UserActionItem input submit 主流程", () => {
+  it("输入请求沿用中性等待语法，不显示橙色告警或后台待处理标签", () => {
+    const { container } = render(<UserActionItem threadId="thread-1" item={makeInputItem()} />);
+    expect(screen.getByText("需要你的输入")).toBeTruthy();
+    expect(screen.queryByText("待处理")).toBeNull();
+    expect(container.querySelector('[class*="warning"]')).toBeNull();
+  });
+
   it("展示请求的问题，不把内部 purpose 当正文", () => {
     render(
       <UserActionItem
@@ -331,8 +338,8 @@ describe("UserActionItem input schema omitted/required 语义与 fail-closed", (
 });
 
 describe("UserActionItem external confirmation preview", () => {
-  it("以通用只读结构展示外部 Agent 已校验的 preview，不执行任何动作", () => {
-    render(
+  function renderConfirmation() {
+    return render(
       <UserActionItem
         threadId="thread-1"
         item={{
@@ -361,12 +368,48 @@ describe("UserActionItem external confirmation preview", () => {
         }}
       />,
     );
+  }
 
-    expect(screen.getByText("操作预览")).toBeTruthy();
+  it("把待确认操作呈现为中性选择面板，详情默认收起且不暴露技术字段名", () => {
+    renderConfirmation();
+
+    const panel = screen.getByRole("region", { name: "需要用户确认" });
+    expect(panel.getAttribute("data-user-action-state")).toBe("waiting");
+    expect(screen.queryByText("待处理")).toBeNull();
+    expect(screen.queryByText(/^影响：/)).toBeNull();
+    expect(screen.queryByText("操作预览")).toBeNull();
+    expect(screen.queryByText("年假")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看操作详情" }));
+
+    expect(screen.getByRole("region", { name: "操作详情" })).toBeTruthy();
+    expect(screen.getByText("假期类型")).toBeTruthy();
+    expect(screen.getByText("天数")).toBeTruthy();
+    expect(screen.getByText("日期")).toBeTruthy();
+    expect(screen.getByText("审批人")).toBeTruthy();
+    expect(screen.queryByText("leave_type")).toBeNull();
+    expect(screen.queryByText("days")).toBeNull();
     expect(screen.getByText("年假")).toBeTruthy();
     expect(screen.getByText("3")).toBeTruthy();
     expect(screen.getByText("2026-09-10")).toBeTruthy();
     expect(screen.getByText("王经理")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "确认" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "收起操作详情" })).toBeTruthy();
+  });
+
+  it("用清晰的整行选项完成确认或拒绝，不使用后台审批按钮语法", async () => {
+    const fetchMock = makeFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    renderConfirmation();
+
+    expect(screen.getByRole("button", { name: /确认并继续/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /拒绝此操作/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "确认" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "拒绝" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /确认并继续/ }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/threads/thread-1/user-actions/confirmation-request-1/resolve");
+    expect(JSON.parse(init.body as string)).toEqual({ resolution: "approve" });
   });
 });

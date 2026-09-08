@@ -31,6 +31,7 @@ import { useSidebar } from "./sidebar-context";
 interface SidebarThread {
   readonly id: string;
   readonly title: string | null;
+  readonly latest_turn_state?: string | null;
 }
 
 interface DesktopSidebarProps {
@@ -356,14 +357,22 @@ function ThreadListItem({
         if (isNarrow) setCollapsed(true);
       }}
       className={cn(
-        "block truncate rounded-lg px-2.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/40",
+        "flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/40",
         isActive
           ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
           : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
       )}
       title={thread.title ?? "新会话"}
     >
-      {thread.title ?? "新会话"}
+      <span className="min-w-0 flex-1 truncate">{thread.title ?? "新会话"}</span>
+      {thread.latest_turn_state === "waiting_user" ? (
+        <span
+          data-thread-status="needs-input"
+          className="shrink-0 rounded-full bg-accent px-2 py-0.5 font-medium text-[10px] leading-4 text-accent-foreground"
+        >
+          需要用户输入
+        </span>
+      ) : null}
     </Link>
   );
 }

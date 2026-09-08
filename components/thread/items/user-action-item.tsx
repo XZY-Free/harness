@@ -29,7 +29,16 @@ import { useUserAction } from "@/components/hooks/use-user-action";
 import type { ClientItem } from "@/lib/client/types";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { cn } from "@/lib/utils";
-import { Check, CircleAlert, FilePenLine } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  CircleHelp,
+  FilePenLine,
+  ListTree,
+  X,
+} from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 
 interface UserActionItemProps {
@@ -240,6 +249,25 @@ function previewText(value: string): string {
   return value.length > 500 ? `${value.slice(0, 500)}…` : value;
 }
 
+const PREVIEW_FIELD_LABELS: Readonly<Record<string, string>> = {
+  leave_type: "假期类型",
+  days: "天数",
+  dates: "日期",
+  reviewer: "审批人",
+  name: "姓名",
+  start_date: "开始日期",
+  end_date: "结束日期",
+  reason: "事由",
+  amount: "金额",
+  currency: "币种",
+  recipient: "接收方",
+};
+
+/** 外部协议键只用于读取，不直接暴露给员工界面。 */
+function previewFieldLabel(key: string, index: number): string {
+  return PREVIEW_FIELD_LABELS[key] ?? `信息 ${index + 1}`;
+}
+
 function PreviewValue({ value, depth = 0 }: { value: unknown; depth?: number }): ReactNode {
   if (value === null || value === undefined) return "—";
   if (typeof value === "string") return previewText(value);
@@ -264,9 +292,11 @@ function PreviewValue({ value, depth = 0 }: { value: unknown; depth?: number }):
     const entries = Object.entries(value as Record<string, unknown>).slice(0, 8);
     return (
       <dl className="space-y-1 border-l border-border pl-2">
-        {entries.map(([key, nested]) => (
+        {entries.map(([key, nested], index) => (
           <div key={key} className="grid grid-cols-[minmax(0,auto)_1fr] gap-x-2">
-            <dt className="max-w-32 truncate text-muted-foreground">{previewText(key)}</dt>
+            <dt className="max-w-32 truncate text-muted-foreground">
+              {previewFieldLabel(key, index)}
+            </dt>
             <dd className="min-w-0 break-words">
               <PreviewValue value={nested} depth={depth + 1} />
             </dd>
@@ -337,6 +367,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const inputFields = inputSchema.fields;
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [diffOpen, setDiffOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // 是否展示操作按钮
   const showActions = isRequestPending && !isExpired && !resolvedResolution;
@@ -387,19 +418,23 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     : resolvedResolution
       ? getResolutionLabel(resolvedResolution)
       : isRequestPending
-        ? "待处理"
+        ? content.request_type === "input"
+          ? "需要你的输入"
+          : content.request_type === "auth"
+            ? "需要你授权"
+            : "需要你的确认"
         : item.item_state === "completed"
           ? "已完成"
           : item.item_state === "failed"
             ? "失败"
-            : "待处理";
+            : "等待处理";
 
   const statusColor = isExpired
     ? "border-destructive/30 bg-destructive/5"
     : resolvedResolution
       ? "border-success/25 bg-success/5"
       : isRequestPending
-        ? "border-warning/30 bg-warning/5"
+        ? "border-border bg-card"
         : "border-border bg-muted/40";
 
   const statusTagColor = isExpired
@@ -407,7 +442,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     : resolvedResolution
       ? "bg-success/10 text-success"
       : isRequestPending
-        ? "bg-[var(--warning)]/10 text-warning"
+        ? "bg-muted text-muted-foreground"
         : "bg-muted-foreground/10 text-muted-foreground";
 
   const expiresLabel = formatExpiresAt(content.expires_at);
@@ -604,11 +639,185 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     }
   };
 
+  if (content.request_type === "confirmation" && !isDiffConfirmation) {
+    const panelState = isExpired ? "expired" : showActions ? "waiting" : "resolved";
+    const panelStatus = isExpired
+      ? "已超时"
+      : resolvedResolution
+        ? getResolutionLabel(resolvedResolution)
+        : showActions
+          ? "需要你的确认"
+          : statusLabel;
+
+    return (
+      <div className="flex justify-start">
+        <section
+          aria-label={showActions ? "需要用户确认" : "用户操作记录"}
+          data-user-action-state={panelState}
+          className="w-full overflow-hidden rounded-2xl border border-border bg-card shadow-[0_16px_40px_-32px_rgba(15,23,42,0.35)]"
+        >
+          <div className="px-4 pt-4 pb-3 sm:px-5 sm:pt-[18px]">
+            <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                {resolvedResolution ? (
+                  <Check aria-hidden="true" className="size-3.5" strokeWidth={1.7} />
+                ) : (
+                  <CircleHelp aria-hidden="true" className="size-3.5" strokeWidth={1.7} />
+                )}
+                {panelStatus}
+              </span>
+              {expiresLabel && showActions ? <span>{expiresLabel}</span> : null}
+            </div>
+
+            <h2 className="mt-2.5 font-medium text-[14px] leading-5 text-foreground">
+              {displayTitle}
+            </h2>
+            <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{displayReason}</p>
+            {content.impact ? (
+              <p className="mt-0.5 text-[12.5px] leading-5 text-muted-foreground">
+                {content.impact}
+              </p>
+            ) : null}
+          </div>
+
+          {preview ? (
+            <div className="px-2 pb-1.5 sm:px-3">
+              <button
+                type="button"
+                onClick={() => setPreviewOpen((open) => !open)}
+                aria-expanded={previewOpen}
+                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              >
+                <span className="flex items-center gap-2">
+                  <ListTree aria-hidden="true" className="size-3.5" strokeWidth={1.6} />
+                  {previewOpen ? "收起操作详情" : "查看操作详情"}
+                </span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn("size-3.5 transition-transform", previewOpen && "rotate-180")}
+                  strokeWidth={1.6}
+                />
+              </button>
+
+              {previewOpen ? (
+                <section
+                  aria-label="操作详情"
+                  className="mx-1 mb-2 rounded-xl bg-muted/55 px-3 py-2.5 text-xs"
+                >
+                  <dl className="space-y-1.5">
+                    {Object.entries(preview).map(([key, value], index) => (
+                      <div
+                        key={key}
+                        className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 leading-5"
+                      >
+                        <dt className="truncate text-muted-foreground">
+                          {previewFieldLabel(key, index)}
+                        </dt>
+                        <dd className="min-w-0 break-words text-foreground">
+                          <PreviewValue value={value} />
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
+              ) : null}
+            </div>
+          ) : null}
+
+          {showActions ? (
+            <div className="space-y-1.5 px-2 pb-2.5 sm:px-3 sm:pb-3">
+              <button
+                type="button"
+                onClick={() => handleUserActionResolve("approve")}
+                disabled={busy || !requestId}
+                className="group flex w-full items-center gap-3 rounded-xl bg-muted/70 px-2.5 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-[11px] text-muted-foreground">
+                  1
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium text-[12.5px] leading-5 text-foreground">
+                    {busy ? "处理中…" : "确认并继续"}
+                  </span>
+                  <span className="block text-[11px] leading-4 text-muted-foreground">
+                    允许助手执行上面的操作。
+                  </span>
+                </span>
+                <ArrowRight
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                  strokeWidth={1.5}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUserActionResolve("deny")}
+                disabled={busy || !requestId}
+                className="group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-[11px] text-muted-foreground">
+                  2
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium text-[12.5px] leading-5 text-foreground">
+                    {busy ? "处理中…" : "拒绝此操作"}
+                  </span>
+                  <span className="block text-[11px] leading-4 text-muted-foreground">
+                    不执行这项操作，并返回当前任务。
+                  </span>
+                </span>
+                <ArrowRight
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                  strokeWidth={1.5}
+                />
+              </button>
+            </div>
+          ) : null}
+
+          {showActions && !requestId ? (
+            <div
+              role="alert"
+              className="mx-4 mb-3 rounded-lg bg-muted px-3 py-2 text-xs text-foreground"
+            >
+              操作信息不完整，无法执行操作；请刷新会话后重试。
+            </div>
+          ) : null}
+
+          {error && showActions ? (
+            <div
+              role="alert"
+              className="mx-4 mb-3 flex items-center justify-between rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive"
+            >
+              <span>
+                {error.title}：{error.description}
+              </span>
+              <button
+                type="button"
+                onClick={clearError}
+                className="ml-2 flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-destructive/10"
+                aria-label="关闭错误提示"
+              >
+                <X aria-hidden="true" className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
+
+          {isExpired && !resolvedResolution ? (
+            <div className="mx-4 mb-3 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+              请求已超时，未执行任何操作。
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="flex justify-start">
       <div
         className={cn(
-          "w-full overflow-hidden rounded-[15px] border",
+          "w-full overflow-hidden rounded-2xl border shadow-[0_16px_40px_-32px_rgba(15,23,42,0.35)]",
           isDiffConfirmation
             ? isDiffResolved
               ? "border-success/25 bg-background"
@@ -623,12 +832,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
               "flex size-[34px] shrink-0 items-center justify-center rounded-[10px]",
               isExpired && "bg-destructive/10 text-destructive",
               (resolvedResolution || isDiffResolved) && "bg-success/10 text-success",
-              isRequestPending &&
-                !isExpired &&
-                !isDiffResolved &&
-                (isDiffConfirmation
-                  ? "bg-muted text-foreground"
-                  : "bg-[var(--warning)]/10 text-warning"),
+              isRequestPending && !isExpired && !isDiffResolved && "bg-muted text-muted-foreground",
               !isRequestPending &&
                 !isExpired &&
                 !resolvedResolution &&
@@ -639,6 +843,8 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
               <Check className="size-4" aria-hidden="true" />
             ) : isDiffConfirmation ? (
               <FilePenLine className="size-4" aria-hidden="true" />
+            ) : isRequestPending ? (
+              <CircleHelp className="size-4" aria-hidden="true" />
             ) : (
               <CircleAlert className="size-4" aria-hidden="true" />
             )}
@@ -661,7 +867,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
               </div>
             )}
             {content.impact && (
-              <div className="mt-1 text-2xs text-warning">影响：{content.impact}</div>
+              <div className="mt-1 text-2xs text-muted-foreground">{content.impact}</div>
             )}
             {expiresLabel && isRequestPending && !isExpired && (
               <div className="mt-1 text-2xs text-muted-foreground">{expiresLabel}</div>
