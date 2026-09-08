@@ -32,12 +32,14 @@
 import { CatalogDisplayName } from "@/components/thread/catalog/catalog-display-name";
 import type { ClientGoal, ClientThread, ClientTurn } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
 
 interface ThreadHeaderProps {
   readonly thread: ClientThread;
   readonly activeGoal: ClientGoal | null;
   readonly latestTurn: ClientTurn | null;
+  readonly actions?: ReactNode;
   /** 渲染变体：web（默认）= 完整 header；desktop = 仅次级信息行（Goal / 位置）。 */
   readonly variant?: "web" | "desktop";
 }
@@ -91,6 +93,7 @@ export function ThreadHeader({
   thread,
   activeGoal,
   latestTurn,
+  actions,
   variant = "web",
 }: ThreadHeaderProps) {
   const taskStatus = deriveTaskStatus(latestTurn);
@@ -199,6 +202,7 @@ export function ThreadHeader({
           />
           <span className="text-2xs text-muted-foreground">{taskStatus.label}</span>
         </div>
+        {actions}
       </div>
     </header>
   );

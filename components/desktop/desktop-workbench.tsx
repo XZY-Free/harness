@@ -15,6 +15,7 @@ import {
   CircleDot,
   FileText,
   Files,
+  PanelRight,
   Plus,
   X,
 } from "lucide-react";
@@ -50,9 +51,10 @@ const AUXILIARY_TABS: readonly {
 ];
 
 interface DesktopWorkbenchProps {
-  readonly threadId: string;
+  readonly threadId: string | null;
   /** 由桌面标题栏控制显隐；关闭时不保留窄轨道。 */
   readonly isOpen?: boolean;
+  readonly surface?: "web" | "desktop";
   /** Desktop Browser 的会话归属身份；由服务端路由传入，避免把 ThreadId 当身份使用。 */
   readonly viewerId?: string;
   readonly threadTitle?: string | null;
@@ -142,6 +144,7 @@ function TabIcon({ tab }: { tab: AuxiliaryWorkbenchTab }) {
 export function DesktopWorkbench({
   threadId,
   isOpen = true,
+  surface = "desktop",
   viewerId,
   threadTitle,
   activeGoal,
@@ -156,6 +159,8 @@ export function DesktopWorkbench({
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [width, setWidth] = useState(368);
   const [isResizing, setIsResizing] = useState(false);
+  const auxiliaryTabs =
+    surface === "desktop" ? AUXILIARY_TABS : AUXILIARY_TABS.filter((tab) => tab.id !== "browser");
 
   const reviews = useMemo(() => collectReviews(items), [items]);
   const artifacts = useMemo(() => collectArtifacts(items), [items]);
@@ -298,38 +303,40 @@ export function DesktopWorkbench({
               )}
             </div>
           ))}
-          <div className="relative ml-auto">
-            <button
-              type="button"
-              aria-label="打开工作台功能"
-              aria-haspopup="menu"
-              aria-expanded={launcherOpen}
-              onClick={() => setLauncherOpen((open) => !open)}
-              className="flex size-8 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              <Plus className="size-4" strokeWidth={1.5} />
-            </button>
-            {launcherOpen && (
-              <div
-                role="menu"
-                aria-label="工作台功能"
-                className="absolute top-9 right-0 z-20 w-44 rounded-lg border border-border bg-popover p-1 shadow-lg"
+          {threadId && (
+            <div className="relative ml-auto">
+              <button
+                type="button"
+                aria-label="打开工作台功能"
+                aria-haspopup="menu"
+                aria-expanded={launcherOpen}
+                onClick={() => setLauncherOpen((open) => !open)}
+                className="flex size-8 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
               >
-                {AUXILIARY_TABS.map(({ id, label }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => openTab(id)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-foreground hover:bg-muted"
-                  >
-                    <TabIcon tab={id} />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+                <Plus className="size-4" strokeWidth={1.5} />
+              </button>
+              {launcherOpen && (
+                <div
+                  role="menu"
+                  aria-label="工作台功能"
+                  className="absolute top-9 right-0 z-20 w-44 rounded-lg border border-border bg-popover p-1 shadow-lg"
+                >
+                  {auxiliaryTabs.map(({ id, label }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => openTab(id)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-foreground hover:bg-muted"
+                    >
+                      <TabIcon tab={id} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div
@@ -338,7 +345,9 @@ export function DesktopWorkbench({
           className="min-h-0 flex-1 overflow-hidden"
         >
           {activeTab === "task" &&
-            (hasTaskContent ? (
+            (!threadId ? (
+              <NewThreadEmptyPane />
+            ) : hasTaskContent ? (
               <TaskPane
                 taskTitle={taskTitle}
                 statusLabel={taskStatus.label}
@@ -349,12 +358,13 @@ export function DesktopWorkbench({
               />
             ) : (
               <EmptyTaskPane
+                tabs={auxiliaryTabs}
                 onOpenFiles={() => openTab("files")}
                 onOpenReview={() => openTab("review")}
                 onOpenBrowser={() => openTab("browser")}
               />
             ))}
-          {activeTab === "files" && (
+          {activeTab === "files" && threadId && (
             <FilesPane
               threadId={threadId}
               selectedPath={selectedPath}
@@ -369,7 +379,7 @@ export function DesktopWorkbench({
               onLocateItem={onLocateItem}
             />
           )}
-          {activeTab === "browser" && (
+          {activeTab === "browser" && threadId && surface === "desktop" && (
             <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col pl-2">
               {viewerId ? (
                 <DesktopBrowserSurface
@@ -388,6 +398,26 @@ export function DesktopWorkbench({
         </div>
       </div>
     </aside>
+  );
+}
+
+export function WorkbenchToggle({
+  open,
+  onOpenChange,
+}: {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={open ? "收起任务工作台" : "展开任务工作台"}
+      title={open ? "收起任务工作台" : "展开任务工作台"}
+      onClick={() => onOpenChange(!open)}
+      className="ml-auto flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 [-webkit-app-region:no-drag]"
+    >
+      <PanelRight className="size-4" strokeWidth={1.5} />
+    </button>
   );
 }
 
@@ -495,10 +525,12 @@ function TaskPane({
 }
 
 function EmptyTaskPane({
+  tabs,
   onOpenFiles,
   onOpenReview,
   onOpenBrowser,
 }: {
+  readonly tabs: readonly (typeof AUXILIARY_TABS)[number][];
   readonly onOpenFiles: () => void;
   readonly onOpenReview: () => void;
   readonly onOpenBrowser: () => void;
@@ -512,7 +544,7 @@ function EmptyTaskPane({
   return (
     <div className="flex h-full items-center justify-center px-5" aria-label="空任务快捷入口">
       <div className="w-36 space-y-1">
-        {AUXILIARY_TABS.map(({ id, label, Icon }) => (
+        {tabs.map(({ id, label, Icon }) => (
           <button
             key={id}
             type="button"
@@ -524,6 +556,19 @@ function EmptyTaskPane({
             {label}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function NewThreadEmptyPane() {
+  return (
+    <div className="flex h-full items-center justify-center px-8 text-center">
+      <div className="max-w-52">
+        <p className="text-[13px] font-medium text-foreground/80">暂无输出内容</p>
+        <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">
+          开始对话后，文件和需要确认的操作会显示在这里。
+        </p>
       </div>
     </div>
   );

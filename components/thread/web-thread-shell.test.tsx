@@ -30,22 +30,32 @@ vi.mock("@/components/thread/new-thread-page", () => ({
   NewThreadPage: ({
     defaultModelRef,
     onSubmit,
+    workbenchOpen,
+    onWorkbenchOpenChange,
   }: {
     readonly defaultModelRef?: string;
+    readonly workbenchOpen?: boolean;
+    readonly onWorkbenchOpenChange?: (open: boolean) => void;
     readonly onSubmit: (submission: {
       readonly text: string;
       readonly agentId: string;
       readonly modelRef: string | null;
     }) => Promise<boolean>;
   }) => (
-    <button
-      type="button"
-      data-testid="new-thread-page"
-      data-default-model-ref={defaultModelRef ?? ""}
-      onClick={() => void onSubmit({ text: "请分析销售数据", agentId: "agent-1", modelRef: null })}
-    >
-      发送首条消息
-    </button>
+    <div data-testid="new-thread-page" data-default-model-ref={defaultModelRef ?? ""}>
+      <button type="button" onClick={() => onWorkbenchOpenChange?.(true)}>
+        展开工作台
+      </button>
+      <button
+        type="button"
+        data-workbench-open={String(workbenchOpen)}
+        onClick={() =>
+          void onSubmit({ text: "请分析销售数据", agentId: "agent-1", modelRef: null })
+        }
+      >
+        发送首条消息
+      </button>
+    </div>
   ),
 }));
 vi.mock("@/components/thread/thread-page", () => ({
@@ -53,15 +63,18 @@ vi.mock("@/components/thread/thread-page", () => ({
     defaultModelRef,
     threadId,
     onLatestTurnStateChange,
+    workbenchOpen,
   }: {
     readonly defaultModelRef?: string;
     readonly threadId: string;
+    readonly workbenchOpen?: boolean;
     readonly onLatestTurnStateChange?: (threadId: string, state: string | null) => void;
   }) => (
     <button
       type="button"
       data-testid="thread-page"
       data-default-model-ref={defaultModelRef ?? ""}
+      data-workbench-open={String(workbenchOpen)}
       onClick={() => onLatestTurnStateChange?.(threadId, null)}
     >
       更新会话状态
@@ -113,7 +126,7 @@ describe("WebThreadShell 透传平台默认模型", () => {
     await screen.findByTestId("new-thread-page");
     expect(mocks.loadThreadShell).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByTestId("new-thread-page"));
+    fireEvent.click(screen.getByRole("button", { name: "发送首条消息" }));
 
     // 同一组件树直接切到 ThreadPage，不出现 shell loading
     await waitFor(() => expect(screen.getByTestId("thread-page")).toBeTruthy());
@@ -124,6 +137,21 @@ describe("WebThreadShell 透传平台默认模型", () => {
     expect(router.replace).not.toHaveBeenCalled();
     // 地址栏经 history.replaceState 更新
     expect(window.location.pathname).toBe("/chat/created-1");
+  });
+
+  it("工作台展开状态由 Web 外壳持有，创建会话后保持展开", async () => {
+    mocks.createNewThreadSession.mockReturnValue({
+      submit: vi.fn().mockResolvedValue({ id: "created-1", title: "新会话" }),
+    });
+    render(<WebThreadShell threadId={null} />);
+    await screen.findByTestId("new-thread-page");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送首条消息" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("thread-page").dataset.workbenchOpen).toBe("true"),
+    );
   });
 
   it("当前会话离开等待状态后立即清除侧栏需要输入标记", async () => {

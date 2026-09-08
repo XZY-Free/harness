@@ -17,15 +17,18 @@ vi.mock("@/components/thread/thread-page", () => ({
     threadId,
     defaultModelRef,
     onLatestTurnStateChange,
+    workbenchOpen,
   }: {
     readonly threadId: string;
     readonly defaultModelRef?: string;
+    readonly workbenchOpen?: boolean;
     readonly onLatestTurnStateChange?: (threadId: string, state: string | null) => void;
   }) => (
     <button
       type="button"
       data-testid="desktop-thread-page"
       data-default-model-ref={defaultModelRef ?? ""}
+      data-workbench-open={String(workbenchOpen)}
       onClick={() => onLatestTurnStateChange?.(threadId, null)}
     >
       会话 {threadId}
@@ -36,6 +39,8 @@ vi.mock("@/components/thread/new-thread-page", () => ({
   NewThreadPage: ({
     onSubmit,
     defaultModelRef,
+    workbenchOpen,
+    onWorkbenchOpenChange,
   }: {
     readonly onSubmit: (input: {
       readonly text: string;
@@ -43,17 +48,23 @@ vi.mock("@/components/thread/new-thread-page", () => ({
       readonly modelRef: string | null;
     }) => Promise<boolean>;
     readonly defaultModelRef?: string;
+    readonly workbenchOpen?: boolean;
+    readonly onWorkbenchOpenChange?: (open: boolean) => void;
   }) => (
-    <button
-      type="button"
-      data-testid="desktop-new-thread-page"
-      data-default-model-ref={defaultModelRef ?? ""}
-      onClick={() =>
-        void onSubmit({ text: "请帮我分析销售数据", agentId: "agent-1", modelRef: "glm-5.2" })
-      }
-    >
-      发送首条消息
-    </button>
+    <div data-testid="desktop-new-thread-page" data-default-model-ref={defaultModelRef ?? ""}>
+      <button type="button" onClick={() => onWorkbenchOpenChange?.(true)}>
+        展开工作台
+      </button>
+      <button
+        type="button"
+        data-workbench-open={String(workbenchOpen)}
+        onClick={() =>
+          void onSubmit({ text: "请帮我分析销售数据", agentId: "agent-1", modelRef: "glm-5.2" })
+        }
+      >
+        发送首条消息
+      </button>
+    </div>
   ),
 }));
 vi.mock("@/components/thread/sidebar/desktop-sidebar", () => ({
@@ -159,6 +170,31 @@ describe("DesktopRendererApp", () => {
     render(<DesktopRendererApp />);
     const threadPage = await screen.findByTestId("desktop-thread-page");
     expect(threadPage.dataset.defaultModelRef).toBe("deepseek-v4-flash");
+  });
+
+  it("工作台展开状态由 Desktop 外壳持有，创建会话后保持展开", async () => {
+    const createdThreadId = "6fd2a5b8-4d43-43e5-a436-80adb4f73b23";
+    apiFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ viewer_id: "viewer-1", threads: [], default_model_ref: "model-1" }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: createdThreadId, title: "分析销售数据" })),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ turn: { id: "turn-1" } }), { status: 201 }),
+      );
+    render(<DesktopRendererApp />);
+    await screen.findByTestId("desktop-new-thread-page");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工作台" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送首条消息" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("desktop-thread-page").dataset.workbenchOpen).toBe("true"),
+    );
   });
 
   it("当前会话完成用户操作后同步清除桌面侧栏等待标记", async () => {

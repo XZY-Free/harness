@@ -22,7 +22,7 @@ vi.mock("@/components/thread/thread-input", () => ({
 }));
 // 其余非目标子组件与数据 hooks 隔离，仅保证两个渲染分支能到达 ThreadInput。
 vi.mock("@/components/thread/thread-header", () => ({
-  ThreadHeader: () => <div />,
+  ThreadHeader: ({ actions }: { readonly actions?: React.ReactNode }) => <div>{actions}</div>,
   deriveTaskStatus: () => ({ tone: "idle", label: "空闲" }),
 }));
 vi.mock("@/components/thread/thread-timeline", () => ({
@@ -40,6 +40,17 @@ vi.mock("@/components/thread/turn-failure-notice", () => ({ TurnFailureNotice: (
 vi.mock("@/components/desktop/desktop-workbench", () => ({
   DesktopWorkbench: ({ isOpen }: { readonly isOpen?: boolean }) => (
     <div data-testid="workbench" data-open={String(isOpen)} />
+  ),
+  WorkbenchToggle: ({
+    open,
+    onOpenChange,
+  }: {
+    readonly open: boolean;
+    readonly onOpenChange: (open: boolean) => void;
+  }) => (
+    <button type="button" onClick={() => onOpenChange(!open)}>
+      {open ? "收起任务工作台" : "展开任务工作台"}
+    </button>
   ),
 }));
 
@@ -104,18 +115,21 @@ describe("ThreadPage 把平台默认模型传给 ThreadInput（Web 与 Desktop �
   });
 });
 
-describe("ThreadPage Desktop 输出区", () => {
-  it("桌面端默认隐藏输出工作台，用户点击标题栏入口后展开", () => {
-    render(<ThreadPage threadId="t-1" variant="desktop" />);
+describe("ThreadPage 输出区", () => {
+  it.each(["web", "desktop"] as const)(
+    "%s 默认隐藏输出工作台，用户点击标题栏入口后展开",
+    (variant) => {
+      render(<ThreadPage threadId="t-1" variant={variant} />);
 
-    expect(screen.getByTestId("workbench").dataset.open).toBe("false");
-    const toggle = screen.getByRole("button", { name: "展开任务工作台" });
+      expect(screen.getByTestId("workbench").dataset.open).toBe("false");
+      const toggle = screen.getByRole("button", { name: "展开任务工作台" });
 
-    fireEvent.click(toggle);
+      fireEvent.click(toggle);
 
-    expect(screen.getByTestId("workbench").dataset.open).toBe("true");
-    expect(screen.getByRole("button", { name: "收起任务工作台" })).toBeTruthy();
-  });
+      expect(screen.getByTestId("workbench").dataset.open).toBe("true");
+      expect(screen.getByRole("button", { name: "收起任务工作台" })).toBeTruthy();
+    },
+  );
 });
 
 describe("ThreadPage 待用户操作面板", () => {

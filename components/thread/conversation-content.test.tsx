@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ClientItem } from "@/lib/client/types";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantMessageItem } from "./items/assistant-message-item";
 import { UserMessageItem } from "./items/user-message-item";
@@ -157,6 +157,15 @@ describe("消息轨道与输入轨道拆分", () => {
     // 错误提示位于输入轨道内
     const composerTrack = container.querySelector(".composer-track");
     expect(composerTrack?.textContent).toContain("发送失败");
+  });
+
+  it("新会话也提供默认隐藏的工作台入口，用户可以主动展开空面板", () => {
+    stubModelsFetch();
+    render(<NewThreadPage agents={[]} onSubmit={async () => true} surface="web" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开任务工作台" }));
+    expect(screen.getByLabelText("任务工作台").getAttribute("aria-hidden")).toBe("false");
+    expect(screen.getByText("开始对话后，文件和需要确认的操作会显示在这里。")).toBeTruthy();
   });
 });
 

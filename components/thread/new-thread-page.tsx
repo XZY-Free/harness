@@ -2,7 +2,8 @@
 
 import type { ClientNewThreadSubmission } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { DesktopWorkbench, WorkbenchToggle } from "../desktop/desktop-workbench";
 import type { AgentOption } from "./input/input-popovers";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
 import { ThreadInput } from "./thread-input";
@@ -16,6 +17,9 @@ interface NewThreadPageProps {
   readonly error?: string | null;
   readonly onSubmit: (submission: ClientNewThreadSubmission) => Promise<boolean>;
   readonly surface?: "web" | "desktop";
+  readonly viewerId?: string;
+  readonly workbenchOpen?: boolean;
+  readonly onWorkbenchOpenChange?: (open: boolean) => void;
 }
 
 export function NewThreadPage({
@@ -24,10 +28,23 @@ export function NewThreadPage({
   error,
   onSubmit,
   surface = "desktop",
+  viewerId,
+  workbenchOpen: controlledWorkbenchOpen,
+  onWorkbenchOpenChange,
 }: NewThreadPageProps) {
   const sidebar = useOptionalSidebar();
   const [agentId, setAgentId] = useState<string | null>(null);
   const [modelRef, setModelRef] = useState<string | null>(null);
+  const [localWorkbenchOpen, setLocalWorkbenchOpen] = useState(false);
+  const workbenchOpen = controlledWorkbenchOpen ?? localWorkbenchOpen;
+
+  const setWorkbenchOpen = useCallback(
+    (open: boolean) => {
+      if (controlledWorkbenchOpen === undefined) setLocalWorkbenchOpen(open);
+      onWorkbenchOpenChange?.(open);
+    },
+    [controlledWorkbenchOpen, onWorkbenchOpenChange],
+  );
 
   useEffect(() => {
     if (agentId && agents && !agents.some((agent) => agent.id === agentId)) setAgentId(null);
@@ -49,27 +66,42 @@ export function NewThreadPage({
           )}
         />
         <h1 className="relative truncate font-semibold text-sm text-foreground">新会话</h1>
+        <WorkbenchToggle open={workbenchOpen} onOpenChange={setWorkbenchOpen} />
       </div>
-      {error && (
-        <div className="composer-track">
-          <div role="alert" className="mt-3 text-destructive text-xs">
-            {error}
-          </div>
+      <div className="relative flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {error && (
+            <div className="composer-track">
+              <div role="alert" className="mt-3 text-destructive text-xs">
+                {error}
+              </div>
+            </div>
+          )}
+          <ThreadTimeline items={[]} streamStatus="idle" />
+          <ThreadInput
+            threadId={null}
+            draftKey="new-thread"
+            latestTurn={null}
+            availableAgents={agents}
+            currentAgentId={agentId}
+            currentModelRef={modelRef}
+            defaultModelRef={defaultModelRef}
+            onAgentChange={setAgentId}
+            onModelChange={setModelRef}
+            onSubmitText={(text) => onSubmit({ text, modelRef, agentId })}
+          />
         </div>
-      )}
-      <ThreadTimeline items={[]} streamStatus="idle" />
-      <ThreadInput
-        threadId={null}
-        draftKey="new-thread"
-        latestTurn={null}
-        availableAgents={agents}
-        currentAgentId={agentId}
-        currentModelRef={modelRef}
-        defaultModelRef={defaultModelRef}
-        onAgentChange={setAgentId}
-        onModelChange={setModelRef}
-        onSubmitText={(text) => onSubmit({ text, modelRef, agentId })}
-      />
+        <DesktopWorkbench
+          threadId={null}
+          isOpen={workbenchOpen}
+          surface={surface}
+          viewerId={viewerId}
+          activeGoal={null}
+          latestTurn={null}
+          items={[]}
+          onLocateItem={() => {}}
+        />
+      </div>
     </div>
   );
 }

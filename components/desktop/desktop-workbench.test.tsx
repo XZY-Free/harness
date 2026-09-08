@@ -382,4 +382,22 @@ describe("DesktopWorkbench", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开文件" }));
     expect(screen.getByRole("tab", { name: "文件" }).getAttribute("aria-selected")).toBe("true");
   });
+
+  it("新会话工作台只展示真实空状态，不开放依赖 threadId 的功能", () => {
+    render(
+      <DesktopWorkbench
+        threadId={null}
+        activeGoal={null}
+        latestTurn={null}
+        items={[]}
+        isOpen
+        surface="web"
+        onLocateItem={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("开始对话后，文件和需要确认的操作会显示在这里。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开工作台功能" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开文件" })).toBeNull();
+  });
 });

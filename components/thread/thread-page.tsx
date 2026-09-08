@@ -40,9 +40,8 @@ import { useThread } from "@/components/hooks/use-thread";
 import { useThreadDetail } from "@/components/hooks/use-thread-detail";
 import { useThreadSettings } from "@/components/hooks/use-thread-settings";
 import { cn } from "@/lib/utils";
-import { PanelRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DesktopWorkbench } from "../desktop/desktop-workbench";
+import { DesktopWorkbench, WorkbenchToggle } from "../desktop/desktop-workbench";
 import { UserActionItem } from "./items/user-action-item";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
 import { ThreadHeader, deriveTaskStatus } from "./thread-header";
@@ -58,6 +57,8 @@ interface ThreadPageProps {
   readonly viewerId?: string;
   /** 平台默认模型（shell.default_model_ref）；用于既有 Thread 未配模型时的即时展示。 */
   readonly defaultModelRef?: string;
+  readonly workbenchOpen?: boolean;
+  readonly onWorkbenchOpenChange?: (open: boolean) => void;
   /** 最新 Turn 状态变化时同步侧栏快捷状态。 */
   readonly onLatestTurnStateChange?: (threadId: string, state: string | null) => void;
 }
@@ -67,6 +68,8 @@ export function ThreadPage({
   variant = "web",
   viewerId,
   defaultModelRef,
+  workbenchOpen: controlledWorkbenchOpen,
+  onWorkbenchOpenChange,
   onLatestTurnStateChange,
 }: ThreadPageProps) {
   const sidebar = useOptionalSidebar();
@@ -87,7 +90,16 @@ export function ThreadPage({
   // W04：Thread 默认设置 PATCH（Model / Environment）
   const { patchSettings, busy: settingsBusy } = useThreadSettings({ threadId });
   const [locateItem, setLocateItem] = useState<{ itemId: string; requestId: number } | null>(null);
-  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [localWorkbenchOpen, setLocalWorkbenchOpen] = useState(false);
+  const workbenchOpen = controlledWorkbenchOpen ?? localWorkbenchOpen;
+
+  const setWorkbenchOpen = useCallback(
+    (open: boolean) => {
+      if (controlledWorkbenchOpen === undefined) setLocalWorkbenchOpen(open);
+      onWorkbenchOpenChange?.(open);
+    },
+    [controlledWorkbenchOpen, onWorkbenchOpenChange],
+  );
 
   useEffect(() => {
     if (loading) return;
@@ -183,15 +195,7 @@ export function ThreadPage({
           <span className="text-2xs text-muted-foreground">{taskStatus.label}</span>
         </div>
       )}
-      <button
-        type="button"
-        aria-label={workbenchOpen ? "收起任务工作台" : "展开任务工作台"}
-        title={workbenchOpen ? "收起任务工作台" : "展开任务工作台"}
-        onClick={() => setWorkbenchOpen((open) => !open)}
-        className="ml-auto flex size-8 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 [-webkit-app-region:no-drag]"
-      >
-        <PanelRight className="size-4" strokeWidth={1.5} />
-      </button>
+      <WorkbenchToggle open={workbenchOpen} onOpenChange={setWorkbenchOpen} />
     </div>
   );
 
@@ -262,7 +266,12 @@ export function ThreadPage({
 
   // Web 顶部标题区：已加载用真实 ThreadHeader；首次加载用同高稳定占位（不构造假 Thread）。
   const webHeader = thread ? (
-    <ThreadHeader thread={thread} activeGoal={activeGoal} latestTurn={latestTurn} />
+    <ThreadHeader
+      thread={thread}
+      activeGoal={activeGoal}
+      latestTurn={latestTurn}
+      actions={<WorkbenchToggle open={workbenchOpen} onOpenChange={setWorkbenchOpen} />}
+    />
   ) : (
     <header
       data-testid="web-thread-header-placeholder"
@@ -274,6 +283,7 @@ export function ThreadPage({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <h1 className="min-w-0 flex-1 truncate font-semibold text-base text-foreground">新会话</h1>
       </div>
+      <WorkbenchToggle open={workbenchOpen} onOpenChange={setWorkbenchOpen} />
     </header>
   );
 
@@ -315,27 +325,42 @@ export function ThreadPage({
       className="flex h-full min-h-0 flex-col overflow-hidden"
     >
       {webHeader}
-      {isFirstLoad ? (
-        messageAreaLoading
-      ) : (
-        <>
-          <ThreadTimeline
-            items={timelineItems}
-            streamStatus={streamStatus}
-            reconnectAttempt={reconnectAttempt}
-            reconnectMax={reconnectMax}
-            threadId={threadId}
-            activeTurn={latestTurn}
-            turns={turns}
-          />
-          <TurnFailureNotice
-            turnState={latestTurn?.turn_state}
-            errorCode={latestTurn?.error_code}
-          />
-          {pendingUserActionDock}
-        </>
-      )}
-      {inputArea}
+      <div className="relative flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {isFirstLoad ? (
+            messageAreaLoading
+          ) : (
+            <>
+              <ThreadTimeline
+                items={timelineItems}
+                streamStatus={streamStatus}
+                reconnectAttempt={reconnectAttempt}
+                reconnectMax={reconnectMax}
+                threadId={threadId}
+                activeTurn={latestTurn}
+                turns={turns}
+              />
+              <TurnFailureNotice
+                turnState={latestTurn?.turn_state}
+                errorCode={latestTurn?.error_code}
+              />
+              {pendingUserActionDock}
+            </>
+          )}
+          {inputArea}
+        </div>
+        <DesktopWorkbench
+          threadId={threadId}
+          isOpen={workbenchOpen}
+          surface="web"
+          viewerId={viewerId}
+          threadTitle={thread?.title}
+          activeGoal={activeGoal}
+          latestTurn={latestTurn}
+          items={items}
+          onLocateItem={handleLocateItem}
+        />
+      </div>
     </div>
   );
 
@@ -381,6 +406,7 @@ export function ThreadPage({
           <DesktopWorkbench
             threadId={threadId}
             isOpen={workbenchOpen}
+            surface="desktop"
             viewerId={viewerId}
             threadTitle={thread?.title}
             activeGoal={activeGoal}

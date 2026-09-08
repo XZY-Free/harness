@@ -16,6 +16,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
   // 内部持有的当前 Thread id：新建页提交成功后原地切到 ThreadPage，
   // 避免经 App Router 导航卸载/重挂 shell（否则再次进入 shell loading 控件闪没）。
   const [activeThreadId, setActiveThreadId] = useState<string | null>(threadId);
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
 
   // prop threadId（App Router 真实导航 / 浏览器前进后退）变化时同步内部状态。
   useEffect(() => {
@@ -108,12 +109,18 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
               error={error}
               onSubmit={submitNewThread}
               surface="web"
+              viewerId={shell.viewer_id}
+              workbenchOpen={workbenchOpen}
+              onWorkbenchOpenChange={setWorkbenchOpen}
             />
           ) : (
             <ThreadPage
               key={activeThreadId}
               threadId={activeThreadId}
+              viewerId={shell.viewer_id}
               defaultModelRef={shell.default_model_ref}
+              workbenchOpen={workbenchOpen}
+              onWorkbenchOpenChange={setWorkbenchOpen}
               onLatestTurnStateChange={handleLatestTurnStateChange}
             />
           )}

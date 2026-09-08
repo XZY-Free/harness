@@ -24,6 +24,7 @@ function DesktopShell() {
   const [shell, setShell] = useState<ClientThreadShellResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newThreadError, setNewThreadError] = useState<string | null>(null);
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const newThreadSession = useRef(createNewThreadSession()).current;
   const viewerId = shell?.viewer_id;
 
@@ -135,6 +136,9 @@ function DesktopShell() {
               defaultModelRef={shell.default_model_ref}
               error={newThreadError}
               onSubmit={submitNewThread}
+              viewerId={shell.viewer_id}
+              workbenchOpen={workbenchOpen}
+              onWorkbenchOpenChange={setWorkbenchOpen}
             />
           ) : (
             <ThreadPage
@@ -143,6 +147,8 @@ function DesktopShell() {
               variant="desktop"
               viewerId={shell.viewer_id}
               defaultModelRef={shell.default_model_ref}
+              workbenchOpen={workbenchOpen}
+              onWorkbenchOpenChange={setWorkbenchOpen}
               onLatestTurnStateChange={handleLatestTurnStateChange}
             />
           )}
