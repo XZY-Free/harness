@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createAgentActionExecutor } from "@/lib/agents/calls/application/agent-action-executor";
 import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/resume-agent-call-from-user-action";
+import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
   EXECUTION_FIXTURE_CONTRACT,
   seedAgentCallExecutionScenario,
@@ -23,7 +24,7 @@ import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/m
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
 
@@ -36,6 +37,7 @@ describe("AgentActionExecutor", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     for (const scenario of scenarios) {
       delete process.env[scenario.credentialEnvVar];
       await scenario.provider.close();
@@ -184,6 +186,61 @@ describe("AgentActionExecutor", () => {
         .from(agentCallTable)
         .where(eq(agentCallTable.parentInvocationId, scenario.parentInvocationId)),
     ).toHaveLength(0);
+  });
+
+  it("F06 Harness 执行器把父取消透传到 startAgentCall 的 claim/dispatch 边界", async () => {
+    const scenario = await seed("long_running");
+    const execute = createAgentActionExecutor({
+      tenantId: scenario.tenantId,
+      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      resolveRoute,
+      transportChannel: "hosted",
+    });
+    const controller = new AbortController();
+    const claimCurrentAttempt = mysqlAgentCallStore.claimCurrentAttempt.bind(mysqlAgentCallStore);
+    vi.spyOn(mysqlAgentCallStore, "claimCurrentAttempt").mockImplementation(async (params) => {
+      const claim = await claimCurrentAttempt(params);
+      controller.abort(new DOMException("parent cancelled after claim", "AbortError"));
+      return claim;
+    });
+    const actionId = "f06-cancel-inside-start";
+
+    await expect(
+      execute(
+        {
+          actionId,
+          stepNo: 1,
+          actionType: "agent.call",
+          purposeCode: "query_balance",
+          shortPurpose: "查询年假余额",
+          payload: { agentId: scenario.agentId, task: "不得出站" },
+        },
+        {
+          invocationId: scenario.parentInvocationId,
+          tenantId: scenario.tenantId,
+          threadId: scenario.threadId,
+          turnId: scenario.turnId,
+          actionDigest: `sha256:${"1".repeat(64)}`,
+          abortSignal: controller.signal,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "AGENT_ACTION_CANCELLED" });
+    expect(scenario.provider.requests).toHaveLength(0);
+    const [call] = await db
+      .select()
+      .from(agentCallTable)
+      .where(
+        and(
+          eq(agentCallTable.parentInvocationId, scenario.parentInvocationId),
+          eq(agentCallTable.sourceRef, actionId),
+        ),
+      );
+    expect(call).toMatchObject({ state: "cancelled" });
+    const [attempt] = await db
+      .select()
+      .from(agentCallAttemptTable)
+      .where(eq(agentCallAttemptTable.callId, call?.id as string));
+    expect(attempt).toMatchObject({ attemptState: "cancelled" });
   });
 
   it("AgentCall 完成后只返回 Agent Observation", async () => {

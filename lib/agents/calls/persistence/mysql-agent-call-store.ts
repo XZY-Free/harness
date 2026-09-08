@@ -28,6 +28,7 @@ import type {
   AgentCallStore,
   StoreAgentCallInput,
 } from "@/lib/agents/calls/persistence/agent-call-store";
+import { applyAgentCallTransition } from "@/lib/agents/calls/persistence/apply-agent-call-transition";
 import { lockAndValidateAgentCallAuthority } from "@/lib/agents/calls/persistence/finalize-agent-call-authority";
 import { recordCapabilityUseInSession } from "@/lib/capability/capability-use-queries";
 import { db } from "@/lib/db/client";
@@ -93,7 +94,7 @@ export function createMysqlAgentCallStore(
             };
           }
         }
-        const finalizedInput = await finalizeEnterpriseUserContext(tx, input, clock());
+        const finalizedInput = await finalizeEnterpriseUserContext(tx, input, clock);
         const call = await doCreate(tx, finalizedInput, dependencies.recordCapabilityUse);
         return {
           call,
@@ -333,7 +334,7 @@ export function createMysqlAgentCallStore(
         return toAttempt(after);
       }),
 
-    claimCurrentAttempt: ({ callId, tenantId, requestDigest, now }) =>
+    claimCurrentAttempt: ({ callId, tenantId, requestDigest, now, signal }) =>
       db.transaction(async (tx) => {
         const [callRow] = await tx
           .select()
@@ -364,6 +365,46 @@ export function createMysqlAgentCallStore(
 
         const call = await toAgentCallWithSession(tx, callRow);
         const attempt = toAttempt(attemptRow);
+
+        // 取消若在等待 claim 行锁期间已可见，未认领 queued Call 必须在同一事务里
+        // 先于认领事实收口，避免释放锁后出现另一启动者抢先 dispatch 的窗口；
+        // 已有出站事实的状态返回应用层，由统一 cancelAgentCall 保留远端取消语义。
+        if (signal?.aborted) {
+          if (callRow.state === "queued" && attemptRow.requestDigest === null) {
+            await applyAgentCallTransition(tx, {
+              callId,
+              tenantId,
+              input: "call.cancelled",
+              authority: "local_cancel",
+              errorCode: "AGENT_CALL_CANCELLED_BEFORE_DISPATCH",
+              errorSummary: "父执行在 AgentCall 认领前已取消",
+              now,
+            });
+            const [cancelledCallRow] = await tx
+              .select()
+              .from(agentCallTable)
+              .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+              .limit(1);
+            const [cancelledAttemptRow] = await tx
+              .select()
+              .from(agentCallAttemptTable)
+              .where(eq(agentCallAttemptTable.id, attemptRow.id))
+              .limit(1);
+            if (!cancelledCallRow || !cancelledAttemptRow) {
+              throw new Error("AgentCall 取消后无法回读");
+            }
+            return {
+              status: "aborted",
+              attempt: toAttempt(cancelledAttemptRow),
+              call: await toAgentCallWithSession(tx, cancelledCallRow),
+            } as const;
+          }
+          return {
+            status: "aborted",
+            attempt,
+            call,
+          } as const;
+        }
 
         // 已认领：同 digest → idempotent；异 digest → conflict（稳定冲突，含终态后）。
         if (attemptRow.requestDigest !== null) {
@@ -437,7 +478,7 @@ type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 async function finalizeEnterpriseUserContext(
   tx: Transaction,
   input: StoreAgentCallInput,
-  now: Date,
+  clock: () => Date,
 ): Promise<StoreAgentCallInput> {
   const evidence = input.bindingCandidate.enterpriseUserContextEvidence;
   const publicContext = input.bindingCandidate.enterpriseUserContext;
@@ -478,7 +519,7 @@ async function finalizeEnterpriseUserContext(
 
   const finalizedPublicContext = finalizeEnterpriseUserContextCandidate(
     { publicContext, evidence },
-    now,
+    clock(),
   );
   const bindingCandidate = {
     ...input.bindingCandidate,

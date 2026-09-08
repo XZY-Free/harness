@@ -509,6 +509,115 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
     }
   });
 
+  it.each([
+    {
+      name: "fresh_required 等待 UserIdentity 锁跨过 freshUntil 后拒绝",
+      profileRequirement: "fresh_required" as const,
+      finalNow: new Date("2026-08-29T00:10:00.000Z"),
+      expectedStatus: "rejected" as const,
+    },
+    {
+      name: "stale_allowed 等待 UserIdentity 锁进入 stale 窗后冻结 stale",
+      profileRequirement: "stale_allowed" as const,
+      finalNow: new Date("2026-08-29T00:15:00.000Z"),
+      expectedStatus: "stale" as const,
+    },
+    {
+      name: "stale_allowed 等待 UserIdentity 锁跨过 staleUntil 后拒绝",
+      profileRequirement: "stale_allowed" as const,
+      finalNow: new Date("2026-08-29T00:30:00.000Z"),
+      expectedStatus: "rejected" as const,
+    },
+  ])("F05-B $name", async ({ profileRequirement, finalNow, expectedStatus }) => {
+    const scenario = await seed();
+    const identity = await upsertUserIdentity({
+      tenantId: scenario.tenantId,
+      externalSubject: `employee-f05-user-lock-${profileRequirement}-${expectedStatus}`,
+      email: `employee-f05-user-lock-${profileRequirement}-${expectedStatus}@example.test`,
+      displayName: "F05 User Lock",
+    });
+    const preparedAt = new Date("2026-08-29T00:00:00.000Z");
+    let clockNow = new Date("2026-08-29T00:05:00.000Z");
+    let clockReads = 0;
+    const bindingCandidate = {
+      ...scenario.binding,
+      enterpriseUserContext: {
+        context_version: "1" as const,
+        profile_status: "fresh" as const,
+        last_verified_at: preparedAt.toISOString(),
+        fields: { employeeNo: "USER-LOCK-A" },
+      },
+      enterpriseUserContextEvidence: {
+        tenantId: scenario.tenantId,
+        userIdentityId: identity.id,
+        profileRequirement,
+        sourceSystem: "directory",
+        profileFingerprint: `sha256:${"e".repeat(64)}`,
+        lastVerifiedAt: preparedAt,
+        freshUntil: new Date("2026-08-29T00:10:00.000Z"),
+        staleUntil: new Date("2026-08-29T00:30:00.000Z"),
+        maxFreshAgeMs: 30 * 60_000,
+        maxStaleAgeMs: 30 * 60_000,
+      },
+    };
+    const store = createMysqlAgentCallStore({
+      recordCapabilityUse: recordCapabilityUseInSession,
+      now: () => {
+        clockReads += 1;
+        return clockNow;
+      },
+    });
+    const create = createCreateAgentCall({ store, now: () => preparedAt });
+    const actionId = `f05-user-lock:${profileRequirement}:${expectedStatus}:${randomUUID()}`;
+    const logicalCallKey = buildAgentCallLogicalKey(actionId, scenario.agentId);
+    const blocker = await mysql.createConnection(process.env.DATABASE_URL!);
+    await blocker.beginTransaction();
+    try {
+      await blocker.execute("SELECT `id` FROM `UserIdentity` WHERE `id` = ? FOR UPDATE", [
+        identity.id,
+      ]);
+      const pending = create(commandFor(scenario, { actionId, bindingCandidate }));
+      const state = await Promise.race([
+        pending.then(
+          () => "settled",
+          () => "settled",
+        ),
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 100)),
+      ]);
+      expect(state).toBe("pending");
+      const clockReadsBeforeUserLockRelease = clockReads;
+
+      clockNow = finalNow;
+      await blocker.commit();
+      if (expectedStatus === "rejected") {
+        await expect(pending).rejects.toMatchObject({
+          code: "enterprise_user_context_unavailable",
+        });
+        expect(
+          await db
+            .select()
+            .from(agentCallTable)
+            .where(eq(agentCallTable.logicalCallKey, logicalCallKey)),
+        ).toHaveLength(0);
+      } else {
+        const created = await pending;
+        const binding = await store.getBinding({
+          callId: created.call.id,
+          tenantId: scenario.tenantId,
+        });
+        expect(binding?.enterpriseUserContext).toMatchObject({
+          profile_status: "stale",
+          fields: { employeeNo: "USER-LOCK-A" },
+        });
+      }
+      expect(clockReadsBeforeUserLockRelease).toBe(0);
+      expect(clockReads).toBe(1);
+    } finally {
+      await blocker.rollback().catch(() => undefined);
+      await blocker.end();
+    }
+  });
+
   it("Resolve 后 Publication withdraw，最终事务 fail closed 且不写 Call", async () => {
     const scenario = await seed();
     const [publication] = await db

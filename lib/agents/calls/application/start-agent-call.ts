@@ -10,7 +10,8 @@
  *   其它 waiter 返回同一 durable AgentCall。不同 input 在 claim 已存在时稳定冲突。
  * - started 前的 endpoint/auth/503/protocol 错误把当前 Call 与 Attempt 一起标为 failed，
  *   不留下 queued + failed 的无主组合；运行中丢流仍由恢复 Worker 决定是否创建新 Attempt。
- * - 不实现 resume/cancel。
+ * - 父 signal 在网络 dispatch 前可本地收口 queued Call；已有出站事实时委托统一
+ *   cancelAgentCall，保留正式远端取消语义。
  */
 import { createHash } from "node:crypto";
 import {
@@ -18,6 +19,7 @@ import {
   assertAgentRevisionContractRequirements,
 } from "@/lib/agents/application/agent-revision-contract-requirements";
 import { transitionAgentCall } from "@/lib/agents/calls/application/agent-call-transition";
+import { cancelAgentCall } from "@/lib/agents/calls/application/cancel-agent-call";
 import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
 import { type AgentCall, isAgentCallTerminal } from "@/lib/agents/calls/domain/agent-call";
@@ -47,6 +49,8 @@ export interface StartAgentCallCommand {
   input: string;
   /** 平台上下文（tenant 必须等于 call tenant；executionSubject.tenant 也必须等于 call tenant）。 */
   contextEnvironment?: PlatformContextEnvironment;
+  /** 父执行的真实取消信号；未出站时本地收口，已出站时走统一远端取消。 */
+  signal?: AbortSignal;
 }
 
 /** startAgentCall 稳定错误基类（message 绝不包含 secret/token）。 */
@@ -123,6 +127,12 @@ export class AgentCallInvalidInputError extends AgentCallStartError {
 export class AgentCallClaimConflictError extends AgentCallStartError {
   constructor(callId: string) {
     super("AGENT_CALL_CLAIM_CONFLICT", `AgentCall ${callId} 已被不同输入认领，拒绝冲突`);
+  }
+}
+
+export class AgentCallStartCancelledError extends AgentCallStartError {
+  constructor(callId: string) {
+    super("AGENT_CALL_START_CANCELLED", `AgentCall ${callId} 在出站前已取消`);
   }
 }
 
@@ -223,6 +233,7 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
   // 1. tenant-scoped 加载 existing call + exact binding（绝不读取最新 Revision/Route/Contract）。
   const call = await mysqlAgentCallStore.getById({ callId, tenantId });
   if (!call) throw new AgentCallNotFoundError(callId, tenantId);
+  if (command.signal?.aborted) await cancelBeforeDispatch(call);
   const binding = await mysqlAgentCallStore.getBinding({ callId, tenantId });
   if (!binding) throw new AgentCallBindingNotFoundError(callId);
 
@@ -303,6 +314,7 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     identityMode: binding.identityMode,
     credentialRefId: binding.credentialRefId,
   });
+  if (command.signal?.aborted) await cancelBeforeDispatch(call);
 
   // 8. durable 请求摘要 + 原子 initial claim。
   const requestDigest = computeRequestDigest(callId, tenantId, command.input);
@@ -311,7 +323,11 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     tenantId,
     requestDigest,
     now: new Date(),
+    signal: command.signal,
   });
+  if (claim.status === "aborted") {
+    await cancelBeforeDispatch(claim.call);
+  }
   if (claim.status === "conflict") throw new AgentCallClaimConflictError(callId);
   if (claim.status === "idempotent" || claim.status === "terminal") {
     // 同 call 同 input 的并发 waiter / 已终态：返回既有 durable AgentCall，不重复 outbound。
@@ -346,6 +362,8 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     streamTimeoutMs: 60_000,
     hostControlPolicy,
   });
+  // signal 未取消时这里不能 await/yield；下一条同步调用 transport.startCall 即为 dispatch 边界。
+  if (command.signal?.aborted) await cancelBeforeDispatch(call);
 
   // 10. startCall：binding endpoint、resolved auth、durable idempotency key、冻结 capabilities。
   try {
@@ -382,4 +400,9 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
   const current = await mysqlAgentCallStore.getById({ callId, tenantId });
   if (!current) throw new AgentCallNotFoundError(callId, tenantId);
   return current;
+}
+
+async function cancelBeforeDispatch(call: { id: string; tenantId: string }): Promise<never> {
+  await cancelAgentCall({ tenantId: call.tenantId, callId: call.id });
+  throw new AgentCallStartCancelledError(call.id);
 }

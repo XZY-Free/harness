@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
+  EXECUTION_FIXTURE_CONTRACT,
   type ExecutionScenario,
   loadAttempt,
   loadFrozenBinding,
@@ -38,7 +39,8 @@ import {
   executionSubjectFromUserIdentity,
 } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import mysql from "mysql2/promise";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const NOW = new Date("2026-08-29T00:00:00.000Z");
 
@@ -70,6 +72,7 @@ function startParams(
     executionSubject?: ExecutionSubject | null;
     timezone?: string;
     contextEnvironment?: ContextEnvironmentShape;
+    signal?: AbortSignal;
   } = {},
 ) {
   return {
@@ -86,6 +89,7 @@ function startParams(
         timezone: opts.timezone ?? "Asia/Shanghai",
         locale: "zh-CN",
       } satisfies ContextEnvironmentShape),
+    signal: opts.signal,
   };
 }
 
@@ -119,6 +123,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const key of trackedEnvVars) delete process.env[key];
   trackedEnvVars.clear();
 });
@@ -237,6 +242,122 @@ describe("startAgentCall 执行域启动", () => {
     expect(attempt?.attemptNo).toBe(1);
     expect(attempt?.dispatchAttemptCount).toBe(1);
     expect(attempt?.attemptState).toBe("completed");
+  });
+
+  it("F06 cancel-before-claim：等待 durable claim 行锁时取消，不得 claim 或 dispatch", async () => {
+    const scenario = await seedAgentCallExecutionScenario();
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    const controller = new AbortController();
+    const blocker = await mysql.createConnection(process.env.DATABASE_URL!);
+    await blocker.beginTransaction();
+    try {
+      await blocker.execute("SELECT `id` FROM `AgentCall` WHERE `id` = ? FOR UPDATE", [
+        scenario.callId,
+      ]);
+      const pending = startAgentCall(startParams(scenario, { signal: controller.signal }));
+      const state = await Promise.race([
+        pending.then(
+          () => "settled",
+          () => "settled",
+        ),
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 100)),
+      ]);
+      expect(state).toBe("pending");
+
+      controller.abort(new DOMException("parent cancelled", "AbortError"));
+      await blocker.commit();
+      await expect(pending).rejects.toMatchObject({ code: "AGENT_CALL_START_CANCELLED" });
+      expect(scenario.provider.requests).toHaveLength(0);
+      expect(await mysqlCall(scenario)).toMatchObject({ state: "cancelled" });
+      expect(await loadAttempt(scenario.callId, scenario.tenantId)).toMatchObject({
+        attemptState: "cancelled",
+        dispatchAttemptCount: 0,
+        requestDigest: null,
+      });
+    } finally {
+      await blocker.rollback().catch(() => undefined);
+      await blocker.end();
+      await scenario.provider.close();
+    }
+  });
+
+  it("F06 cancel-before-dispatch：claim 已提交后取消，仍不得产生真实 Provider 请求", async () => {
+    const scenario = await seedAgentCallExecutionScenario();
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    const controller = new AbortController();
+    const claimCurrentAttempt = mysqlAgentCallStore.claimCurrentAttempt.bind(mysqlAgentCallStore);
+    vi.spyOn(mysqlAgentCallStore, "claimCurrentAttempt").mockImplementation(async (params) => {
+      const claim = await claimCurrentAttempt(params);
+      controller.abort(new DOMException("parent cancelled after claim", "AbortError"));
+      return claim;
+    });
+    try {
+      await expect(
+        startAgentCall(startParams(scenario, { signal: controller.signal })),
+      ).rejects.toMatchObject({ code: "AGENT_CALL_START_CANCELLED" });
+      expect(scenario.provider.requests).toHaveLength(0);
+      expect(await mysqlCall(scenario)).toMatchObject({ state: "cancelled" });
+      expect(await loadAttempt(scenario.callId, scenario.tenantId)).toMatchObject({
+        attemptState: "cancelled",
+        dispatchAttemptCount: 1,
+        requestDigest: expect.stringMatching(/^sha256:/),
+      });
+    } finally {
+      await scenario.provider.close();
+    }
+  });
+
+  it("F06 dispatch 后等待 claim 锁时取消，必须保留正式 remote cancel 语义", async () => {
+    const scenario = await seedAgentCallExecutionScenario({
+      providerScenario: "long_running",
+      contract: {
+        ...EXECUTION_FIXTURE_CONTRACT,
+        interaction: { ...EXECUTION_FIXTURE_CONTRACT.interaction, cancel: true },
+      },
+    });
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    await startAgentCall(startParams(scenario));
+    expect(
+      scenario.provider.rpcMethods.filter((method) => method === "message/stream"),
+    ).toHaveLength(1);
+
+    const controller = new AbortController();
+    const blocker = await mysql.createConnection(process.env.DATABASE_URL!);
+    await blocker.beginTransaction();
+    try {
+      await blocker.execute("SELECT `id` FROM `AgentCall` WHERE `id` = ? FOR UPDATE", [
+        scenario.callId,
+      ]);
+      const pending = startAgentCall(startParams(scenario, { signal: controller.signal }));
+      const state = await Promise.race([
+        pending.then(
+          () => "settled",
+          () => "settled",
+        ),
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 100)),
+      ]);
+      expect(state).toBe("pending");
+
+      controller.abort(new DOMException("parent cancelled after dispatch", "AbortError"));
+      await blocker.commit();
+      await expect(pending).rejects.toMatchObject({ code: "AGENT_CALL_START_CANCELLED" });
+      expect(
+        scenario.provider.rpcMethods.filter((method) => method === "message/stream"),
+      ).toHaveLength(1);
+      expect(
+        scenario.provider.rpcMethods.filter((method) => method === "tasks/cancel"),
+      ).toHaveLength(1);
+      expect(await mysqlCall(scenario)).toMatchObject({ state: "cancelled" });
+      expect(await loadAttempt(scenario.callId, scenario.tenantId)).toMatchObject({
+        attemptState: "cancelled",
+        dispatchAttemptCount: 1,
+        requestDigest: expect.stringMatching(/^sha256:/),
+      });
+    } finally {
+      await blocker.rollback().catch(() => undefined);
+      await blocker.end();
+      await scenario.provider.close();
+    }
   });
 
   it("已 claim 后不同 input 再次 start 必须拒绝冲突，不得发送新 input", async () => {

@@ -5,7 +5,10 @@ import {
   AgentActionUnavailableError,
   resolveAgentActionBinding,
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
-import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
+import {
+  AgentCallStartCancelledError,
+  startAgentCall,
+} from "@/lib/agents/calls/application/start-agent-call";
 import { toAgentCallDisposition } from "@/lib/agents/calls/domain/agent-call";
 import { buildAgentCallLogicalKey } from "@/lib/agents/calls/domain/agent-call";
 import type { AgentCallTransportChannel } from "@/lib/agents/calls/domain/agent-call-attempt";
@@ -160,6 +163,7 @@ export function createAgentActionExecutor(
           timezone: "Asia/Shanghai",
           locale: "zh-CN",
         },
+        signal: context.abortSignal,
       });
       await throwIfAgentActionCancelled(context.abortSignal, current);
       const disposition = toAgentCallDisposition(current);
@@ -220,6 +224,9 @@ export function createAgentActionExecutor(
         error instanceof AgentActionUnavailableError
       ) {
         throw error;
+      }
+      if (error instanceof AgentCallStartCancelledError) {
+        throw new AgentActionExecutionError("AGENT_ACTION_CANCELLED", error.message);
       }
       if (error instanceof AgentCallIdempotencyConflictError) {
         throw new AgentActionExecutionError(

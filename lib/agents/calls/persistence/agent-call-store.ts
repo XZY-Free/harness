@@ -35,12 +35,15 @@ export interface StoreAgentCallInput {
 /**
  * 当前 Attempt claim 结果。
  * - owner：本调用赢得认领（唯一会 record outbound / 发 HTTP 的调用方）。
+ * - aborted：取得 claim 锁后发现父执行已取消；未认领 queued Call 已原子收口，
+ *   其他 durable 状态交由应用层按正式取消语义处理。
  * - idempotent：已存在同 input 的认领（并发同 call 同 input），返回既有 attempt/call，不重复 outbound。
  * - conflict：已存在不同 input 的认领，稳定冲突。
  * - terminal：call/attempt 已终态（如已 completed），返回既有结果，不重复 outbound。
  */
 export type InitialAttemptClaimResult =
   | { status: "owner"; attempt: AgentCallAttempt; call: AgentCall }
+  | { status: "aborted"; attempt: AgentCallAttempt; call: AgentCall }
   | { status: "idempotent"; attempt: AgentCallAttempt; call: AgentCall }
   | { status: "conflict"; attempt: AgentCallAttempt; call: AgentCall }
   | { status: "terminal"; attempt: AgentCallAttempt; call: AgentCall };
@@ -108,12 +111,14 @@ export interface AgentCallStore {
    *
    * 语义：requestDigest IS NULL → owner（唯一发 HTTP 者，dispatchAttemptCount 置 1，
    * attempt 转 running，AgentCall 仍等待正式 call.started）；requestDigest 已存在 → 同 digest=idempotent、
-   * 异 digest=conflict；call/attempt 已终态 → terminal。跨并发 start 用行锁串行化。
+   * 异 digest=conflict；signal 在锁后已取消 → aborted；call/attempt 已终态 → terminal。
+   * 跨并发 start 用行锁串行化。
    */
   claimCurrentAttempt(params: {
     callId: string;
     tenantId: string;
     requestDigest: string;
     now: Date;
+    signal?: AbortSignal;
   }): Promise<InitialAttemptClaimResult>;
 }

@@ -68,6 +68,7 @@ interface SharedRefreshOperation {
   readonly waiters: Set<symbol>;
   promise: Promise<void>;
   timeout: ReturnType<typeof setTimeout> | null;
+  phase: "refreshing" | "accepting" | "settled";
   discarded: boolean;
 }
 
@@ -204,7 +205,7 @@ export async function prepareEnterpriseUserContext(params: {
     throw unavailable("企业资料刷新后仍不满足当前 Agent 要求");
   } finally {
     operation.waiters.delete(waiter);
-    if (operation.waiters.size === 0 && !operation.discarded) {
+    if (operation.waiters.size === 0 && operation.phase === "refreshing" && !operation.discarded) {
       operation.discarded = true;
       operation.controller.abort(new RefreshOperationAbandonedError("所有等待者已离开"));
     }
@@ -242,6 +243,7 @@ function getOrStartSharedRefresh(params: {
     waiters: new Set(),
     promise: Promise.resolve(),
     timeout: null,
+    phase: "refreshing",
     discarded: false,
   };
   const abort = new Promise<never>((_, reject) => {
@@ -252,6 +254,7 @@ function getOrStartSharedRefresh(params: {
     );
   });
   operation.promise = Promise.race([work, abort]).finally(() => {
+    operation.phase = "settled";
     if (operation.timeout) clearTimeout(operation.timeout);
     if (inFlightRefreshes.get(operation.key) === operation) {
       inFlightRefreshes.delete(operation.key);
@@ -263,7 +266,9 @@ function getOrStartSharedRefresh(params: {
   inFlightRefreshes.set(params.key, operation);
   startWork?.();
   operation.timeout = setTimeout(() => {
-    if (operation.discarded) return;
+    // observed 已进入本地接纳后无法安全撤销数据库事务；等待者仍按各自期限结束，
+    // 但共享槽位必须保留到接纳 settle，防止同键打开第二次刷新窗口。
+    if (operation.discarded || operation.phase === "accepting") return;
     operation.discarded = true;
     controller.abort(new RefreshOperationAbandonedError("共享刷新已超过固定等待上限"));
   }, params.waitMaxMs);
@@ -314,6 +319,7 @@ async function runSharedRefresh(
     });
     assertSharedRefreshMayProceed(operation, params.clock());
     if (result.status === "observed") {
+      operation.phase = "accepting";
       await acceptEnterpriseProfileObservation({
         observation: result.observation,
         source: params.source,

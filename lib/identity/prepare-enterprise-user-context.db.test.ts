@@ -16,6 +16,7 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { userIdentity } from "@/lib/persistence/schema/identity";
 import { eq } from "drizzle-orm";
+import mysql from "mysql2/promise";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeEach(async () => {
@@ -249,6 +250,107 @@ describe("prepareEnterpriseUserContext", () => {
     const facts = await getEnterpriseUserProfileFacts(tenant.id, identity.id);
     expect(facts?.attributes ?? []).toEqual([]);
     expect(facts?.syncState).toBeNull();
+  });
+
+  it("F06 observed 已进入资料接纳后最后等待者取消，共享槽位必须保留到接纳完成", async () => {
+    const { tenant, identity } = await seedIdentity();
+    const old = observation(tenant.id, identity.externalSubject, "2026-09-06T00:00:00.000Z");
+    await acceptEnterpriseProfileObservation({
+      observation: old,
+      source,
+      expectedSubject: {
+        tenantId: tenant.id,
+        userIdentityId: identity.id,
+        externalSubject: identity.externalSubject,
+      },
+      now: old.verifiedAt,
+    });
+    const currentNow = new Date("2026-09-07T00:20:00.000Z");
+    const refreshed = deferredResult<EnterpriseProfileSourceResult>();
+    const refresh = vi.fn(async (_context: EnterpriseProfileSourceContext) => {
+      if (refresh.mock.calls.length === 1) return refreshed.promise;
+      throw new Error("共享槽位提前释放导致重复刷新");
+    });
+    const sourceWithRefresh = { ...source, refresh };
+    const firstController = new AbortController();
+    const first = prepareEnterpriseUserContext({
+      tenantId: tenant.id,
+      userIdentityId: identity.id,
+      policy: { profileRequirement: "stale_allowed", allowedFields: policy.allowedFields },
+      source: sourceWithRefresh,
+      signal: firstController.signal,
+      now: currentNow,
+      refreshWaitMaxMs: 2_000,
+    });
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+
+    // 第三位请求先读完旧资料，再被 Tenant 表锁卡在共享入口之前。
+    const tenantBlocker = await mysql.createConnection(process.env.DATABASE_URL!);
+    const acceptanceBlocker = await mysql.createConnection(process.env.DATABASE_URL!);
+    let tenantTableLocked = false;
+    await tenantBlocker.query("LOCK TABLES `Tenant` WRITE");
+    tenantTableLocked = true;
+    const third = prepareEnterpriseUserContext({
+      tenantId: tenant.id,
+      userIdentityId: identity.id,
+      policy,
+      source: sourceWithRefresh,
+      now: currentNow,
+      refreshWaitMaxMs: 2_000,
+    });
+    try {
+      const thirdState = await Promise.race([
+        third.then(
+          () => "settled",
+          () => "settled",
+        ),
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 100)),
+      ]);
+      expect(thirdState).toBe("pending");
+
+      // acceptance 取得 UserIdentity 锁后会在旧 employeeNo 属性行上等待。
+      await acceptanceBlocker.beginTransaction();
+      await acceptanceBlocker.execute(
+        "SELECT `id` FROM `UserExtensionAttribute` WHERE `userIdentityId` = ? AND `attributeKey` = ? FOR UPDATE",
+        [identity.id, "employeeNo"],
+      );
+      refreshed.resolve({
+        status: "observed",
+        observation: {
+          tenantId: tenant.id,
+          externalSubject: identity.externalSubject,
+          sourceSystem: source.sourceSystem,
+          attributes: { employeeNo: "ACCEPTING-B" },
+          verifiedAt: new Date("2026-09-07T00:00:00.000Z"),
+          freshUntil: new Date("2026-09-07T00:10:00.000Z"),
+          staleUntil: new Date("2026-09-07T00:40:00.000Z"),
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      firstController.abort(new DOMException("last original waiter cancelled", "AbortError"));
+      await expect(first).rejects.toMatchObject({ code: "enterprise_user_context_unavailable" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await tenantBlocker.query("UNLOCK TABLES");
+      tenantTableLocked = false;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await acceptanceBlocker.commit();
+
+      await expect(third).rejects.toMatchObject({ code: "enterprise_user_context_unavailable" });
+      expect(refresh).toHaveBeenCalledOnce();
+      const facts = await getEnterpriseUserProfileFacts(tenant.id, identity.id);
+      expect(
+        facts?.attributes.map((attribute) => [attribute.attributeKey, attribute.stringValue]),
+      ).toEqual(expect.arrayContaining([["employeeNo", "ACCEPTING-B"]]));
+      expect(facts?.syncState?.freshUntil).toEqual(new Date("2026-09-07T00:10:00.000Z"));
+    } finally {
+      firstController.abort();
+      if (tenantTableLocked) await tenantBlocker.query("UNLOCK TABLES").catch(() => undefined);
+      await acceptanceBlocker.rollback().catch(() => undefined);
+      await tenantBlocker.end();
+      await acceptanceBlocker.end();
+    }
   });
 
   it("F06 无同步行失败进入 30 秒进程退避，不造假同步行且到期后只允许一次新刷新", async () => {
