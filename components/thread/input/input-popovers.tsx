@@ -31,9 +31,16 @@ export function PlusMenuPopover() {
           <Plus className="size-4" />
         </span>
       </PopoverTrigger>
-      <PopoverContent className="w-[272px] p-2" align="start" side="top" sideOffset={8}>
+      <PopoverContent
+        className="w-[272px] gap-0 overflow-hidden rounded-[18px] border border-foreground/[0.08] bg-popover/95 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_24px_60px_-24px_rgba(15,23,42,0.30),0_8px_20px_-12px_rgba(15,23,42,0.20)] ring-1 ring-inset ring-white/65 backdrop-blur-xl dark:ring-white/10"
+        align="start"
+        side="top"
+        sideOffset={10}
+      >
         <div className="space-y-0.5">
-          <div className="px-2 py-1 text-xs font-medium text-muted-foreground">添加</div>
+          <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold tracking-[0.055em] text-muted-foreground">
+            添加
+          </div>
           <PlusMenuItem
             icon={<FilePlus className="size-4" />}
             label="文件和文件夹"
@@ -44,7 +51,7 @@ export function PlusMenuPopover() {
             }}
           />
           <PlusMenuItem
-            icon={<Target className="size-4 text-warning" />}
+            icon={<Target className="size-4" />}
             label="目标"
             subtitle="设置要持续追求的目标"
             onClick={() => {
@@ -53,11 +60,13 @@ export function PlusMenuPopover() {
             }}
           />
 
-          <div className="my-1 h-px bg-border" />
+          <div className="mx-2.5 my-1.5 h-px bg-foreground/[0.06]" />
 
-          <div className="px-2 py-1 text-xs font-medium text-muted-foreground">能力</div>
+          <div className="px-2.5 pb-1 pt-1 text-[11px] font-semibold tracking-[0.055em] text-muted-foreground">
+            能力
+          </div>
           <PlusMenuItem
-            icon={<Wrench className="size-4 text-purple-500" />}
+            icon={<Wrench className="size-4" />}
             label="技能"
             subtitle="调用已授权技能"
             onClick={() => {
@@ -65,7 +74,7 @@ export function PlusMenuPopover() {
             }}
           />
           <PlusMenuItem
-            icon={<Zap className="size-4 text-blue-500" />}
+            icon={<Zap className="size-4" />}
             label="工具"
             subtitle="使用外部工具"
             onClick={() => {
@@ -73,7 +82,7 @@ export function PlusMenuPopover() {
             }}
           />
           <PlusMenuItem
-            icon={<Database className="size-4 text-green-500" />}
+            icon={<Database className="size-4" />}
             label="知识库"
             subtitle="引用知识库内容"
             onClick={() => {
@@ -103,16 +112,19 @@ function PlusMenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-muted"
+      className="flex min-h-11 w-full items-center gap-2.5 rounded-[11px] px-2.5 py-1.5 text-left outline-none transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.05] active:scale-[0.99]"
     >
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
+      <div
+        data-slot="plus-menu-icon"
+        className="flex size-7 shrink-0 items-center justify-center rounded-[9px] bg-foreground/[0.035] text-muted-foreground"
+      >
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm text-foreground">{label}</div>
-        {subtitle && <div className="text-xs text-muted-foreground">{subtitle}</div>}
+        <div className="text-[13px] font-medium leading-5 text-foreground/90">{label}</div>
+        {subtitle && <div className="text-[11px] leading-4 text-muted-foreground">{subtitle}</div>}
       </div>
-      {shortcut && <span className="text-xs text-muted-foreground">{shortcut}</span>}
+      {shortcut && <span className="pr-0.5 text-[11px] text-muted-foreground/80">{shortcut}</span>}
     </button>
   );
 }

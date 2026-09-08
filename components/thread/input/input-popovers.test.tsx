@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ModelSelectorPopover } from "./input-popovers";
+import { ModelSelectorPopover, PlusMenuPopover } from "./input-popovers";
 
 afterEach(() => {
   cleanup();
@@ -100,5 +100,21 @@ describe("ModelSelectorPopover", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "deepseek-v4-flash" })).toBeTruthy(),
     );
+  });
+});
+
+describe("PlusMenuPopover", () => {
+  it("使用统一中性色图标，不按能力类型着色", () => {
+    render(<PlusMenuPopover />);
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+
+    const icons = document.querySelectorAll('[data-slot="plus-menu-icon"]');
+    expect(icons).toHaveLength(5);
+    for (const icon of icons) {
+      expect(icon.className).toContain("text-muted-foreground");
+    }
+    expect(
+      document.querySelector(".text-warning, .text-purple-500, .text-blue-500, .text-green-500"),
+    ).toBeNull();
   });
 });
