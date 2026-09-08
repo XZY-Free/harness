@@ -1,5 +1,5 @@
 import type { ClientThread } from "@/lib/client/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -105,8 +105,14 @@ describe("ThreadPage 把平台默认模型传给 ThreadInput（Web 与 Desktop �
 });
 
 describe("ThreadPage Desktop 输出区", () => {
-  it("桌面端默认展示输出工作台，用户无需先猜测隐藏入口", () => {
+  it("桌面端默认隐藏输出工作台，用户点击标题栏入口后展开", () => {
     render(<ThreadPage threadId="t-1" variant="desktop" />);
+
+    expect(screen.getByTestId("workbench").dataset.open).toBe("false");
+    const toggle = screen.getByRole("button", { name: "展开任务工作台" });
+
+    fireEvent.click(toggle);
+
     expect(screen.getByTestId("workbench").dataset.open).toBe("true");
     expect(screen.getByRole("button", { name: "收起任务工作台" })).toBeTruthy();
   });

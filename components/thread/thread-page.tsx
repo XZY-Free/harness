@@ -87,7 +87,7 @@ export function ThreadPage({
   // W04：Thread 默认设置 PATCH（Model / Environment）
   const { patchSettings, busy: settingsBusy } = useThreadSettings({ threadId });
   const [locateItem, setLocateItem] = useState<{ itemId: string; requestId: number } | null>(null);
-  const [workbenchOpen, setWorkbenchOpen] = useState(variant === "desktop");
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -342,7 +342,7 @@ export function ThreadPage({
   // W3-2：Desktop 三段式布局（侧栏 + 主区 + 工作台）。
   // - 标题行横贯主区顶部，下方左右分栏。
   // - 次级信息（Agent / Goal / 位置）不再常驻一行（W3-2 规格：移入输入区选择器或标题行 tooltip）。
-  // - 工作台可由员工调整宽度或收起，默认展示固定的任务页签。
+  // - 工作台默认收起，员工可从标题栏主动展开并调整宽度。
   if (variant === "desktop") {
     return (
       <div

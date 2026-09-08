@@ -1,3 +1,6 @@
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
+
 /**
  * §20.5 Desktop 正式执行链 E2E（真启动 Electron）。
  *
@@ -29,6 +32,14 @@ const ADMIN_BASE = "/admin/api/v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const PLACEHOLDER_DIGEST = `sha256:${"0".repeat(64)}`;
+const captureUi = process.env.SNOW_CAPTURE_UI === "1";
+const captureDir = resolve(process.cwd(), "output/workbench-default-hidden-design-qa");
+
+async function capture(window: Page, name: string): Promise<void> {
+  if (!captureUi) return;
+  mkdirSync(captureDir, { recursive: true });
+  await window.screenshot({ path: resolve(captureDir, name), fullPage: true });
+}
 
 /** 从 desktop 路由中提取 threadId（/desktop/chat/<id>）。 */
 function desktopThreadId(url: string): string {
@@ -124,12 +135,29 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     // ─── 3. Desktop 变体渲染（桌面标题栏存在）──────────────
     await expect(window.getByTestId("desktop-thread-titlebar")).toBeVisible({ timeout: 30_000 });
 
+    // 右侧输出工作台默认不占主界面；用户通过标题栏入口显式展开后仍可正常使用。
+    const workbench = window.locator('aside[aria-label="任务工作台"]');
+    await expect(workbench).toHaveAttribute("aria-hidden", "true");
+    await expect(workbench).toHaveCSS("width", "0px");
+
     // ─── 4. Agent 回复渲染（结构性断言）────────────────────
     const agentMessage = window.getByTestId("assistant-message").first();
     await expect(agentMessage).toBeVisible({ timeout: 90_000 });
     await expect
       .poll(async () => (await agentMessage.innerText()).trim().length, { timeout: 90_000 })
       .toBeGreaterThan(0);
+    await capture(window, "01-default-hidden.png");
+
+    const workbenchToggle = window.getByRole("button", { name: "展开任务工作台" });
+    await workbenchToggle.click();
+    await expect(workbench).toHaveAttribute("aria-hidden", "false");
+    await expect(workbench).toHaveCSS("width", "368px");
+    await expect(window.getByRole("tab", { name: "输出内容" })).toBeVisible();
+    await capture(window, "02-user-opened.png");
+
+    await window.getByRole("button", { name: "收起任务工作台" }).click();
+    await expect(workbench).toHaveAttribute("aria-hidden", "true");
+    await expect(workbench).toHaveCSS("width", "0px");
     console.log(
       `[e2e][desktop] thread=${threadId} Agent 回复原文：${(await agentMessage.innerText()).trim()}`,
     );
