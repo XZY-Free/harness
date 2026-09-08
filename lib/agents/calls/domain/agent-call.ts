@@ -163,6 +163,8 @@ export interface AgentCall {
   resultDigest: string | null;
   errorCode: string | null;
   errorSummary: string | null;
+  /** 已请求取消但可能仍在等待远端 taskId 关联；终态仍由实际取消结果推进。 */
+  cancelRequestedAt: Date | null;
   /** 业务幂等键（parentInvocationId + logicalCallKey 幂等）。 */
   logicalCallKey: string;
   /** canonical 创建请求摘要；与 outbound Attempt.requestDigest 语义独立。 */

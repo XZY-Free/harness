@@ -76,6 +76,7 @@ export async function POST(request: Request): Promise<Response> {
         remote_may_continue:
           result.remoteCancellation === "unsupported" ||
           result.remoteCancellation === "failed" ||
+          result.remoteCancellation === "pending" ||
           result.call.state === "lost",
       },
       { headers: { [REQUEST_ID_HEADER]: requestId } },

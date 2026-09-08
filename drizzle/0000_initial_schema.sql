@@ -232,6 +232,7 @@ CREATE TABLE `AgentCall` (
 	`resultDigest` varchar(71),
 	`errorCode` varchar(128),
 	`errorSummary` text,
+	`cancelRequestedAt` datetime(3),
 	`logicalCallKey` varchar(256) NOT NULL,
 	`creationRequestDigest` varchar(71) NOT NULL,
 	`createdAt` datetime(3) NOT NULL,

@@ -15,6 +15,7 @@
  * 不 mock transport / store / DB。
  */
 import { randomUUID } from "node:crypto";
+import { cancelActiveAgentCalls } from "@/lib/agents/calls/application/cancel-active-agent-calls";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
@@ -299,7 +300,7 @@ describe("startAgentCall 执行域启动", () => {
       expect(await mysqlCall(scenario)).toMatchObject({ state: "cancelled" });
       expect(await loadAttempt(scenario.callId, scenario.tenantId)).toMatchObject({
         attemptState: "cancelled",
-        dispatchAttemptCount: 1,
+        dispatchAttemptCount: 0,
         requestDigest: expect.stringMatching(/^sha256:/),
       });
     } finally {
@@ -356,6 +357,86 @@ describe("startAgentCall 执行域启动", () => {
     } finally {
       await blocker.rollback().catch(() => undefined);
       await blocker.end();
+      await scenario.provider.close();
+    }
+  });
+
+  it("F06 Provider 已收到 start 但 started 尚未返回时取消，必须保留意图并在关联后远端收敛", async () => {
+    const scenario = await seedAgentCallExecutionScenario({
+      providerScenario: "held_start",
+      contract: {
+        ...EXECUTION_FIXTURE_CONTRACT,
+        interaction: { ...EXECUTION_FIXTURE_CONTRACT.interaction, cancel: true },
+      },
+    });
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    const controller = new AbortController();
+    const pendingStart = startAgentCall(startParams(scenario, { signal: controller.signal }));
+    let cancellationResult: Awaited<ReturnType<typeof cancelActiveAgentCalls>> | undefined;
+    let cancellationPromise:
+      | Promise<Awaited<ReturnType<typeof cancelActiveAgentCalls>>>
+      | undefined;
+
+    try {
+      await scenario.provider.waitForHeldStartRequest();
+      expect(
+        scenario.provider.rpcMethods.filter((method) => method === "message/stream"),
+      ).toHaveLength(1);
+      expect(await mysqlCall(scenario)).toMatchObject({ state: "queued" });
+      expect(await loadAttempt(scenario.callId, scenario.tenantId)).toMatchObject({
+        attemptState: "running",
+        dispatchAttemptCount: 1,
+        externalTaskRef: null,
+      });
+
+      controller.abort(new DOMException("parent cancelled after request arrived", "AbortError"));
+      cancellationPromise = cancelActiveAgentCalls({
+        tenantId: scenario.tenantId,
+        parentInvocationId: scenario.parentInvocationId,
+      }).then((result) => {
+        cancellationResult = result;
+        return result;
+      });
+
+      await expect
+        .poll(() => cancellationResult?.[0]?.remoteCancellation, { timeout: 5_000 })
+        .toBe("pending");
+      expect(cancellationResult?.[0]?.call).toMatchObject({ state: "queued" });
+      expect(await mysqlCall(scenario)).toMatchObject({
+        state: "queued",
+        cancelRequestedAt: expect.any(Date),
+      });
+      expect(scenario.provider.rpcMethods).not.toContain("tasks/cancel");
+
+      scenario.provider.releaseHeldStartResponse();
+      await expect(pendingStart).rejects.toMatchObject({ code: "AGENT_CALL_START_CANCELLED" });
+      await cancellationPromise;
+
+      expect(
+        scenario.provider.rpcMethods.filter((method) => method === "message/stream"),
+      ).toHaveLength(1);
+      expect(
+        scenario.provider.rpcMethods.filter((method) => method === "tasks/cancel"),
+      ).toHaveLength(1);
+      expect(scenario.provider.cancelledTaskIds).toEqual([
+        scenario.provider.captured[0]?.responseTaskId,
+      ]);
+      const finalCall = await mysqlCall(scenario);
+      expect(finalCall).toMatchObject({ state: "cancelled" });
+      expect(finalCall.errorCode).not.toBe("AGENT_CALL_CANCELLED_BEFORE_DISPATCH");
+      expect(await loadAttempt(scenario.callId, scenario.tenantId)).toMatchObject({
+        attemptState: "cancelled",
+        dispatchAttemptCount: 1,
+        externalTaskRef: scenario.provider.captured[0]?.responseTaskId,
+      });
+    } finally {
+      try {
+        scenario.provider.releaseHeldStartResponse();
+      } catch {
+        // 已放行或尚未进入 held_start 均无需处理。
+      }
+      await pendingStart.catch(() => undefined);
+      await cancellationPromise?.catch(() => undefined);
       await scenario.provider.close();
     }
   });

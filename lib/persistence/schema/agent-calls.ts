@@ -106,6 +106,8 @@ export const agentCallTable = mysqlTable(
     resultDigest: varchar("resultDigest", { length: 71 }),
     errorCode: varchar("errorCode", { length: 128 }),
     errorSummary: text("errorSummary"),
+    /** 已可能出站但 taskId 尚未知时持久化取消意图；不得据此伪造 cancelled 终态。 */
+    cancelRequestedAt: datetime("cancelRequestedAt", { mode: "date", fsp: 3 }),
     /** 业务幂等键（parentInvocationId + logicalCallKey 幂等）。 */
     logicalCallKey: varchar("logicalCallKey", { length: 256 }).notNull(),
     /** canonical 创建请求摘要；与 outbound Attempt.requestDigest 分离。 */

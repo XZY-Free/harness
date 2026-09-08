@@ -1839,6 +1839,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "cancelRequestedAt": {
+          "name": "cancelRequestedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "logicalCallKey": {
           "name": "logicalCallKey",
           "type": "varchar(256)",
@@ -7181,7 +7188,7 @@
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
+          "autoincrement": false
         },
         "staleUntil": {
           "name": "staleUntil",

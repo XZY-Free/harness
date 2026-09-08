@@ -131,6 +131,7 @@ function callInState(state: AgentCall["state"], overrides: Partial<AgentCall> = 
     finishedAt: null,
     versionNo: 1,
     ...overrides,
+    cancelRequestedAt: overrides.cancelRequestedAt ?? null,
   };
 }
 

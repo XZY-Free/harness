@@ -28,7 +28,10 @@ import type {
   AgentCallStore,
   StoreAgentCallInput,
 } from "@/lib/agents/calls/persistence/agent-call-store";
-import { applyAgentCallTransition } from "@/lib/agents/calls/persistence/apply-agent-call-transition";
+import {
+  applyAgentCallTransition,
+  recordAgentCallCancellationRequest,
+} from "@/lib/agents/calls/persistence/apply-agent-call-transition";
 import { lockAndValidateAgentCallAuthority } from "@/lib/agents/calls/persistence/finalize-agent-call-authority";
 import { recordCapabilityUseInSession } from "@/lib/capability/capability-use-queries";
 import { db } from "@/lib/db/client";
@@ -422,14 +425,14 @@ export function createMysqlAgentCallStore(
           return { status: "terminal", attempt, call } as const;
         }
 
-        // 赢得认领：唯一发 HTTP 者。Attempt 进入 running；AgentCall 必须等待正式
-        // call.started 才能进入 running，禁止 claim 伪造远端 started 事实。
+        // 赢得认领：唯一有资格提交 dispatch 的调用方。Attempt 进入 running；真正的
+        // outbound 计数由 commitCurrentAttemptDispatch 在发送前原子写入。
+        // AgentCall 必须等待正式 call.started 才能进入 running。
         await tx
           .update(agentCallAttemptTable)
           .set({
             requestDigest,
             attemptState: "running",
-            dispatchAttemptCount: 1,
             startedAt: now,
             updatedAt: now,
           })
@@ -441,6 +444,170 @@ export function createMysqlAgentCallStore(
           .limit(1);
         if (!afterAttempt) throw new Error("AgentCallAttempt claim 后无法回读");
         return { status: "owner", attempt: toAttempt(afterAttempt), call } as const;
+      }),
+
+    commitCurrentAttemptDispatch: ({ callId, tenantId, attemptNo, now, signal }) =>
+      db.transaction(async (tx) => {
+        const [callRow] = await tx
+          .select()
+          .from(agentCallTable)
+          .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+          .limit(1)
+          .for("update");
+        if (!callRow) throw new Error(`AgentCall ${callId} 不存在或不属于租户`);
+        const [attemptRow] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(
+            and(
+              eq(agentCallAttemptTable.callId, callId),
+              eq(agentCallAttemptTable.tenantId, tenantId),
+              eq(agentCallAttemptTable.attemptNo, attemptNo),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!attemptRow) throw new Error(`AgentCallAttempt ${callId}#${attemptNo} 不存在`);
+
+        if (
+          isAgentCallTerminal(callRow.state) ||
+          isAgentCallAttemptTerminal(attemptRow.attemptState)
+        ) {
+          return {
+            status: "terminal",
+            attempt: toAttempt(attemptRow),
+            call: await toAgentCallWithSession(tx, callRow),
+          } as const;
+        }
+        if (attemptRow.requestDigest === null || attemptRow.attemptState !== "running") {
+          throw new AgentCallAttemptConflictError(callId, "Attempt 尚未完成 initial claim");
+        }
+        if (attemptRow.dispatchAttemptCount > 0) {
+          return {
+            status: "committed",
+            attempt: toAttempt(attemptRow),
+            call: await toAgentCallWithSession(tx, callRow),
+          } as const;
+        }
+
+        if (signal?.aborted || callRow.cancelRequestedAt !== null) {
+          await applyAgentCallTransition(tx, {
+            callId,
+            tenantId,
+            input: "call.cancelled",
+            authority: "local_cancel",
+            errorCode: "AGENT_CALL_CANCELLED_BEFORE_DISPATCH",
+            errorSummary: "父执行在 AgentCall 出站提交前已取消",
+            now,
+          });
+          const [cancelledCallRow] = await tx
+            .select()
+            .from(agentCallTable)
+            .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+            .limit(1);
+          const [cancelledAttemptRow] = await tx
+            .select()
+            .from(agentCallAttemptTable)
+            .where(eq(agentCallAttemptTable.id, attemptRow.id))
+            .limit(1);
+          if (!cancelledCallRow || !cancelledAttemptRow) {
+            throw new Error("AgentCall dispatch 前取消后无法回读");
+          }
+          return {
+            status: "cancelled",
+            attempt: toAttempt(cancelledAttemptRow),
+            call: await toAgentCallWithSession(tx, cancelledCallRow),
+          } as const;
+        }
+
+        await tx
+          .update(agentCallAttemptTable)
+          .set({ dispatchAttemptCount: 1, updatedAt: now })
+          .where(eq(agentCallAttemptTable.id, attemptRow.id));
+        const [committedAttemptRow] = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(eq(agentCallAttemptTable.id, attemptRow.id))
+          .limit(1);
+        if (!committedAttemptRow) throw new Error("AgentCallAttempt dispatch 提交后无法回读");
+        return {
+          status: "committed",
+          attempt: toAttempt(committedAttemptRow),
+          call: await toAgentCallWithSession(tx, callRow),
+        } as const;
+      }),
+
+    requestCancellation: ({ callId, tenantId, remoteCancellationSupported, now }) =>
+      db.transaction(async (tx) => {
+        const [callRow] = await tx
+          .select()
+          .from(agentCallTable)
+          .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+          .limit(1)
+          .for("update");
+        if (!callRow) throw new Error(`AgentCall ${callId} 不存在或不属于租户`);
+        const attemptRows = await tx
+          .select()
+          .from(agentCallAttemptTable)
+          .where(
+            and(
+              eq(agentCallAttemptTable.callId, callId),
+              eq(agentCallAttemptTable.tenantId, tenantId),
+            ),
+          )
+          .orderBy(desc(agentCallAttemptTable.attemptNo))
+          .for("update");
+        const activeAttempts = attemptRows.filter(
+          (attempt) => !isAgentCallAttemptTerminal(attempt.attemptState),
+        );
+        if (activeAttempts.length > 1) {
+          throw new AgentCallAttemptConflictError(callId, "存在多个活动 Attempt");
+        }
+        const attemptRow = activeAttempts[0] ?? attemptRows[0];
+        const currentCall = () => toAgentCallWithSession(tx, callRow);
+
+        if (isAgentCallTerminal(callRow.state)) {
+          return { status: "terminal", call: await currentCall() } as const;
+        }
+        if (!["queued", "running", "waiting_user"].includes(callRow.state) || !attemptRow) {
+          return { status: "invalid", call: await currentCall() } as const;
+        }
+
+        if (callRow.state === "queued" && attemptRow.dispatchAttemptCount === 0) {
+          await applyAgentCallTransition(tx, {
+            callId,
+            tenantId,
+            input: "call.cancelled",
+            authority: "local_cancel",
+            errorCode: "AGENT_CALL_CANCELLED_BEFORE_DISPATCH",
+            errorSummary: "父执行在 AgentCall 出站前已取消",
+            now,
+          });
+          const [cancelledCallRow] = await tx
+            .select()
+            .from(agentCallTable)
+            .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+            .limit(1);
+          if (!cancelledCallRow) throw new Error("AgentCall 本地取消后无法回读");
+          return {
+            status: "local_cancelled",
+            call: await toAgentCallWithSession(tx, cancelledCallRow),
+          } as const;
+        }
+
+        if (!remoteCancellationSupported) {
+          return { status: "unsupported", call: await currentCall() } as const;
+        }
+
+        if (callRow.cancelRequestedAt === null) {
+          await recordAgentCallCancellationRequest(tx, { callId, tenantId, now });
+          callRow.cancelRequestedAt = now;
+        }
+        const call = await currentCall();
+        return {
+          status: attemptRow.externalTaskRef ? "remote_ready" : "remote_pending",
+          call,
+        } as const;
       }),
   };
 }
@@ -667,6 +834,7 @@ function toAgentCall(row: typeof agentCallTable.$inferSelect): AgentCall {
     resultDigest: row.resultDigest,
     errorCode: row.errorCode,
     errorSummary: row.errorSummary,
+    cancelRequestedAt: row.cancelRequestedAt,
     logicalCallKey: row.logicalCallKey,
     creationRequestDigest: row.creationRequestDigest,
     createdAt: row.createdAt,

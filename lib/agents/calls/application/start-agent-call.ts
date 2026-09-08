@@ -132,7 +132,7 @@ export class AgentCallClaimConflictError extends AgentCallStartError {
 
 export class AgentCallStartCancelledError extends AgentCallStartError {
   constructor(callId: string) {
-    super("AGENT_CALL_START_CANCELLED", `AgentCall ${callId} 在出站前已取消`);
+    super("AGENT_CALL_START_CANCELLED", `AgentCall ${callId} 在启动期间收到取消请求`);
   }
 }
 
@@ -362,10 +362,19 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     streamTimeoutMs: 60_000,
     hostControlPolicy,
   });
-  // signal 未取消时这里不能 await/yield；下一条同步调用 transport.startCall 即为 dispatch 边界。
+  // signal 未取消时先提交 durable dispatch 边界；该事务与正式取消共用 AgentCall 行锁。
   if (command.signal?.aborted) await cancelBeforeDispatch(call);
+  const dispatch = await mysqlAgentCallStore.commitCurrentAttemptDispatch({
+    callId,
+    tenantId,
+    attemptNo: claim.attempt.attemptNo,
+    now: new Date(),
+    signal: command.signal,
+  });
+  if (dispatch.status === "cancelled") throw new AgentCallStartCancelledError(callId);
+  if (dispatch.status === "terminal") return dispatch.call;
 
-  // 10. startCall：binding endpoint、resolved auth、durable idempotency key、冻结 capabilities。
+  // 10. dispatch 已提交后不再 await/yield；同步进入 startCall 发起真实 HTTP。
   try {
     await transport.startCall({
       callId,
@@ -396,9 +405,20 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     throw err;
   }
 
-  // 11. 只回读一次当前 durable disposition；后台流继续经 eventSink 推进状态。
+  // 11. startCall 返回前首个 task/context 已持久化；若 dispatch 期间收到取消，
+  // 现在已有真实 taskId，可沿统一 cancelAgentCall 路径向远端收敛。
   const current = await mysqlAgentCallStore.getById({ callId, tenantId });
   if (!current) throw new AgentCallNotFoundError(callId, tenantId);
+  if (
+    !isAgentCallTerminal(current.state) &&
+    (current.cancelRequestedAt || command.signal?.aborted)
+  ) {
+    const cancelled = await cancelAgentCall({ tenantId, callId });
+    if (cancelled.call.state === "cancelled") {
+      throw new AgentCallStartCancelledError(callId);
+    }
+    return cancelled.call;
+  }
   return current;
 }
 

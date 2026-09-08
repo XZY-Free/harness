@@ -226,6 +226,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         remote_may_continue:
           entry.remoteCancellation === "unsupported" ||
           entry.remoteCancellation === "failed" ||
+          entry.remoteCancellation === "pending" ||
           entry.call.state === "lost",
       })),
       event_id: result.eventId,

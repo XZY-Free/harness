@@ -19,7 +19,7 @@ import {
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { invocationTable } from "@/lib/persistence/schema/executions";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 export type AgentCallTransitionAuthority =
   | "agent_event"
@@ -47,6 +47,27 @@ export interface AgentCallTransitionResult {
   afterVersionNo: number;
   finalState: AgentCallState;
   continuationKind?: AgentCallContinuationKind;
+}
+
+/**
+ * 在 AgentCall Authority 模块内持久化“已请求取消、等待远端关联”的非终态事实。
+ * 调用方必须已在同一事务中锁定对应 AgentCall；状态转换仍只能走
+ * applyAgentCallTransition。
+ */
+export async function recordAgentCallCancellationRequest(
+  tx: DbOrTx,
+  params: { tenantId: string; callId: string; now: Date },
+): Promise<void> {
+  await tx
+    .update(agentCallTable)
+    .set({ cancelRequestedAt: params.now })
+    .where(
+      and(
+        eq(agentCallTable.id, params.callId),
+        eq(agentCallTable.tenantId, params.tenantId),
+        isNull(agentCallTable.cancelRequestedAt),
+      ),
+    );
 }
 
 type CallRow = typeof agentCallTable.$inferSelect;

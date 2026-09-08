@@ -19,7 +19,7 @@
  * （TextPart 追问文本 + DataPart 公共结构化结果）→ 终态 status 无 status.message。
  * message/send（resume）同步返回完整 Task（kind:"task"，id/contextId/status/artifacts）。
  *
- * 场景：completed / chunks / input_required / long_running / failed /
+ * 场景：completed / chunks / input_required / long_running / held_start / failed /
  * rejected / malformed / subject_echo / confirmation_chain / confirmation_resolution。场景由测试显式选择，Provider 按 A2A wire
  * 语义响应。
  */
@@ -56,6 +56,7 @@ export type A2ATestProviderScenario =
   | "input_required"
   | "confirmation_chain"
   | "long_running"
+  | "held_start"
   | "failed"
   | "rejected"
   | "malformed"
@@ -102,6 +103,8 @@ export interface A2ATestProvider {
   }>;
   /** 每个已解析 JSON-RPC 请求的 method（含 tasks/cancel，分支前记录，wire 观测用）。 */
   rpcMethods: string[];
+  /** tasks/cancel 实际携带的远端 taskId。 */
+  cancelledTaskIds: string[];
   /** 下一次 resume（message/send）返回篡改后的 taskId/contextId（correlation 反例）。 */
   corruptResumeCorrelation(): void;
   /** 设置后所有请求必须携带恰好 `Authorization: Bearer <token>`，否则 401。 */
@@ -120,6 +123,10 @@ export interface A2ATestProvider {
   reset(): void;
   /** 场景切换（每个 Invocation 可用不同场景）。 */
   setScenario(scenario: A2ATestProviderScenario): void;
+  /** 等待 held_start 场景确认已完整收到 message/stream 请求。 */
+  waitForHeldStartRequest(): Promise<void>;
+  /** 放行 held_start 的首个 working 事件；之后保持长运行直到 tasks/cancel。 */
+  releaseHeldStartResponse(): void;
   close(): Promise<void>;
 }
 
@@ -160,6 +167,7 @@ export async function startA2ATestProvider(
     idempotencyKey?: string;
   }> = [];
   const rpcMethods: string[] = [];
+  const cancelledTaskIds: string[] = [];
   let scenario: A2ATestProviderScenario = initialScenario;
   let resumeCorrelationCorrupted = false;
   let confirmationEpisodes = 0;
@@ -172,6 +180,10 @@ export async function startA2ATestProvider(
   // 前 N 个 POST / 请求返回 HTTP 503（transient 反例）；随后恢复正常。
   let flakyFailuresRemaining = 0;
   const longRunningResponses = new Map<string, { response: ServerResponse; contextId: string }>();
+  let heldStart:
+    | { response: ServerResponse; taskId: string; contextId: string; rpcId: string | number }
+    | undefined;
+  const heldStartWaiters: Array<() => void> = [];
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -253,6 +265,7 @@ export async function startA2ATestProvider(
       // A2A 0.3.0 TaskIdParams 使用 id。
       if (rpc.method === "tasks/cancel") {
         const taskId = rpc.params?.id ?? "unknown";
+        cancelledTaskIds.push(taskId);
         const running = longRunningResponses.get(taskId);
         if (running) {
           running.response.write(
@@ -631,6 +644,13 @@ export async function startA2ATestProvider(
           // 不发终态、不关闭 SSE；只由显式 cancel 或测试 teardown 结束。
           longRunningResponses.set(taskId, { response: res, contextId });
           break;
+        case "held_start":
+          // 已完整接收并解析 start 请求，但暂不发送首个 task/started 事件。
+          // flushHeaders 让真实客户端进入“HTTP 已出站、correlation 尚未知”的确定窗口。
+          res.flushHeaders();
+          heldStart = { response: res, taskId, contextId, rpcId: rpc.id ?? 1 };
+          for (const resolveWaiter of heldStartWaiters.splice(0)) resolveWaiter();
+          break;
         case "failed":
           statusUpdate("failed", {
             message: { role: "agent", parts: [{ kind: "text", text: "远端执行失败" }] },
@@ -660,7 +680,7 @@ export async function startA2ATestProvider(
           });
           break;
       }
-      if (scenario !== "long_running") res.end();
+      if (scenario !== "long_running" && scenario !== "held_start") res.end();
     });
   });
 
@@ -678,6 +698,7 @@ export async function startA2ATestProvider(
     captured,
     requests,
     rpcMethods,
+    cancelledTaskIds,
     corruptResumeCorrelation() {
       resumeCorrelationCorrupted = true;
     },
@@ -707,6 +728,7 @@ export async function startA2ATestProvider(
       captured.length = 0;
       requests.length = 0;
       rpcMethods.length = 0;
+      cancelledTaskIds.length = 0;
       resumeCorrelationCorrupted = false;
       expectedBearerToken = null;
       resumeResponseShape = "task";
@@ -718,7 +740,31 @@ export async function startA2ATestProvider(
     setScenario(next: A2ATestProviderScenario) {
       scenario = next;
     },
+    waitForHeldStartRequest() {
+      if (heldStart) return Promise.resolve();
+      return new Promise<void>((resolveWaiter) => heldStartWaiters.push(resolveWaiter));
+    },
+    releaseHeldStartResponse() {
+      if (!heldStart) throw new Error("没有待放行的 held_start 请求");
+      const { response, taskId, contextId, rpcId } = heldStart;
+      heldStart = undefined;
+      longRunningResponses.set(taskId, { response, contextId });
+      response.write(
+        sseFrame({
+          jsonrpc: "2.0",
+          id: rpcId,
+          result: {
+            kind: "status-update",
+            taskId,
+            contextId,
+            status: { state: "working", final: false },
+          },
+        }),
+      );
+    },
     close() {
+      heldStart?.response.destroy();
+      heldStart = undefined;
       for (const { response } of longRunningResponses.values()) response.destroy();
       longRunningResponses.clear();
       return new Promise<void>((resolve, reject) =>

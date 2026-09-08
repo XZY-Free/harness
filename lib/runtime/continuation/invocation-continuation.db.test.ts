@@ -33,6 +33,7 @@ function call(state: AgentCall["state"], versionNo = 2): AgentCall {
     resultDigest: null,
     errorCode: state === "failed" ? "REMOTE_FAILED" : null,
     errorSummary: state === "failed" ? "远端失败" : null,
+    cancelRequestedAt: null,
     logicalCallKey: "harness-action:action-1:agent:agent-1",
     creationRequestDigest: "sha256:test",
     createdAt: new Date(),
