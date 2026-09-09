@@ -429,6 +429,9 @@ export async function resolveGenericUserAction(
         .set({
           turnState: "running",
           activeInvocationId: invocation.id,
+          // 这里已经把 Authority 从 waiting_user 推进为 running；运行耗时必须从
+          // 本次恢复起算，不能继续沿用进入人工等待前的 startedAt。
+          startedAt: now,
           versionNo: sql`${turnTable.versionNo} + 1`,
         })
         .where(

@@ -59,9 +59,13 @@ afterEach(() => {
 describe("UserActionItem input submit 主流程", () => {
   it("输入请求沿用中性等待语法，不显示橙色告警或后台待处理标签", () => {
     const { container } = render(<UserActionItem threadId="thread-1" item={makeInputItem()} />);
-    expect(screen.getByText("需要你的输入")).toBeTruthy();
+    const panel = screen.getByRole("region", { name: "需要用户输入" });
+    expect(panel.getAttribute("data-user-action-state")).toBe("waiting");
+    expect(screen.queryByText("输入请求")).toBeNull();
+    expect(screen.queryByText("需要你的输入")).toBeNull();
     expect(screen.queryByText("待处理")).toBeNull();
     expect(container.querySelector('[class*="warning"]')).toBeNull();
+    expect(container.querySelector('[class*="success"]')).toBeNull();
   });
 
   it("展示请求的问题，不把内部 purpose 当正文", () => {
@@ -71,7 +75,7 @@ describe("UserActionItem input submit 主流程", () => {
         item={makeInputItem({ agent_display_name: "人力助手" })}
       />,
     );
-    expect(screen.getByText("人力助手需要补充信息")).toBeTruthy();
+    expect(screen.getByText("人力助手")).toBeTruthy();
     expect(screen.getByText("请提供请假事由")).toBeTruthy();
     expect(screen.queryByText("a2a_input_required")).toBeNull();
     expect(screen.getByRole("button", { name: "继续同一任务" })).toBeTruthy();
@@ -87,7 +91,7 @@ describe("UserActionItem input submit 主流程", () => {
   );
 
   it("刷新后按持久化 resolution 展示已提交，不能再次提交", () => {
-    render(
+    const { container } = render(
       <UserActionItem
         threadId="thread-1"
         item={{
@@ -96,8 +100,10 @@ describe("UserActionItem input submit 主流程", () => {
         }}
       />,
     );
-    expect(screen.getAllByText("已提交").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已提交")).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "用户输入记录" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "继续同一任务" })).toBeNull();
+    expect(container.querySelector('[class*="success"]')).toBeNull();
   });
 
   it("提交使用 content.request_id（request-1）而非 item.id，body 为精确脱敏对象", async () => {
@@ -146,6 +152,66 @@ describe("UserActionItem input submit 主流程", () => {
     // 不暴露裸技术键 `text`，回落到中文默认 label「补充信息」。
     expect(screen.queryByText(/^text\*?$/)).toBeNull();
     expect(screen.getByText(/^补充信息\*?$/)).toBeTruthy();
+  });
+
+  it("字段没有 title 但有说明时，直接用说明作为标签，不显示泛化的输入项编号", () => {
+    render(
+      <UserActionItem
+        threadId="thread-1"
+        item={makeInputItem({
+          input_schema: {
+            type: "object",
+            required: ["productUse"],
+            properties: {
+              productUse: { type: "string", description: "产品用途" },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/^产品用途\*?$/)).toBeTruthy();
+    expect(screen.queryByText(/^输入项 1\*?$/)).toBeNull();
+  });
+
+  it("单个枚举问题渲染为可直接作答的选项行，不退化成表单下拉框", async () => {
+    const fetchMock = makeFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <UserActionItem
+        threadId="thread-1"
+        item={makeInputItem({
+          purpose: "clarify_priority",
+          prompt: "今天你最想把时间花在哪件事上？",
+          input_schema: {
+            type: "object",
+            required: ["choice"],
+            properties: {
+              choice: {
+                type: "string",
+                enum: ["完成任务", "放松休息", "探索新东西"],
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByText(/^输入项 1\*?$/)).toBeNull();
+    expect(screen.getByRole("button", { name: "选择 完成任务" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "选择 放松休息" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "选择 探索新东西" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "选择 完成任务" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body).toEqual({
+      resolution: "submit",
+      response_redacted: { choice: "完成任务" },
+    });
   });
 
   it("content.request_id 缺失：fail-closed，所有按钮不可用、零网络，显示可恢复中文提示（绝不 fallback 到 item.id）", async () => {

@@ -72,6 +72,8 @@ async function seedWaitingInputRequest(): Promise<{
     triggerRef: null,
     triggerItemId: null,
     turnState: "waiting_user",
+    startedAt: new Date(Date.now() - 120_000),
+    waitingAt: new Date(Date.now() - 60_000),
     versionNo: 1,
   });
 
@@ -251,6 +253,7 @@ describe("resolveGenericUserAction input submit（authority payload）", () => {
   it("submit：Invocation waiting_user→running + resume 命令持久化精确 resume_payload 对象", async () => {
     const seeded = await seedWaitingInputRequest();
     const response = { text: "年休假，明天一天" };
+    const resumedAfter = new Date();
 
     const result = await resolveGenericUserAction({
       tenantId: TENANT,
@@ -276,6 +279,8 @@ describe("resolveGenericUserAction input submit（authority payload）", () => {
       .where(eq(turnTable.id, seeded.turnId))
       .limit(1);
     expect(turnRow?.turnState).toBe("running");
+    expect(turnRow?.startedAt).not.toBeNull();
+    expect(turnRow!.startedAt!.getTime()).toBeGreaterThanOrEqual(resumedAfter.getTime());
 
     // 冻结断言：queued resume 命令必须携带精确 resume_payload 对象（非仅 has_response）
     // + 内部来源标记（post-authority Resume 凭证）。

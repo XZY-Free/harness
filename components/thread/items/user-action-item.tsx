@@ -188,7 +188,10 @@ function extractInputFields(schema: Record<string, unknown> | undefined): InputS
     index += 1;
     fields.push({
       key,
-      label: (def.title as string | undefined) ?? defaultFieldLabel(key, fieldIndex),
+      label:
+        (def.title as string | undefined) ??
+        (def.description as string | undefined) ??
+        defaultFieldLabel(key, fieldIndex),
       type,
       required: requiredList.includes(key),
       description: def.description as string | undefined,
@@ -365,6 +368,10 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     [content.input_schema],
   );
   const inputFields = inputSchema.fields;
+  const singleChoiceField =
+    inputFields.length === 1 && inputFields[0]?.enum && inputFields[0].enum.length > 0
+      ? inputFields[0]
+      : null;
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [diffOpen, setDiffOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -401,15 +408,27 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     return true;
   })();
 
-  const handleInputSubmit = () => {
-    if (busy || !showActions || !requestId || !inputFormValid) return;
+  const submitInputValues = (values: Readonly<Record<string, string>>) => {
+    if (busy || !showActions || !requestId || !inputSchema.ok) return;
     // 把表单值转换为对应类型（字符串 trim）；可选字段留空 → 省略该键
     const response: Record<string, unknown> = {};
     for (const field of inputFields) {
-      const normalized = normalizeFieldValue(field, inputValues[field.key] ?? "");
+      const normalized = normalizeFieldValue(field, values[field.key] ?? "");
+      if (!normalized.ok) return;
       if (normalized.ok && !normalized.omit) response[field.key] = normalized.value;
     }
     handleUserActionResolve("submit", { responseRedactedJson: response });
+  };
+
+  const handleInputSubmit = () => {
+    if (!inputFormValid) return;
+    submitInputValues(inputValues);
+  };
+
+  const handleSingleChoiceSubmit = (field: InputFieldDef, value: string) => {
+    const nextValues = { ...inputValues, [field.key]: value };
+    setInputValues(nextValues);
+    submitInputValues(nextValues);
   };
 
   // 状态标签
@@ -546,98 +565,214 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
           </div>
         );
 
-      case "input": {
-        // input 类型：渲染简单表单 + submit/cancel 按钮
-        return (
-          <div className="mt-3 space-y-2">
-            {!inputSchema.ok ? (
-              <div className="text-2xs text-warning" role="alert">
-                请求的输入定义不可用，无法提交；请刷新会话后重试。
-              </div>
-            ) : inputFields.length > 0 ? (
-              <div className="space-y-2">
-                {inputFields.map((field) => (
-                  <div key={field.key} className="space-y-0.5">
-                    <label
-                      htmlFor={`ua-input-${item.id}-${field.key}`}
-                      className="text-2xs text-muted-foreground"
-                    >
-                      {field.label}
-                      {field.required ? "*" : ""}
-                    </label>
-                    {field.enum ? (
-                      <select
-                        id={`ua-input-${item.id}-${field.key}`}
-                        value={inputValues[field.key] ?? ""}
-                        onChange={(e) => handleInputChange(field.key, e.target.value)}
-                        disabled={busy || !requestId}
-                        className="w-full rounded-[var(--radius-sm)] border border-border bg-card px-2 py-1 text-xs text-foreground disabled:opacity-40"
-                      >
-                        <option value="">请选择…</option>
-                        {field.enum.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    ) : field.type === "boolean" ? (
-                      // boolean 必须显式选择是/否（提交实际布尔值），不允许自由文本。
-                      <select
-                        id={`ua-input-${item.id}-${field.key}`}
-                        value={inputValues[field.key] ?? ""}
-                        onChange={(e) => handleInputChange(field.key, e.target.value)}
-                        disabled={busy || !requestId}
-                        className="w-full rounded-[var(--radius-sm)] border border-border bg-card px-2 py-1 text-xs text-foreground disabled:opacity-40"
-                      >
-                        <option value="">请选择…</option>
-                        <option value="true">是</option>
-                        <option value="false">否</option>
-                      </select>
-                    ) : (
-                      <input
-                        id={`ua-input-${item.id}-${field.key}`}
-                        type={field.type === "number" ? "number" : "text"}
-                        value={inputValues[field.key] ?? ""}
-                        onChange={(e) => handleInputChange(field.key, e.target.value)}
-                        disabled={busy || !requestId}
-                        placeholder={field.description ?? ""}
-                        className="w-full rounded-[var(--radius-sm)] border border-border bg-card px-2 py-1 text-xs text-foreground disabled:opacity-40"
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-2xs text-muted-foreground">
-                请求未提供输入字段定义，可直接提交或取消。
-              </div>
-            )}
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleInputSubmit}
-                disabled={busy || !requestId || !inputFormValid}
-                className="flex-1 rounded-md bg-primary px-3 py-1.5 text-primary-foreground text-xs transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {busy ? "处理中…" : isAgentInputRequired ? "继续同一任务" : "提交"}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleUserActionResolve("cancel")}
-                disabled={busy || !requestId}
-                className="flex-1 rounded-md border border-border px-3 py-1.5 text-muted-foreground text-xs transition hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {busy ? "处理中…" : "取消"}
-              </button>
-            </div>
-          </div>
-        );
-      }
-
       default:
         return null;
     }
   };
+
+  if (content.request_type === "input") {
+    const panelState = isExpired ? "expired" : showActions ? "waiting" : "resolved";
+
+    if (!showActions) {
+      return (
+        <div className="flex justify-start">
+          <section
+            aria-label="用户输入记录"
+            data-user-action-state={panelState}
+            className="flex w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-[0_10px_30px_-28px_rgba(15,23,42,0.45)]"
+          >
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted/45 text-muted-foreground">
+              {isExpired ? (
+                <CircleAlert aria-hidden="true" className="size-3.5" strokeWidth={1.6} />
+              ) : (
+                <Check aria-hidden="true" className="size-3.5" strokeWidth={1.7} />
+              )}
+            </span>
+            <p className="min-w-0 flex-1 truncate text-[13px] text-foreground">{displayReason}</p>
+            <span className="shrink-0 text-[12px] text-muted-foreground">
+              {isExpired
+                ? "已超时"
+                : resolvedResolution
+                  ? getResolutionLabel(resolvedResolution)
+                  : statusLabel}
+            </span>
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex justify-start">
+        <section
+          aria-label="需要用户输入"
+          data-user-action-state={panelState}
+          className="w-full rounded-[20px] border border-border bg-card p-3 shadow-[0_18px_48px_-40px_rgba(15,23,42,0.55)] sm:p-4"
+        >
+          <header className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-[13px] leading-5 text-foreground">{displayReason}</p>
+              {isAgentInputRequired ? (
+                <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                  {agentDisplayName}
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => handleUserActionResolve("cancel")}
+              disabled={busy || !requestId}
+              aria-label="关闭输入请求"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <X aria-hidden="true" className="size-3.5" strokeWidth={1.5} />
+            </button>
+          </header>
+
+          {!inputSchema.ok ? (
+            <div
+              className="mt-3 rounded-xl bg-muted/55 px-3 py-2 text-[12px] text-muted-foreground"
+              role="alert"
+            >
+              请求的输入定义不可用，无法提交；请刷新会话后重试。
+            </div>
+          ) : singleChoiceField ? (
+            <fieldset className="mt-2 space-y-0.5">
+              <legend className="sr-only">可选答案</legend>
+              {singleChoiceField.enum?.map((option, optionIndex) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-label={`选择 ${option}`}
+                  onClick={() => handleSingleChoiceSubmit(singleChoiceField, option)}
+                  disabled={busy || !requestId}
+                  className="group flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-[11px] text-muted-foreground">
+                    {optionIndex + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 font-medium text-[12.5px] leading-5 text-foreground">
+                    {option}
+                  </span>
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                    strokeWidth={1.5}
+                  />
+                </button>
+              ))}
+            </fieldset>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {inputFields.map((field) => (
+                <div key={field.key} className="space-y-1">
+                  <label
+                    htmlFor={`ua-input-${item.id}-${field.key}`}
+                    className="block px-1 text-[11px] leading-4 text-muted-foreground"
+                  >
+                    {field.label}
+                    {field.required ? "*" : ""}
+                  </label>
+                  {field.enum ? (
+                    <select
+                      id={`ua-input-${item.id}-${field.key}`}
+                      value={inputValues[field.key] ?? ""}
+                      onChange={(event) => handleInputChange(field.key, event.target.value)}
+                      disabled={busy || !requestId}
+                      className="h-10 w-full rounded-xl border border-transparent bg-muted/55 px-3 text-[13px] text-foreground outline-none transition focus:border-border-strong focus:bg-background focus:ring-2 focus:ring-ring/15 disabled:opacity-40"
+                    >
+                      <option value="">请选择…</option>
+                      {field.enum.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.type === "boolean" ? (
+                    <select
+                      id={`ua-input-${item.id}-${field.key}`}
+                      value={inputValues[field.key] ?? ""}
+                      onChange={(event) => handleInputChange(field.key, event.target.value)}
+                      disabled={busy || !requestId}
+                      className="h-10 w-full rounded-xl border border-transparent bg-muted/55 px-3 text-[13px] text-foreground outline-none transition focus:border-border-strong focus:bg-background focus:ring-2 focus:ring-ring/15 disabled:opacity-40"
+                    >
+                      <option value="">请选择…</option>
+                      <option value="true">是</option>
+                      <option value="false">否</option>
+                    </select>
+                  ) : (
+                    <input
+                      id={`ua-input-${item.id}-${field.key}`}
+                      type={field.type === "number" ? "number" : "text"}
+                      value={inputValues[field.key] ?? ""}
+                      onChange={(event) => handleInputChange(field.key, event.target.value)}
+                      disabled={busy || !requestId}
+                      placeholder={field.description ?? "输入你的回答"}
+                      className="h-10 w-full rounded-xl border border-transparent bg-muted/55 px-3 text-[13px] text-foreground outline-none transition placeholder:text-muted-foreground/65 focus:border-border-strong focus:bg-background focus:ring-2 focus:ring-ring/15 disabled:opacity-40"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!requestId ? (
+            <div
+              className="mt-3 rounded-xl bg-muted px-3 py-2 text-[12px] text-foreground"
+              role="alert"
+            >
+              操作信息不完整，无法执行操作；请刷新会话后重试。
+            </div>
+          ) : null}
+
+          {error ? (
+            <div
+              className="mt-3 flex items-center justify-between rounded-xl bg-destructive/8 px-3 py-2 text-[12px] text-destructive"
+              role="alert"
+            >
+              <span>
+                {error.title}：{error.description}
+              </span>
+              <button
+                type="button"
+                onClick={clearError}
+                aria-label="关闭错误提示"
+                className="ml-2 flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-destructive/10"
+              >
+                <X aria-hidden="true" className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
+
+          <footer className="mt-3 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => handleUserActionResolve("cancel")}
+              disabled={busy || !requestId}
+              aria-label="取消"
+              className="rounded-full border border-border px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              跳过
+            </button>
+            {!singleChoiceField ? (
+              <button
+                type="button"
+                onClick={handleInputSubmit}
+                disabled={busy || !requestId || !inputFormValid}
+                className="group flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[12px] font-medium text-primary-foreground transition-colors hover:bg-primary/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <span>{busy ? "处理中…" : isAgentInputRequired ? "继续同一任务" : "提交"}</span>
+                <ArrowRight
+                  aria-hidden="true"
+                  className="size-3.5 transition-transform group-hover:translate-x-0.5"
+                  strokeWidth={1.6}
+                />
+              </button>
+            ) : null}
+          </footer>
+        </section>
+      </div>
+    );
+  }
 
   if (content.request_type === "confirmation" && !isDiffConfirmation) {
     const panelState = isExpired ? "expired" : showActions ? "waiting" : "resolved";
