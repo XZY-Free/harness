@@ -59,11 +59,15 @@ describe("LoginForm", () => {
 });
 
 describe("LoginScreen", () => {
-  it("只保留一次产品名和直接的登录标题，不展示管理员或账号创建说明", () => {
+  it("用左右分栏组织品牌与表单，不再显示独立登录标题", () => {
     render(<LoginScreen />);
 
     expect(screen.getAllByText("SnowHarness")).toHaveLength(1);
-    expect(screen.getByRole("heading", { name: "登录" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "登录" })).toBeNull();
+    expect(screen.getByRole("button", { name: "登录" })).toBeTruthy();
+    const loginRegion = screen.getByLabelText("SnowHarness 登录");
+    expect(loginRegion.className).toContain("md:grid-cols-2");
+    expect(loginRegion.querySelector("form")?.parentElement?.className).toContain("max-w-[28rem]");
     expect(screen.queryByText(/管理员/)).toBeNull();
     expect(screen.queryByText(/账号由/)).toBeNull();
   });

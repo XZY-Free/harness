@@ -31,9 +31,8 @@ test.describe("Desktop 登录闭环", () => {
   });
 
   test("未登录 → 失败反馈 → 登录 → 退出 → 回到登录页", async () => {
-    await expect(window.getByRole("heading", { name: "登录" })).toBeVisible({
-      timeout: 90_000,
-    });
+    await expect(window.getByRole("button", { name: "登录" })).toBeVisible({ timeout: 90_000 });
+    await expect(window.getByRole("heading", { name: "登录" })).toHaveCount(0);
     await expect(window.getByText("SnowHarness", { exact: true })).toHaveCount(1);
     await expect(window.getByText(/管理员/)).toHaveCount(0);
     await capture(window, "01-desktop-login.png");
@@ -70,9 +69,8 @@ test.describe("Desktop 登录闭环", () => {
     await window.getByRole("button", { name: E2E_ADMIN_NAME }).click();
     await window.getByRole("menuitem", { name: "退出登录" }).click();
 
-    await expect(window.getByRole("heading", { name: "登录" })).toBeVisible({
-      timeout: 90_000,
-    });
+    await expect(window.getByRole("button", { name: "登录" })).toBeVisible({ timeout: 90_000 });
+    await expect(window.getByRole("heading", { name: "登录" })).toHaveCount(0);
     await expect(window.getByLabel("邮箱")).toHaveValue("");
     await capture(window, "03-desktop-after-logout.png");
   });

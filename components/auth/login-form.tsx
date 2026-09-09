@@ -19,7 +19,7 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
 
   return (
     <form
-      className="w-full space-y-4"
+      className="w-full space-y-5"
       onSubmit={async (event) => {
         event.preventDefault();
         if (submitting) return;
@@ -59,8 +59,8 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
         }
       }}
     >
-      <div className="space-y-1.5">
-        <Label htmlFor="login-email" className="text-[13px]">
+      <div className="space-y-2">
+        <Label htmlFor="login-email" className="text-sm font-medium tracking-[-0.01em]">
           邮箱
         </Label>
         <Input
@@ -74,11 +74,11 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
           disabled={submitting}
           required
           autoFocus
-          className="h-10 rounded-lg px-3"
+          className="h-11 rounded-[10px] border-border-strong px-3.5 shadow-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/35"
         />
       </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="login-password" className="text-[13px]">
+      <div className="space-y-2">
+        <Label htmlFor="login-password" className="text-sm font-medium tracking-[-0.01em]">
           密码
         </Label>
         <Input
@@ -90,7 +90,7 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
           onChange={(event) => setPassword(event.target.value)}
           disabled={submitting}
           required
-          className="h-10 rounded-lg px-3"
+          className="h-11 rounded-[10px] border-border-strong px-3.5 shadow-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/35"
         />
       </div>
       {error ? (
@@ -98,7 +98,11 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
           {error}
         </p>
       ) : null}
-      <Button type="submit" disabled={submitting} className="h-10 w-full rounded-lg">
+      <Button
+        type="submit"
+        disabled={submitting}
+        className="h-11 w-full rounded-[10px] text-sm shadow-none hover:bg-primary/90"
+      >
         {submitting ? "正在登录…" : "登录"}
       </Button>
     </form>
