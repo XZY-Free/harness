@@ -111,12 +111,12 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
 
   // Agent selector 空态：触发按钮可点（文案明确是偏好而非接管），打开 popover
   // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。
-  const agentTrigger = page.getByRole("button", { name: "优先助手" });
+  const agentTrigger = page.getByRole("button", { name: "选择助手" });
   await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
   await agentTrigger.click();
   await expect(page.getByText("当前问题需要时优先咨询；简单问题可能直接回答。")).toBeVisible();
   await expect(page.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
-  const agentDialog = page.getByRole("dialog", { name: "优先助手" });
+  const agentDialog = page.getByRole("dialog", { name: "选择助手" });
   expect(
     await agentDialog.evaluate((element) =>
       element.parentElement ? getComputedStyle(element.parentElement).position : null,

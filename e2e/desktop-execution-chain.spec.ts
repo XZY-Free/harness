@@ -89,9 +89,9 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     const agentsBody = (await agentsResponse.json()) as { items: readonly unknown[] };
     expect(agentsBody.items).toEqual([]);
 
-    // Agent selector 空态：触发按钮可点（aria-label 稳定为"优先助手"），打开 popover
+    // Agent selector 空态：触发按钮可点（aria-label 稳定为"选择助手"），打开 popover
     // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。
-    const agentTrigger = window.getByRole("button", { name: "优先助手" });
+    const agentTrigger = window.getByRole("button", { name: "选择助手" });
     await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
     await agentTrigger.click();
     await expect(window.getByText("当前问题需要时优先咨询；简单问题可能直接回答。")).toBeVisible();

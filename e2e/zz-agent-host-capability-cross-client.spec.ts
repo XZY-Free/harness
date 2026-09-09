@@ -259,7 +259,9 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
     expect(resumed).toMatchObject({ resumed: true, callId, state: "waiting_user" });
     await continuationWorker.pollOnce();
 
-    await expect(page.getByText("确认第二项请假操作")).toBeVisible({ timeout: 90_000 });
+    await expect(
+      page.getByRole("heading", { name: "确认第二项请假操作", exact: true }),
+    ).toBeVisible({ timeout: 90_000 });
     const requests = await harness.db
       .select()
       .from(harness.userActionRequestTable)
