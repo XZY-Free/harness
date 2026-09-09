@@ -94,7 +94,9 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     const agentTrigger = window.getByRole("button", { name: "选择助手" });
     await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
     await agentTrigger.click();
-    await expect(window.getByText("当前问题需要时优先咨询；简单问题可能直接回答。")).toBeVisible();
+    await expect(
+      window.getByText("当前任务会优先使用所选助手；未选择时由系统按能力匹配。"),
+    ).toBeVisible();
     await expect(window.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
 
     // popover 打开与关闭后，消息输入框都保持 enabled（空态不阻止输入）。
