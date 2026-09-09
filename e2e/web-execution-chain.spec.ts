@@ -114,7 +114,9 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   const agentTrigger = page.getByRole("button", { name: "选择助手" });
   await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
   await agentTrigger.click();
-  await expect(page.getByText("当前任务会优先使用所选助手；未选择时由系统按能力匹配。")).toBeVisible();
+  await expect(
+    page.getByText("当前任务会优先使用所选助手；未选择时由系统按能力匹配。"),
+  ).toBeVisible();
   await expect(page.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
   const agentDialog = page.getByRole("dialog", { name: "选择助手" });
   expect(
