@@ -70,6 +70,36 @@ describe("new thread client session", () => {
     );
   });
 
+  it("binds a selected Desktop workspace when creating the Thread", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "thread-1", title: "检查项目" }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ turn: { id: "turn-1" } }), { status: 201 }),
+      );
+    const keys = ["thread-key", "turn-key"];
+    const session = createNewThreadSession({
+      fetchImpl,
+      idempotencyKeyFactory: () => keys.shift() ?? "unexpected",
+    });
+
+    await session.submit({
+      text: "检查这个项目",
+      modelRef: null,
+      workspaceId: "workspace-1",
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/threads",
+      expect.objectContaining({
+        body: JSON.stringify({ title: "检查这个项目", workspace_id: "workspace-1" }),
+      }),
+    );
+  });
+
   it("sends preferred agent_use when the employee explicitly selected an Agent", async () => {
     const fetchImpl = vi
       .fn()

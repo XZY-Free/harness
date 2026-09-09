@@ -20,6 +20,9 @@ interface NewThreadPageProps {
   readonly viewerId?: string;
   readonly workbenchOpen?: boolean;
   readonly onWorkbenchOpenChange?: (open: boolean) => void;
+  readonly workspaceName?: string | null;
+  readonly onWorkspaceSelect?: () => void;
+  readonly workspaceId?: string | null;
 }
 
 export function NewThreadPage({
@@ -31,6 +34,9 @@ export function NewThreadPage({
   viewerId,
   workbenchOpen: controlledWorkbenchOpen,
   onWorkbenchOpenChange,
+  workspaceName,
+  onWorkspaceSelect,
+  workspaceId,
 }: NewThreadPageProps) {
   const sidebar = useOptionalSidebar();
   const [agentId, setAgentId] = useState<string | null>(null);
@@ -89,7 +95,9 @@ export function NewThreadPage({
             defaultModelRef={defaultModelRef}
             onAgentChange={setAgentId}
             onModelChange={setModelRef}
-            onSubmitText={(text) => onSubmit({ text, modelRef, agentId })}
+            onWorkspaceSelect={onWorkspaceSelect}
+            workspaceName={workspaceName}
+            onSubmitText={(text) => onSubmit({ text, modelRef, agentId, workspaceId })}
           />
         </div>
         <DesktopWorkbench

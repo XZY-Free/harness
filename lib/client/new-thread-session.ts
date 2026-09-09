@@ -71,6 +71,7 @@ function submissionsEqual(
   return (
     left.text === right.text &&
     left.modelRef === right.modelRef &&
+    (left.workspaceId ?? null) === (right.workspaceId ?? null) &&
     (left.agentId ?? null) === (right.agentId ?? null)
   );
 }
@@ -95,7 +96,10 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
             "content-type": "application/json",
             "idempotency-key": idempotencyKeyFactory(),
           },
-          body: JSON.stringify({ title }),
+          body: JSON.stringify({
+            title,
+            ...(submission.workspaceId ? { workspace_id: submission.workspaceId } : {}),
+          }),
         });
         const created = await requireJson<{ readonly id: string; readonly title?: string | null }>(
           createResponse,

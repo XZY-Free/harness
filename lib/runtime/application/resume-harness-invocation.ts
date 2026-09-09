@@ -19,7 +19,12 @@ export interface HarnessExecutionLease {
   id: string;
 }
 
-export type HarnessResumeSourceType = "hosted_start" | "user_action" | "agent_call" | "tool_call";
+export type HarnessResumeSourceType =
+  | "hosted_start"
+  | "user_action"
+  | "user_pause"
+  | "agent_call"
+  | "tool_call";
 
 export interface ResumeHarnessInvocationDependencies {
   loadInvocation(tenantId: string, invocationId: string): Promise<Invocation | null>;
@@ -44,6 +49,7 @@ export interface ResumeHarnessInvocationDependencies {
     runtimeRevision: RuntimeRevisionRow;
     subject: ExecutionSubject;
     capabilityCatalog: CapabilityCatalogSnapshot;
+    sourceType: HarnessResumeSourceType;
     abortSignal: AbortSignal;
   }): Promise<HostedHarnessLoopResult>;
   resumeExternal(params: {
@@ -92,7 +98,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
     if (isTerminal(invocation.executionState)) {
       return { status: "handled_noop", invocationId: invocation.id };
     }
-    if (invocation.executionState === "waiting_user") {
+    if (invocation.executionState === "waiting_user" && input.sourceType !== "user_pause") {
       throw new InvocationContinuationRetryableError(
         "PARENT_INVOCATION_WAITING_USER",
         "父 Invocation 仍在等待用户，暂不并发续跑",
@@ -215,6 +221,7 @@ export function createResumeHarnessInvocation(dependencies: ResumeHarnessInvocat
         runtimeRevision,
         subject,
         capabilityCatalog,
+        sourceType: input.sourceType ?? "agent_call",
         abortSignal: leaseController.signal,
       });
       return {

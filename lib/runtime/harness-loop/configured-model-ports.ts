@@ -2,6 +2,7 @@ import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { collectModelText } from "@/lib/runtime/model-text-stream";
 import { generateObject, streamText } from "ai";
+import { z } from "zod";
 import { HARNESS_NEXT_ACTION_SCHEMA } from "./action-schema";
 import type { HarnessDecisionPort, HarnessFinalResponsePort } from "./loop";
 
@@ -13,7 +14,8 @@ export function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
         model: getChatModel(modelRef),
         schema: HARNESS_NEXT_ACTION_SCHEMA,
         prompt: [
-          "你是 SnowHarness 的行动决策器。每步只返回一个符合 Schema 的行动，不输出正文或隐藏推理。",
+          "你是 SnowHarness 的行动决策器。每步只返回一个符合 Schema 的 json 对象，不输出正文或隐藏推理。",
+          `必须严格匹配这份 json schema：${JSON.stringify(z.toJSONSchema(HARNESS_NEXT_ACTION_SCHEMA))}`,
           "只有 observations 足以支持回答时才返回 respond；用户 preferred Agent 只是候选，不表示必须调用。",
           JSON.stringify(view),
         ].join("\n\n"),

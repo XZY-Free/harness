@@ -17,5 +17,19 @@ export function buildE2eModelReply(userText: string): string {
       payload: {},
     });
   }
+  // 最终回答端口会把 Harness 视图作为内部提示传给模型。测试服务必须像真实模型一样
+  // 只返回用户可见答案，不能把 invocation / capability / actionHistory 等内部上下文回显。
+  if (trimmed.startsWith("根据当前用户目标与已完成 observations")) {
+    const jsonStart = trimmed.indexOf("{");
+    if (jsonStart >= 0) {
+      try {
+        const view = JSON.parse(trimmed.slice(jsonStart)) as Record<string, unknown>;
+        const objective = typeof view.objective === "string" ? view.objective.trim() : "";
+        if (objective) return `${E2E_REPLY_PREFIX} ${objective}：已完成。`;
+      } catch {
+        return `${E2E_REPLY_PREFIX} 已完成处理。`;
+      }
+    }
+  }
   return `${E2E_REPLY_PREFIX} 已收到你的消息：「${trimmed}」。这是 e2e 确定性回复。`;
 }

@@ -97,7 +97,15 @@ export const resumeHarnessInvocation = createResumeHarnessInvocation({
   acquireLease: tryAcquireInvocationExecutionLease,
   releaseLease: releaseInvocationExecutionLease,
   renewLease: renewInvocationExecutionLease,
-  async runHosted({ tenantId, invocation, binding, subject, capabilityCatalog, abortSignal }) {
+  async runHosted({
+    tenantId,
+    invocation,
+    binding,
+    subject,
+    capabilityCatalog,
+    sourceType,
+    abortSignal,
+  }) {
     const overrides = hostedExecutionOverrides.get(invocation.id);
     const turn = invocation.turnId ? await getTurnById(tenantId, invocation.turnId) : null;
     if (!invocation.threadId || !invocation.turnId || !turn) {
@@ -196,7 +204,9 @@ export const resumeHarnessInvocation = createResumeHarnessInvocation({
           capabilityCatalog,
           transportChannel: "hosted",
         }),
-      recoveryPort: createMySqlHarnessLoopRecoveryPort(tenantId),
+      recoveryPort: createMySqlHarnessLoopRecoveryPort(tenantId, {
+        resumeWaitingUser: sourceType === "user_pause",
+      }),
       transientEventBatchSink:
         overrides?.transientEventBatchSink ??
         (async ({ invocationId, events, transientSequenceStart }) => {
@@ -294,10 +304,11 @@ export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = 
   },
 
   resume(input) {
+    const payload = asRecord(input.resumePayload);
     return resumeHarnessInvocation({
       tenantId: input.tenantId,
       invocationId: input.invocationId,
-      sourceType: "user_action",
+      sourceType: payload?.source === "user_pause" ? "user_pause" : "user_action",
       agentCallId: input.idempotencyKey,
       sourceVersion: 1,
     });
@@ -306,7 +317,13 @@ export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = 
   async cancel(input) {
     const liveRunner = liveHostedRunners.get(input.invocationId);
     if (liveRunner) {
-      liveRunner.controller.abort(new DOMException("Hosted Invocation 已取消", "AbortError"));
+      const pauseRequested = input.reason === "user_requested_pause";
+      const abortReason = new Error(pauseRequested ? "用户暂停任务" : "Hosted Invocation 已取消");
+      abortReason.name = "AbortError";
+      Object.assign(abortReason, {
+        code: pauseRequested ? "USER_PAUSED" : "INVOCATION_CANCELLED",
+      });
+      liveRunner.controller.abort(abortReason);
     }
     await cancelActiveAgentCalls({
       tenantId: input.tenantId,

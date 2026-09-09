@@ -222,10 +222,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       },
     });
     if (!dispatch.dispatched) {
-      // 顶层无有效 Runtime Route → Turn 保持 accepted（Agent 与 Runtime Authority 分离）。
-      // 用户选择 Agent 是本 Turn 偏好，不作为顶层 Route 判断；顶层无 Route 时
-      // 由正式控制面初始化供应 / dispatch retry 处理，POST Turn 不在此做同步失败。
-      logger.warn("[runtime] 顶层 Harness Route 未就绪，Turn 保持 accepted", {
+      // 顶层 Runtime Route 是确定性启动条件；缺失时已由 dispatcher
+      // 将 Turn 明确收口为 failed，避免客户端无限展示“处理中”。
+      logger.warn("[runtime] 顶层 Harness Route 未就绪，Turn 已收口失败", {
         threadId,
         turnId: result.turn.id,
         reason: dispatch.reason ?? "no_effective_route",
@@ -243,7 +242,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         thread_id: result.turn.threadId,
         turn_sequence: result.turn.turnSequence,
         trigger_type: result.turn.triggerType,
-        turn_state: result.turn.turnState,
+        turn_state: dispatch.turnState ?? result.turn.turnState,
+        error_code: dispatch.errorCode ?? result.turn.errorCode,
         agent_use: agentActivity.agent_use,
         actual_agent_calls: agentActivity.actual_agent_calls,
       },

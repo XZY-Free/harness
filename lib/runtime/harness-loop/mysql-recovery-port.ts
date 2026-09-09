@@ -12,7 +12,10 @@ import {
   type HarnessLoopRecoverySnapshot,
 } from "./loop";
 
-export function createMySqlHarnessLoopRecoveryPort(tenantId: string): HarnessLoopRecoveryPort {
+export function createMySqlHarnessLoopRecoveryPort(
+  tenantId: string,
+  options: { resumeWaitingUser?: boolean } = {},
+): HarnessLoopRecoveryPort {
   return {
     async load(invocationId): Promise<HarnessLoopRecoverySnapshot> {
       const invocation = await getInvocationById(tenantId, invocationId);
@@ -122,7 +125,12 @@ export function createMySqlHarnessLoopRecoveryPort(tenantId: string): HarnessLoo
         })),
       ];
       return {
-        invocationState: invocation.executionState,
+        // 用户主动继续已经通过服务端状态校验。这里仅把本次恢复快照视为可执行态，
+        // DB 仍保持 waiting_user，直到 Runtime 返回 ack 后才由命令调度器推进为 running。
+        invocationState:
+          invocation.executionState === "waiting_user" && options.resumeWaitingUser
+            ? "running"
+            : invocation.executionState,
         nextProducerSequence: Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1,
         actionHistory,
         observations: [

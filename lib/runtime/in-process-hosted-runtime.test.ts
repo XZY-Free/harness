@@ -103,6 +103,45 @@ describe("InProcessHostedRuntimeClient", () => {
     expect(service.steer).toHaveBeenCalledOnce();
   });
 
+  it("resume 先确认恢复，再由后台继续同一 Invocation", async () => {
+    let finishResume: (() => void) | undefined;
+    const service = applicationService();
+    type ResumeResult = Awaited<ReturnType<HostedRuntimeApplicationService["resume"]>>;
+    service.resume = vi.fn(
+      async ({ invocationId }): Promise<ResumeResult> =>
+        await new Promise<ResumeResult>((resolve) => {
+          finishResume = () =>
+            resolve({
+              status: "resumed" as const,
+              invocationId,
+              runtime: "hosted" as const,
+            });
+        }),
+    );
+    const client = createInProcessHostedRuntimeClient({
+      tenantId: "tenant-1",
+      applicationService: service,
+    });
+
+    await expect(
+      client.resumeInvocation({
+        runtimeEndpoint: "in-process://hosted",
+        auth: { mode: "workload_token", token: "runtime-token" },
+        invocationId: "invocation-1",
+        idempotencyKey: "resume-1",
+        requestBody: {
+          resume_payload: { source: "user_pause" },
+          gateway_access: { access_token: "gw", expires_at: "2026-09-05T00:00:00.000Z" },
+        },
+      }),
+    ).resolves.toMatchObject({ invocation_id: "invocation-1", resumed: true });
+    expect(service.resume).toHaveBeenCalledOnce();
+    expect(client.getLastLaunchPromise()).not.toBeNull();
+
+    finishResume?.();
+    await client.getLastLaunchPromise();
+  });
+
   it("尚未启动时不暴露 Agent Loop Promise", () => {
     const client = createInProcessHostedRuntimeClient({
       tenantId: "tenant-1",

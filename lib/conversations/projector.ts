@@ -355,13 +355,14 @@ async function projectToThreadList(
     case "turn.regeneration_started":
     case "turn.regeneration_failed":
     case "turn.interrupt_requested":
+    case "turn.resume_requested":
     case "turn.steer_queued":
     case "turn.steered": {
       // S04-C06 新增事件类型：thread_list_projection 无对应字段，只前移 cursor
       // 事实源：docs/architecture/agent-control-plane.md -3.10
       // - child_thread.created：父 Thread 流中事件，标记 Fork 关系建立（投影列无 fork 计数）
       // - turn.regeneration_started/failed：Regenerate 进行中/失败（turn 状态由 turn.regenerating 事件更新）
-      // - turn.interrupt_requested：Interrupt 命令入队（Turn 状态未变，等 Runtime ack）
+      // - turn.interrupt_requested/turn.resume_requested：控制命令入队（等 Runtime ack）
       // - turn.steer_queued/steered：Steer 命令入队/已应用（user_guidance Item 由 item.created 投影）
       await tx
         .update(threadListProjectionTable)
@@ -632,12 +633,13 @@ async function projectToTurnTimeline(
     case "turn.regeneration_started":
     case "turn.regeneration_failed":
     case "turn.interrupt_requested":
+    case "turn.resume_requested":
     case "turn.steer_queued":
     case "turn.steered": {
       // S04-C06 新增 Turn 事件类型：turn_timeline_projection 只前移 cursor
       // - turn.regeneration_started：regeneration_no 由 turn.regenerating 事件更新（payload.regeneration_no）
       // - turn.regeneration_failed：Turn 状态由 turn.failed/interrupted 等终态事件更新
-      // - turn.interrupt_requested：Turn 状态未变（Runtime ack 后才进入终态）
+      // - turn.interrupt_requested/turn.resume_requested：Turn 状态未变（等待 Runtime ack）
       // - turn.steer_queued/steered：user_guidance Item 由 item.created 投影
       // 事实源：docs/architecture/agent-control-plane.md -3.10
       await tx

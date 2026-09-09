@@ -41,25 +41,44 @@ vi.mock("@/components/thread/new-thread-page", () => ({
     defaultModelRef,
     workbenchOpen,
     onWorkbenchOpenChange,
+    workspaceName,
+    onWorkspaceSelect,
+    workspaceId,
   }: {
     readonly onSubmit: (input: {
       readonly text: string;
       readonly agentId: string;
       readonly modelRef: string | null;
+      readonly workspaceId?: string | null;
     }) => Promise<boolean>;
     readonly defaultModelRef?: string;
     readonly workbenchOpen?: boolean;
     readonly onWorkbenchOpenChange?: (open: boolean) => void;
+    readonly workspaceName?: string | null;
+    readonly onWorkspaceSelect?: () => void;
+    readonly workspaceId?: string | null;
   }) => (
-    <div data-testid="desktop-new-thread-page" data-default-model-ref={defaultModelRef ?? ""}>
+    <div
+      data-testid="desktop-new-thread-page"
+      data-default-model-ref={defaultModelRef ?? ""}
+      data-workspace-name={workspaceName ?? ""}
+    >
       <button type="button" onClick={() => onWorkbenchOpenChange?.(true)}>
         展开工作台
+      </button>
+      <button type="button" onClick={onWorkspaceSelect}>
+        选择本地目录
       </button>
       <button
         type="button"
         data-workbench-open={String(workbenchOpen)}
         onClick={() =>
-          void onSubmit({ text: "请帮我分析销售数据", agentId: "agent-1", modelRef: "glm-5.2" })
+          void onSubmit({
+            text: "请帮我分析销售数据",
+            agentId: "agent-1",
+            modelRef: "glm-5.2",
+            workspaceId,
+          })
         }
       >
         发送首条消息
@@ -116,7 +135,7 @@ describe("DesktopRendererApp", () => {
 
     render(<DesktopRendererApp />);
 
-    expect(await screen.findByRole("heading", { name: "登录" })).toBeTruthy();
+    expect(await screen.findByLabelText("SnowHarness 登录")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("邮箱"), {
       target: { value: "admin@example.com" },
     });
@@ -182,6 +201,56 @@ describe("DesktopRendererApp", () => {
           selected_model: "glm-5.2",
           agent_use: { mode: "preferred", agent_id: "agent-1" },
         }),
+      }),
+    );
+  });
+
+  it("选择本地目录后在新会话中显示目录名，并把 workspace_id 带入创建请求", async () => {
+    const selectDirectory = vi.fn().mockResolvedValue({
+      ok: true,
+      workspaceId: "workspace-1",
+      bindingId: "binding-1",
+      displayName: "snow_harness",
+    });
+    getDesktopBridge.mockReturnValue({
+      device: { register: vi.fn().mockResolvedValue({ ok: true, tenantId: "tenant-1" }) },
+      bridge: { connect: vi.fn() },
+      workspace: { selectDirectory },
+    });
+    apiFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            viewer_id: "viewer-1",
+            viewer_name: "sunshine",
+            threads: [],
+            default_model_ref: "deepseek-v4-flash",
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "thread-1", title: "分析销售数据" }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ turn: { id: "turn-1" } }), { status: 201 }),
+      );
+
+    render(<DesktopRendererApp />);
+    await screen.findByTestId("desktop-new-thread-page");
+    fireEvent.click(screen.getByRole("button", { name: "选择本地目录" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("desktop-new-thread-page").dataset.workspaceName).toBe(
+        "snow_harness",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "发送首条消息" }));
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(3));
+    expect(apiFetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/threads",
+      expect.objectContaining({
+        body: JSON.stringify({ title: "分析销售数据", workspace_id: "workspace-1" }),
       }),
     );
   });

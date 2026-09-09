@@ -113,6 +113,7 @@ import {
   freezeTrustedExecutionSubject,
 } from "@/lib/runtime/transport/execution-subject";
 import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
+import { resolveWorkspaceBindingId } from "@/lib/workspace/desktop-workspace-queries";
 import { and, eq } from "drizzle-orm";
 
 /** 默认路由 scope key — 正式默认值，调用方可显式覆盖。 */
@@ -147,7 +148,8 @@ export interface DispatchResult {
     | "no_effective_route"
     | "ambiguous_route_configuration"
     | "invalid_traffic_weight_total"
-    | "agent_revision_not_found";
+    | "agent_revision_not_found"
+    | "workspace_binding_unavailable";
   /** 调度的 Invocation（dispatched=true 时填）。 */
   invocation?: Invocation;
   /** 调度的 ExecutionBinding（dispatched=true 时填）。 */
@@ -288,6 +290,19 @@ export async function dispatchInvocationForTurn(params: {
   const routeResolution = plan.routeResolution;
   const modelInfo = plan.modelInfo;
 
+  // Thread 选择了 Workspace 时，必须在创建不可变 ExecutionBinding 前解析到有效 Binding。
+  // 不能把有本地目录的任务静默当作无 Workspace 的 Cloud 任务执行。
+  const workspaceBindingId = thread.defaultWorkspaceId
+    ? await resolveWorkspaceBindingId(
+        params.tenantId,
+        thread.defaultWorkspaceId,
+        thread.ownerUserId,
+      )
+    : null;
+  if (thread.defaultWorkspaceId && !workspaceBindingId) {
+    return { dispatched: false, reason: "workspace_binding_unavailable" };
+  }
+
   // 6. createInvocation（事务内：锁 Thread、分配 invocationSequence、写 invocation.queued Event）
   const invocationParams: CreateInvocationParams = {
     tenantId: params.tenantId,
@@ -342,7 +357,7 @@ export async function dispatchInvocationForTurn(params: {
     modelId: modelInfo.modelId,
     modelRevisionRef: modelInfo.modelRevisionRef,
     initialEnvironmentLeaseId: null,
-    workspaceBindingId: null,
+    workspaceBindingId,
     policyRevisionId: bindingGovernance.policyRevisionId,
     policyRulesDigest: bindingGovernance.policyRulesDigest,
     governanceConfigRevisionId: bindingGovernance.governanceConfigRevisionId,

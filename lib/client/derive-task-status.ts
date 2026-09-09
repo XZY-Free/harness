@@ -18,7 +18,9 @@ export function deriveTaskStatus(turn: ClientTurn | null): {
     case "running":
       return { label: "执行中", tone: "running" };
     case "waiting_user":
-      return { label: "等待确认", tone: "waiting" };
+      return turn.error_code === "USER_PAUSED"
+        ? { label: "已暂停", tone: "waiting" }
+        : { label: "等待确认", tone: "waiting" };
     case "regenerating":
       return { label: "重新生成中", tone: "running" };
     case "completed":

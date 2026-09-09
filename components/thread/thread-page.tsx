@@ -39,12 +39,13 @@
 import { useThread } from "@/components/hooks/use-thread";
 import { useThreadDetail } from "@/components/hooks/use-thread-detail";
 import { useThreadSettings } from "@/components/hooks/use-thread-settings";
+import { deriveTaskStatus } from "@/lib/client/derive-task-status";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DesktopWorkbench, WorkbenchToggle } from "../desktop/desktop-workbench";
 import { UserActionItem } from "./items/user-action-item";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
-import { ThreadHeader, deriveTaskStatus } from "./thread-header";
+import { ThreadHeader } from "./thread-header";
 import { ThreadInput } from "./thread-input";
 import { ThreadTimeline } from "./thread-timeline";
 import { TurnFailureNotice } from "./turn-failure-notice";

@@ -783,18 +783,21 @@ export async function retryDispatchedInvocationCommand(params: {
   throw new CommandAlreadyDispatchedError(loaded.command.id, loaded.command.commandType);
 }
 
-/** Resume 前置状态校验（waiting_user 或 post-authority running）。 */
-function validateResumeInvocationState(loaded: LoadedCommand): void {
-  const loadedPayload = loaded.command.commandPayloadJson as Record<string, unknown>;
-  const isPostAuthorityResume =
+/** Resume 前置状态校验（waiting_user 或 UserAction 已先落 Authority 的 running）。 */
+function isPostAuthorityResume(loaded: LoadedCommand): boolean {
+  const payload = loaded.command.commandPayloadJson as Record<string, unknown>;
+  return (
     loaded.invocation.executionState === "running" &&
-    loadedPayload.resume_source === "user_action_resolution" &&
-    typeof loadedPayload.request_id === "string" &&
-    loadedPayload.request_id.length > 0 &&
-    loadedPayload.resume_payload !== null &&
-    typeof loadedPayload.resume_payload === "object";
+    payload.resume_source === "user_action_resolution" &&
+    typeof payload.request_id === "string" &&
+    payload.request_id.length > 0 &&
+    payload.resume_payload !== null &&
+    typeof payload.resume_payload === "object"
+  );
+}
 
-  if (loaded.invocation.executionState !== "waiting_user" && !isPostAuthorityResume) {
+function validateResumeInvocationState(loaded: LoadedCommand): void {
+  if (loaded.invocation.executionState !== "waiting_user" && !isPostAuthorityResume(loaded)) {
     throw new ResumeInvocationNotWaitingError(
       loaded.invocation.id,
       loaded.invocation.executionState,
@@ -808,14 +811,7 @@ async function executeResumeDispatch(
   loaded: LoadedCommand,
 ): Promise<CommandDispatchResult> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
-  const loadedPayload = loaded.command.commandPayloadJson as Record<string, unknown>;
-  const isPostAuthorityResume =
-    loaded.invocation.executionState === "running" &&
-    loadedPayload.resume_source === "user_action_resolution" &&
-    typeof loadedPayload.request_id === "string" &&
-    loadedPayload.request_id.length > 0 &&
-    loadedPayload.resume_payload !== null &&
-    typeof loadedPayload.resume_payload === "object";
+  const postAuthorityResume = isPostAuthorityResume(loaded);
 
   // 2. 解析 runtimeEndpoint + auth（+ 可选 gatewayEndpoints）
   const endpointResolution = await params.runtimeEndpointResolver(loaded.binding);
@@ -895,7 +891,7 @@ async function executeResumeDispatch(
 
   // 5. 检查 requires_redispatch 分支
   if (response.requires_redispatch === true) {
-    if (isPostAuthorityResume) {
+    if (postAuthorityResume) {
       // post-authority 分支 fail closed：不套用旧 waiting_user redispatch 路径，
       // 不伪造成功；命令标记 failed（无状态回退，Invocation/Turn 保持 sink 已落状态）。
       await markCommandFailed(
@@ -918,7 +914,7 @@ async function executeResumeDispatch(
   // 6a. post-authority 成功：只 CAS dispatched → acknowledged。transport 的
   // eventBatchSink 可能已把 Invocation/Turn 推进到 completed/failed/waiting_user 等
   // 状态；本分支绝不回写 running、绝不补 turn.resumed/invocation.resumed 事件。
-  if (isPostAuthorityResume) {
+  if (postAuthorityResume) {
     await db.transaction(async (tx) => {
       await transitionCommandToAcknowledged(tx, loaded.command.id);
     });
@@ -982,6 +978,8 @@ async function executeResumeDispatch(
           .update(turnTable)
           .set({
             turnState: "running",
+            errorCode: null,
+            waitingAt: null,
             versionNo: turnRow.versionNo + 1,
           })
           .where(eq(turnTable.id, turnId));

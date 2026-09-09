@@ -16,4 +16,14 @@ describe("e2e deterministic model Harness protocol", () => {
       payload: {},
     });
   });
+
+  it("最终回答只返回用户可见正文，不回显 Harness 内部上下文", () => {
+    const content = buildE2eModelReply(
+      '根据当前用户目标与已完成 observations 生成最终可见回答。\n\n{"invocation":{"invocationId":"secret-internal-id"},"objective":"请继续处理"}',
+    );
+
+    expect(content).toBe("[e2e-model] 请继续处理：已完成。");
+    expect(content).not.toContain("invocationId");
+    expect(content).not.toContain("secret-internal-id");
+  });
 });

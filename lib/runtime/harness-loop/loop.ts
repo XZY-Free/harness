@@ -288,7 +288,9 @@ export class HarnessLoop {
       const abortReason = this.params.abortSignal?.reason;
       const leaseLost = errorCode(abortReason) === "INVOCATION_EXECUTION_LEASE_LOST";
       if (!leaseLost && (this.params.abortSignal?.aborted || isAbortError(error))) {
-        await this.safeWriteExecutionCancelled();
+        await this.safeWriteExecutionCancelled(
+          errorCode(abortReason) === "USER_PAUSED" ? "user_requested_pause" : "cancel_command",
+        );
         return {
           completed: false,
           cancelled: true,
@@ -683,11 +685,11 @@ export class HarnessLoop {
       : new DOMException("Hosted Invocation 已取消", "AbortError");
   }
 
-  private async safeWriteExecutionCancelled(): Promise<void> {
+  private async safeWriteExecutionCancelled(reason: string): Promise<void> {
     try {
       await this.params.eventWriter.write("execution.cancelled", {
         cancelled_by: "hosted_control",
-        reason: "cancel_command",
+        reason,
       });
     } catch {
       // 取消信号已生效；事件回传失败由 durable command retry 处理。

@@ -30,6 +30,7 @@
 "use client";
 
 import { CatalogDisplayName } from "@/components/thread/catalog/catalog-display-name";
+import { deriveTaskStatus } from "@/lib/client/derive-task-status";
 import type { ClientGoal, ClientThread, ClientTurn } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
@@ -42,37 +43,6 @@ interface ThreadHeaderProps {
   readonly actions?: ReactNode;
   /** 渲染变体：web（默认）= 完整 header；desktop = 仅次级信息行（Goal / 位置）。 */
   readonly variant?: "web" | "desktop";
-}
-
-/** 从 Turn 状态推导当前任务状态（中文）。
- * 导出供 ThreadPage desktop 标题栏复用（W2-2）。
- */
-export function deriveTaskStatus(turn: ClientTurn | null): {
-  readonly label: string;
-  readonly tone: "idle" | "running" | "waiting" | "success" | "error" | "stopped";
-} {
-  if (!turn) return { label: "空闲", tone: "idle" };
-  switch (turn.turn_state) {
-    case "accepted":
-    case "queued":
-      return { label: "排队中", tone: "running" };
-    case "running":
-      return { label: "执行中", tone: "running" };
-    case "waiting_user":
-      return { label: "等待确认", tone: "waiting" };
-    case "regenerating":
-      return { label: "重新生成中", tone: "running" };
-    case "completed":
-      return { label: "已完成", tone: "success" };
-    case "interrupted":
-      return { label: "已停止", tone: "stopped" };
-    case "failed":
-      return { label: "失败", tone: "error" };
-    case "cancelled":
-      return { label: "已取消", tone: "stopped" };
-    default:
-      return { label: "未知", tone: "idle" };
-  }
 }
 
 /** Goal 状态中文。 */

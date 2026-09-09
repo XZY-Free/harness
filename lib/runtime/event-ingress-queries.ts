@@ -1347,7 +1347,7 @@ async function mapExecutionFailed(
   };
 }
 
-/** execution.cancelled：invocation.cancelled ThreadEvent + 终态（Turn → interrupted）。 */
+/** execution.cancelled：用户暂停进入可恢复等待态，其他取消进入终态。 */
 async function mapExecutionCancelled(
   tx: Tx,
   ctx: {
@@ -1364,9 +1364,11 @@ async function mapExecutionCancelled(
     throw new IngressInvocationNotFoundError(ctx.invocation.id);
   }
 
+  const paused = ctx.event.payload.reason === "user_requested_pause";
   const seq = await allocateEventSequences(tx, ctx.threadId, 1);
   const event = await insertThreadEvent(tx, ctx.threadId, seq, {
-    eventType: "invocation.cancelled",
+    // 暂停复用既有 waiting_user 生命周期事件，避免引入投影器不认识的旁路事件。
+    eventType: paused ? "invocation.waiting_user" : "invocation.cancelled",
     turnId: ctx.turnId,
     invocationId: ctx.invocation.id,
     actorType: ctx.actorType,
@@ -1377,13 +1379,20 @@ async function mapExecutionCancelled(
     correlationId: ctx.correlationId ?? undefined,
   });
 
-  await updateInvocationState(tx, ctx.tenantId, ctx.invocation.id, "cancelled");
+  await updateInvocationState(
+    tx,
+    ctx.tenantId,
+    ctx.invocation.id,
+    paused ? "waiting_user" : "cancelled",
+  );
 
-  // 默认 Turn → interrupted（员工取消）；管理员取消由调用方另行处理
+  // 用户点击停止是可恢复暂停；其他取消仍是终态 interrupted。
   await casUpdateTurn(tx, {
     turnId: ctx.turnId,
     expectedVersionNo: ctx.invocation.versionNo,
-    nextState: "interrupted",
+    nextState: paused ? "waiting_user" : "interrupted",
+    activeInvocationId: paused ? ctx.invocation.id : undefined,
+    errorCode: paused ? "USER_PAUSED" : undefined,
   });
 
   return {
@@ -1447,6 +1456,7 @@ async function casUpdateTurn(
   }
   if (params.nextState === "waiting_user") {
     updates.waitingAt = now;
+    if (params.errorCode !== undefined) updates.errorCode = params.errorCode;
   }
 
   const result = await tx

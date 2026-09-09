@@ -75,6 +75,7 @@ function readBody(req: import("node:http").IncomingMessage): Promise<Record<stri
  * @param port 0 表示由系统分配空闲端口。
  */
 export function startE2eModelServer(port = 0): Promise<E2eModelServer> {
+  const delayedPausePrompts = new Set<string>();
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
 
@@ -96,13 +97,28 @@ export function startE2eModelServer(port = 0): Promise<E2eModelServer> {
       return;
     }
 
-    void readBody(req).then((body) => {
+    void readBody(req).then(async (body) => {
       const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
       const model = typeof body.model === "string" ? body.model : "e2e-deterministic";
-      const reply = buildE2eModelReply(lastUserText(messages));
+      const userText = lastUserText(messages);
+      const reply = buildE2eModelReply(userText);
       const id = `chatcmpl-e2e-${Buffer.from(reply).length}`;
       const created = 1_700_000_000;
       console.log(`[e2e-model] 请求 model=${model} → 回复 ${reply.length} 字符`);
+
+      // 仅供真实 UI 暂停/继续验收：命中特定测试语句时，首次请求留出可点击暂停按钮的窗口；
+      // 同一语句在继续后的第二次请求立即响应，验证恢复的是原 Invocation 而非永远延迟。
+      if (userText.includes("暂停继续验收") && !delayedPausePrompts.has(userText)) {
+        delayedPausePrompts.add(userText);
+        await new Promise<void>((resolveDelay) => {
+          const timer = setTimeout(resolveDelay, 30_000);
+          res.once("close", () => {
+            clearTimeout(timer);
+            resolveDelay();
+          });
+        });
+        if (res.destroyed) return;
+      }
 
       // 非流式：一次性返回完整结果。
       if (body.stream !== true) {
@@ -140,6 +156,9 @@ export function startE2eModelServer(port = 0): Promise<E2eModelServer> {
       send({ ...base, choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }] });
       for (const chunk of toChunks(reply)) {
         send({ ...base, choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }] });
+        // 留出浏览器实际绘制增量的时间；只作用于测试模型，避免所有 chunk 同一帧到达后
+        // 看起来像一次性输出，掩盖产品流式渲染回归。
+        await new Promise((resolveChunk) => setTimeout(resolveChunk, 180));
       }
       send({
         ...base,

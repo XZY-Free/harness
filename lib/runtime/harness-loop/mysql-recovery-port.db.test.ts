@@ -5,6 +5,7 @@ import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bo
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createMySqlHarnessLoopRecoveryPort } from "./mysql-recovery-port";
 
@@ -46,6 +47,22 @@ beforeEach(async () => {
 });
 
 describe("MySQL Harness recovery durable input", () => {
+  it("用户主动继续时把 waiting_user 快照作为可执行恢复态交给 Loop", async () => {
+    const seeded = await seedActiveInvocation();
+    await db
+      .update(invocationTable)
+      .set({ executionState: "waiting_user" })
+      .where(eq(invocationTable.id, seeded.invocationId));
+
+    const paused = await createMySqlHarnessLoopRecoveryPort(TENANT_ID).load(seeded.invocationId);
+    const resumed = await createMySqlHarnessLoopRecoveryPort(TENANT_ID, {
+      resumeWaitingUser: true,
+    }).load(seeded.invocationId);
+
+    expect(paused.invocationState).toBe("waiting_user");
+    expect(resumed.invocationState).toBe("running");
+  });
+
   it("只靠数据库恢复已解析的 generic UAR 与已确认 steer guidance", async () => {
     const seeded = await seedActiveInvocation();
     const requestId = randomUUID();

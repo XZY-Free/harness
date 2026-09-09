@@ -120,6 +120,37 @@ describe("Resume Harness Invocation", () => {
     expect(acquireLease).not.toHaveBeenCalled();
   });
 
+  it("用户暂停后把恢复来源传给 Hosted Loop，允许它执行 waiting_user 快照", async () => {
+    const f = fixture();
+    f.invocation.executionState = "waiting_user";
+    const runHosted = vi.fn(async () => ({
+      completed: true,
+      responseText: "继续完成",
+      sentEvents: [],
+    }));
+    const resume = createResumeHarnessInvocation({
+      loadInvocation: async () => f.invocation,
+      loadBinding: async () => f.binding,
+      loadRuntimeRevision: async () => f.runtimeRevision,
+      acquireLease: async () => ({ id: "lease-1" }),
+      releaseLease: vi.fn(async () => undefined),
+      renewLease: vi.fn(async () => true),
+      runHosted,
+      resumeExternal: vi.fn(),
+    });
+
+    await expect(
+      resume({
+        tenantId: "tenant-1",
+        invocationId: "invocation-1",
+        sourceType: "user_pause",
+        agentCallId: "resume-1",
+        sourceVersion: 1,
+      }),
+    ).resolves.toMatchObject({ status: "resumed", completed: true });
+    expect(runHosted).toHaveBeenCalledWith(expect.objectContaining({ sourceType: "user_pause" }));
+  });
+
   it("执行租约续约失败时向 Hosted Loop 发出 fail-closed 中止信号", async () => {
     const f = fixture();
     let observedReason: unknown;

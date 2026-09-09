@@ -15,8 +15,11 @@
  * 白名单中的 channel 运行时必须都有 handler：Bridge 相关 channel 无条件注册，
  * 不再因未注册而缺 handler。
  */
+import { createHash } from "node:crypto";
+import { realpath, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import type { IpcMain } from "electron";
-import { BrowserWindow, shell } from "electron";
+import { BrowserWindow, dialog, shell } from "electron";
 import type {
   DesktopCapabilities,
   DesktopDeviceRegisterResult,
@@ -29,6 +32,7 @@ import { type DeviceIdentity, saveDeviceIdentity } from "../bridge/device-identi
 import type { AiLockManager } from "../browser/ai-lock";
 import type { BrowserController } from "../browser/browser-controller";
 import type { KeychainAdapter } from "../storage/keychain";
+import type { WorkspaceRootStore } from "../storage/workspace-root-store";
 import type { UpdateManager } from "../updater/update-manager";
 import { RendererSubscriptions } from "./renderer-subscriptions";
 
@@ -55,6 +59,7 @@ export function registerIpcHandlers(
   browserController?: BrowserController,
   profileCleaner?: BrowserProfileCleaner,
   updateManager?: UpdateManager,
+  workspaceRoots?: WorkspaceRootStore,
 ): void {
   const rendererSubscriptions = new RendererSubscriptions();
 
@@ -167,6 +172,90 @@ export function registerIpcHandlers(
     }
     bridgeLifecycle.connect();
     return { ok: true, tenantId };
+  });
+
+  // 本地 Workspace：原生目录选择、Server 登记指纹、本机保存绝对路径。
+  // renderer 只收到逻辑 id 与目录名，不能读取用户绝对路径。
+  ipcMain.handle("desktop:workspace:selectDirectory", async (event) => {
+    if (!workspaceRoots || !capabilities.deviceId) {
+      return { ok: false, code: "device_unavailable", message: "桌面设备尚未就绪" };
+    }
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: "选择工作目录",
+      buttonLabel: "选择",
+      properties: ["openDirectory", "createDirectory"] as Array<
+        "openDirectory" | "createDirectory"
+      >,
+    };
+    const selected = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options);
+    if (selected.canceled || selected.filePaths.length === 0) {
+      return { ok: false, code: "cancelled" };
+    }
+
+    let absolutePath: string;
+    try {
+      absolutePath = await realpath(selected.filePaths[0] ?? "");
+      if (!(await stat(absolutePath)).isDirectory()) throw new Error("not_directory");
+    } catch {
+      return { ok: false, code: "invalid_directory", message: "所选目录不可用" };
+    }
+    const displayName = basename(absolutePath);
+    const locationFingerprint = `sha256:${createHash("sha256")
+      .update(capabilities.deviceId)
+      .update("\0")
+      .update(absolutePath)
+      .digest("hex")}`;
+
+    let response: Response;
+    try {
+      response = await event.sender.session.fetch(
+        `${capabilities.serverOrigin}/api/desktop/workspaces`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            device_id: capabilities.deviceId,
+            display_name: displayName,
+            location_fingerprint: locationFingerprint,
+          }),
+        },
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        code: "network_error",
+        message: error instanceof Error ? error.message : "目录登记失败",
+      };
+    }
+    const body = (await response.json().catch(() => null)) as {
+      data?: { workspace_id?: unknown; binding_id?: unknown; display_name?: unknown };
+      error?: { message?: unknown };
+    } | null;
+    const workspaceId = body?.data?.workspace_id;
+    const bindingId = body?.data?.binding_id;
+    const safeDisplayName = body?.data?.display_name;
+    if (
+      !response.ok ||
+      typeof workspaceId !== "string" ||
+      typeof bindingId !== "string" ||
+      typeof safeDisplayName !== "string"
+    ) {
+      return {
+        ok: false,
+        code: "server_error",
+        message: typeof body?.error?.message === "string" ? body.error.message : "目录登记失败",
+      };
+    }
+    workspaceRoots.upsert({
+      workspaceId,
+      bindingId,
+      absolutePath,
+      displayName: safeDisplayName,
+    });
+    return { ok: true, workspaceId, bindingId, displayName: safeDisplayName };
   });
 
   // Browser tab 操作

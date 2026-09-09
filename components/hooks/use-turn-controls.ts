@@ -4,12 +4,12 @@
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W03：「Steer 显示 requested/acknowledged/applied/rejected，不在 Runtime ack 前宣称已经引导」
- *   「Stop 暂停后续队列；页面明确区分『已请求停止』『Runtime 已确认』和『副作用仍需核对』」
+ *   「暂停请求不在 Runtime ack 前宣称已经暂停」
  *
  * 职责：
  * - Steer 运行中 Turn（POST /api/v1/turns/{id}/steer，202 Accepted，异步命令）。
  * - Interrupt（Stop）运行中 Turn（POST /api/v1/turns/{id}/interrupt，202 Accepted，异步命令）。
- * - 不在 Runtime ack 前宣称已引导/已停止：UI 状态固定为 "queued" / "requested"。
+ * - 不在 Runtime ack 前宣称已引导/已暂停：UI 状态固定为 "queued" / "requested"。
  * - 错误转化为 ClientVisibleError。
  *
  * 关键不变量：
@@ -20,8 +20,8 @@
  *   - turn.interrupt_requested → 命令入队
  *   - turn.interrupted → Runtime ack 终态（本阶段不会被写入）
  * - 前端 UI 必须区分三种状态：
- *   1. 已请求停止（command_state=queued，等待 Runtime ack）
- *   2. Runtime 已确认（通过 turn.interrupted SSE 事件，turn_state 变为 interrupted）
+ *   1. 已请求暂停（command_state=queued，等待 Runtime ack）
+ *   2. Runtime 已确认（通过 waiting_user 状态切换为继续按钮）
  *   3. 副作用仍需核对（already_completed_effects_preserved=true 提示）
  *
  * 使用：
@@ -52,12 +52,14 @@ export interface UseTurnControlsResult {
   readonly error: ClientVisibleError | null;
   /** 最近一次 Steer 结果（用于 UI 显示 "已请求引导" 状态）。 */
   readonly lastSteer: ClientSteerResponse | null;
-  /** 最近一次 Interrupt 结果（用于 UI 显示 "已请求停止" 状态）。 */
+  /** 最近一次 Interrupt 结果（用于 UI 显示“已请求暂停”状态）。 */
   readonly lastInterrupt: ClientInterruptResponse | null;
   /** 发送 Steer（运行中引导）。 */
   readonly steer: (guidanceText: string) => Promise<boolean>;
-  /** 发送 Interrupt（停止）。 */
+  /** 发送 Interrupt（用户暂停）。 */
   readonly interrupt: (reasonCode?: string, preservePendingInputs?: boolean) => Promise<boolean>;
+  /** 继续用户暂停的原 Turn / 原 Invocation。 */
+  readonly resume: () => Promise<boolean>;
   /** 清除错误。 */
   readonly clearError: () => void;
 }
@@ -149,7 +151,7 @@ export function useTurnControls(turnId: string): UseTurnControlsResult {
     [turnId],
   );
 
-  /** 发送 Interrupt（停止）。 */
+  /** 发送 Interrupt（暂停/终止由 reasonCode 区分）。 */
   const interrupt = useCallback(
     async (reasonCode = "user_requested_stop", preservePendingInputs = true): Promise<boolean> => {
       setBusy(true);
@@ -193,6 +195,40 @@ export function useTurnControls(turnId: string): UseTurnControlsResult {
     [turnId],
   );
 
+  const resume = useCallback(async (): Promise<boolean> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const resp = await apiFetch(`/api/v1/turns/${turnId}/resume`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": generateIdempotencyKey(),
+        },
+        body: "{}",
+      });
+      if (!resp.ok) {
+        setError(await parseError(resp));
+        return false;
+      }
+      setLastInterrupt(null);
+      return true;
+    } catch {
+      setError({
+        code: "NETWORK_ERROR",
+        title: "网络异常",
+        description: "无法连接服务器，请检查网络后再试。",
+        retryable: true,
+        recoveryAction: "reload_page",
+        requestId: null,
+      });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [turnId]);
+
   const clearError = useCallback(() => setError(null), []);
 
   return {
@@ -202,6 +238,7 @@ export function useTurnControls(turnId: string): UseTurnControlsResult {
     lastInterrupt,
     steer,
     interrupt,
+    resume,
     clearError,
   };
 }

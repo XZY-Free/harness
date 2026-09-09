@@ -4,9 +4,11 @@ import Database from "better-sqlite3";
 import { TabRestore } from "../browser/tab-restore";
 import type { MigrationDb, PreparedStmt } from "./db-interface";
 import { runMigrations } from "./migration-runner";
+import { WorkspaceRootStore } from "./workspace-root-store";
 
 export interface DesktopDatabase {
   tabRestore: TabRestore;
+  workspaceRoots: WorkspaceRootStore;
   close(): void;
 }
 
@@ -26,6 +28,7 @@ export async function openDesktopDatabase(
   await runMigrations(migrationDb, migrationsPath);
   return {
     tabRestore: new TabRestore(migrationDb),
+    workspaceRoots: new WorkspaceRootStore(migrationDb),
     close: () => database.close(),
   };
 }

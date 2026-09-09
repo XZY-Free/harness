@@ -1,9 +1,15 @@
 import { aiConfig } from "@/lib/config";
-import { getThreadById } from "@/lib/conversations/thread-queries";
+import {
+  allocateEventSequences,
+  getThreadById,
+  insertThreadEvent,
+} from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
+import { turnTable } from "@/lib/persistence/schema/conversation";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
@@ -32,6 +38,7 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
+import { and, eq } from "drizzle-orm";
 
 /** 使用统一解析入口 — Projection 是唯一数据源。 */
 const configuredResolver = createConfiguredRouteResolver({
@@ -51,14 +58,67 @@ const resolveRoute: RouteResolver = async (input) => {
 
 export interface EmployeeTurnDispatchResult {
   dispatched: boolean;
+  /** 未调度被明确收口时的 Turn 状态，避免客户端继续展示“处理中”。 */
+  turnState?: "failed";
+  /** 未调度的稳定错误码。 */
+  errorCode?: string;
   /** 未调度原因（dispatched=false 时填；06 专项 P2-4 的稳定 route_* 原因码）。 */
   reason?:
     | "no_effective_route"
     | "ambiguous_route_configuration"
     | "invalid_traffic_weight_total"
-    | "agent_revision_not_found";
+    | "agent_revision_not_found"
+    | "workspace_binding_unavailable";
   /** Agent Loop 的后台执行；HTTP 路由不等待它，测试可等待。 */
   completion: Promise<void>;
+}
+
+const ROUTE_FAILURE_CODES = {
+  no_effective_route: "NO_EFFECTIVE_RUNTIME_ROUTE",
+  ambiguous_route_configuration: "AMBIGUOUS_RUNTIME_ROUTE",
+  invalid_traffic_weight_total: "INVALID_RUNTIME_ROUTE_WEIGHT",
+  agent_revision_not_found: "RUNTIME_ROUTE_TARGET_NOT_FOUND",
+  workspace_binding_unavailable: "WORKSPACE_BINDING_UNAVAILABLE",
+} as const;
+
+async function failUndispatchedTurn(params: {
+  tenantId: string;
+  threadId: string;
+  turnId: string;
+  reason: keyof typeof ROUTE_FAILURE_CODES;
+  correlationId?: string;
+}): Promise<string> {
+  const errorCode = ROUTE_FAILURE_CODES[params.reason];
+  await db.transaction(async (tx) => {
+    const [turn] = await tx
+      .select()
+      .from(turnTable)
+      .where(and(eq(turnTable.id, params.turnId), eq(turnTable.threadId, params.threadId)))
+      .for("update")
+      .limit(1);
+    if (!turn || turn.turnState !== "accepted") return;
+
+    const now = new Date();
+    await tx
+      .update(turnTable)
+      .set({
+        turnState: "failed",
+        activeInvocationId: null,
+        errorCode,
+        finishedAt: now,
+        versionNo: turn.versionNo + 1,
+      })
+      .where(and(eq(turnTable.id, turn.id), eq(turnTable.versionNo, turn.versionNo)));
+    const eventSequence = await allocateEventSequences(tx, params.threadId, 1);
+    await insertThreadEvent(tx, params.threadId, eventSequence, {
+      eventType: "turn.failed",
+      turnId: turn.id,
+      actorType: "system",
+      payload: { error_code: errorCode, dispatch_reason: params.reason },
+      correlationId: params.correlationId,
+    });
+  });
+  return errorCode;
 }
 
 /**
@@ -66,7 +126,7 @@ export interface EmployeeTurnDispatchResult {
  *
  * 正式热路径（§9.3）：读取 Thread → Resolve 基础 Harness Route（显式 runtime target，冻结架构）
  * → 创建 Invocation → 创建 ExecutionBinding → Runtime Dispatch。
- * 无 Ready Route 时保持 accepted 并返回未调度（热路径不做 Agent-specific Hosted Provisioning，§11.2/§11.5）；
+ * 无 Ready Route 时将 Turn 明确收口为 failed（热路径不做 Agent-specific Hosted Provisioning，§11.2/§11.5）；
  * 基础 Harness Route 的供应策略由正式控制面初始化。
  */
 export async function dispatchEmployeeTurn(params: {
@@ -105,18 +165,28 @@ export async function dispatchEmployeeTurn(params: {
 
   if (routeOutcome.status !== "resolved") {
     // Thread 不绑定 Agent；无 Ready Route 时热路径不发起 Agent-specific Hosted Provisioning。
-    // Turn 保持 accepted 并返回未调度（基础 Harness Route 由正式控制面初始化供应策略）；
+    // Turn 明确失败并返回稳定错误码（基础 Harness Route 由正式控制面初始化供应策略）；
     // reason 供调用方区分确定性失败（06 专项 P2-4：required Route race 终态化）。
+    const reason =
+      routeOutcome.status === "unresolved"
+        ? routeOutcome.reason === "ambiguous_route_configuration"
+          ? "ambiguous_route_configuration"
+          : routeOutcome.reason === "invalid_traffic_weight_total"
+            ? "invalid_traffic_weight_total"
+            : "no_effective_route"
+        : "no_effective_route";
+    const errorCode = await failUndispatchedTurn({
+      tenantId: params.tenantId,
+      threadId: params.threadId,
+      turnId: params.turnId,
+      reason,
+      correlationId: params.correlationId,
+    });
     return {
       dispatched: false,
-      reason:
-        routeOutcome.status === "unresolved"
-          ? routeOutcome.reason === "ambiguous_route_configuration"
-            ? "ambiguous_route_configuration"
-            : routeOutcome.reason === "invalid_traffic_weight_total"
-              ? "invalid_traffic_weight_total"
-              : "no_effective_route"
-          : undefined,
+      reason,
+      turnState: "failed",
+      errorCode,
       completion: Promise.resolve(),
     };
   }
@@ -234,6 +304,23 @@ export async function dispatchEmployeeTurn(params: {
       };
     },
   });
+
+  if (!result.dispatched && result.reason) {
+    const errorCode = await failUndispatchedTurn({
+      tenantId: params.tenantId,
+      threadId: params.threadId,
+      turnId: params.turnId,
+      reason: result.reason,
+      correlationId: params.correlationId,
+    });
+    return {
+      dispatched: false,
+      reason: result.reason,
+      turnState: "failed",
+      errorCode,
+      completion: Promise.resolve(),
+    };
+  }
 
   if (!result.dispatched || !result.invocation || result.runtimeDispatch?.skipped) {
     return { dispatched: result.dispatched, completion: Promise.resolve() };

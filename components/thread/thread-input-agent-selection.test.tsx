@@ -115,7 +115,23 @@ describe("已有会话单轮助手选择", () => {
       expect((screen.getByRole("button", { name: "选择助手" }) as HTMLButtonElement).disabled).toBe(
         true,
       );
-      expect(screen.queryByRole("button", { name: "停止任务" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "暂停任务" })).toBeNull();
     },
   );
+});
+
+describe("Desktop 本地目录选择", () => {
+  it("只在调用方提供本地目录能力时显示紧凑目录按钮", () => {
+    const onWorkspaceSelect = vi.fn();
+    const { rerender } = render(
+      <ThreadInput {...props} onWorkspaceSelect={onWorkspaceSelect} workspaceName={null} />,
+    );
+
+    expect(screen.getByRole("button", { name: "选择本地目录" })).toBeTruthy();
+
+    rerender(
+      <ThreadInput {...props} onWorkspaceSelect={onWorkspaceSelect} workspaceName="snow_harness" />,
+    );
+    expect(screen.getByRole("button", { name: "本地目录：snow_harness" })).toBeTruthy();
+  });
 });

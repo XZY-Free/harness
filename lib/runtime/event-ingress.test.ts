@@ -27,7 +27,7 @@ import {
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { computeEventPayloadHash, createThread } from "@/lib/conversations/thread-queries";
-import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
+import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
@@ -605,7 +605,7 @@ describe("RuntimeEventIngress 核心入库", () => {
   it("重复 execution.completed 仍 fail closed（不允许 completed→completed）", async () => {
     const { invocationId } = await seedRunningInvocation(ctx);
 
-    await ingressEventBatch({
+    const result = await ingressEventBatch({
       tenantId: ctx.tenantId,
       invocationId,
       producerSequenceStart: 1,
@@ -682,6 +682,38 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(result.acceptedThroughProducerSequence).toBe(1);
     const invocation = await getInvocationById(ctx.tenantId, invocationId);
     expect(invocation?.executionState).toBe("cancelled");
+  });
+
+  it("用户点击停止时转为可恢复暂停，不把原 Invocation 终态化", async () => {
+    const { invocationId, turnId } = await seedRunningInvocation(ctx);
+
+    const result = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 1,
+      events: [
+        makeEvent("evt-pause", 1, "execution.cancelled", {
+          cancelled_by: "hosted_control",
+          reason: "user_requested_pause",
+        }),
+      ],
+    });
+
+    expect(await getInvocationById(ctx.tenantId, invocationId)).toMatchObject({
+      executionState: "waiting_user",
+    });
+    const [pauseEvent] = await db
+      .select({ eventType: threadEventTable.eventType })
+      .from(threadEventTable)
+      .where(eq(threadEventTable.id, result.mappedEvents[0]?.threadEventId ?? ""))
+      .limit(1);
+    expect(pauseEvent?.eventType).toBe("invocation.waiting_user");
+    expect(await getTurnById(ctx.tenantId, turnId)).toMatchObject({
+      turnState: "waiting_user",
+      activeInvocationId: invocationId,
+      errorCode: "USER_PAUSED",
+      finishedAt: null,
+    });
   });
 
   it("user_action.requested：创建 UAR Authority + user_action Item Projection + Invocation→waiting_user（§21.1）", async () => {

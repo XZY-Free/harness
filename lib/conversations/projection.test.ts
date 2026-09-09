@@ -417,6 +417,36 @@ describe("transient 事件不投影", () => {
 // ─── 未知事件类型写 event_delivery_failure ─────────────
 
 describe("未知事件类型写 event_delivery_failure", () => {
+  it("turn.resume_requested 作为等待 Runtime 确认的控制事件推进投影游标", async () => {
+    const { tenantId, ownerId, threadId } = await seedFullContext();
+    const { turn } = await acceptUserMessageTurn({
+      tenantId,
+      threadId,
+      ownerUserId: ownerId,
+      content: { text: "暂停后继续" },
+      actorId: ownerId,
+    });
+    const currentEvents = await listThreadEvents(tenantId, threadId, { limit: 100 });
+    await projectThreadEvents(currentEvents);
+    const eventId = await insertRawEvent(
+      threadId,
+      4,
+      "turn.resume_requested",
+      { command_id: "resume-command-1" },
+      turn.id,
+    );
+    const [resumeEvent] = await db
+      .select()
+      .from(threadEventTable)
+      .where(eq(threadEventTable.id, eventId))
+      .limit(1);
+
+    await projectThreadEvent(resumeEvent as ThreadEvent);
+
+    expect((await getThreadProjection(tenantId, threadId))?.latestEventSequence).toBe(4);
+    expect((await getTurnTimelineProjection(tenantId, turn.id))?.latestEventSequence).toBe(4);
+  });
+
   it("未知 eventType 触发 ProjectionFailureError 并写入 event_delivery_failure", async () => {
     const { tenantId, threadId } = await seedFullContext();
 
@@ -615,6 +645,7 @@ async function insertRawEvent(
   sequence: number,
   eventType: string,
   payload: Record<string, unknown>,
+  turnId?: string,
 ): Promise<string> {
   const { randomUUID } = await import("node:crypto");
   const id = randomUUID();
@@ -624,6 +655,7 @@ async function insertRawEvent(
     threadId,
     eventSequence: sequence,
     eventType,
+    turnId,
     schemaVersion: 1,
     actorType: "system",
     payloadJson: payload,

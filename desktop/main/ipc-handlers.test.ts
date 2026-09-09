@@ -8,6 +8,9 @@
  * - Bridge getState/connect/disconnect/onStateChange 无条件注册并动态读取 lifecycle
  * - cancelAi 动态读取 lifecycle 当前 client
  */
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesktopCapabilities } from "../../lib/desktop/capabilities";
 import { DESKTOP_CAPABILITY_VERSION, DESKTOP_IPC_CHANNELS } from "../../lib/desktop/capabilities";
@@ -25,6 +28,22 @@ interface FakeBridgeClient {
 }
 
 const instances: FakeBridgeClient[] = [];
+
+const electronMocks = vi.hoisted(() => ({
+  showOpenDialog: vi.fn(),
+  fromWebContents: vi.fn(() => null),
+  getFocusedWindow: vi.fn(() => null),
+  openExternal: vi.fn(),
+}));
+
+vi.mock("electron", () => ({
+  BrowserWindow: {
+    fromWebContents: electronMocks.fromWebContents,
+    getFocusedWindow: electronMocks.getFocusedWindow,
+  },
+  dialog: { showOpenDialog: electronMocks.showOpenDialog },
+  shell: { openExternal: electronMocks.openExternal },
+}));
 
 const mockBridgeClient = vi.hoisted(() => ({
   BridgeClient: class {
@@ -425,5 +444,76 @@ describe("registerIpcHandlers (Bridge channel 无条件注册 + 动态读取)", 
 
     const reg = await ipc.invoke("desktop:device:getRegistration");
     expect(reg).toEqual(makeRegistrationPayload());
+  });
+});
+
+describe("registerIpcHandlers (本地目录选择)", () => {
+  let selectedDirectory: string | null = null;
+
+  afterEach(async () => {
+    vi.clearAllMocks();
+    if (selectedDirectory) {
+      await rm(selectedDirectory, { recursive: true, force: true });
+      selectedDirectory = null;
+    }
+  });
+
+  it("仅向 renderer 返回逻辑标识和目录名，绝对路径只写入本机存储", async () => {
+    selectedDirectory = await mkdtemp(join(tmpdir(), "snowharness-workspace-"));
+    const canonicalPath = await realpath(selectedDirectory);
+    electronMocks.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [selectedDirectory],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        ok: true,
+        data: {
+          workspace_id: "workspace-1",
+          binding_id: "binding-1",
+          display_name: "工作目录",
+        },
+      }),
+    );
+    const workspaceRoots = { upsert: vi.fn() };
+    const lifecycle = new DesktopBridgeLifecycle(makeIdentity(TID), {
+      serverUrl: "ws://localhost:3002",
+      deviceName: "test-host",
+      deviceVersion: "1.0.0",
+      commandTarget,
+      actionTarget,
+    });
+    const ipc = makeIpcMain();
+    registerIpcHandlers(
+      ipc,
+      capabilities,
+      makeRegistrationPayload(),
+      lifecycle,
+      makeKeychain(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      workspaceRoots as never,
+    );
+
+    const result = await ipc.invoke("desktop:workspace:selectDirectory", makeEvent(fetchImpl));
+
+    expect(result).toEqual({
+      ok: true,
+      workspaceId: "workspace-1",
+      bindingId: "binding-1",
+      displayName: "工作目录",
+    });
+    expect(workspaceRoots.upsert).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      bindingId: "binding-1",
+      absolutePath: canonicalPath,
+      displayName: "工作目录",
+    });
+    const [, init] = fetchImpl.mock.calls[0] as [string, { body: string }];
+    const requestBody = JSON.parse(init.body) as Record<string, unknown>;
+    expect(requestBody).not.toHaveProperty("absolute_path");
+    expect(JSON.stringify(result)).not.toContain(canonicalPath);
   });
 });

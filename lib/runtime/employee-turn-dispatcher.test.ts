@@ -15,6 +15,7 @@ import {
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { requestInterrupt } from "@/lib/conversations/interrupt-queries";
+import { requestPausedTurnResume } from "@/lib/conversations/pause-resume-queries";
 import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regenerate-queries";
 import { queueSteer } from "@/lib/conversations/steer-queries";
 import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
@@ -23,9 +24,14 @@ import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-que
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
+import { registerDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { invocationCommandTable, turnTable } from "@/lib/persistence/schema/conversation";
+import {
+  invocationCommandTable,
+  threadTable,
+  turnTable,
+} from "@/lib/persistence/schema/conversation";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
@@ -52,6 +58,7 @@ import {
   publishExternalRuntimeRevisionForTest,
   publishRuntimeRevisionForTest,
 } from "@/lib/test-support/publish-runtime-revision-for-test";
+import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -506,6 +513,96 @@ async function createExternalResumeCommand(params: {
 }
 
 describe("dispatchEmployeeTurn", () => {
+  it("桌面目录选择写入不可变 ExecutionBinding，不能静默退回 Cloud 模式", async () => {
+    const fixture = await seedReadyEmployeeTurn("desktop-workspace-binding");
+    await registerDevice({
+      tenantId: fixture.tenantId,
+      userId: fixture.ownerId,
+      deviceKey: "desktop-device-1",
+      publicKey: "public-key",
+      deviceName: "Mac",
+      appVersion: "1.0.0",
+    });
+    const workspace = await ensureDesktopWorkspace({
+      tenantId: fixture.tenantId,
+      userId: fixture.ownerId,
+      deviceKey: "desktop-device-1",
+      displayName: "snow_harness",
+      locationFingerprint: `sha256:${"b".repeat(64)}`,
+    });
+    await db
+      .update(threadTable)
+      .set({ defaultWorkspaceId: workspace.workspaceId })
+      .where(eq(threadTable.id, fixture.thread.id));
+
+    const result = await dispatchEmployeeTurn({
+      tenantId: fixture.tenantId,
+      threadId: fixture.thread.id,
+      turnId: fixture.turn.id,
+      executionSubject: {
+        tenantId: fixture.tenantId,
+        subjectType: "user",
+        subjectId: fixture.ownerId,
+      },
+    });
+
+    expect(result.dispatched).toBe(true);
+    const dispatchedTurn = await getTurnById(fixture.tenantId, fixture.turn.id);
+    const [binding] = await db
+      .select()
+      .from(executionBindingTable)
+      .where(eq(executionBindingTable.invocationId, dispatchedTurn?.activeInvocationId ?? ""))
+      .limit(1);
+    expect(binding?.workspaceBindingId).toBe(workspace.bindingId);
+  });
+
+  it("基础 Harness Route 缺失时把已接纳 Turn 明确收口为失败，不无限停在 accepted", async () => {
+    const tenant = await ensureDefaultTenant();
+    const owner = await upsertUserIdentity({
+      tenantId: tenant.id,
+      externalSubject: `no-route-${randomUUID()}`,
+      email: `no-route-${randomUUID()}@example.com`,
+      displayName: "No Route User",
+    });
+    const { thread } = await createThread({
+      tenantId: tenant.id,
+      ownerUserId: owner.id,
+      title: "无运行路由",
+      actorId: owner.id,
+    });
+    const { turn } = await acceptUserMessageTurn({
+      tenantId: tenant.id,
+      threadId: thread.id,
+      ownerUserId: owner.id,
+      content: { text: "你好" },
+      actorId: owner.id,
+    });
+
+    const result = await dispatchEmployeeTurn({
+      tenantId: tenant.id,
+      threadId: thread.id,
+      turnId: turn.id,
+      executionSubject: {
+        tenantId: tenant.id,
+        subjectType: "user",
+        subjectId: owner.id,
+      },
+    });
+
+    expect(result).toMatchObject({
+      dispatched: false,
+      reason: "no_effective_route",
+      turnState: "failed",
+      errorCode: "NO_EFFECTIVE_RUNTIME_ROUTE",
+    });
+    expect(await getTurnById(tenant.id, turn.id)).toMatchObject({
+      turnState: "failed",
+      activeInvocationId: null,
+      errorCode: "NO_EFFECTIVE_RUNTIME_ROUTE",
+      finishedAt: expect.any(Date),
+    });
+  });
+
   it("external_endpoint 真实发送 HTTP 并持久化会话能力，不启动 Hosted Loop", async () => {
     vi.stubEnv("SNOW_CONTROL_PLANE_PUBLIC_URL", "https://platform.example.test/base/");
     const { server, tenantId, ownerId, thread, turn } =
@@ -771,6 +868,66 @@ describe("dispatchEmployeeTurn", () => {
       actorId: fixture.ownerId,
     });
     expect(resume).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    expect(fixture.server.requests.map((request) => request.url)).toEqual([
+      `/runtime/v1/invocations/${invocationId}/resume`,
+    ]);
+  });
+
+  it("用户暂停后继续同一 Invocation，不新建 Turn 或 Regenerate", async () => {
+    const fixture = await seedReadyExternalEmployeeTurn("user-pause-resume");
+    await dispatchEmployeeTurn({
+      tenantId: fixture.tenantId,
+      threadId: fixture.thread.id,
+      turnId: fixture.turn.id,
+      executionSubject: {
+        tenantId: fixture.tenantId,
+        subjectType: "user",
+        subjectId: fixture.ownerId,
+      },
+    });
+    const running = await getTurnById(fixture.tenantId, fixture.turn.id);
+    const invocationId = running?.activeInvocationId;
+    if (!invocationId) throw new Error("缺少 active Invocation");
+    await db
+      .update(invocationTable)
+      .set({ executionState: "waiting_user", updatedAt: new Date() })
+      .where(eq(invocationTable.id, invocationId));
+    await db
+      .update(turnTable)
+      .set({ turnState: "waiting_user", errorCode: "USER_PAUSED", waitingAt: new Date() })
+      .where(eq(turnTable.id, fixture.turn.id));
+
+    const requested = await requestPausedTurnResume({
+      tenantId: fixture.tenantId,
+      ownerUserId: fixture.ownerId,
+      turnId: fixture.turn.id,
+      idempotencyKey: "user-pause-resume-command",
+    });
+    expect(await getTurnById(fixture.tenantId, fixture.turn.id)).toMatchObject({
+      turnState: "waiting_user",
+      activeInvocationId: invocationId,
+      errorCode: "USER_PAUSED",
+    });
+    fixture.server.requests.length = 0;
+    const resumed = await dispatchResumeCommandToRuntime({
+      tenantId: fixture.tenantId,
+      commandId: requested.command.id,
+      actorId: fixture.ownerId,
+    });
+
+    expect(requested).toMatchObject({ turnState: "waiting_user", resumeState: "requested" });
+    expect(await getTurnById(fixture.tenantId, fixture.turn.id)).toMatchObject({
+      turnState: "running",
+      activeInvocationId: invocationId,
+      errorCode: null,
+    });
+    expect(await getInvocationById(fixture.tenantId, invocationId)).toMatchObject({
+      executionState: "running",
+    });
+    expect(resumed).toMatchObject({
       dispatched: true,
       command: { commandState: "acknowledged" },
     });

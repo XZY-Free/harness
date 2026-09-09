@@ -77,15 +77,20 @@ export function createInProcessHostedRuntimeClient(params: {
     },
 
     async resumeInvocation(request: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
-      const result = await params.applicationService.resume({
-        tenantId: params.tenantId,
-        invocationId: request.invocationId,
-        idempotencyKey: request.idempotencyKey,
-        resumePayload: request.requestBody.resume_payload,
-      });
+      // Runtime 协议的 resume 响应是“已接受恢复”，不是“本次执行已经完成”。
+      // 先把后台 Promise 暴露给测试/观测，再立即 ack，让平台把 durable 状态推进到
+      // running；随后 Loop 的 execution.completed 才能按正常状态机收口。
+      lastLaunchPromise = params.applicationService
+        .resume({
+          tenantId: params.tenantId,
+          invocationId: request.invocationId,
+          idempotencyKey: request.idempotencyKey,
+          resumePayload: request.requestBody.resume_payload,
+        })
+        .then(() => undefined);
       return {
         invocation_id: request.invocationId,
-        resumed: result.status !== "handled_noop",
+        resumed: true,
         attempt_no: 1,
         requires_redispatch: false,
       };

@@ -88,13 +88,13 @@ function makeRunningTurn(cancelSupported: boolean) {
   } as const;
 }
 
-describe("ThreadInput Stop 按钮 capability 门禁（05 §10）", () => {
-  it("运行中 Turn 且 controls.cancel_supported=true → 渲染停止按钮", () => {
+describe("ThreadInput 暂停按钮 capability 门禁（05 §10）", () => {
+  it("运行中 Turn 且 controls.cancel_supported=true → 渲染暂停按钮", () => {
     stubModelsFetch();
     const { container } = render(
       <ThreadInput threadId="thread-1" latestTurn={makeRunningTurn(true)} availableAgents={[]} />,
     );
-    expect(container.querySelector('[aria-label="停止任务"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="暂停任务"]')).not.toBeNull();
   });
 
   it("controls.cancel_supported=false → 无可点击 Stop（不发送 interrupt API）", () => {
@@ -102,7 +102,80 @@ describe("ThreadInput Stop 按钮 capability 门禁（05 §10）", () => {
     const { container } = render(
       <ThreadInput threadId="thread-1" latestTurn={makeRunningTurn(false)} availableAgents={[]} />,
     );
-    expect(container.querySelector('[aria-label="停止任务"]')).toBeNull();
+    expect(container.querySelector('[aria-label="暂停任务"]')).toBeNull();
+  });
+
+  it("运行中输入内容后按钮恢复发送，消息进入 PendingInput 队列", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/models") {
+        return Response.json({ ok: true, data: { models: [], defaultModel: "test-model" } });
+      }
+      if (url.includes("/pending-inputs") && init?.method === "GET") {
+        return Response.json({ items: [], pending_queue_version_no: 1 });
+      }
+      if (url.includes("/pending-inputs") && init?.method === "POST") {
+        return Response.json({ id: "pending-1" }, { status: 201 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <ThreadInput threadId="thread-1" latestTurn={makeRunningTurn(true)} availableAgents={[]} />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "队列消息输入框" }), {
+      target: { value: "追加一条" },
+    });
+    expect(screen.queryByRole("button", { name: "暂停任务" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "加入队列" }));
+
+    await vi.waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            url === "/api/v1/threads/thread-1/pending-inputs" && init?.method === "POST",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("用户暂停后显示继续按钮，点击恢复原任务", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/models") {
+        return Response.json({ ok: true, data: { models: [], defaultModel: "test-model" } });
+      }
+      if (url.endsWith("/resume") && init?.method === "POST") {
+        return Response.json(
+          { turn_id: "turn-running", resume_state: "requested" },
+          { status: 202 },
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pausedTurn = {
+      ...makeRunningTurn(true),
+      turn_state: "waiting_user",
+      error_code: "USER_PAUSED",
+      controls: {
+        cancel_supported: false,
+        resume_supported: true,
+        steer_supported: false,
+      },
+    } as const;
+    render(<ThreadInput threadId="thread-1" latestTurn={pausedTurn} availableAgents={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "继续任务" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/turns/turn-running/resume",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await vi.waitFor(() => {
+      expect(screen.getByRole("button", { name: "已请求继续" })).toHaveProperty("disabled", true);
+    });
   });
 });
 

@@ -11,6 +11,7 @@ import {
 } from "@/lib/client/new-thread-session";
 import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
 import { getDesktopBridge, getDesktopCapabilities } from "@/lib/desktop/capabilities";
+import type { DesktopWorkspaceSelectionResult } from "@/lib/desktop/capabilities";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { parseDesktopRoute } from "../desktop-route";
 import { navigateDesktop, usePathname } from "../next-navigation";
@@ -36,6 +37,10 @@ function DesktopShell() {
   const [loadVersion, setLoadVersion] = useState(0);
   const [newThreadError, setNewThreadError] = useState<string | null>(null);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [workspace, setWorkspace] = useState<Extract<
+    DesktopWorkspaceSelectionResult,
+    { ok: true }
+  > | null>(null);
   const newThreadSession = useRef(createNewThreadSession()).current;
   const viewerId = shell?.viewer_id;
 
@@ -92,10 +97,11 @@ function DesktopShell() {
     text,
     agentId,
     modelRef,
+    workspaceId,
   }: ClientNewThreadSubmission): Promise<boolean> => {
     setNewThreadError(null);
     try {
-      const thread = await newThreadSession.submit({ text, agentId, modelRef });
+      const thread = await newThreadSession.submit({ text, agentId, modelRef, workspaceId });
 
       setShell((current) =>
         current
@@ -113,6 +119,23 @@ function DesktopShell() {
         submitError instanceof Error ? submitError.message : "发送失败，请稍后重试。",
       );
       return false;
+    }
+  };
+
+  const selectWorkspace = async () => {
+    setNewThreadError(null);
+    const bridge = getDesktopBridge();
+    if (!bridge?.workspace) {
+      setNewThreadError("当前桌面端版本不支持选择本地目录，请更新后重试。");
+      return;
+    }
+    const result = await bridge.workspace.selectDirectory();
+    if (result.ok) {
+      setWorkspace(result);
+      return;
+    }
+    if (result.code !== "cancelled") {
+      setNewThreadError(result.message ?? "无法使用这个目录，请重新选择。");
     }
   };
 
@@ -173,6 +196,9 @@ function DesktopShell() {
               viewerId={shell.viewer_id}
               workbenchOpen={workbenchOpen}
               onWorkbenchOpenChange={setWorkbenchOpen}
+              workspaceId={workspace?.workspaceId ?? null}
+              workspaceName={workspace?.displayName ?? null}
+              onWorkspaceSelect={() => void selectWorkspace()}
             />
           ) : (
             <ThreadPage

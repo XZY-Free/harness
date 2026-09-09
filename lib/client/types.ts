@@ -49,6 +49,8 @@ export interface ClientThreadShellResponse {
 export interface ClientNewThreadSubmission {
   readonly text: string;
   readonly modelRef: string | null;
+  /** Desktop 选择的逻辑 Workspace；null/undefined 表示使用 Cloud/无本地目录。 */
+  readonly workspaceId?: string | null;
   /**
    * 员工显式选择的 Agent id；只形成下一新 Turn 的 preferred directive，不写 Thread Agent。
    * null/undefined = 不带 agent_use，本 Turn 不继承上一 Turn。

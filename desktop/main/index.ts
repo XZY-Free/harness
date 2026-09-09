@@ -373,6 +373,7 @@ async function main(): Promise<void> {
     browserController,
     profileCleaner,
     updateManager,
+    desktopDatabase.workspaceRoots,
   );
 
   // 设置系统菜单

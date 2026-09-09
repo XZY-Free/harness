@@ -9,10 +9,10 @@
  * - 底部工具行：[＋] [助手选择器]（弹性空间）[模型选择器] [右下圆钮]
  *
  * W4-1 右下圆钮状态机（参考 codex 截图 3）：
- * - 运行中 + 输入框为空 → 黑色实心圆 + ■（点击 = interrupt，不弹确认）。
+ * - 运行中 + 输入框为空 → 蓝色实心圆 + ■（点击 = pause，不弹确认）。
  * - 运行中 + 输入框有文字 → Send 箭头（消息送进 PendingInput 队列）。
  * - 空闲 → Send 箭头（创建正式 Turn）。
- * - 已请求停止（lastInterrupt !== null）→ 圆钮禁用 + title 显示"已请求停止，等待 Runtime 确认"。
+ * - 已请求暂停（lastInterrupt !== null）→ 圆钮禁用，等待 Runtime 确认后切换为继续。
  *
  * W4-1 引导：PendingInputQueue 的 ↳ 引导 按钮调用本组件的 useTurnControls.steer，
  * 把排队消息升级为对当前 Turn 的即时引导；成功后 PendingInputQueue 自行从队列移除。
@@ -25,7 +25,7 @@ import { useTurnControls } from "@/components/hooks/use-turn-controls";
 import { Button } from "@/components/ui/button";
 import type { ClientPendingInput, ClientThread, ClientTurn } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
-import { Loader2, Send, Square, X } from "lucide-react";
+import { Folder, Loader2, Play, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type AgentOption,
@@ -53,6 +53,10 @@ interface ThreadInputProps {
   readonly currentModelRef?: string | null;
   /** 平台默认模型（shell.default_model_ref）；未显式选择时的即时展示。 */
   readonly defaultModelRef?: string;
+  /** Desktop 新会话的原生目录选择入口；Web 与已有会话不传。 */
+  readonly onWorkspaceSelect?: () => void;
+  /** 仅展示安全目录名，不向 renderer 暴露绝对路径。 */
+  readonly workspaceName?: string | null;
 }
 
 /** 从 PendingInput.input 提取可读文本，作为引导请求体。 */
@@ -73,6 +77,8 @@ export function ThreadInput({
   currentAgentId,
   currentModelRef,
   defaultModelRef,
+  onWorkspaceSelect,
+  workspaceName,
 }: ThreadInputProps) {
   // 选择器只做客户端预填；每次发送仍把当前选择显式写入新 Turn，
   // null 表示本 Turn 不带 directive，不建立 Thread 默认绑定。
@@ -106,6 +112,7 @@ export function ThreadInput({
   const {
     steer,
     interrupt,
+    resume,
     busy: turnBusy,
     error: turnError,
     lastInterrupt,
@@ -115,18 +122,28 @@ export function ThreadInput({
   // threadId 为 null 时仅新建页（必带 draftKey）会命中；调用方漏传时兜底到新建草稿键。
   const { text, setText, clear: clearDraft } = useThreadDraft(draftKey ?? threadId ?? "new-thread");
   const [customBusy, setCustomBusy] = useState(false);
+  const [resumeRequested, setResumeRequested] = useState(false);
   const sending = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const busy = threadBusy || customBusy || turnBusy;
   const isRunning = route === "pending_input";
-  // Stop 可用 = isRunning AND latestTurn.controls.cancel_supported
-  // （服务端 Binding 派生；cancel=false → 无可点击 Stop、不发送 interrupt API）。
+  const isPaused =
+    latestTurn?.turn_state === "waiting_user" && latestTurn.error_code === "USER_PAUSED";
+  // 暂停可用 = isRunning AND latestTurn.controls.cancel_supported
+  // （服务端 Binding 派生；cancel=false → 无可点击暂停、不发送 interrupt API）。
   const cancelSupported = latestTurn?.controls?.cancel_supported ?? false;
   // 新建页（onSubmitText）不暴露停止按钮；停止按钮仅对既有 Thread + 运行中 Turn 生效。
-  const stopAvailable = isRunning && !onSubmitText && turnId !== "" && cancelSupported;
+  const stopAvailable = isRunning && !isPaused && !onSubmitText && turnId !== "" && cancelSupported;
+  const resumeAvailable =
+    isPaused && !onSubmitText && turnId !== "" && (latestTurn?.controls?.resume_supported ?? false);
   const stopRequested = lastInterrupt !== null;
   // 运行中且输入框为空 → 显示停止按钮；否则显示发送按钮。
   const showStopButton = stopAvailable && !text.trim();
+  const showResumeButton = resumeAvailable && !text.trim();
+
+  useEffect(() => {
+    if (!isPaused) setResumeRequested(false);
+  }, [isPaused]);
 
   // textarea 自增高
   // biome-ignore lint/correctness/useExhaustiveDependencies: text 变化后必须重新测量 textarea 的 scrollHeight
@@ -164,10 +181,15 @@ export function ThreadInput({
     }
   };
 
-  /** 直接停止当前 Turn（无确认对话框）。 */
+  /** 暂停当前 Turn（无确认对话框）。 */
   const handleStop = async () => {
     if (busy || stopRequested) return;
-    await interrupt("user_requested_stop", true);
+    await interrupt("user_requested_pause", true);
+  };
+
+  const handleResume = async () => {
+    if (busy || resumeRequested) return;
+    if (await resume()) setResumeRequested(true);
   };
 
   /** 引导：把排队消息升级为对当前 Turn 的即时引导。 */
@@ -256,6 +278,26 @@ export function ThreadInput({
               disabled={busy || isRunning}
             />
 
+            {onWorkspaceSelect && (
+              <button
+                type="button"
+                onClick={onWorkspaceSelect}
+                disabled={busy}
+                aria-label={workspaceName ? `本地目录：${workspaceName}` : "选择本地目录"}
+                title={workspaceName ? `本地目录：${workspaceName}` : "选择本地目录"}
+                className={cn(
+                  "inline-flex h-[30px] min-w-0 max-w-[148px] shrink items-center gap-1.5 rounded-full border px-2.5 text-[13px] transition-[background-color,border-color,transform,color] duration-150 ease-out",
+                  "border-foreground/[0.055] bg-foreground/[0.018] text-muted-foreground hover:border-foreground/[0.08] hover:bg-foreground/[0.03] hover:text-foreground/82 active:scale-[0.985]",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/10 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+                )}
+              >
+                <Folder aria-hidden="true" className="size-[15px] shrink-0 stroke-[1.7]" />
+                <span className="truncate font-medium leading-none">
+                  {workspaceName ?? "选择文件夹"}
+                </span>
+              </button>
+            )}
+
             <div className="flex-1" />
 
             <ModelSelectorPopover
@@ -264,19 +306,34 @@ export function ThreadInput({
               onChange={onModelChange}
             />
 
-            {showStopButton ? (
-              // W4-1：运行中且输入框为空 → 停止按钮（codex 形态）。
-              // 直接 interrupt，不弹确认；已请求停止后禁用并显示加载态。
+            {showResumeButton ? (
+              <Button
+                type="button"
+                onClick={handleResume}
+                disabled={busy || resumeRequested}
+                size="icon-sm"
+                aria-label={resumeRequested ? "已请求继续" : "继续任务"}
+                title={resumeRequested ? "已请求继续，等待 Runtime 确认" : "继续任务"}
+                className="rounded-full bg-ring text-white hover:bg-ring/85"
+              >
+                {turnBusy || resumeRequested ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Play className="ml-px size-3.5 fill-current" />
+                )}
+              </Button>
+            ) : showStopButton ? (
+              // 运行中且输入框为空 → 暂停按钮；Runtime 确认后切换为继续按钮。
               <Button
                 type="button"
                 onClick={handleStop}
                 disabled={busy || stopRequested}
                 size="icon-sm"
-                aria-label={stopRequested ? "已请求停止" : "停止任务"}
-                title={stopRequested ? "已请求停止，等待 Runtime 确认" : "停止任务"}
-                className="rounded-full bg-foreground text-background hover:bg-foreground/80"
+                aria-label={stopRequested ? "已请求暂停" : "暂停任务"}
+                title={stopRequested ? "已请求暂停，等待 Runtime 确认" : "暂停任务"}
+                className="rounded-full bg-ring text-white hover:bg-ring/85"
               >
-                {turnBusy ? (
+                {turnBusy || stopRequested ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
                   <Square className="size-3.5 fill-current" />

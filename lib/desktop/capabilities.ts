@@ -39,6 +39,8 @@ export const DESKTOP_IPC_CHANNELS = [
   "desktop:device:getRegistration",
   /** renderer → main：发起设备注册（main 用 Electron Session fetch 同源注册端点） */
   "desktop:device:register",
+  /** renderer → main：选择并登记一个本地 Workspace 目录 */
+  "desktop:workspace:selectDirectory",
   /** renderer → main：创建 browser tab */
   "desktop:browser:createTab",
   /** renderer → main：关闭 browser tab */
@@ -181,6 +183,25 @@ export interface DesktopDeviceRegisterResult {
   code?: string;
   message?: string;
 }
+
+/** 原生目录选择并登记为 Workspace 的结果；不向 renderer 暴露绝对路径。 */
+export type DesktopWorkspaceSelectionResult =
+  | {
+      ok: true;
+      workspaceId: string;
+      bindingId: string;
+      displayName: string;
+    }
+  | {
+      ok: false;
+      code:
+        | "cancelled"
+        | "device_unavailable"
+        | "invalid_directory"
+        | "network_error"
+        | "server_error";
+      message?: string;
+    };
 
 // ─── 本地任务操作类型 ──────────────────────────────
 
@@ -351,6 +372,9 @@ export interface DesktopRendererBridge {
   device: {
     getRegistration(): Promise<DesktopDeviceRegistrationPayload>;
     register(): Promise<DesktopDeviceRegisterResult>;
+  };
+  workspace: {
+    selectDirectory(): Promise<DesktopWorkspaceSelectionResult>;
   };
   bridge: {
     getState(): Promise<string>;

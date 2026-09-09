@@ -19,6 +19,7 @@ import type {
   DesktopDeviceRegisterResult,
   DesktopDeviceRegistrationPayload,
   DesktopWindowFrameState,
+  DesktopWorkspaceSelectionResult,
 } from "../../lib/desktop/capabilities";
 import {
   DESKTOP_CAPABILITY_VERSION,
@@ -88,6 +89,12 @@ contextBridge.exposeInMainWorld("snowDesktop", {
     /** 发起设备注册（幂等；主进程用本机 Session fetch 同源注册端点）。 */
     register: (): Promise<DesktopDeviceRegisterResult> =>
       ipcRenderer.invoke("desktop:device:register"),
+  },
+
+  /** 本地 Workspace：绝对路径仅在主进程保存，renderer 只收到安全展示信息。 */
+  workspace: {
+    selectDirectory: (): Promise<DesktopWorkspaceSelectionResult> =>
+      ipcRenderer.invoke("desktop:workspace:selectDirectory"),
   },
 
   // Browser tab 操作
