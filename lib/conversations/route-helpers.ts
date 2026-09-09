@@ -5,6 +5,7 @@ import {
   PendingInputNotPendingError,
   PendingInputReorderConflictError,
   PendingInputVersionConflictError,
+  ThreadAttachmentUnavailableError,
   ThreadNotAcceptingTurnsError,
   ThreadNotFoundError,
   ThreadVersionConflictError,
@@ -186,6 +187,9 @@ export function etagMismatchTable(requestId: string, message: string): Response 
 export function conversationErrorToResponse(error: unknown, requestId: string): Response | null {
   if (error instanceof ThreadNotFoundError) {
     return resourceNotFound(requestId, `Thread 不存在或无权访问: ${error.threadId}`);
+  }
+  if (error instanceof ThreadAttachmentUnavailableError) {
+    return resourceNotFound(requestId, `附件不存在或无权访问: ${error.attachmentId}`);
   }
   if (error instanceof TurnNotFoundError) {
     return resourceNotFound(requestId, `Turn 不存在或无权访问: ${error.turnId}`);

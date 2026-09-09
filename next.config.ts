@@ -34,8 +34,7 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   // playwright 有原生依赖（调用 chromium 可执行文件），不能被 Turbopack/webpack 打包，
   // 否则 server 端 import("playwright") 会失败 → QA gate fail-closed。
-  // pdf-parse / officeparser 同理（运行时读取原生文件格式）。
-  serverExternalPackages: ["pdf-parse", "officeparser", "playwright"],
+  serverExternalPackages: ["playwright"],
   typescript: {
     // 部署构建时跳过类型检查（预存的路由类型错误不影响运行）
     ignoreBuildErrors: true,

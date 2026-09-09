@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "f1f5a6ba-4075-469a-9370-7cdd66ee1934",
+  "id": "ce9c6e9f-a741-4683-967d-971e107a18f3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -69,6 +69,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "storageProvider": {
+          "name": "storageProvider",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'binding'"
         },
         "contentRef": {
           "name": "contentRef",
@@ -141,6 +149,14 @@
           "columns": [
             "tenantId",
             "threadId"
+          ],
+          "isUnique": false
+        },
+        "RuntimeArtifact_tenant_provider_idx": {
+          "name": "RuntimeArtifact_tenant_provider_idx",
+          "columns": [
+            "tenantId",
+            "storageProvider"
           ],
           "isUnique": false
         },
@@ -7152,6 +7168,116 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
+    "AuthSession": {
+      "name": "AuthSession",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userIdentityId": {
+          "name": "userIdentityId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tokenHash": {
+          "name": "tokenHash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revokedAt": {
+          "name": "revokedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AuthSession_token_uq": {
+          "name": "AuthSession_token_uq",
+          "columns": [
+            "tokenHash"
+          ],
+          "isUnique": true
+        },
+        "AuthSession_user_expiry_idx": {
+          "name": "AuthSession_user_expiry_idx",
+          "columns": [
+            "tenantId",
+            "userIdentityId",
+            "expiresAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "AuthSession_tenantId_Tenant_id_fk": {
+          "name": "AuthSession_tenantId_Tenant_id_fk",
+          "tableFrom": "AuthSession",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "AuthSession_userIdentityId_UserIdentity_id_fk": {
+          "name": "AuthSession_userIdentityId_UserIdentity_id_fk",
+          "tableFrom": "AuthSession",
+          "tableTo": "UserIdentity",
+          "columnsFrom": [
+            "userIdentityId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AuthSession_id": {
+          "name": "AuthSession_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "EnterpriseProfileSyncState": {
       "name": "EnterpriseProfileSyncState",
       "columns": {
@@ -7246,6 +7372,137 @@
       "compositePrimaryKeys": {
         "EnterpriseProfileSyncState_id": {
           "name": "EnterpriseProfileSyncState_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "LocalCredential": {
+      "name": "LocalCredential",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userIdentityId": {
+          "name": "userIdentityId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "normalizedEmail": {
+          "name": "normalizedEmail",
+          "type": "varchar(254)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "passwordHash": {
+          "name": "passwordHash",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "failedLoginCount": {
+          "name": "failedLoginCount",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "lockedUntil": {
+          "name": "lockedUntil",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "passwordChangedAt": {
+          "name": "passwordChangedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "LocalCredential_tenant_email_uq": {
+          "name": "LocalCredential_tenant_email_uq",
+          "columns": [
+            "tenantId",
+            "normalizedEmail"
+          ],
+          "isUnique": true
+        },
+        "LocalCredential_user_uq": {
+          "name": "LocalCredential_user_uq",
+          "columns": [
+            "userIdentityId"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "LocalCredential_tenantId_Tenant_id_fk": {
+          "name": "LocalCredential_tenantId_Tenant_id_fk",
+          "tableFrom": "LocalCredential",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "LocalCredential_userIdentityId_UserIdentity_id_fk": {
+          "name": "LocalCredential_userIdentityId_UserIdentity_id_fk",
+          "tableFrom": "LocalCredential",
+          "tableTo": "UserIdentity",
+          "columnsFrom": [
+            "userIdentityId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "LocalCredential_id": {
+          "name": "LocalCredential_id",
           "columns": [
             "id"
           ]
@@ -7558,7 +7815,7 @@
       "checkConstraint": {
         "UserExtensionAttribute_value_slot_ck": {
           "name": "UserExtensionAttribute_value_slot_ck",
-          "value": "(\n        (valueType = 'string' AND stringValue IS NOT NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NULL)\n        OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)\n        OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)\n        OR (valueType = 'json' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NOT NULL)\n      "
+          "value": "(\n        (valueType = 'string' AND stringValue IS NOT NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NULL)\n        OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)\n        OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)\n        OR (valueType = 'json' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NOT NULL)\n      )"
         }
       }
     },
@@ -17467,8 +17724,16 @@
           "name": "workspaceBindingId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
+        },
+        "storageProvider": {
+          "name": "storageProvider",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'binding'"
         },
         "resourceType": {
           "name": "resourceType",
@@ -17494,6 +17759,27 @@
         "displayRef": {
           "name": "displayRef",
           "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "originalFilename": {
+          "name": "originalFilename",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "contentType": {
+          "name": "contentType",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sizeBytes": {
+          "name": "sizeBytes",
+          "type": "int unsigned",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -17574,6 +17860,14 @@
             "attachmentState"
           ],
           "isUnique": false
+        },
+        "WorkspaceAttachment_tenant_provider_idx": {
+          "name": "WorkspaceAttachment_tenant_provider_idx",
+          "columns": [
+            "tenantId",
+            "storageProvider"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -17620,6 +17914,137 @@
       "compositePrimaryKeys": {
         "WorkspaceAttachment_id": {
           "name": "WorkspaceAttachment_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "WorkspaceAttachmentAccessGrant": {
+      "name": "WorkspaceAttachmentAccessGrant",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspaceAttachmentId": {
+          "name": "workspaceAttachmentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "turnId": {
+          "name": "turnId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocationId": {
+          "name": "invocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentCallId": {
+          "name": "agentCallId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "issuedAt": {
+          "name": "issuedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revokedAt": {
+          "name": "revokedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "WorkspaceAttachmentAccessGrant_call_attachment_uq": {
+          "name": "WorkspaceAttachmentAccessGrant_call_attachment_uq",
+          "columns": [
+            "agentCallId",
+            "workspaceAttachmentId"
+          ],
+          "isUnique": true
+        },
+        "WorkspaceAttachmentAccessGrant_tenant_expiry_idx": {
+          "name": "WorkspaceAttachmentAccessGrant_tenant_expiry_idx",
+          "columns": [
+            "tenantId",
+            "expiresAt"
+          ],
+          "isUnique": false
+        },
+        "WorkspaceAttachmentAccessGrant_attachment_idx": {
+          "name": "WorkspaceAttachmentAccessGrant_attachment_idx",
+          "columns": [
+            "workspaceAttachmentId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "WorkspaceAttachmentAccessGrant_tenantId_Tenant_id_fk": {
+          "name": "WorkspaceAttachmentAccessGrant_tenantId_Tenant_id_fk",
+          "tableFrom": "WorkspaceAttachmentAccessGrant",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "WorkspaceAttachmentAccessGrant_attachment_fk": {
+          "name": "WorkspaceAttachmentAccessGrant_attachment_fk",
+          "tableFrom": "WorkspaceAttachmentAccessGrant",
+          "tableTo": "WorkspaceAttachment",
+          "columnsFrom": [
+            "workspaceAttachmentId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "WorkspaceAttachmentAccessGrant_id": {
+          "name": "WorkspaceAttachmentAccessGrant_id",
           "columns": [
             "id"
           ]

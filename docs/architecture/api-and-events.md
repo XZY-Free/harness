@@ -447,7 +447,75 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_source/forks' \
 
 Fork 复制或引用会话内容边界，不默认复制文件系统。`checkpoint_copy` 只有 Environment 支持并且用户有权时可用。
 
-### 3.11 附加 Workspace 资源
+### 3.11 上传 Thread 原文件
+
+`POST /api/v1/threads/{thread_id}/attachments`
+
+| 请求参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---:|---|
+| thread_id | Path | string | 是 | 当前员工拥有的 Thread id |
+| Idempotency-Key | Header | string | 是 | 同一文件上传重试使用相同键；不同文件不得复用 |
+| file | Form | binary | 是 | 原文件；图片上限 10 MB，当前允许的文档上限 20 MB |
+
+```bash
+curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../attachments' \
+  -H 'Authorization: Bearer <employee-token>' \
+  -H 'Idempotency-Key: upload-medical-proof-01' \
+  -F 'file=@病假证明.pdf;type=application/pdf'
+```
+
+```json
+{
+  "kind": "attachment",
+  "attachment_id": "6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
+  "url": "/api/v1/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
+  "filename": "病假证明.pdf",
+  "size": 48231,
+  "type": "application/pdf"
+}
+```
+
+上传接口只保存原始字节，不解析 PDF、Word、Excel 或文本。服务端先校验当前员工是 Thread owner，再调用当前部署唯一的 `FileStorageProvider`，并登记大小、MIME、Provider 和 SHA-256；元数据事务失败时删除刚保存的字节。客户端只得到平台 attachment id 和读取地址，不能得到本地路径或 COS key。
+
+### 3.11.1 读取 Thread 原文件
+
+`GET /api/v1/threads/{thread_id}/attachments/{attachment_id}`
+
+| 请求参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---:|---|
+| thread_id | Path | string | 是 | 当前员工拥有的 Thread id |
+| attachment_id | Path | string | 是 | 已登记的原文件 id |
+
+```bash
+curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166' \
+  -H 'Authorization: Bearer <employee-token>' \
+  -o '病假证明.pdf'
+```
+
+成功响应：`application/octet-stream`
+
+返回原始二进制文件。服务端重新校验用户、Thread、Attachment 状态、有效期、Provider、字节数和 SHA-256，响应强制下载，并使用 `private, no-store` 与 `nosniff`，避免 HTML 等用户文件在 SnowHarness 同源执行。
+
+### 3.12 读取 Thread 最终产物
+
+`GET /api/v1/threads/{thread_id}/artifacts/{artifact_id}`
+
+| 请求参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---:|---|
+| thread_id | Path | string | 是 | 当前员工拥有的 Thread id |
+| artifact_id | Path | string | 是 | AI/Tool 已登记的最终产物 id |
+
+```bash
+curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../artifacts/54ad86f1-59e5-47c3-a55c-3278613a0e92' \
+  -H 'Authorization: Bearer <employee-token>' \
+  -o '月报.xlsx'
+```
+
+成功响应：`application/octet-stream`
+
+返回当前 `FileStorageProvider` 保存的原始二进制内容；校验规则与 Attachment 读取一致。Artifact 是 AI/Tool 输出记录，WorkspaceAttachment 是用户输入记录，两者共用 Provider 但不混用业务表。
+
+### 3.13 附加 Workspace 资源
 
 `POST /api/v1/threads/{thread_id}/workspace-attachments`
 
@@ -486,7 +554,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../workspace-attac
 
 服务端校验 Binding.device_id 与签名设备；响应只返回安全展示引用。Runtime 通过短期 attachment handle 使用资源，不能把 Desktop 绝对路径交给 Cloud Runtime。
 
-### 3.12 移除 Workspace Attachment
+### 3.14 移除 Workspace Attachment
 
 `DELETE /api/v1/workspace-attachments/{attachment_id}`
 
@@ -511,7 +579,7 @@ curl -X DELETE 'https://snow.example.com/api/v1/workspace-attachments/watt_01J..
 
 移除只阻止后续 Invocation 取得新 handle，不撤销已开始 Invocation 的 ExecutionBinding，也不删除用户原文件。
 
-### 3.13 查询 PendingInput
+### 3.15 查询 PendingInput
 
 `GET /api/v1/threads/{thread_id}/pending-inputs`
 
@@ -536,7 +604,7 @@ curl 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs' \
 
 Desktop/Web 恢复 Thread 时读取该列表；admitted 和 removed 输入不返回。
 
-### 3.14 创建 PendingInput
+### 3.16 创建 PendingInput
 
 `POST /api/v1/threads/{thread_id}/pending-inputs`
 
@@ -568,7 +636,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs'
 
 创建队列输入不生成 user_message Item，也不自动中断当前 Turn。
 
-### 3.15 编辑 PendingInput
+### 3.17 编辑 PendingInput
 
 `PATCH /api/v1/pending-inputs/{pending_input_id}`
 
@@ -598,7 +666,7 @@ curl -X PATCH 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 
 输入已经 admitted 时返回 409，不能修改已进入 Turn 的 user_message 或 user_guidance Item。
 
-### 3.16 重排 PendingInput
+### 3.18 重排 PendingInput
 
 `POST /api/v1/threads/{thread_id}/pending-inputs/reorder`
 
@@ -632,7 +700,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs/
 
 列表不完整、包含非 pending 输入或并发状态改变时返回 409，客户端重新拉取队列。
 
-### 3.17 删除 PendingInput
+### 3.19 删除 PendingInput
 
 `DELETE /api/v1/pending-inputs/{pending_input_id}`
 
@@ -658,7 +726,7 @@ curl -X DELETE 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 
 删除表示从队列移除，不生成 user_message Item。已 admitted 的输入返回 409。
 
-### 3.18 解析用户操作请求
+### 3.20 解析用户操作请求
 
 `POST /api/v1/user-action-requests/{request_id}/resolve`
 
@@ -691,7 +759,7 @@ curl -X POST 'https://snow.example.com/api/v1/user-action-requests/uar_01J...:re
 
 请求只能解析一次。confirmation 仅接受 approve/deny，grant 仅接受 approve/deny 且 Scope 不得扩大，input 仅接受 submit/cancel 并按 input_schema 校验；auth 成功只能来自下述受信回调，本接口不能由客户端自报 completed。解析事务同时写入持久 resume command；Runtime 确认后才追加 `turn.resumed / invocation.resumed` 并进入 running。`block` 的 PermissionDecision 不创建可绕过的 approve 请求。
 
-### 3.19 完成 Auth 回调
+### 3.21 完成 Auth 回调
 
 `GET /api/v1/user-action-requests/{request_id}/auth/callback`
 
@@ -1099,9 +1167,30 @@ curl -X POST 'https://snow.example.com/gateway/v1/artifacts' \
 }
 ```
 
-Artifact 内容进入对象存储；Turn Invocation 可创建 Artifact Item 并追加 ThreadEvent，Job Invocation 只记录 Artifact 与 JobEvent。显式发布到某个 Turn 时新建 job_result_projection 和 job_result Item，不改挂 Job Artifact。响应中的 `event_ref.stream_type` 为 thread 或 job。Desktop 原地修改的用户文件不强制上传为 Artifact，改用 FileChange + WorkspaceBinding 引用。
+Artifact 内容进入当前部署的 `FileStorageProvider`；Turn Invocation 可创建 Artifact Item 并追加 ThreadEvent，Job Invocation 只记录 Artifact 与 JobEvent。显式发布到某个 Turn 时新建 job_result_projection 和 job_result Item，不改挂 Job Artifact。响应中的 `event_ref.stream_type` 为 thread 或 job。Desktop 原地修改的用户文件不强制上传为 Artifact，改用 FileChange + WorkspaceBinding 引用。
 
-### 5.4 查询上下文
+### 5.4 解析 Agent 短期附件引用
+
+`POST /gateway/v1/attachments/resolve`
+
+| 请求参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---:|---|
+| reference_id | Body | UUID | 是 | SnowHarness 为当前 AgentCall 与 Turn 附件签发的短期 capability（能力凭证） |
+
+```bash
+curl -X POST 'https://snow.example.com/gateway/v1/attachments/resolve' \
+  -H 'Content-Type: application/json' \
+  -d '{"reference_id":"123e4567-e89b-12d3-a456-426614174000"}' \
+  -o '授权附件.pdf'
+```
+
+成功响应：`application/octet-stream`
+
+响应正文是原始二进制文件，不返回 JSON。reference id 本身是短期随机 bearer capability，不包含 Attachment id、本地路径、COS key 或凭据；最多有效 5 分钟，并同时绑定 Turn、Invocation 和 AgentCall。读取时再次核对授权未撤销、调用未取消、附件仍属于该 Turn、有效期、Provider、大小和 SHA-256。未知、过期或越权引用统一返回 404；当前部署无法解释记录中的 Provider 返回 503。
+
+HR Agent 取得原始字节后自行完成业务解析；只有请假业务需要时才把字节上传 Gaia。该接口不会把 Gaia 当成 SnowHarness 文件存储。
+
+### 5.5 查询上下文
 
 `POST /gateway/v1/context/query`
 
@@ -1132,7 +1221,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
 
 查询结果受当前用户、Agent、Workspace、Policy 和数据分类共同限制；Runtime 不能枚举另一个 Invocation 的 Context。
 
-### 5.5 发起用户操作请求
+### 5.6 发起用户操作请求
 
 `POST /gateway/v1/user-action-requests`
 

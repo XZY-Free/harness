@@ -13,9 +13,9 @@
  * - Artifact（本表）：运行时产物（ToolCall/Job 生成的 Excel、报告、图片等）。
  *
  * 关键不变量：
- * - 大内容进入对象存储或原 Workspace，表中只保存受控引用（contentRef）和 hash（contentHash）。
- * - contentRef 必须是受管对象引用（s3:// / oci:// / gs:// / file://internal/...），
- * 不接受公网 http(s):// URL。
+ * - 文件字节进入当前部署装配的 FileStorageProvider，表中只保存 Provider 名、受控引用
+ * （contentRef）和 hash（contentHash）。
+ * - contentRef 是仅由 storageProvider 解释的内部引用，不接受公网 http(s):// URL。
  * - contentHash 必须是 sha256:<64-hex> 格式（不接受可变 tag）。
  * - 非空 itemId 必须唯一（员工可见 Artifact Item 一对一）。
  * - 会话产物（threadId/turnId 非空）与 Job 产物（jobId 非空）互斥，不可同时填写。
@@ -100,7 +100,9 @@ export const artifactTable = mysqlTable(
     artifactType: varchar("artifactType", { length: 32 }).notNull(),
     /** 员工可见文件名。 */
     displayName: varchar("displayName", { length: 256 }).notNull(),
-    /** 受管对象存储引用（s3:// / oci:// / gs:// / file://internal/...；不接受公网 URL）。 */
+    /** 解释 contentRef 的唯一文件存储提供器。 */
+    storageProvider: varchar("storageProvider", { length: 64 }).notNull().default("binding"),
+    /** 仅由 storageProvider 解释的受管引用；不接受公网 URL。 */
     contentRef: varchar("contentRef", { length: 512 }).notNull(),
     /** MIME type。 */
     mediaType: varchar("mediaType", { length: 128 }).notNull(),
@@ -123,6 +125,10 @@ export const artifactTable = mysqlTable(
       t.invocationId,
     ),
     tenantThreadIdx: index("RuntimeArtifact_tenant_thread_idx").on(t.tenantId, t.threadId),
+    tenantProviderIdx: index("RuntimeArtifact_tenant_provider_idx").on(
+      t.tenantId,
+      t.storageProvider,
+    ),
     tenantJobIdx: index("RuntimeArtifact_tenant_job_idx").on(t.tenantId, t.jobId),
     tenantExpiresIdx: index("RuntimeArtifact_tenant_expires_idx").on(t.tenantId, t.expiresAt),
   }),

@@ -95,6 +95,15 @@ describe("gitAdd / gitCommit", () => {
     expect(res.commitSha).toBeUndefined();
   });
 
+  it("默认暂存排除 SnowHarness 内部文件", async () => {
+    writeFile("app.js", "console.log('ok')");
+    writeFile(".snow/files/attachment/private/content", "private bytes");
+
+    await gitAdd(TID);
+
+    expect(gitCli(["diff", "--cached", "--name-only"]).split("\n")).toEqual(["app.js"]);
+  });
+
   it("gitDiff 限长 truncated（已跟踪文件的大改动）", async () => {
     writeFile("big.txt", "seed");
     await gitAdd(TID);

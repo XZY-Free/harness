@@ -8,6 +8,7 @@ CREATE TABLE `RuntimeArtifact` (
 	`itemId` varchar(36),
 	`artifactType` varchar(32) NOT NULL,
 	`displayName` varchar(256) NOT NULL,
+	`storageProvider` varchar(64) NOT NULL DEFAULT 'binding',
 	`contentRef` varchar(512) NOT NULL,
 	`mediaType` varchar(128) NOT NULL,
 	`byteSize` bigint NOT NULL,
@@ -852,6 +853,48 @@ CREATE TABLE `IdempotencyRecord` (
 	CONSTRAINT `IdempotencyRecord_tenant_audience_caller_scope_key_uq` UNIQUE(`tenantId`,`audience`,`callerType`,`callerId`,`commandScope`,`idempotencyKey`)
 );
 --> statement-breakpoint
+CREATE TABLE `AuthSession` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`userIdentityId` varchar(36) NOT NULL,
+	`tokenHash` varchar(64) NOT NULL,
+	`expiresAt` datetime(3) NOT NULL,
+	`revokedAt` datetime(3),
+	`createdAt` datetime(3) NOT NULL,
+	CONSTRAINT `AuthSession_id` PRIMARY KEY(`id`),
+	CONSTRAINT `AuthSession_token_uq` UNIQUE(`tokenHash`)
+);
+--> statement-breakpoint
+CREATE TABLE `EnterpriseProfileSyncState` (
+	`id` varchar(36) NOT NULL,
+	`userIdentityId` varchar(36) NOT NULL,
+	`profileFingerprint` varchar(72) NOT NULL,
+	`lastVerifiedAt` datetime(3) NOT NULL,
+	`freshUntil` datetime(3) NOT NULL,
+	`staleUntil` datetime(3) NOT NULL,
+	`lastSyncErrorCode` varchar(96),
+	`sourceSystem` varchar(128) NOT NULL,
+	`updatedAt` datetime(3) NOT NULL,
+	CONSTRAINT `EnterpriseProfileSyncState_id` PRIMARY KEY(`id`),
+	CONSTRAINT `EnterpriseProfileSyncState_user_uq` UNIQUE(`userIdentityId`)
+);
+--> statement-breakpoint
+CREATE TABLE `LocalCredential` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`userIdentityId` varchar(36) NOT NULL,
+	`normalizedEmail` varchar(254) NOT NULL,
+	`passwordHash` varchar(512) NOT NULL,
+	`failedLoginCount` int NOT NULL DEFAULT 0,
+	`lockedUntil` datetime(3),
+	`passwordChangedAt` datetime(3) NOT NULL,
+	`createdAt` datetime(3) NOT NULL,
+	`updatedAt` datetime(3) NOT NULL,
+	CONSTRAINT `LocalCredential_id` PRIMARY KEY(`id`),
+	CONSTRAINT `LocalCredential_tenant_email_uq` UNIQUE(`tenantId`,`normalizedEmail`),
+	CONSTRAINT `LocalCredential_user_uq` UNIQUE(`userIdentityId`)
+);
+--> statement-breakpoint
 CREATE TABLE `PrincipalBinding` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
@@ -876,33 +919,6 @@ CREATE TABLE `Tenant` (
 	CONSTRAINT `Tenant_key_uq` UNIQUE(`key`)
 );
 --> statement-breakpoint
-CREATE TABLE `UserIdentity` (
-	`id` varchar(36) NOT NULL,
-	`tenantId` varchar(36) NOT NULL,
-	`externalSubject` varchar(128) NOT NULL,
-	`email` varchar(128) NOT NULL,
-	`displayName` text,
-	`status` enum('active','disabled') NOT NULL DEFAULT 'active',
-	`createdAt` datetime NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	CONSTRAINT `UserIdentity_id` PRIMARY KEY(`id`),
-	CONSTRAINT `UserIdentity_tenant_subject_uq` UNIQUE(`tenantId`,`externalSubject`)
-);
---> statement-breakpoint
-CREATE TABLE `EnterpriseProfileSyncState` (
-	`id` varchar(36) NOT NULL,
-	`userIdentityId` varchar(36) NOT NULL,
-	`profileFingerprint` varchar(72) NOT NULL,
-	`lastVerifiedAt` datetime(3) NOT NULL,
-	`freshUntil` datetime(3) NOT NULL,
-	`staleUntil` datetime(3) NOT NULL,
-	`lastSyncErrorCode` varchar(96),
-	`sourceSystem` varchar(128) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	CONSTRAINT `EnterpriseProfileSyncState_id` PRIMARY KEY(`id`),
-	CONSTRAINT `EnterpriseProfileSyncState_user_uq` UNIQUE(`userIdentityId`)
-);
---> statement-breakpoint
 CREATE TABLE `UserExtensionAttribute` (
 	`id` varchar(36) NOT NULL,
 	`userIdentityId` varchar(36) NOT NULL,
@@ -916,7 +932,7 @@ CREATE TABLE `UserExtensionAttribute` (
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `UserExtensionAttribute_id` PRIMARY KEY(`id`),
 	CONSTRAINT `UserExtensionAttribute_user_key_uq` UNIQUE(`userIdentityId`,`attributeKey`),
-	CONSTRAINT `UserExtensionAttribute_value_slot_ck` CHECK ((
+	CONSTRAINT `UserExtensionAttribute_value_slot_ck` CHECK((
         (valueType = 'string' AND stringValue IS NOT NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NULL)
         OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)
         OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)
@@ -924,9 +940,19 @@ CREATE TABLE `UserExtensionAttribute` (
       ))
 );
 --> statement-breakpoint
-ALTER TABLE `EnterpriseProfileSyncState` ADD CONSTRAINT `EnterpriseProfileSyncState_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `UserExtensionAttribute` ADD CONSTRAINT `UserExtensionAttribute_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX `UserExtensionAttribute_user_idx` ON `UserExtensionAttribute` (`userIdentityId`);--> statement-breakpoint
+CREATE TABLE `UserIdentity` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`externalSubject` varchar(128) NOT NULL,
+	`email` varchar(128) NOT NULL,
+	`displayName` text,
+	`status` enum('active','disabled') NOT NULL DEFAULT 'active',
+	`createdAt` datetime NOT NULL,
+	`updatedAt` datetime(3) NOT NULL,
+	CONSTRAINT `UserIdentity_id` PRIMARY KEY(`id`),
+	CONSTRAINT `UserIdentity_tenant_subject_uq` UNIQUE(`tenantId`,`externalSubject`)
+);
+--> statement-breakpoint
 CREATE TABLE `JobCommand` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
@@ -2041,8 +2067,8 @@ CREATE TABLE `UserActionRequest` (
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `UserActionRequest_id` PRIMARY KEY(`id`),
 	CONSTRAINT `UserActionRequest_item_id_uq` UNIQUE(`itemId`),
-	CONSTRAINT `UserActionRequest_invocation_harnessAction_uq` UNIQUE(`invocationId`,`harnessActionId`),
-	CONSTRAINT `UserActionRequest_permissionDecision_id_uq` UNIQUE(`permissionDecisionId`)
+	CONSTRAINT `UserActionRequest_permissionDecision_id_uq` UNIQUE(`permissionDecisionId`),
+	CONSTRAINT `UserActionRequest_invocation_harnessAction_uq` UNIQUE(`invocationId`,`harnessActionId`)
 );
 --> statement-breakpoint
 CREATE TABLE `WorkloadTokenRevocation` (
@@ -2101,11 +2127,15 @@ CREATE TABLE `WorkspaceAttachment` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`threadId` varchar(36) NOT NULL,
-	`workspaceBindingId` varchar(36) NOT NULL,
+	`workspaceBindingId` varchar(36),
+	`storageProvider` varchar(64) NOT NULL DEFAULT 'binding',
 	`resourceType` enum('file','directory','archive','database_snapshot','external_ref') NOT NULL,
 	`resourceRef` varchar(512) NOT NULL,
 	`resourceFingerprint` varchar(128),
 	`displayRef` varchar(256),
+	`originalFilename` varchar(512),
+	`contentType` varchar(255),
+	`sizeBytes` int unsigned,
 	`accessMode` enum('read','read_write') NOT NULL DEFAULT 'read',
 	`attachmentState` enum('attached','detached','expired') NOT NULL DEFAULT 'attached',
 	`attachedBy` varchar(128) NOT NULL,
@@ -2114,6 +2144,20 @@ CREATE TABLE `WorkspaceAttachment` (
 	`updatedAt` datetime(3) NOT NULL,
 	`expiresAt` datetime(3),
 	CONSTRAINT `WorkspaceAttachment_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `WorkspaceAttachmentAccessGrant` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`workspaceAttachmentId` varchar(36) NOT NULL,
+	`turnId` varchar(36) NOT NULL,
+	`invocationId` varchar(36) NOT NULL,
+	`agentCallId` varchar(36) NOT NULL,
+	`issuedAt` datetime(3) NOT NULL,
+	`expiresAt` datetime(3) NOT NULL,
+	`revokedAt` datetime(3),
+	CONSTRAINT `WorkspaceAttachmentAccessGrant_id` PRIMARY KEY(`id`),
+	CONSTRAINT `WorkspaceAttachmentAccessGrant_call_attachment_uq` UNIQUE(`agentCallId`,`workspaceAttachmentId`)
 );
 --> statement-breakpoint
 CREATE TABLE `WorkspaceAttachmentUse` (
@@ -2598,8 +2642,14 @@ ALTER TABLE `FilesystemCheckpoint` ADD CONSTRAINT `FilesystemCheckpoint_workspac
 ALTER TABLE `GovernanceConfigRevision` ADD CONSTRAINT `GovernanceConfigRevision_configSetId_GovernanceConfigSet_id_fk` FOREIGN KEY (`configSetId`) REFERENCES `GovernanceConfigSet`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `GovernanceConfigSet` ADD CONSTRAINT `GovernanceConfigSet_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IdempotencyRecord` ADD CONSTRAINT `IdempotencyRecord_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AuthSession` ADD CONSTRAINT `AuthSession_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AuthSession` ADD CONSTRAINT `AuthSession_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnterpriseProfileSyncState` ADD CONSTRAINT `EnterpriseProfileSyncState_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `LocalCredential` ADD CONSTRAINT `LocalCredential_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `LocalCredential` ADD CONSTRAINT `LocalCredential_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `PrincipalBinding` ADD CONSTRAINT `PrincipalBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `PrincipalBinding` ADD CONSTRAINT `PrincipalBinding_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `UserExtensionAttribute` ADD CONSTRAINT `UserExtensionAttribute_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `UserIdentity` ADD CONSTRAINT `UserIdentity_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `JobCommand` ADD CONSTRAINT `JobCommand_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `JobEvent` ADD CONSTRAINT `JobEvent_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2679,6 +2729,8 @@ ALTER TABLE `Workspace` ADD CONSTRAINT `Workspace_tenantId_Tenant_id_fk` FOREIGN
 ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_workspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `WorkspaceAttachmentAccessGrant` ADD CONSTRAINT `WorkspaceAttachmentAccessGrant_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `WorkspaceAttachmentAccessGrant` ADD CONSTRAINT `WorkspaceAttachmentAccessGrant_attachment_fk` FOREIGN KEY (`workspaceAttachmentId`) REFERENCES `WorkspaceAttachment`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachmentUse` ADD CONSTRAINT `WorkspaceAttachmentUse_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachmentUse` ADD CONSTRAINT `WorkspaceAttachmentUse_workspaceAttachmentId_WorkspaceAttach5f4d` FOREIGN KEY (`workspaceAttachmentId`) REFERENCES `WorkspaceAttachment`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2690,6 +2742,7 @@ ALTER TABLE `WithdrawalRecord` ADD CONSTRAINT `WithdrawalRecord_publicationRecor
 ALTER TABLE `RuntimeConformanceCaseResult` ADD CONSTRAINT `RuntimeConformanceCaseResult_runId_RuntimeConformanceRun_id_fk` FOREIGN KEY (`runId`) REFERENCES `RuntimeConformanceRun`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX `RuntimeArtifact_tenant_invocation_idx` ON `RuntimeArtifact` (`tenantId`,`invocationId`);--> statement-breakpoint
 CREATE INDEX `RuntimeArtifact_tenant_thread_idx` ON `RuntimeArtifact` (`tenantId`,`threadId`);--> statement-breakpoint
+CREATE INDEX `RuntimeArtifact_tenant_provider_idx` ON `RuntimeArtifact` (`tenantId`,`storageProvider`);--> statement-breakpoint
 CREATE INDEX `RuntimeArtifact_tenant_job_idx` ON `RuntimeArtifact` (`tenantId`,`jobId`);--> statement-breakpoint
 CREATE INDEX `RuntimeArtifact_tenant_expires_idx` ON `RuntimeArtifact` (`tenantId`,`expiresAt`);--> statement-breakpoint
 CREATE INDEX `tenant_status_idx` ON `admin_export` (`tenant_id`,`status`);--> statement-breakpoint
@@ -2779,7 +2832,9 @@ CREATE INDEX `FilesystemCheckpoint_tenant_expires_idx` ON `FilesystemCheckpoint`
 CREATE INDEX `GovernanceConfigRevision_set_state_idx` ON `GovernanceConfigRevision` (`configSetId`,`revisionState`);--> statement-breakpoint
 CREATE INDEX `GovernanceConfigSet_tenant_lifecycle_updated_idx` ON `GovernanceConfigSet` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
 CREATE INDEX `IdempotencyRecord_tenant_expires_idx` ON `IdempotencyRecord` (`tenantId`,`expiresAt`);--> statement-breakpoint
+CREATE INDEX `AuthSession_user_expiry_idx` ON `AuthSession` (`tenantId`,`userIdentityId`,`expiresAt`);--> statement-breakpoint
 CREATE INDEX `PrincipalBinding_tenant_user_idx` ON `PrincipalBinding` (`tenantId`,`userIdentityId`);--> statement-breakpoint
+CREATE INDEX `UserExtensionAttribute_user_idx` ON `UserExtensionAttribute` (`userIdentityId`);--> statement-breakpoint
 CREATE INDEX `UserIdentity_tenant_email_idx` ON `UserIdentity` (`tenantId`,`email`);--> statement-breakpoint
 CREATE INDEX `JobCommand_tenant_job_state_idx` ON `JobCommand` (`tenantId`,`jobId`,`commandState`);--> statement-breakpoint
 CREATE INDEX `JobCommand_tenant_replacement_idx` ON `JobCommand` (`tenantId`,`replacementJobId`);--> statement-breakpoint
@@ -2906,6 +2961,9 @@ CREATE INDEX `Workspace_tenant_lifecycle_idx` ON `Workspace` (`tenantId`,`lifecy
 CREATE INDEX `WorkspaceAttachment_tenant_thread_idx` ON `WorkspaceAttachment` (`tenantId`,`threadId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachment_tenant_binding_idx` ON `WorkspaceAttachment` (`tenantId`,`workspaceBindingId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachment_tenant_state_idx` ON `WorkspaceAttachment` (`tenantId`,`attachmentState`);--> statement-breakpoint
+CREATE INDEX `WorkspaceAttachment_tenant_provider_idx` ON `WorkspaceAttachment` (`tenantId`,`storageProvider`);--> statement-breakpoint
+CREATE INDEX `WorkspaceAttachmentAccessGrant_tenant_expiry_idx` ON `WorkspaceAttachmentAccessGrant` (`tenantId`,`expiresAt`);--> statement-breakpoint
+CREATE INDEX `WorkspaceAttachmentAccessGrant_attachment_idx` ON `WorkspaceAttachmentAccessGrant` (`workspaceAttachmentId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachmentUse_tenant_turn_idx` ON `WorkspaceAttachmentUse` (`tenantId`,`turnId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachmentUse_tenant_attachment_idx` ON `WorkspaceAttachmentUse` (`tenantId`,`workspaceAttachmentId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceBinding_tenant_workspace_idx` ON `WorkspaceBinding` (`tenantId`,`workspaceId`);--> statement-breakpoint

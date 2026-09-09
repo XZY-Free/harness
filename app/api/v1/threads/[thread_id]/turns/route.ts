@@ -63,11 +63,6 @@ interface RouteContext {
 interface TurnInput {
   type: string;
   text?: string;
-  attachments?: Array<{
-    workspace_attachment_id: string;
-    resource_type: string;
-    resource_ref: string;
-  }>;
 }
 
 /** 请求体 schema。 */
@@ -88,12 +83,16 @@ function validateBody(body: unknown): body is CreateTurnBody {
   const input = b.input as Record<string, unknown>;
   if (typeof input.type !== "string" || input.type.length === 0) return false;
   if (input.text !== undefined && typeof input.text !== "string") return false;
+  if (input.attachments !== undefined) return false;
   if (b.selected_model !== undefined && typeof b.selected_model !== "string") return false;
   if (b.workspace_attachment_ids !== undefined) {
     if (!Array.isArray(b.workspace_attachment_ids)) return false;
     for (const id of b.workspace_attachment_ids) {
-      if (typeof id !== "string") return false;
+      if (typeof id !== "string" || id.trim().length === 0 || id.length > 64) return false;
     }
+    if (b.workspace_attachment_ids.length > 20) return false;
+    if (new Set(b.workspace_attachment_ids).size !== b.workspace_attachment_ids.length)
+      return false;
   }
   if (b.agent_use !== undefined && b.agent_use !== null) {
     if (typeof b.agent_use !== "object" || Array.isArray(b.agent_use)) return false;
@@ -200,9 +199,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       ownerUserId: principal.userIdentityId,
       content: {
         text: body.input.text ?? "",
-        attachments: body.input.attachments,
         client_message_id: idempotencyKey,
       },
+      attachmentIds: body.workspace_attachment_ids,
       actorId: principal.userIdentityId,
       agentUse: body.agent_use ? { mode: "preferred", agentId: preferredAgentId as string } : null,
       idempotencyKey,

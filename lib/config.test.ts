@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runtimeConformanceConfig } from "./config";
+import { fileStorageConfig, runtimeConformanceConfig } from "./config";
 
 /**
  * Runtime Conformance 配置 fail-closed 测试。
@@ -9,6 +9,8 @@ const ORIG_RUNNER_SIGNING_IDENTITIES = process.env.SNOW_RUNNER_SIGNING_IDENTITIE
 const ORIG_LEGACY_RUNNERS = process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS;
 const ORIG_LEGACY_KEYS = process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON;
 const ORIG_ACTIVE_EXTERNAL_SIGNER = process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+const ORIG_IMAGE_UPLOAD_MB = process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB;
+const ORIG_DOCUMENT_UPLOAD_MB = process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB;
 
 beforeEach(() => {
   // 清空 env（用 undefined 赋值，避免 delete 操作符）
@@ -16,6 +18,8 @@ beforeEach(() => {
   process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = undefined;
   process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = undefined;
   process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = undefined;
+  process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = undefined;
+  process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = undefined;
 });
 
 afterEach(() => {
@@ -24,6 +28,29 @@ afterEach(() => {
   process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = ORIG_LEGACY_RUNNERS;
   process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = ORIG_LEGACY_KEYS;
   process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = ORIG_ACTIVE_EXTERNAL_SIGNER;
+  process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = ORIG_IMAGE_UPLOAD_MB;
+  process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = ORIG_DOCUMENT_UPLOAD_MB;
+});
+
+describe("fileStorageConfig", () => {
+  it("提供默认上传上限并允许部署配置覆盖", () => {
+    expect(fileStorageConfig.imageUploadMaxBytes).toBe(10 * 1024 * 1024);
+    expect(fileStorageConfig.documentUploadMaxBytes).toBe(20 * 1024 * 1024);
+
+    process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = "7";
+    process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = "32";
+
+    expect(fileStorageConfig.imageUploadMaxBytes).toBe(7 * 1024 * 1024);
+    expect(fileStorageConfig.documentUploadMaxBytes).toBe(32 * 1024 * 1024);
+  });
+
+  it.each(["0", "-1", "abc", "1.5"])("非法上传上限 %s 回退到安全默认值", (value) => {
+    process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = value;
+    process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = value;
+
+    expect(fileStorageConfig.imageUploadMaxBytes).toBe(10 * 1024 * 1024);
+    expect(fileStorageConfig.documentUploadMaxBytes).toBe(20 * 1024 * 1024);
+  });
 });
 
 describe("runtimeConformanceConfig.runnerSigningIdentities", () => {

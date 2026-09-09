@@ -1,13 +1,19 @@
 name: snow-harness
 
+x-shared-environment: &shared-environment
+  APP_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  SNOW_WORKSPACES_DIR: /data/workspaces
+
 x-shared-runtime: &shared-runtime
   restart: unless-stopped
   env_file:
     - path: .env.production
       required: true
   environment:
-    APP_ENV: production
-    DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    <<: *shared-environment
+  volumes:
+    - snow-harness-workspaces:/data/workspaces
 
 x-worker: &worker
   <<: *shared-runtime
@@ -37,40 +43,39 @@ services:
     ports:
       - "${SNOW_HARNESS_HTTP_PORT:-3000}:3000"
     deploy:
-      replicas: 2
+      replicas: 1
 
   hosted-provisioning-worker:
     <<: *worker
     environment:
-      APP_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      <<: *shared-environment
       WORKER_ROLE: hosted-provisioning-worker
     deploy:
-      replicas: 2
+      replicas: 1
 
   control-plane-outbox-worker:
     <<: *worker
     environment:
-      APP_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      <<: *shared-environment
       WORKER_ROLE: control-plane-outbox-worker
     deploy:
-      replicas: 2
+      replicas: 1
 
   runtime-dispatch-retry-worker:
     <<: *worker
     environment:
-      APP_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      <<: *shared-environment
       WORKER_ROLE: runtime-dispatch-retry-worker
     deploy:
-      replicas: 2
+      replicas: 1
 
   tool-execution-worker:
     <<: *worker
     environment:
-      APP_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      <<: *shared-environment
       WORKER_ROLE: tool-execution-worker
     deploy:
-      replicas: 2
+      replicas: 1
+
+volumes:
+  snow-harness-workspaces:

@@ -141,9 +141,9 @@ export function isValidPathRef(pathRef: string): boolean {
 }
 
 /**
- * 校验受管对象引用（不接受公网 http(s):// URL）。
+ * 校验 Provider 受管引用（不接受公网 http(s):// URL）。
  *
- * 接受：s3:// / oci:// / gs:// / file://internal/... 等受管协议或自定义 scheme。
+ * 接受：由 storageProvider 解释的内部路径、受管协议或自定义 scheme。
  * 拒绝：http:// / https:// 公网 URL。
  */
 export function isValidManagedRef(ref: string): boolean {
@@ -225,6 +225,8 @@ export function validateFileChangeHashes(
 // ─── createArtifact ──────────────────────────────────────
 
 export interface CreateArtifactInput {
+  /** 调用方预先分配的稳定 id；用于先保存原文件、再原子登记事实。 */
+  id?: string;
   tenantId: string;
   invocationId: string;
   /** 会话产物时填（与 turnId 一起）；Job 产物为 null。 */
@@ -237,6 +239,8 @@ export interface CreateArtifactInput {
   itemId?: string | null;
   artifactType: RuntimeArtifactType;
   displayName: string;
+  /** 解释 contentRef 的唯一文件存储提供器。 */
+  storageProvider?: string;
   contentRef: string;
   mediaType: string;
   byteSize: number;
@@ -261,6 +265,7 @@ export interface CreateArtifactInput {
  * @throws ArtifactItemConflictError 非空 itemId 已被占用
  */
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
+  if (input.id !== undefined && !input.id) throw new ArtifactValidationError("id 不能为空");
   if (!input.tenantId) throw new ArtifactValidationError("tenantId 不能为空");
   if (!input.invocationId) throw new ArtifactValidationError("invocationId 不能为空");
   if (!input.displayName) throw new ArtifactValidationError("displayName 不能为空");
@@ -292,6 +297,10 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   if (!Number.isInteger(input.byteSize) || input.byteSize < 0) {
     throw new ArtifactValidationError(`byteSize 必须为非负整数: ${input.byteSize}`);
   }
+  const storageProvider = input.storageProvider ?? "binding";
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(storageProvider)) {
+    throw new ArtifactValidationError("storageProvider 格式非法");
+  }
 
   // 会话产物与 Job 产物互斥校验
   const hasThread = input.threadId !== null && input.threadId !== undefined;
@@ -301,6 +310,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   }
 
   const row: NewArtifact = {
+    id: input.id,
     tenantId: input.tenantId,
     invocationId: input.invocationId,
     threadId: input.threadId ?? null,
@@ -309,6 +319,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     itemId: input.itemId ?? null,
     artifactType: input.artifactType,
     displayName: input.displayName,
+    storageProvider,
     contentRef: input.contentRef,
     mediaType: input.mediaType,
     byteSize: input.byteSize,
@@ -329,8 +340,15 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   const [created] = await db
     .select()
     .from(artifactTable)
-    .where(eq(artifactTable.contentHash, input.contentHash))
-    .orderBy(desc(artifactTable.createdAt))
+    .where(
+      input.id
+        ? and(eq(artifactTable.tenantId, input.tenantId), eq(artifactTable.id, input.id))
+        : and(
+            eq(artifactTable.tenantId, input.tenantId),
+            eq(artifactTable.contentHash, input.contentHash),
+          ),
+    )
+    .orderBy(desc(artifactTable.createdAt), desc(artifactTable.id))
     .limit(1);
   if (!created) {
     throw new Error("createArtifact: 行未找到");

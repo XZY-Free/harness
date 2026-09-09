@@ -337,7 +337,7 @@ Invocation
 
 Workspace 是逻辑工作位置；同一个 Workspace 可拥有多个 Binding，例如某台 Desktop 的本地目录、Cloud volume 或远程仓库。Binding 的位置标识只在相应执行域内有效，本地绝对路径必须同时绑定 device_id，不能被云端直接解释。
 
-Attachment 表示额外位置，不改变默认 Workspace。用户明确位置优先于默认位置。
+Attachment 表示 Thread 可使用的输入文件或额外位置，不改变默认 Workspace。用户上传的原文件登记为 WorkspaceAttachment，但不要求额外的 WorkspaceBinding；Desktop 已有文件等外部位置仍通过 Binding 解释。Turn 只能引用已经属于当前 Thread、仍有效且归属匹配的 Attachment。
 
 ### 6.2 Memory
 
@@ -353,7 +353,9 @@ Knowledge Base 管理文档、修订、权限、索引状态和证据引用。�
 
 ### 6.4 Artifact 与文件变化
 
-Artifact 保存逻辑产物、内容地址、媒体类型、大小、hash、来源和访问范围。FileChange 保存实际位置、变更类型、前后 hash 和关联 ToolCall。大内容放对象存储或原 Workspace，Item 和 Event 只保存引用与摘要。
+Artifact 保存 AI/Tool 最终生成文件的逻辑记录、Provider、内容引用、媒体类型、大小、hash、来源和访问范围。FileChange 保存已有工作位置的变更类型、前后 hash 和关联 ToolCall。
+
+WorkspaceAttachment 与 Artifact 不是两套字节存储：当前部署只装配一个 `FileStorageProvider`。开源部署默认保存在 Thread Workspace，企业私有部署可以替换为 COS。两类记录分开是因为输入附件和输出产物的归属、授权及生命周期不同，不代表平台重复保存同一文件。PDF、Word、Excel 等在上传时只保存原始字节；解析由确实需要内容的 Agent 或业务能力按授权执行。
 
 ## 7. 观测与治理领域
 

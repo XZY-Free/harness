@@ -163,7 +163,7 @@ export async function gitRemoteUrl(threadId: string, name = "origin"): Promise<s
 /** `git add <paths|.|>`（非 repo 则先 init + 配身份）。 */
 export async function gitAdd(threadId: string, paths?: string[]): Promise<void> {
   const g = await ensureRepo(threadId);
-  await withGitTimeout(g.add(paths ?? "."));
+  await withGitTimeout(g.add([...(paths ?? ["."]), ":(exclude).snow", ":(exclude).snow/**"]));
 }
 
 export type GitCommitResult = { commitSha?: string; nothingToCommit?: boolean };

@@ -16,13 +16,18 @@ import {
   agentCallTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { capabilityUseTable } from "@/lib/persistence/schema/capability-use";
-import { threadEventTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { threadEventTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { workspaceAttachmentAccessGrant } from "@/lib/persistence/schema/workspace";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
+import {
+  createManagedWorkspaceAttachment,
+  createWorkspaceAttachmentUse,
+} from "@/lib/workspace/workspace-queries";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,9 +51,11 @@ describe("AgentActionExecutor", () => {
 
   async function seed(
     providerScenario: "completed" | "long_running" | "input_required" | "confirmation_chain",
+    options?: { contract?: unknown },
   ) {
     const scenario = await seedAgentCallExecutionScenario({
       providerScenario,
+      contract: options?.contract,
       ...(providerScenario === "input_required" || providerScenario === "confirmation_chain"
         ? {
             contract: {
@@ -146,6 +153,87 @@ describe("AgentActionExecutor", () => {
       sourceType: "harness_planned",
       sourceRef: action.actionId,
     });
+  });
+
+  it("只把 action 显式选择的 Turn 附件作为短期公共引用发送给 Agent", async () => {
+    const scenario = await seed("long_running", {
+      contract: {
+        ...EXECUTION_FIXTURE_CONTRACT,
+        invocation_context: [
+          ...EXECUTION_FIXTURE_CONTRACT.invocation_context,
+          {
+            key: "attachment_references",
+            name: { "zh-CN": "附件引用" },
+            necessity: "accepted",
+          },
+        ],
+      },
+    });
+    const [thread] = await db
+      .select()
+      .from(threadTable)
+      .where(eq(threadTable.id, scenario.threadId))
+      .limit(1);
+    if (!thread) throw new Error("测试 Thread 不存在");
+    const attachmentId = randomUUID();
+    await createManagedWorkspaceAttachment({
+      id: attachmentId,
+      tenantId: scenario.tenantId,
+      threadId: scenario.threadId,
+      storageProvider: "workspace",
+      resourceRef: `.snow/files/attachment/${attachmentId}/content`,
+      resourceFingerprint: `sha256:${"a".repeat(64)}`,
+      originalFilename: "工资证明.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 2048,
+      attachedBy: thread.ownerUserId,
+    });
+    await createWorkspaceAttachmentUse({
+      tenantId: scenario.tenantId,
+      turnId: scenario.turnId,
+      workspaceAttachmentId: attachmentId,
+    });
+    const execute = createAgentActionExecutor({
+      tenantId: scenario.tenantId,
+      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, thread.ownerUserId),
+      resolveRoute,
+      transportChannel: "hosted",
+    });
+
+    await execute(
+      {
+        actionId: "action-with-attachment",
+        stepNo: 1,
+        actionType: "agent.call",
+        purposeCode: "read_attachment",
+        shortPurpose: "读取用户明确选择的附件",
+        payload: {
+          agentId: scenario.agentId,
+          task: "读取工资证明",
+          contextRefs: [`attachment:${attachmentId}`],
+        },
+      },
+      {
+        invocationId: scenario.parentInvocationId,
+        tenantId: scenario.tenantId,
+        threadId: scenario.threadId,
+        turnId: scenario.turnId,
+        actionDigest: `sha256:${"2".repeat(64)}`,
+        deadlineAt: new Date(Date.now() + 60_000),
+      },
+    );
+
+    const references = scenario.provider.captured[0]?.messageMetadata?.attachment_references;
+    expect(references).toEqual([
+      {
+        reference_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        resource_type: "file",
+        display_name: "工资证明.pdf",
+        media_type: "application/pdf",
+      },
+    ]);
+    expect(JSON.stringify(references)).not.toContain(".snow/files/attachment");
+    expect(await db.select().from(workspaceAttachmentAccessGrant)).toHaveLength(1);
   });
 
   it("F06 父执行已取消时在创建和出站前停止，不留下 AgentCall 或远端请求", async () => {

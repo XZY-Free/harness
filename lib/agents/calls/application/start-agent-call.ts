@@ -49,6 +49,8 @@ export interface StartAgentCallCommand {
   input: string;
   /** 平台上下文（tenant 必须等于 call tenant；executionSubject.tenant 也必须等于 call tenant）。 */
   contextEnvironment?: PlatformContextEnvironment;
+  /** Harness 本次 action 明确选择的 accepted context kind。 */
+  selectedAcceptedContextKinds?: readonly string[];
   /** 父执行的真实取消信号；未出站时本地收口，已出站时走统一远端取消。 */
   signal?: AbortSignal;
 }
@@ -301,6 +303,7 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     contract,
     effectiveEnvironment,
     enterprisePolicy,
+    command.selectedAcceptedContextKinds,
   );
 
   // 6. 输入非空纯文本；空白/缺失网络前失败。

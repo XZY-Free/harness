@@ -5,10 +5,10 @@
   "cleanMigration": "drizzle/0000_initial_schema.sql",
   "inventory": "docs/topic-01/evidence/schema-inventory.json",
   "counts": {
-    "canonical": 124,
-    "runtimeLoaded": 124,
-    "migration": 124,
-    "freshDbPlanned": 124
+    "canonical": 127,
+    "runtimeLoaded": 127,
+    "migration": 127,
+    "freshDbPlanned": 127
   },
   "tables": [
     "Agent",
@@ -25,6 +25,7 @@
     "ArtifactAttestation",
     "AttestationRevocationRecord",
     "AuditEvent",
+    "AuthSession",
     "CapabilityReview",
     "CapabilityUse",
     "CatalogEntry",
@@ -71,6 +72,7 @@
     "KnowledgeDocumentRevision",
     "KnowledgeIndex",
     "LegalHold",
+    "LocalCredential",
     "MemoryCandidate",
     "MemoryEntry",
     "MemorySource",
@@ -121,6 +123,7 @@
     "WorkloadTokenRevocation",
     "Workspace",
     "WorkspaceAttachment",
+    "WorkspaceAttachmentAccessGrant",
     "WorkspaceAttachmentUse",
     "WorkspaceBinding",
     "WorkspaceWriteLock",

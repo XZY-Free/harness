@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const ws = vi.hoisted(() => ({
+  isInternalPath: vi.fn((relPath: string) => relPath.split("/").includes(".snow")),
   readWorkspaceFile: vi.fn(),
   safeJoin: vi.fn((threadId: string, rel: string) => `/tmp/ws-${threadId}/${rel}`),
   workspaceRoot: vi.fn((id: string) => `/tmp/ws-${id}`),
@@ -138,6 +139,17 @@ describe("StaticPreviewRuntime 鉴权（05-P2-8）", () => {
     const handle = await staticPreviewRuntime.start(TID);
     const r = await httpRequest(handle.port, `/?token=${handle.token}`);
     expect(r.status).toBe(404);
+  });
+
+  it("正确 token 也不能通过预览服务器读取内部文件", async () => {
+    const handle = await staticPreviewRuntime.start(TID);
+    const r = await httpRequest(
+      handle.port,
+      `/.snow/files/attachment/123e4567-e89b-12d3-a456-426614174000/content?token=${handle.token}`,
+    );
+
+    expect(r.status).toBe(404);
+    expect(ws.readWorkspaceFile).not.toHaveBeenCalled();
   });
 
   it("safeJoin 抛错（路径越界）→ 403（即使 token 正确）", async () => {

@@ -32,6 +32,14 @@ export class ThreadNotAcceptingTurnsError extends Error {
   }
 }
 
+/** Turn 引用的附件不存在、不属于当前 Thread 或已失效。映射隐藏式 404。 */
+export class ThreadAttachmentUnavailableError extends Error {
+  constructor(public readonly attachmentId: string) {
+    super(`附件不存在、已失效或不属于当前 Thread：${attachmentId}`);
+    this.name = "ThreadAttachmentUnavailableError";
+  }
+}
+
 /** Thread 乐观锁冲突。映射 412 ETAG_MISMATCH。 */
 export class ThreadVersionConflictError extends Error {
   constructor(

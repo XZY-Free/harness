@@ -23,6 +23,7 @@ import {
   datetime,
   foreignKey,
   index,
+  int,
   mysqlEnum,
   mysqlTable,
   text,
@@ -227,9 +228,11 @@ export const workspaceAttachment = mysqlTable(
       .notNull()
       .references(() => threadTable.id),
     /** WorkspaceBinding（DB 级 FK → WorkspaceBinding.id）。 */
-    workspaceBindingId: varchar("workspaceBindingId", { length: 36 })
-      .notNull()
-      .references(() => workspaceBinding.id),
+    workspaceBindingId: varchar("workspaceBindingId", { length: 36 }).references(
+      () => workspaceBinding.id,
+    ),
+    /** 解释 resourceRef 的唯一存储提供器；binding 表示既有 WorkspaceBinding 资源。 */
+    storageProvider: varchar("storageProvider", { length: 64 }).notNull().default("binding"),
     resourceType: mysqlEnum("resourceType", WORKSPACE_ATTACHMENT_RESOURCE_TYPES).notNull(),
     /** 资源引用（受管引用，不是绝对路径；解释依赖 WorkspaceBinding）。 */
     resourceRef: varchar("resourceRef", { length: 512 }).notNull(),
@@ -237,6 +240,12 @@ export const workspaceAttachment = mysqlTable(
     resourceFingerprint: varchar("resourceFingerprint", { length: 128 }),
     /** 员工可见展示引用（脱敏后的相对路径/对象名等，不暴露绝对路径）。 */
     displayRef: varchar("displayRef", { length: 256 }),
+    /** 上传时的原始展示文件名；绝不用于物理路径拼接。 */
+    originalFilename: varchar("originalFilename", { length: 512 }),
+    /** 上传方声明并经接口允许列表校验后的内容类型。 */
+    contentType: varchar("contentType", { length: 255 }),
+    /** 原文件字节数。既有外部挂载记录可为空。 */
+    sizeBytes: int("sizeBytes", { unsigned: true }),
     accessMode: mysqlEnum("accessMode", WORKSPACE_ATTACHMENT_ACCESS_MODES)
       .notNull()
       .default("read"),
@@ -265,6 +274,10 @@ export const workspaceAttachment = mysqlTable(
       t.workspaceBindingId,
     ),
     tenantStateIdx: index("WorkspaceAttachment_tenant_state_idx").on(t.tenantId, t.attachmentState),
+    tenantProviderIdx: index("WorkspaceAttachment_tenant_provider_idx").on(
+      t.tenantId,
+      t.storageProvider,
+    ),
   }),
 );
 
@@ -308,6 +321,50 @@ export const workspaceAttachmentUse = mysqlTable(
   }),
 );
 
+// ─── workspace_attachment_access_grant ───────────────────
+
+/**
+ * 外部 Agent 的短期附件读取授权。referenceId 本身是随机 capability，不暴露 Provider 引用。
+ * 授权同时绑定 Turn、Invocation 与 AgentCall，过期后不可续用。
+ */
+export const workspaceAttachmentAccessGrant = mysqlTable(
+  "WorkspaceAttachmentAccessGrant",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    workspaceAttachmentId: varchar("workspaceAttachmentId", { length: 36 }).notNull(),
+    turnId: varchar("turnId", { length: 36 }).notNull(),
+    invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    agentCallId: varchar("agentCallId", { length: 36 }).notNull(),
+    issuedAt: datetime("issuedAt", { mode: "date", fsp: 3 }).notNull(),
+    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }).notNull(),
+    revokedAt: datetime("revokedAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    callAttachmentUq: uniqueIndex("WorkspaceAttachmentAccessGrant_call_attachment_uq").on(
+      t.agentCallId,
+      t.workspaceAttachmentId,
+    ),
+    tenantExpiryIdx: index("WorkspaceAttachmentAccessGrant_tenant_expiry_idx").on(
+      t.tenantId,
+      t.expiresAt,
+    ),
+    attachmentIdx: index("WorkspaceAttachmentAccessGrant_attachment_idx").on(
+      t.workspaceAttachmentId,
+    ),
+    attachmentFk: foreignKey({
+      name: "WorkspaceAttachmentAccessGrant_attachment_fk",
+      columns: [t.workspaceAttachmentId],
+      foreignColumns: [workspaceAttachment.id],
+    }).onDelete("cascade"),
+  }),
+);
+
 // ─── 类型导出 ──────────────────────────────────────────────
 
 export type Workspace = InferSelectModel<typeof workspace>;
@@ -321,6 +378,9 @@ export type WorkspaceAttachmentInsert = InferInsertModel<typeof workspaceAttachm
 
 export type WorkspaceAttachmentUse = InferSelectModel<typeof workspaceAttachmentUse>;
 export type WorkspaceAttachmentUseInsert = InferInsertModel<typeof workspaceAttachmentUse>;
+export type WorkspaceAttachmentAccessGrant = InferSelectModel<
+  typeof workspaceAttachmentAccessGrant
+>;
 
 /** 校验位置/资源指纹格式（sha256: 前缀 + 64 hex）。 */
 export function isValidWorkspaceFingerprint(hash: string): boolean {

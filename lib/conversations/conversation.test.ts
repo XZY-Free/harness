@@ -2,6 +2,7 @@ import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import {
   GoalAlreadyActiveError,
   ItemSupersedeCycleError,
+  ThreadAttachmentUnavailableError,
   ThreadNotAcceptingTurnsError,
   ThreadNotFoundError,
   ThreadRelationConflictError,
@@ -57,6 +58,10 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import {
+  createManagedWorkspaceAttachment,
+  listWorkspaceAttachmentUsesByTurn,
+} from "@/lib/workspace/workspace-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -376,6 +381,109 @@ describe("Turn 接纳事务", () => {
     expect(result.thread.lastTurnSequence).toBe(1);
     expect(result.thread.lastItemSequence).toBe(1);
     expect(result.thread.lastEventSequence).toBe(3);
+  });
+
+  it("附件由服务端校验并在 Turn 接纳事务中建立使用记录", async () => {
+    const attachmentId = crypto.randomUUID();
+    await createManagedWorkspaceAttachment({
+      id: attachmentId,
+      tenantId,
+      threadId,
+      storageProvider: "workspace",
+      resourceRef: `uploads/${attachmentId}/content`,
+      resourceFingerprint: `sha256:${"b".repeat(64)}`,
+      originalFilename: "病假证明.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 2048,
+      attachedBy: ownerId,
+    });
+
+    const result = await acceptUserMessageTurn({
+      tenantId,
+      threadId,
+      ownerUserId: ownerId,
+      content: { text: "申请病假" },
+      attachmentIds: [attachmentId],
+      actorId: ownerId,
+    });
+
+    expect(result.item.contentJson).toMatchObject({
+      text: "申请病假",
+      attachments: [
+        {
+          workspace_attachment_id: attachmentId,
+          context_ref: `attachment:${attachmentId}`,
+          filename: "病假证明.pdf",
+          content_type: "application/pdf",
+          size_bytes: 2048,
+        },
+      ],
+    });
+    expect(JSON.stringify(result.item.contentJson)).not.toContain("resourceRef");
+    expect(JSON.stringify(result.item.contentJson)).not.toContain("resource_ref");
+    await expect(
+      listWorkspaceAttachmentUsesByTurn(tenantId, result.turn.id),
+    ).resolves.toMatchObject([{ workspaceAttachmentId: attachmentId, turnId: result.turn.id }]);
+  });
+
+  it("其他 Thread 的附件在写入 Turn 前失败关闭", async () => {
+    const { thread: otherThread } = await seedThread(tenantId, ownerId, agentId);
+    const attachmentId = crypto.randomUUID();
+    await createManagedWorkspaceAttachment({
+      id: attachmentId,
+      tenantId,
+      threadId: otherThread.id,
+      storageProvider: "workspace",
+      resourceRef: `uploads/${attachmentId}/content`,
+      resourceFingerprint: `sha256:${"c".repeat(64)}`,
+      originalFilename: "其他会话.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 10,
+      attachedBy: ownerId,
+    });
+
+    await expect(
+      acceptUserMessageTurn({
+        tenantId,
+        threadId,
+        ownerUserId: ownerId,
+        content: { text: "越权引用" },
+        attachmentIds: [attachmentId],
+        actorId: ownerId,
+      }),
+    ).rejects.toBeInstanceOf(ThreadAttachmentUnavailableError);
+  });
+
+  it("事务入口忽略调用方自报附件正文，并拒绝非 Thread owner", async () => {
+    const accepted = await acceptUserMessageTurn({
+      tenantId,
+      threadId,
+      ownerUserId: ownerId,
+      content: {
+        text: "普通消息",
+        attachments: [
+          {
+            workspace_attachment_id: crypto.randomUUID(),
+            context_ref: "attachment:forged",
+            filename: "伪造.pdf",
+            content_type: "application/pdf",
+            size_bytes: 1,
+          },
+        ],
+      },
+      actorId: ownerId,
+    });
+    expect(accepted.item.contentJson).toEqual({ text: "普通消息" });
+
+    await expect(
+      acceptUserMessageTurn({
+        tenantId,
+        threadId,
+        ownerUserId: crypto.randomUUID(),
+        content: { text: "越权消息" },
+        actorId: ownerId,
+      }),
+    ).rejects.toBeInstanceOf(ThreadNotFoundError);
   });
 
   it("连续接纳多个 Turn：turn/item/event sequence 单调递增", async () => {

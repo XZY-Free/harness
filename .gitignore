@@ -32,7 +32,7 @@ upstreams/
 # V3.2 后台任务运行时日志（host 平台目录 / container workspace bind mount）
 .snow/
 
-# 用户上传文件（本地存储）
+# 旧版本留下的本地上传文件（新上传链路不再写入此目录）
 public/uploads/
 
 # Electron 构建产物和打包输出

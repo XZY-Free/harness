@@ -22,6 +22,7 @@
  */
 
 import type { InvocationContextContract } from "@/lib/agents/domain/public-agent-contract";
+import type { AgentAttachmentReference } from "@/lib/files/agent-attachment-access";
 import type { EnterpriseUserPublicContext } from "@/lib/identity/enterprise-user-access-policy";
 import {
   type ExecutionSubject,
@@ -44,7 +45,7 @@ export interface PlatformContextEnvironment {
   /** 会话引用（contextKind=conversation_context 的 handle/reference，按现有 Context 体系）。 */
   conversationContextRef?: string | null;
   /** 附件引用集合（contextKind=attachment_references）。 */
-  attachmentRefs?: string[];
+  attachmentRefs?: AgentAttachmentReference[];
   /** 工作区引用（contextKind=workspace_context）。 */
   workspaceContextRef?: string | null;
   /** 服务端生成的安全企业资料上下文；客户端输入不得覆盖。 */

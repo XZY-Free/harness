@@ -308,6 +308,22 @@ export const workspaceConfig = {
   },
 } as const;
 
+function positiveIntegerMegabytes(key: string, fallback: number): number {
+  const raw = optionalEnv(key, String(fallback));
+  if (!/^\d+$/.test(raw)) return fallback;
+  const value = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(value) && value > 0 && value <= 1024 ? value : fallback;
+}
+
+export const fileStorageConfig = {
+  get imageUploadMaxBytes(): number {
+    return positiveIntegerMegabytes("SNOW_FILE_IMAGE_UPLOAD_MAX_MB", 10) * 1024 * 1024;
+  },
+  get documentUploadMaxBytes(): number {
+    return positiveIntegerMegabytes("SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB", 20) * 1024 * 1024;
+  },
+} as const;
+
 /**
  * Skill 目录仓库根（后续切片）。
  *

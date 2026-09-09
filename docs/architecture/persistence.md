@@ -13,9 +13,9 @@
 | Workspace、Memory、Knowledge、Artifact | 独立资源表 | 上下文和内容来源 |
 | Trace、Evaluation、Audit | 独立观测存储或索引表 | 排障、评测、治理和成本 |
 
-MySQL 保存控制数据、交互事实和执行索引；大 Artifact、原始日志、诊断内容和评测附件进入对象存储；全文、向量与 Trace 可以使用专用存储，但必须以这里定义的 id 关联。
+MySQL 保存控制数据、交互事实和执行索引；用户原文件和 AI/Tool 最终产物统一交给当前部署装配的 `FileStorageProvider`，数据库只保存 Provider 名、受管引用、大小、媒体类型和内容 hash。开源部署默认写入 Thread Workspace；企业私有部署可替换为 COS。一个部署只启用一个 Provider，不隐式双写。全文、向量与 Trace 可以使用专用存储，但必须以这里定义的 id 关联。
 
-业务例子：Agent 的最终回答保存在 `thread_item`，回答完成写入 `thread_event`；回答生成过程的模型耗时保存在 Trace，生成的 Excel 保存在对象存储并由 `artifact` 引用。三者不会复制同一份大内容。
+业务例子：Agent 的最终回答保存在 `thread_item`，回答完成写入 `thread_event`；回答生成过程的模型耗时保存在 Trace，生成的 Excel 由 `FileStorageProvider` 保存并由 `artifact` 引用。三者不会复制同一份大内容。
 
 ## 2. 命名与公共字段
 
@@ -523,14 +523,19 @@ cancel 命令只先写 `job.cancel_requested`，不能提前修改为 cancelled�
 
 ## 7. Workspace、环境和内容表
 
+文件字节只有一个平台存储边界：`FileStorageProvider.store/read/delete`。用户上传和 AI/Tool 生成文件使用同一 Provider，但保留不同业务记录：前者登记为 `workspace_attachment`，后者登记为 `artifact`。原始文件名仅用于展示，不能参与物理路径拼接；客户端和 Agent 都不能取得 Provider 内部引用。
+
+开源默认 Provider 把字节保存到 `SNOW_WORKSPACES_DIR/{thread_id}/.snow/files/{attachment|artifact}/{resource_id}/content`。`.snow` 是平台内部目录，不进入工作区文件列表、预览服务或 Git 交付。企业发行版在组合根替换为 COS Provider 后直接写 COS，不先写本地再上传。Gaia 附件上传属于 HR 请假提交中的下游业务动作，不是平台文件持久化 Provider。
+
 ### 7.1 `workspace`、`workspace_binding` 与 `workspace_attachment`
 
 | 表 | 核心字段 | 关键规则 |
 |---|---|---|
 | workspace | id、tenant_id、owner_user_id、workspace_key、display_name、workspace_kind、lifecycle_state、created_at | 逻辑工作位置，不存跨环境通用绝对路径 |
 | workspace_binding | id、workspace_id、binding_type、device_id、environment_definition_id、location_ref、location_fingerprint、binding_state、last_verified_at | Desktop binding 必须同时有 device_id 和 location_ref；Cloud/Remote 使用受管 location_ref |
-| workspace_attachment | id、thread_id、workspace_binding_id、resource_type、resource_ref、access_mode、attachment_state、attached_by、version_no、created_at、expires_at | Thread 级受限资源，不改变默认 Workspace；version_no 生成 ETag |
+| workspace_attachment | id、thread_id、workspace_binding_id、storage_provider、resource_type、resource_ref、resource_fingerprint、original_filename、content_type、size_bytes、access_mode、attachment_state、attached_by、version_no、created_at、expires_at | Thread 级受限资源；平台上传文件不要求 WorkspaceBinding，外部挂载资源仍通过 Binding 解释；version_no 生成 ETag |
 | workspace_attachment_use | turn_id、workspace_attachment_id、created_at | `UNIQUE(turn_id, workspace_attachment_id)`；Turn 只引用已验证且仍有效的 Attachment |
+| workspace_attachment_access_grant | id、tenant_id、workspace_attachment_id、turn_id、invocation_id、agent_call_id、issued_at、expires_at、revoked_at | Agent 短期读取 capability；同一 AgentCall 与 Attachment 唯一，不暴露 Provider 引用 |
 
 ### 7.2 `environment_definition` 与 `environment_lease`
 
@@ -549,7 +554,7 @@ environment_type 为 desktop、cloud、remote、sandbox。Desktop ToolCall 使�
 
 | 表 | 核心字段 | 关键规则 |
 |---|---|---|
-| artifact | id、tenant_id、invocation_id、thread_id、turn_id、job_id、item_id、artifact_type、display_name、content_ref、media_type、byte_size、content_hash、visibility_scope、created_at、expires_at | 内容在对象存储或原 Workspace，表中只保存受控引用和 hash |
+| artifact | id、tenant_id、invocation_id、thread_id、turn_id、job_id、item_id、artifact_type、display_name、storage_provider、content_ref、media_type、byte_size、content_hash、visibility_scope、created_at、expires_at | 最终文件由当前 `FileStorageProvider` 保存，表中只保存受控引用和 hash |
 | file_change | id、tool_call_id、workspace_binding_id、path_ref、change_type、before_hash、after_hash、artifact_id、created_at | 本地路径必须结合 WorkspaceBinding 和 device 解释 |
 | job_result_projection | id、job_id、source_result_ref、source_artifact_id、thread_id、turn_id、item_id、published_by、created_at | Job 结果进入会话的显式投影；source_result_ref/source_artifact_id 至少一个，item_id 唯一，Item 本身 invocation_id 为空 |
 

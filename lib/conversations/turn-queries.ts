@@ -21,6 +21,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
+  ThreadAttachmentUnavailableError,
   ThreadNotAcceptingTurnsError,
   ThreadNotFoundError,
   TurnNotFoundError,
@@ -47,7 +48,8 @@ import {
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
-import { and, asc, eq } from "drizzle-orm";
+import { workspaceAttachment, workspaceAttachmentUse } from "@/lib/persistence/schema/workspace";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 /** 事务句柄类型。 */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -59,8 +61,11 @@ export interface UserMessageContent {
   /** 附件引用列表（可为空）。 */
   attachments?: Array<{
     workspace_attachment_id: string;
-    resource_type: string;
-    resource_ref: string;
+    /** Harness planner 选择附件时使用的稳定上下文引用；不是底层存储路径。 */
+    context_ref: string;
+    filename: string;
+    content_type: string;
+    size_bytes: number;
   }>;
   /** 客户端消息 id（用于重发幂等）。 */
   client_message_id?: string;
@@ -103,6 +108,8 @@ export async function acceptUserMessageTurn(params: {
   threadId: string;
   ownerUserId: string;
   content: UserMessageContent;
+  /** 只接受平台 attachmentId；资源引用和元数据必须在事务内从数据库读取。 */
+  attachmentIds?: readonly string[];
   triggerRef?: string;
   /** 本 Turn 的显式 AgentUseDirective；省略/null = 本 Turn 无偏好，不继承历史。 */
   agentUse?: { mode: "preferred"; agentId: string } | null;
@@ -120,7 +127,6 @@ export async function acceptUserMessageTurn(params: {
   const itemCreatedEventId = randomUUID();
   const turnAcceptedEventId = randomUUID();
   const now = new Date();
-  const contentHash = computeUserMessageHash(params.content);
 
   const result = await db.transaction(async (tx) => {
     // 1. 锁定 Thread 行
@@ -131,12 +137,82 @@ export async function acceptUserMessageTurn(params: {
       .for("update")
       .limit(1);
 
-    if (!thread) {
+    if (!thread || thread.ownerUserId !== params.ownerUserId) {
       throw new ThreadNotFoundError(params.threadId);
     }
     if (thread.lifecycleState !== "active") {
       throw new ThreadNotAcceptingTurnsError(params.threadId, thread.lifecycleState);
     }
+
+    const attachmentIds = [...(params.attachmentIds ?? [])];
+    if (
+      attachmentIds.length > 20 ||
+      attachmentIds.some((attachmentId) => !attachmentId || attachmentId.length > 64)
+    ) {
+      throw new ThreadAttachmentUnavailableError("invalid_selection");
+    }
+    if (new Set(attachmentIds).size !== attachmentIds.length) {
+      throw new ThreadAttachmentUnavailableError(
+        attachmentIds.find((id, index) => attachmentIds.indexOf(id) !== index) ?? "duplicate",
+      );
+    }
+    const attachmentRows =
+      attachmentIds.length === 0
+        ? []
+        : await tx
+            .select()
+            .from(workspaceAttachment)
+            .where(
+              and(
+                eq(workspaceAttachment.tenantId, params.tenantId),
+                eq(workspaceAttachment.threadId, params.threadId),
+                inArray(workspaceAttachment.id, attachmentIds),
+              ),
+            )
+            .for("share");
+    const attachmentById = new Map(attachmentRows.map((attachment) => [attachment.id, attachment]));
+    for (const attachmentId of attachmentIds) {
+      const attachment = attachmentById.get(attachmentId);
+      if (
+        !attachment ||
+        attachment.resourceType !== "file" ||
+        attachment.attachmentState !== "attached" ||
+        (attachment.expiresAt !== null && attachment.expiresAt.getTime() <= now.getTime()) ||
+        !attachment.originalFilename ||
+        !attachment.contentType ||
+        attachment.sizeBytes === null
+      ) {
+        throw new ThreadAttachmentUnavailableError(attachmentId);
+      }
+    }
+    const content: UserMessageContent = {
+      text: params.content.text,
+      ...(params.content.client_message_id
+        ? { client_message_id: params.content.client_message_id }
+        : {}),
+      ...(attachmentIds.length > 0
+        ? {
+            attachments: attachmentIds.map((attachmentId) => {
+              const attachment = attachmentById.get(attachmentId);
+              if (
+                !attachment?.originalFilename ||
+                !attachment.contentType ||
+                attachment.sizeBytes === null
+              ) {
+                throw new ThreadAttachmentUnavailableError(attachmentId);
+              }
+              return {
+                workspace_attachment_id: attachment.id,
+                context_ref: `attachment:${attachment.id}`,
+                filename: attachment.originalFilename,
+                content_type: attachment.contentType,
+                size_bytes: attachment.sizeBytes,
+              };
+            }),
+          }
+        : {}),
+    };
+    const contentHash = computeUserMessageHash(content);
 
     // 2. 分配 sequence（所有 sequence 在同一锁定事务内分配）
     // 事件顺序：turn.accepted 先于 item.created，确保投影时 Turn 行先创建（projector 按序消费）
@@ -155,7 +231,7 @@ export async function acceptUserMessageTurn(params: {
       itemState: "completed",
       authorType: "user",
       authorId: params.ownerUserId,
-      contentJson: params.content as unknown as Record<string, unknown>,
+      contentJson: content as unknown as Record<string, unknown>,
       contentHash,
       contextPolicy: "include",
       createdAt: now,
@@ -176,6 +252,17 @@ export async function acceptUserMessageTurn(params: {
       acceptedAt: now,
       versionNo: 1,
     });
+
+    if (attachmentIds.length > 0) {
+      await tx.insert(workspaceAttachmentUse).values(
+        attachmentIds.map((workspaceAttachmentId) => ({
+          tenantId: params.tenantId,
+          turnId,
+          workspaceAttachmentId,
+          createdAt: now,
+        })),
+      );
+    }
 
     // 5. INSERT ThreadEvent (turn.accepted) —— 先于 item.created，投影器按序消费时 Turn 行先创建
     await tx.insert(threadEventTable).values({

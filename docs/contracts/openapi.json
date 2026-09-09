@@ -1492,6 +1492,241 @@
         }
       }
     },
+    "/api/v1/threads/{thread_id}/attachments": {
+      "post": {
+        "operationId": "post_api_v1_threads_by_thread_id_attachments",
+        "summary": "上传 Thread 原文件",
+        "tags": [
+          "employee"
+        ],
+        "security": [
+          {
+            "employeeAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "description": "当前员工拥有的 Thread id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "同一文件上传重试使用相同键；不同文件不得复用",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功响应，字段语义以对应规范章节为准。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "attachment_id": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "attachment_id",
+                    "url",
+                    "filename",
+                    "size",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "kind": "attachment",
+                  "attachment_id": "6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
+                  "url": "/api/v1/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
+                  "filename": "病假证明.pdf",
+                  "size": 48231,
+                  "type": "application/pdf"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "x-snowharness-doc": "api-and-events.md#上传-thread-原文件",
+        "x-snowharness-boundary": "employee",
+        "x-snowharness-error-codes": [
+          "ACCESS_DENIED",
+          "AUTHENTICATION_REQUIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "RATE_LIMITED",
+          "REQUEST_SCHEMA_INVALID",
+          "RESOURCE_NOT_FOUND"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "原文件；图片上限 10 MB，当前允许的文档上限 20 MB"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/threads/{thread_id}/attachments/{attachment_id}": {
+      "get": {
+        "operationId": "get_api_v1_threads_by_thread_id_attachments_by_attachment_id",
+        "summary": "读取 Thread 原文件",
+        "tags": [
+          "employee"
+        ],
+        "security": [
+          {
+            "employeeAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "description": "当前员工拥有的 Thread id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "description": "已登记的原文件 id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应，字段语义以对应规范章节为准。",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "x-snowharness-doc": "api-and-events.md#读取-thread-原文件",
+        "x-snowharness-boundary": "employee",
+        "x-snowharness-error-codes": [
+          "ACCESS_DENIED",
+          "AUTHENTICATION_REQUIRED",
+          "RATE_LIMITED",
+          "REQUEST_SCHEMA_INVALID",
+          "RESOURCE_NOT_FOUND"
+        ]
+      }
+    },
+    "/api/v1/threads/{thread_id}/artifacts/{artifact_id}": {
+      "get": {
+        "operationId": "get_api_v1_threads_by_thread_id_artifacts_by_artifact_id",
+        "summary": "读取 Thread 最终产物",
+        "tags": [
+          "employee"
+        ],
+        "security": [
+          {
+            "employeeAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "description": "当前员工拥有的 Thread id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "description": "AI/Tool 已登记的最终产物 id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应，字段语义以对应规范章节为准。",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "x-snowharness-doc": "api-and-events.md#读取-thread-最终产物",
+        "x-snowharness-boundary": "employee",
+        "x-snowharness-error-codes": [
+          "ACCESS_DENIED",
+          "AUTHENTICATION_REQUIRED",
+          "RATE_LIMITED",
+          "REQUEST_SCHEMA_INVALID",
+          "RESOURCE_NOT_FOUND"
+        ]
+      }
+    },
     "/api/v1/threads/{thread_id}/workspace-attachments": {
       "post": {
         "operationId": "post_api_v1_threads_by_thread_id_workspace_attachments",
@@ -4039,6 +4274,67 @@
                   "media_type",
                   "content_hash",
                   "file"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gateway/v1/attachments/resolve": {
+      "post": {
+        "operationId": "post_gateway_v1_attachments_resolve",
+        "summary": "解析 Agent 短期附件引用",
+        "tags": [
+          "gateway"
+        ],
+        "security": [
+          {
+            "workloadAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "成功响应，字段语义以对应规范章节为准。",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "x-snowharness-doc": "api-and-events.md#解析-agent-短期附件引用",
+        "x-snowharness-boundary": "gateway",
+        "x-snowharness-error-codes": [
+          "ACCESS_DENIED",
+          "AUTHENTICATION_REQUIRED",
+          "IDEMPOTENCY_CONFLICT",
+          "RATE_LIMITED",
+          "REQUEST_SCHEMA_INVALID",
+          "RESOURCE_NOT_FOUND"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reference_id": {
+                    "type": "string",
+                    "description": "SnowHarness 为当前 AgentCall 与 Turn 附件签发的短期 capability（能力凭证）"
+                  }
+                },
+                "required": [
+                  "reference_id"
                 ],
                 "additionalProperties": false
               }
@@ -9499,5 +9795,5 @@
       }
     }
   },
-  "x-snowharness-operation-count": 63
+  "x-snowharness-operation-count": 67
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type Server, createServer } from "node:http";
 import { extname, resolve as resolvePath } from "node:path";
 import { runtimeConfig } from "@/lib/config";
-import { readWorkspaceFile, safeJoin, workspaceRoot } from "@/lib/workspace";
+import { isInternalPath, readWorkspaceFile, safeJoin, workspaceRoot } from "@/lib/workspace";
 import { execDetached } from "./container/docker-cli";
 import { startContainer, stopContainerById } from "./container/manager";
 import { type SecretEnvMap, prepareContainerStartOptions } from "./container/start-options";
@@ -80,11 +80,17 @@ function createStaticServer(threadId: string, token: string): Server {
     if (pathname.endsWith("/")) {
       pathname += "index.html";
     }
+    const relativePath = `.${pathname}`;
+    if (isInternalPath(relativePath)) {
+      res.statusCode = 404;
+      res.end("Not Found");
+      return;
+    }
     // 复用 workspace.safeJoin（lstat+realpath symlink 防护）替代自做词法检查 +
     // readFile（原 readFile 跟随 symlink，可越界读 workspace 外文件）。safeJoin 抛错 → 403。
     let target: string;
     try {
-      target = safeJoin(threadId, `.${pathname}`);
+      target = safeJoin(threadId, relativePath);
     } catch {
       res.statusCode = 403;
       res.end("Forbidden");
@@ -92,7 +98,7 @@ function createStaticServer(threadId: string, token: string): Server {
     }
     try {
       // readWorkspaceFile 内部也走 safeJoin + symlink 防护，双重保险
-      const content = await readWorkspaceFile(threadId, `.${pathname}`);
+      const content = await readWorkspaceFile(threadId, relativePath);
       if (content === null) throw new Error("not found");
       res.setHeader(
         "Content-Type",

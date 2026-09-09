@@ -22,6 +22,10 @@ import {
   RequiredContextUnavailableError,
 } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import {
+  AgentAttachmentAccessError,
+  createAgentAttachmentReferences,
+} from "@/lib/files/agent-attachment-access";
+import {
   EnterpriseUserContextRequirementError,
   loadEnterpriseUserAccessPolicy,
 } from "@/lib/identity/enterprise-user-access-policy";
@@ -152,6 +156,15 @@ export function createAgentActionExecutor(
         throw new AgentCallIdempotencyConflictError(context.invocationId, logicalCallKey);
       }
       await throwIfAgentActionCancelled(context.abortSignal, call);
+      const attachmentRefs = await createAgentAttachmentReferences({
+        tenantId: params.tenantId,
+        threadId: context.threadId,
+        turnId: context.turnId,
+        invocationId: context.invocationId,
+        agentCallId: call.id,
+        selectedContextRefs: action.payload.contextRefs ?? [],
+        expiresAt: context.deadlineAt ?? new Date(Date.now() + 5 * 60 * 1000),
+      });
       const current = await startAgentCall({
         tenantId: params.tenantId,
         callId: call.id,
@@ -162,7 +175,9 @@ export function createAgentActionExecutor(
           now: new Date(),
           timezone: "Asia/Shanghai",
           locale: "zh-CN",
+          attachmentRefs,
         },
+        selectedAcceptedContextKinds: attachmentRefs.length > 0 ? ["attachment_references"] : [],
         signal: context.abortSignal,
       });
       await throwIfAgentActionCancelled(context.abortSignal, current);
@@ -227,6 +242,9 @@ export function createAgentActionExecutor(
       }
       if (error instanceof AgentCallStartCancelledError) {
         throw new AgentActionExecutionError("AGENT_ACTION_CANCELLED", error.message);
+      }
+      if (error instanceof AgentAttachmentAccessError) {
+        throw new AgentActionExecutionError("AGENT_CONTEXT_REQUIREMENT_UNSATISFIED", error.message);
       }
       if (error instanceof AgentCallIdempotencyConflictError) {
         throw new AgentActionExecutionError(

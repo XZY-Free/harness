@@ -7,15 +7,15 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 291,
-    "db": 112,
+    "unit": 294,
+    "db": 116,
     "integration": 10,
     "contract": 28,
     "e2e-web": 4,
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 449,
+  "total": 456,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -117,7 +117,29 @@
       ]
     },
     {
-      "file": "app/api/upload/route.test.ts",
+      "file": "app/api/v1/threads/[thread_id]/artifacts/[artifact_id]/route.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "app/api/v1/threads/[thread_id]/attachments/[attachment_id]/route.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "app/api/v1/threads/[thread_id]/attachments/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -140,6 +162,17 @@
     },
     {
       "file": "app/api/v1/user/current/route.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "app/gateway/v1/attachments/resolve/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -3043,6 +3076,39 @@
       ]
     },
     {
+      "file": "lib/files/agent-attachment-access.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/files/commit-managed-attachment.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/files/persist-thread-artifact.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/git/commit-message.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
@@ -4709,6 +4775,17 @@
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
       "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/workspace-attachment-storage.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"

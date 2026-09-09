@@ -380,14 +380,18 @@ def iter_operations() -> list[dict[str, Any]]:
                 end += 1
             section = lines[index + 1 : end]
             is_sse = method == "GET" and route.endswith("/events")
+            is_binary = "成功响应：`application/octet-stream`" in section
             if not any(line.startswith("| 请求参数 |") for line in section):
                 raise ValueError(f"API section missing request parameter table: {name} {heading}")
             if "```bash" not in section:
                 raise ValueError(f"API section missing curl example: {name} {heading}")
-            if "```json" not in section and not is_sse:
+            if "```json" not in section and not is_sse and not is_binary:
                 raise ValueError(f"API section missing JSON response example: {name} {heading}")
             parameters, request_body = parse_parameters(section)
-            response_schema, response_example = parse_json_response(section)
+            if is_binary:
+                response_schema, response_example = ({"type": "string", "format": "binary"}, None)
+            else:
+                response_schema, response_example = parse_json_response(section)
             operations.append(
                 {
                     "method": method,
@@ -401,6 +405,7 @@ def iter_operations() -> list[dict[str, Any]]:
                     "response_example": response_example,
                     "success_status": success_status(method, route, section),
                     "external_runtime_endpoint": external_runtime_endpoint,
+                    "binary_response": is_binary,
                     "error_codes": sorted(
                         set(re.findall(r"\b[A-Z][A-Z0-9_]{3,}\b", "\n".join(section)))
                         & known_errors
@@ -421,6 +426,13 @@ def build_contract() -> dict[str, Any]:
             raise ValueError(f"duplicate operationId: {op_id}")
         seen_operation_ids.add(op_id)
         is_event_stream = item["method"] == "GET" and item["path"].endswith("/events")
+        response_media_type = (
+            "text/event-stream"
+            if is_event_stream
+            else "application/octet-stream"
+            if item["binary_response"]
+            else "application/json"
+        )
         media: dict[str, Any] = {
             "schema": {"type": "string"} if is_event_stream else item["response_schema"]
         }
@@ -435,7 +447,7 @@ def build_contract() -> dict[str, Any]:
             "responses": {
                 item["success_status"]: {
                     "description": "成功响应，字段语义以对应规范章节为准。",
-                    "content": {"text/event-stream" if is_event_stream else "application/json": media},
+                    "content": {response_media_type: media},
                 },
                 "default": {"$ref": "#/components/responses/ErrorResponse"},
             },

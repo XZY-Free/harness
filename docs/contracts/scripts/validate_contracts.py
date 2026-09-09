@@ -62,7 +62,12 @@ def validate_openapi() -> int:
     operation_ids: set[str] = set()
     known_error_codes = set(load_json(CONTRACTS / "error-codes.json")["errors"])
     operation_count = 0
-    post_query_exceptions = {"/gateway/v1/context/query"}
+    post_query_exceptions = {
+        "/gateway/v1/context/query",
+        # capability 解析只读返回原文件字节，不创建或变更平台资源；使用 POST 是为避免
+        # 短期 bearer reference 出现在 URL、访问日志和代理缓存键中。
+        "/gateway/v1/attachments/resolve",
+    }
     for path, path_item in contract["paths"].items():
         if not path.startswith("/"):
             fail(f"invalid OpenAPI path: {path}")

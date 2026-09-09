@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "5",
-      "when": 1788507272144,
+      "when": 1788944770581,
       "tag": "0000_initial_schema",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1788928644155,
-      "tag": "0001_minor_quasimodo",
       "breakpoints": true
     }
   ]

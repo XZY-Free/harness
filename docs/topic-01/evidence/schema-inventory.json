@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "authority": "lib/persistence/schema/index.ts",
   "counts": {
-    "canonical": 124,
-    "runtimeLoaded": 124,
-    "migration": 124,
-    "freshDbPlanned": 124
+    "canonical": 127,
+    "runtimeLoaded": 127,
+    "migration": 127,
+    "freshDbPlanned": 127
   },
   "freshDbVerification": {
     "status": "planned-for-batch-07",
@@ -133,6 +133,7 @@
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/files/agent-attachment-access.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/event-ingress-queries.ts"
@@ -175,6 +176,7 @@
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/files/agent-attachment-access.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/event-ingress-queries.ts",
@@ -661,6 +663,7 @@
         "app/admin/api/v1/artifact-attestations/[attestation_id]/route.ts",
         "app/admin/api/v1/artifact-attestations/route.ts",
         "app/admin/api/v1/artifact-attestations/verify/route.ts",
+        "app/api/v1/threads/[thread_id]/artifacts/[artifact_id]/route.ts",
         "components/desktop/desktop-workbench.tsx",
         "components/studio/audit-log-table.tsx",
         "lib/agents/calls/transport/a2a/a2a-mapper.ts",
@@ -707,6 +710,7 @@
         "app/admin/api/v1/artifact-attestations/[attestation_id]/route.ts",
         "app/admin/api/v1/artifact-attestations/route.ts",
         "app/admin/api/v1/artifact-attestations/verify/route.ts",
+        "app/api/v1/threads/[thread_id]/artifacts/[artifact_id]/route.ts",
         "components/desktop/desktop-workbench.tsx",
         "components/studio/audit-log-table.tsx",
         "lib/agents/calls/transport/a2a/a2a-mapper.ts",
@@ -908,6 +912,48 @@
         "lib/identity/recovery-drill-queries.ts",
         "lib/identity/security-incident-queries.ts",
         "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "AuthSession",
+      "schemaDeclaration": "lib/persistence/schema/identity.ts#authSession",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "identity",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/identity/local-authentication.ts"
+      ],
+      "productionReaders": [
+        "lib/identity/local-authentication.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/identity.ts#authSession 是 AuthSession 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`userIdentityId` varchar(36) NOT NULL",
+        "`tokenHash` varchar(64) NOT NULL",
+        "`expiresAt` datetime(3) NOT NULL",
+        "`createdAt` datetime(3) NOT NULL",
+        "CONSTRAINT `AuthSession_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `AuthSession_token_uq` UNIQUE(`tokenHash`)",
+        "ALTER TABLE `AuthSession` ADD CONSTRAINT `AuthSession_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `AuthSession` ADD CONSTRAINT `AuthSession_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action",
+        "CREATE INDEX `AuthSession_user_expiry_idx` ON `AuthSession` (`tenantId`,`userIdentityId`,`expiresAt`)"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/identity.ts#authSession",
+        "lib/identity/local-authentication.ts",
+        "lib/identity/local-authentication.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -2612,6 +2658,7 @@
         "lib/conversations/environment-takeover-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
+        "lib/files/agent-attachment-access.ts",
         "lib/job/job-control-queries.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
@@ -2666,6 +2713,7 @@
         "lib/conversations/environment-takeover-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
+        "lib/files/agent-attachment-access.ts",
         "lib/job/job-control-queries.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
@@ -3273,6 +3321,51 @@
         "lib/identity/legal-hold-queries.ts",
         "lib/identity/legal-hold-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "LocalCredential",
+      "schemaDeclaration": "lib/persistence/schema/identity.ts#localCredential",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "identity",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/identity/local-authentication.ts"
+      ],
+      "productionReaders": [
+        "lib/identity/local-authentication.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/identity.ts#localCredential 是 LocalCredential 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`userIdentityId` varchar(36) NOT NULL",
+        "`normalizedEmail` varchar(254) NOT NULL",
+        "`passwordHash` varchar(512) NOT NULL",
+        "`failedLoginCount` int NOT NULL DEFAULT 0",
+        "`passwordChangedAt` datetime(3) NOT NULL",
+        "`createdAt` datetime(3) NOT NULL",
+        "`updatedAt` datetime(3) NOT NULL",
+        "CONSTRAINT `LocalCredential_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `LocalCredential_tenant_email_uq` UNIQUE(`tenantId`,`normalizedEmail`)",
+        "CONSTRAINT `LocalCredential_user_uq` UNIQUE(`userIdentityId`)",
+        "ALTER TABLE `LocalCredential` ADD CONSTRAINT `LocalCredential_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `LocalCredential` ADD CONSTRAINT `LocalCredential_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/identity.ts#localCredential",
+        "lib/identity/local-authentication.ts",
+        "lib/identity/local-authentication.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -4315,6 +4408,7 @@
         "`invocationId` varchar(36) NOT NULL",
         "`artifactType` varchar(32) NOT NULL",
         "`displayName` varchar(256) NOT NULL",
+        "`storageProvider` varchar(64) NOT NULL DEFAULT 'binding'",
         "`contentRef` varchar(512) NOT NULL",
         "`mediaType` varchar(128) NOT NULL",
         "`byteSize` bigint NOT NULL",
@@ -4326,6 +4420,7 @@
         "ALTER TABLE `RuntimeArtifact` ADD CONSTRAINT `RuntimeArtifact_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `RuntimeArtifact_tenant_invocation_idx` ON `RuntimeArtifact` (`tenantId`,`invocationId`)",
         "CREATE INDEX `RuntimeArtifact_tenant_thread_idx` ON `RuntimeArtifact` (`tenantId`,`threadId`)",
+        "CREATE INDEX `RuntimeArtifact_tenant_provider_idx` ON `RuntimeArtifact` (`tenantId`,`storageProvider`)",
         "CREATE INDEX `RuntimeArtifact_tenant_job_idx` ON `RuntimeArtifact` (`tenantId`,`jobId`)",
         "CREATE INDEX `RuntimeArtifact_tenant_expires_idx` ON `RuntimeArtifact` (`tenantId`,`expiresAt`)"
       ],
@@ -4839,6 +4934,7 @@
       "productionReaders": [
         "app/admin/api/v1/operations/gateway-protection/route.ts",
         "lib/db/seed.ts",
+        "lib/identity/local-authentication.ts",
         "lib/identity/prepare-enterprise-user-context.ts",
         "lib/identity/resolver.ts",
         "lib/identity/tenant-bootstrap.ts",
@@ -4869,6 +4965,7 @@
         "lib/workers/production-worker-process.ts",
         "app/admin/api/v1/operations/gateway-protection/route.ts",
         "lib/db/seed.ts",
+        "lib/identity/local-authentication.ts",
         "lib/identity/prepare-enterprise-user-context.ts",
         "lib/identity/resolver.ts",
         "lib/identity/tenant-bootstrap.ts",
@@ -5763,8 +5860,8 @@
         "`updatedAt` datetime(3) NOT NULL",
         "CONSTRAINT `UserActionRequest_id` PRIMARY KEY(`id`)",
         "CONSTRAINT `UserActionRequest_item_id_uq` UNIQUE(`itemId`)",
-        "CONSTRAINT `UserActionRequest_invocation_harnessAction_uq` UNIQUE(`invocationId`,`harnessActionId`)",
         "CONSTRAINT `UserActionRequest_permissionDecision_id_uq` UNIQUE(`permissionDecisionId`)",
+        "CONSTRAINT `UserActionRequest_invocation_harnessAction_uq` UNIQUE(`invocationId`,`harnessActionId`)",
         "ALTER TABLE `UserActionRequest` ADD CONSTRAINT `UserActionRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `UserActionRequest_tenant_invocation_state_idx` ON `UserActionRequest` (`tenantId`,`invocationId`,`requestState`)",
         "CREATE INDEX `UserActionRequest_tenant_toolCall_idx` ON `UserActionRequest` (`tenantId`,`toolCallId`)",
@@ -5818,7 +5915,7 @@
         "`updatedAt` datetime(3) NOT NULL",
         "CONSTRAINT `UserExtensionAttribute_id` PRIMARY KEY(`id`)",
         "CONSTRAINT `UserExtensionAttribute_user_key_uq` UNIQUE(`userIdentityId`,`attributeKey`)",
-        "CONSTRAINT `UserExtensionAttribute_value_slot_ck` CHECK ((",
+        "CONSTRAINT `UserExtensionAttribute_value_slot_ck` CHECK((",
         "(valueType = 'string' AND stringValue IS NOT NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NULL)",
         "OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)",
         "OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)",
@@ -5850,6 +5947,7 @@
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/identity/accept-enterprise-profile-observation.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
+        "lib/identity/local-authentication.ts",
         "lib/identity/resolver.ts",
         "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",
@@ -5882,6 +5980,7 @@
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/identity/accept-enterprise-profile-observation.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
+        "lib/identity/local-authentication.ts",
         "lib/identity/resolver.ts",
         "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",
@@ -6076,6 +6175,8 @@
         "lib/workspace/workspace-queries.ts"
       ],
       "productionReaders": [
+        "lib/conversations/turn-queries.ts",
+        "lib/files/agent-attachment-access.ts",
         "lib/workspace/workspace-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -6088,7 +6189,7 @@
         "`id` varchar(36) NOT NULL",
         "`tenantId` varchar(36) NOT NULL",
         "`threadId` varchar(36) NOT NULL",
-        "`workspaceBindingId` varchar(36) NOT NULL",
+        "`storageProvider` varchar(64) NOT NULL DEFAULT 'binding'",
         "`resourceType` enum('file','directory','archive','database_snapshot','external_ref') NOT NULL",
         "`resourceRef` varchar(512) NOT NULL",
         "`accessMode` enum('read','read_write') NOT NULL DEFAULT 'read'",
@@ -6103,13 +6204,61 @@
         "ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_workspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `WorkspaceAttachment_tenant_thread_idx` ON `WorkspaceAttachment` (`tenantId`,`threadId`)",
         "CREATE INDEX `WorkspaceAttachment_tenant_binding_idx` ON `WorkspaceAttachment` (`tenantId`,`workspaceBindingId`)",
-        "CREATE INDEX `WorkspaceAttachment_tenant_state_idx` ON `WorkspaceAttachment` (`tenantId`,`attachmentState`)"
+        "CREATE INDEX `WorkspaceAttachment_tenant_state_idx` ON `WorkspaceAttachment` (`tenantId`,`attachmentState`)",
+        "CREATE INDEX `WorkspaceAttachment_tenant_provider_idx` ON `WorkspaceAttachment` (`tenantId`,`storageProvider`)"
       ],
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/workspace.ts#workspaceAttachment",
         "lib/workspace/workspace-queries.ts",
+        "lib/conversations/turn-queries.ts",
+        "lib/files/agent-attachment-access.ts",
         "lib/workspace/workspace-queries.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "WorkspaceAttachmentAccessGrant",
+      "schemaDeclaration": "lib/persistence/schema/workspace.ts#workspaceAttachmentAccessGrant",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "workspace",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/files/agent-attachment-access.ts"
+      ],
+      "productionReaders": [
+        "lib/files/agent-attachment-access.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "binding",
+      "authorityStatement": "lib/persistence/schema/workspace.ts#workspaceAttachmentAccessGrant 是 WorkspaceAttachmentAccessGrant 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`workspaceAttachmentId` varchar(36) NOT NULL",
+        "`turnId` varchar(36) NOT NULL",
+        "`invocationId` varchar(36) NOT NULL",
+        "`agentCallId` varchar(36) NOT NULL",
+        "`issuedAt` datetime(3) NOT NULL",
+        "`expiresAt` datetime(3) NOT NULL",
+        "CONSTRAINT `WorkspaceAttachmentAccessGrant_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `WorkspaceAttachmentAccessGrant_call_attachment_uq` UNIQUE(`agentCallId`,`workspaceAttachmentId`)",
+        "ALTER TABLE `WorkspaceAttachmentAccessGrant` ADD CONSTRAINT `WorkspaceAttachmentAccessGrant_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `WorkspaceAttachmentAccessGrant` ADD CONSTRAINT `WorkspaceAttachmentAccessGrant_attachment_fk` FOREIGN KEY (`workspaceAttachmentId`) REFERENCES `WorkspaceAttachment`(`id`) ON DELETE cascade ON UPDATE no action",
+        "CREATE INDEX `WorkspaceAttachmentAccessGrant_tenant_expiry_idx` ON `WorkspaceAttachmentAccessGrant` (`tenantId`,`expiresAt`)",
+        "CREATE INDEX `WorkspaceAttachmentAccessGrant_attachment_idx` ON `WorkspaceAttachmentAccessGrant` (`workspaceAttachmentId`)"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/workspace.ts#workspaceAttachmentAccessGrant",
+        "lib/files/agent-attachment-access.ts",
+        "lib/files/agent-attachment-access.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -6123,9 +6272,11 @@
       "domainOwner": "workspace",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
+        "lib/conversations/turn-queries.ts",
         "lib/workspace/workspace-queries.ts"
       ],
       "productionReaders": [
+        "lib/files/agent-attachment-access.ts",
         "lib/workspace/workspace-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -6150,7 +6301,9 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/workspace.ts#workspaceAttachmentUse",
+        "lib/conversations/turn-queries.ts",
         "lib/workspace/workspace-queries.ts",
+        "lib/files/agent-attachment-access.ts",
         "lib/workspace/workspace-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],

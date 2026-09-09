@@ -18,7 +18,7 @@
  * - MySQL 不支持 .returning()：update + select 两步。
  */
 import { createHash } from "node:crypto";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import {
   WORKSPACE_BINDING_TYPES,
   type Workspace,
@@ -400,6 +400,74 @@ export interface CreateWorkspaceAttachmentInput {
   expiresAt?: Date;
 }
 
+export interface CreateManagedWorkspaceAttachmentInput {
+  id: string;
+  tenantId: string;
+  threadId: string;
+  storageProvider: string;
+  resourceRef: string;
+  resourceFingerprint: string;
+  originalFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  attachedBy: string;
+}
+
+/** 登记由 SnowHarness FileStorageProvider 保存的原文件。 */
+export async function createManagedWorkspaceAttachment(
+  input: CreateManagedWorkspaceAttachmentInput,
+  executor: DbOrTx = db,
+): Promise<WorkspaceAttachment> {
+  if (!input.id) throw new WorkspaceValidationError("id 不能为空");
+  if (!input.tenantId) throw new WorkspaceValidationError("tenantId 不能为空");
+  if (!input.threadId) throw new WorkspaceValidationError("threadId 不能为空");
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(input.storageProvider)) {
+    throw new WorkspaceValidationError("storageProvider 格式非法");
+  }
+  if (!input.resourceRef) throw new WorkspaceValidationError("resourceRef 不能为空");
+  if (!/^sha256:[0-9a-f]{64}$/.test(input.resourceFingerprint)) {
+    throw new WorkspaceValidationError("resourceFingerprint 必须是 sha256 指纹");
+  }
+  if (!input.originalFilename || input.originalFilename.length > 512) {
+    throw new WorkspaceValidationError("originalFilename 不能为空且不能超过 512 字符");
+  }
+  if (!input.contentType || input.contentType.length > 255) {
+    throw new WorkspaceValidationError("contentType 不能为空且不能超过 255 字符");
+  }
+  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0) {
+    throw new WorkspaceValidationError("sizeBytes 必须是非负安全整数");
+  }
+  if (!input.attachedBy) throw new WorkspaceValidationError("attachedBy 不能为空");
+
+  await executor.insert(workspaceAttachment).values({
+    id: input.id,
+    tenantId: input.tenantId,
+    threadId: input.threadId,
+    workspaceBindingId: null,
+    storageProvider: input.storageProvider,
+    resourceType: "file",
+    resourceRef: input.resourceRef,
+    resourceFingerprint: input.resourceFingerprint,
+    displayRef: input.originalFilename.slice(0, 256),
+    originalFilename: input.originalFilename,
+    contentType: input.contentType,
+    sizeBytes: input.sizeBytes,
+    accessMode: "read",
+    attachmentState: "attached",
+    attachedBy: input.attachedBy,
+  });
+
+  const [created] = await executor
+    .select()
+    .from(workspaceAttachment)
+    .where(
+      and(eq(workspaceAttachment.tenantId, input.tenantId), eq(workspaceAttachment.id, input.id)),
+    )
+    .limit(1);
+  if (!created) throw new WorkspaceNotFoundError("WorkspaceAttachment 创建后回查失败");
+  return created;
+}
+
 export async function createWorkspaceAttachment(
   input: CreateWorkspaceAttachmentInput,
 ): Promise<WorkspaceAttachment> {
@@ -423,6 +491,7 @@ export async function createWorkspaceAttachment(
     tenantId: input.tenantId,
     threadId: input.threadId,
     workspaceBindingId: input.workspaceBindingId,
+    storageProvider: "binding",
     resourceType: input.resourceType,
     resourceRef: input.resourceRef,
     resourceFingerprint: input.resourceFingerprint ?? computeLocationFingerprint(input.resourceRef),

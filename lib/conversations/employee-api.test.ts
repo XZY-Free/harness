@@ -22,6 +22,10 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
+import {
+  createManagedWorkspaceAttachment,
+  listWorkspaceAttachmentUsesByTurn,
+} from "@/lib/workspace/workspace-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 identity.test.ts 一致）。
@@ -362,6 +366,72 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
     expect(body.input_item.item_state).toBe("completed");
     // thread.created(seq=1) + turn.accepted(seq=2) + item.created(seq=3)
     expect(body.event_cursor.sequence).toBe(3);
+  });
+
+  it("workspace_attachment_ids 绑定平台附件，客户端不得自报 resource_ref", async () => {
+    await seedDispatchableTurn();
+    const { tenantId, userIdentityId } = await seedContext();
+    const createResp = await createThreadPOST(
+      buildApiRequest({
+        audience: "employee",
+        method: "POST",
+        path: "/threads",
+        idempotencyKey: "turn-attachment-thread",
+        body: {},
+      }),
+    );
+    const { id: threadId } = (await createResp.json()) as { id: string };
+    const attachmentId = crypto.randomUUID();
+    await createManagedWorkspaceAttachment({
+      id: attachmentId,
+      tenantId,
+      threadId,
+      storageProvider: "workspace",
+      resourceRef: `.snow/files/attachment/${attachmentId}/content`,
+      resourceFingerprint: `sha256:${"d".repeat(64)}`,
+      originalFilename: "申请材料.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 1024,
+      attachedBy: userIdentityId,
+    });
+
+    const response = await createTurnPOST(
+      buildApiRequest({
+        audience: "employee",
+        method: "POST",
+        path: `/threads/${threadId}/turns`,
+        idempotencyKey: "turn-with-attachment",
+        body: {
+          input: { type: "text", text: "请处理申请材料" },
+          workspace_attachment_ids: [attachmentId],
+        },
+      }),
+      { params: Promise.resolve({ thread_id: threadId }) },
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { turn: { id: string } };
+    await expect(listWorkspaceAttachmentUsesByTurn(tenantId, body.turn.id)).resolves.toMatchObject([
+      { workspaceAttachmentId: attachmentId },
+    ]);
+
+    const forged = await createTurnPOST(
+      buildApiRequest({
+        audience: "employee",
+        method: "POST",
+        path: `/threads/${threadId}/turns`,
+        idempotencyKey: "turn-forged-attachment",
+        body: {
+          input: {
+            type: "text",
+            text: "伪造路径",
+            attachments: [{ resource_ref: "cos://other-tenant/secret" }],
+          },
+        },
+      }),
+      { params: Promise.resolve({ thread_id: threadId }) },
+    );
+    expect(forged.status).toBe(400);
   });
 
   it("幂等重放：同 Idempotency-Key 返回同一 Turn", async () => {

@@ -221,7 +221,7 @@ export const userExtensionAttribute = mysqlTable(
         OR (valueType = 'number' AND stringValue IS NULL AND numberValue IS NOT NULL AND booleanValue IS NULL AND jsonValue IS NULL)
         OR (valueType = 'boolean' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NOT NULL AND jsonValue IS NULL)
         OR (valueType = 'json' AND stringValue IS NULL AND numberValue IS NULL AND booleanValue IS NULL AND jsonValue IS NOT NULL)
-      `,
+      )`,
     ),
   }),
 );

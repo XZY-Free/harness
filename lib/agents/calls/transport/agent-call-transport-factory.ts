@@ -97,15 +97,17 @@ export function buildAgentCallContextMetadata(
   contract: InvocationContextContract,
   environment: PlatformContextEnvironment,
   enterprisePolicy: EnterpriseUserAccessPolicy = { profileRequirement: "none", allowedFields: [] },
+  selectedAcceptedContextKinds: readonly string[] = [],
 ): Record<string, unknown> {
+  const explicitAllows = new Set(selectedAcceptedContextKinds);
+  if (enterprisePolicy.profileRequirement !== "none") {
+    explicitAllows.add("enterprise_user_context");
+  }
   const bundle = buildInvocationContextBundle({
     contract,
     environment,
-    policyFilter: externalAgentContextPolicyFilter(
-      enterprisePolicy.profileRequirement === "none"
-        ? undefined
-        : { explicitAllows: new Set(["enterprise_user_context"]) },
-    ),
+    policyFilter: externalAgentContextPolicyFilter({ explicitAllows }),
+    selectedAcceptedContextKinds: [...selectedAcceptedContextKinds],
   });
   const contextMetadata: Record<string, unknown> = {};
   for (const entry of bundle.entries) {

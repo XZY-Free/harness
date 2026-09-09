@@ -1,6 +1,7 @@
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { workspaceFileStorageProvider } from "@/lib/files/workspace-storage-provider";
 import {
   WorkspacePathError,
   WorkspaceRevisionConflict,
@@ -72,6 +73,94 @@ describe("workspace", () => {
   it("listWorkspaceFiles 对空目录应返回空数组", async () => {
     const files = await listWorkspaceFiles("nonexistent-chat-id");
     expect(files).toEqual([]);
+  });
+});
+
+describe("默认文件存储 Provider", () => {
+  it("保存、读取、删除原文件且不把用户文件名写入物理路径", async () => {
+    const content = Buffer.from("original-pdf-bytes");
+    const stored = await workspaceFileStorageProvider.store({
+      tenantId: "tenant-1",
+      ownerUserId: "user-1",
+      threadId: TEST_CHAT_ID,
+      resourceId: "123e4567-e89b-12d3-a456-426614174000",
+      resourceKind: "attachment",
+      originalFilename: "../../人事证明.pdf",
+      contentType: "application/pdf",
+      content,
+    });
+
+    expect(stored.resourceRef).toBe(
+      ".snow/files/attachment/123e4567-e89b-12d3-a456-426614174000/content",
+    );
+    expect(stored.resourceRef).not.toContain("人事证明.pdf");
+    await expect(
+      workspaceFileStorageProvider.read({
+        tenantId: "tenant-1",
+        threadId: TEST_CHAT_ID,
+        resourceRef: stored.resourceRef,
+      }),
+    ).resolves.toEqual(content);
+    await expect(
+      workspaceFileStorageProvider.delete({
+        tenantId: "tenant-1",
+        threadId: TEST_CHAT_ID,
+        resourceRef: stored.resourceRef,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      workspaceFileStorageProvider.read({
+        tenantId: "tenant-1",
+        threadId: TEST_CHAT_ID,
+        resourceRef: stored.resourceRef,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("拒绝读取非受管文件引用", async () => {
+    await expect(
+      workspaceFileStorageProvider.read({
+        tenantId: "tenant-1",
+        threadId: TEST_CHAT_ID,
+        resourceRef: "README.md",
+      }),
+    ).rejects.toThrow("不是受管文件路径");
+  });
+
+  it("拒绝非法 resourceId，不能把 Provider 写入路径变成调用方输入", async () => {
+    await expect(
+      workspaceFileStorageProvider.store({
+        tenantId: "tenant-1",
+        ownerUserId: "user-1",
+        threadId: TEST_CHAT_ID,
+        resourceId: "../../escape",
+        resourceKind: "attachment",
+        originalFilename: "safe.txt",
+        contentType: "text/plain",
+        content: Buffer.from("x"),
+      }),
+    ).rejects.toThrow("资源 id 非法");
+
+    await expect(
+      workspaceFileStorageProvider.store({
+        tenantId: "tenant-1",
+        ownerUserId: "user-1",
+        threadId: TEST_CHAT_ID,
+        resourceId: "123e4567-e89b-12d3-a456-426614174000",
+        resourceKind: "../../escape" as "attachment",
+        originalFilename: "safe.txt",
+        contentType: "text/plain",
+        content: Buffer.from("x"),
+      }),
+    ).rejects.toThrow("资源类型非法");
+
+    await expect(
+      workspaceFileStorageProvider.read({
+        tenantId: "tenant-1",
+        threadId: TEST_CHAT_ID,
+        resourceRef: ".snow/files/attachment/------------------------------------/content",
+      }),
+    ).rejects.toThrow("不是受管文件路径");
   });
 });
 

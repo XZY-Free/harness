@@ -29,6 +29,9 @@ export async function register() {
     );
     await assertIdentityExtensionsReady();
 
+    const { assertFileStorageReady } = await import("./lib/files/storage-bootstrap");
+    await assertFileStorageReady();
+
     // 启动时应用 db 迁移（替代已退役的 ensureSchema 裸 DDL），确保表结构就绪
     const { runMigrations } = await import("./lib/db/migrate");
     await runMigrations();

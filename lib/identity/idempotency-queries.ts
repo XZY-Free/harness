@@ -14,7 +14,7 @@
  * 本模块只提供数据访问，不包含业务判断。
  */
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import type { ApiAudience } from "@/lib/http";
 import {
   type IdempotencyAudience,
@@ -113,14 +113,17 @@ export async function insertProcessingRecord(params: {
  * 完成幂等记录：回填 processingState=completed + httpStatus + responseRef + responseRedactedJson + completedAt。
  * 不存在或非 processing 状态返回 false。
  */
-export async function completeIdempotencyRecord(params: {
-  recordId: string;
-  httpStatus: number;
-  responseRef?: string | null;
-  responseRedactedJson?: string | null;
-}): Promise<boolean> {
+export async function completeIdempotencyRecord(
+  params: {
+    recordId: string;
+    httpStatus: number;
+    responseRef?: string | null;
+    responseRedactedJson?: string | null;
+  },
+  executor: DbOrTx = db,
+): Promise<boolean> {
   const now = new Date();
-  const result = await db
+  const result = await executor
     .update(idempotencyRecord)
     .set({
       processingState: "completed",

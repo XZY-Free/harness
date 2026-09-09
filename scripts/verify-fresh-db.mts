@@ -199,8 +199,8 @@ async function main(): Promise<void> {
       if (
         !seed ||
         seed.tenants !== 1 ||
-        seed.identities !== 1 ||
-        seed.grants <= 0 ||
+        seed.identities !== 0 ||
+        seed.grants !== 0 ||
         seed.agents !== 0
       ) {
         throw new Error(`Fresh DB seed 结果非法：${JSON.stringify(seed ?? {})}`);

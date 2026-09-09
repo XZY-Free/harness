@@ -140,7 +140,9 @@ workspaces/             运行时生成的用户项目（git 忽略）
 | `LLM_BASE_URL` | | OpenAI 兼容端点（默认阿里云百炼 compatible-mode） |
 | `SNOW_CHAT_MODEL` | | 主聊天 / 代码生成模型（默认 qwen-plus） |
 | `SNOW_TITLE_MODEL` | | 标题模型（默认 qwen-turbo） |
-| `SNOW_WORKSPACES_DIR` | | 工作区根目录（默认 `workspaces`） |
+| `SNOW_WORKSPACES_DIR` | | 工作区根目录（默认 `workspaces`）；开源默认文件 Provider 也在这里保存用户原文件和 AI 最终产物 |
+| `SNOW_FILE_IMAGE_UPLOAD_MAX_MB` | | 员工图片上传上限，正整数 MB（默认 10） |
+| `SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB` | | 员工文档上传上限，正整数 MB（默认 20） |
 
 ### V3.8：生产 runtime / 部署 / secret（可选，不配置则功能降级）
 
