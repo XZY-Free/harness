@@ -63,7 +63,13 @@ describe("startLocalRendererServer", () => {
   it("只把 API 请求转发到远端 basePath", async () => {
     const upstreamOrigin = await startUpstream((request, response) => {
       response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ method: request.method, url: request.url }));
+      response.end(
+        JSON.stringify({
+          method: request.method,
+          origin: request.headers.origin,
+          url: request.url,
+        }),
+      );
     });
     const server = await startLocalRendererServer({
       rendererDir: await createRendererFiles(),
@@ -78,6 +84,34 @@ describe("startLocalRendererServer", () => {
       method: "GET",
       url: "/snowharness/api/v1/threads?limit=20",
     });
+  });
+
+  it("把 Desktop 同源认证请求的 Origin 重写为远端公开 origin", async () => {
+    const upstreamOrigin = await startUpstream((request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.setHeader(
+        "set-cookie",
+        "snow_session=opaque; Path=/snowharness; HttpOnly; SameSite=Lax",
+      );
+      response.end(JSON.stringify({ origin: request.headers.origin }));
+    });
+    const server = await startLocalRendererServer({
+      rendererDir: await createRendererFiles(),
+      serverOrigin: upstreamOrigin,
+    });
+    cleanups.push(() => server.close());
+
+    const response = await fetch(`${server.origin}/api/auth/login`, {
+      method: "POST",
+      headers: { origin: server.origin },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      origin: new URL(upstreamOrigin).origin,
+    });
+    expect(response.headers.get("set-cookie")).toContain("Path=/");
+    expect(response.headers.get("set-cookie")).not.toContain("Path=/snowharness");
   });
 
   it("不将任意本地路径作为远端代理", async () => {

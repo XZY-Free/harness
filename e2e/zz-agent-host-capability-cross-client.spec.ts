@@ -10,7 +10,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { E2E_PORT } from "../playwright.config";
-import { launchDesktopApp } from "./support/launch-desktop";
+import { authenticateDesktopWindow, launchDesktopApp } from "./support/launch-desktop";
 
 const captureUi = process.env.SNOW_CAPTURE_UI === "1";
 const captureDir = resolve(process.cwd(), "output/user-action-design-qa");
@@ -37,7 +37,7 @@ async function loadE2eHarness() {
 
   const [
     { db },
-    { DEFAULT_USER_ID },
+    { E2E_ADMIN_EMAIL },
     { ensureDefaultTenant },
     { getUserIdentityBySubject },
     { EXECUTION_FIXTURE_CONTRACT, seedAgentCallExecutionScenario },
@@ -52,7 +52,7 @@ async function loadE2eHarness() {
     { and, eq },
   ] = await Promise.all([
     import("@/lib/db/client"),
-    import("@/lib/constants"),
+    import("@/lib/test-support/e2e-credentials"),
     import("@/lib/identity/tenant-queries"),
     import("@/lib/identity/user-identity-queries"),
     import("@/lib/agents/calls/test/agent-call-execution-fixtures"),
@@ -68,7 +68,7 @@ async function loadE2eHarness() {
   ]);
   return {
     db,
-    DEFAULT_USER_ID,
+    E2E_ADMIN_EMAIL,
     ensureDefaultTenant,
     getUserIdentityBySubject,
     EXECUTION_FIXTURE_CONTRACT,
@@ -91,8 +91,11 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
 }) => {
   const harness = await loadE2eHarness();
   const tenant = await harness.ensureDefaultTenant();
-  const owner = await harness.getUserIdentityBySubject(tenant.id, harness.DEFAULT_USER_ID);
-  if (!owner) throw new Error("E2E 默认员工身份不存在");
+  const owner = await harness.getUserIdentityBySubject(
+    tenant.id,
+    `local:${harness.E2E_ADMIN_EMAIL}`,
+  );
+  if (!owner) throw new Error("E2E 登录账号不存在");
 
   const actionId = `e2e-agent-confirmation-${randomUUID()}`;
   const scenario = await harness.seedAgentCallExecutionScenario({
@@ -119,6 +122,8 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
   const desktop = await launchDesktopApp();
 
   try {
+    const desktopWindow = await desktop.app.firstWindow();
+    await authenticateDesktopWindow(desktopWindow);
     // 先打开真实 Web 会话，再由真实 AgentCall/A2A 事件写入用户确认请求。
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/chat/${scenario.threadId}`);
@@ -178,7 +183,6 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
     await expect(webPanel.getByText("年假", { exact: true })).toBeVisible();
     await capture(page, "02-web-confirmation-expanded.png");
 
-    const desktopWindow = await desktop.app.firstWindow();
     const rendererOrigin = new URL(desktopWindow.url()).origin;
     await desktopWindow.goto(`${rendererOrigin}/desktop/chat/${scenario.threadId}`);
     const desktopPanel = desktopWindow.getByRole("region", { name: "需要用户确认" });

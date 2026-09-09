@@ -34,7 +34,7 @@ export { GOVERNANCE_CONFIG_SET_KEY, INITIAL_GOVERNANCE_CONFIG } from "@/lib/gove
 /** 默认租户 key（单租户阶段固定）。 */
 export const DEFAULT_TENANT_KEY = "default";
 export const DEFAULT_TENANT_NAME = "Default Tenant";
-/** 默认租户 id 固定，便于 dev 模式和测试复用。 */
+/** 默认租户 id 固定，便于单租户部署和测试复用。 */
 export const DEFAULT_TENANT_ID = "00000000-0000-4000-8000-000000000000";
 
 /** PolicySet 正式稳定 key（冻结方案 §6.1）。 */

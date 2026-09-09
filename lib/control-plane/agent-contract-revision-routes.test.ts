@@ -30,16 +30,16 @@ import { tenant } from "@/lib/persistence/schema/identity";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-routes.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 admin-routes.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 /** seed 管理员并授予 agent.revision.create。 */

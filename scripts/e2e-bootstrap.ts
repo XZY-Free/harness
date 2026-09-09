@@ -23,11 +23,9 @@
  * 由 `scripts/e2e-start.mts` 以子进程方式调用，DATABASE_URL 由父进程注入。
  */
 import { randomUUID } from "node:crypto";
-import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { bootstrapLocalAdmin } from "@/lib/identity/local-authentication";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import {
   MAX_TRAFFIC_WEIGHT,
@@ -39,6 +37,11 @@ import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
+import {
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_NAME,
+  E2E_ADMIN_PASSWORD,
+} from "@/lib/test-support/e2e-credentials";
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
 
 const ROUTE_SCOPE_KEY = "default";
@@ -70,18 +73,10 @@ async function drainOutboxForRoute(routeId: string): Promise<void> {
 
 async function main(): Promise<void> {
   const tenant = await ensureDefaultTenant();
-  const identity = await upsertUserIdentity({
-    tenantId: tenant.id,
-    externalSubject: DEFAULT_USER_ID,
-    email: DEFAULT_USER_EMAIL,
-    displayName: DEFAULT_USER_NAME,
-  });
-  await upsertPrincipalBinding({
-    tenantId: tenant.id,
-    subjectType: "user",
-    externalId: DEFAULT_USER_ID,
-    displayName: DEFAULT_USER_NAME,
-    userIdentityId: identity.id,
+  const identity = await bootstrapLocalAdmin({
+    email: E2E_ADMIN_EMAIL,
+    displayName: E2E_ADMIN_NAME,
+    password: E2E_ADMIN_PASSWORD,
   });
 
   const suffix = randomUUID().slice(0, 8);

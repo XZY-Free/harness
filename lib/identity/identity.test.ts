@@ -1,4 +1,3 @@
-import { POST as authOperationPost } from "@/app/api/auth/[...operation]/route";
 /**
  * S02-C01：身份模块集成测试（真实 MySQL 8）。
  *
@@ -6,9 +5,8 @@ import { POST as authOperationPost } from "@/app/api/auth/[...operation]/route";
  * - tenant-queries：默认租户 seed 幂等、按 key/id 查找。
  * - user-identity-queries：upsert 创建/复用/漂移更新、按 id/subject/跨租户查找。
  * - principal-binding-queries：upsert 创建/复用/漂移更新、按用户列出、按主体查找。
- * - resolver：dev/trusted-headers 双模式、缺身份/缺邮箱报错、authErrorResponse 401 映射。
+ * - resolver：本地会话认证、缺身份报错、authErrorResponse 401 映射。
  */
-import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { EnterpriseProfileAcceptanceError } from "@/lib/identity/accept-enterprise-profile-observation";
@@ -17,21 +15,18 @@ import type {
   EnterpriseProfileObservation,
   EnterpriseProfileSource,
 } from "@/lib/identity/enterprise-profile-source";
+import { getEnterpriseUserProfileFacts } from "@/lib/identity/enterprise-user-profile-queries";
 import {
-  attributesFromRows,
-  getEnterpriseUserProfileFacts,
-} from "@/lib/identity/enterprise-user-profile-queries";
+  bootstrapLocalAdmin,
+  localAuthenticationProvider,
+  verifyPassword,
+} from "@/lib/identity/local-authentication";
 import {
   getPrincipalBinding,
   listPrincipalBindingsByUser,
   upsertPrincipalBinding,
 } from "@/lib/identity/principal-binding-queries";
-import {
-  AuthenticationError,
-  authErrorResponse,
-  getCurrentPrincipal,
-  resolvePrincipal,
-} from "@/lib/identity/resolver";
+import { AuthenticationError, authErrorResponse, resolvePrincipal } from "@/lib/identity/resolver";
 import {
   DEFAULT_TENANT_ID,
   DEFAULT_TENANT_KEY,
@@ -45,11 +40,10 @@ import {
   getUserIdentityForTenant,
   upsertUserIdentity,
 } from "@/lib/identity/user-identity-queries";
-import { userIdentity } from "@/lib/persistence/schema/identity";
+import { authSession, localCredential, userIdentity } from "@/lib/persistence/schema/identity";
 import { eq } from "drizzle-orm";
 import mysql from "mysql2/promise";
-import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // 生产发行版把企业资料源注入组合根（profileSource），开放版默认不启用。
 // 测试只需替换组合根的返回，让 resolvePrincipal 走真实的"认证证据 → 资料观察 → 接纳"链路，
@@ -70,14 +64,12 @@ const profileSourceState = vi.hoisted(() => {
 vi.mock("@/lib/identity/identity-extension-bootstrap", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/lib/identity/identity-extension-bootstrap")>();
-  const { openSourceAuthenticationProvider } = await import(
-    "@/lib/identity/authentication-provider"
-  );
+  const { localAuthenticationProvider } = await import("@/lib/identity/local-authentication");
   return {
     ...actual,
     getIdentityExtensions: vi.fn(async () => ({
       authenticationProvider:
-        profileSourceState.authenticationProviderOverride ?? openSourceAuthenticationProvider,
+        profileSourceState.authenticationProviderOverride ?? localAuthenticationProvider,
       profileSource: {
         sourceSystem: "directory",
         trusted: true,
@@ -94,21 +86,10 @@ vi.mock("@/lib/identity/identity-extension-bootstrap", async (importOriginal) =>
   };
 });
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
-
-function setAuthMode(mode: string | undefined) {
-  process.env.SNOW_AUTH_MODE = mode;
-}
-
 beforeEach(async () => {
   await resetDatabase(db);
-  setAuthMode("dev");
   profileSourceState.resetObserveCount();
   profileSourceState.authenticationProviderOverride = null;
-});
-
-afterEach(() => {
-  setAuthMode(ORIGINAL_AUTH_MODE);
 });
 
 // ─── tenant-queries ──────────────────────────────────────────
@@ -466,40 +447,135 @@ describe("principal-binding-queries", () => {
 
 // ─── resolver ────────────────────────────────────────────────
 
+describe("local-authentication", () => {
+  it("拒绝包含异常 scrypt 参数的损坏凭证记录", async () => {
+    await expect(verifyPassword("password", "scrypt-v1$999999999$8$1$salt$digest")).resolves.toBe(
+      false,
+    );
+  });
+
+  it("只有显式初始化的账号才能登录，并用不透明会话 cookie 恢复真实身份", async () => {
+    const admin = await bootstrapLocalAdmin({
+      email: " Admin@Example.com ",
+      displayName: "管理员",
+      password: "correct horse battery staple",
+    });
+
+    const login = await localAuthenticationProvider.login!({
+      email: "admin@example.com",
+      password: "correct horse battery staple",
+    });
+    expect(login.status).toBe("authenticated");
+    if (login.status !== "authenticated") throw new Error("登录失败");
+
+    const [credential] = await db.select().from(localCredential).limit(1);
+    const [session] = await db.select().from(authSession).limit(1);
+    expect(credential).toBeDefined();
+    expect(session).toBeDefined();
+    if (!credential || !session) throw new Error("认证记录未写入");
+    expect(credential.normalizedEmail).toBe("admin@example.com");
+    expect(credential.passwordHash).not.toContain("correct horse battery staple");
+    expect(session.tokenHash).not.toBe(login.sessionToken);
+
+    const authentication = await localAuthenticationProvider.authenticate({
+      headers: new Headers({ cookie: `snow_session=${login.sessionToken}` }),
+    });
+    expect(authentication).toEqual({
+      status: "authenticated",
+      evidence: {
+        externalSubject: admin.externalSubject,
+        email: "admin@example.com",
+        displayName: "管理员",
+        trustedAuthenticationClaims: {},
+      },
+    });
+  });
+
+  it("错误密码不泄露账号是否存在，连续失败后短时锁定", async () => {
+    await bootstrapLocalAdmin({
+      email: "admin@example.com",
+      displayName: "管理员",
+      password: "correct horse battery staple",
+    });
+
+    await expect(
+      localAuthenticationProvider.login!({
+        email: "missing@example.com",
+        password: "wrong password",
+      }),
+    ).resolves.toEqual({ status: "denied" });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await expect(
+        localAuthenticationProvider.login!({
+          email: "admin@example.com",
+          password: "wrong password",
+        }),
+      ).resolves.toEqual({ status: "denied" });
+    }
+    const locked = await localAuthenticationProvider.login!({
+      email: "admin@example.com",
+      password: "wrong password",
+    });
+    expect(locked.status).toBe("rate_limited");
+  });
+
+  it("退出后服务端会话立即失效", async () => {
+    await bootstrapLocalAdmin({
+      email: "admin@example.com",
+      displayName: "管理员",
+      password: "correct horse battery staple",
+    });
+    const login = await localAuthenticationProvider.login!({
+      email: "admin@example.com",
+      password: "correct horse battery staple",
+    });
+    if (login.status !== "authenticated") throw new Error("登录失败");
+    const headers = new Headers({ cookie: `snow_session=${login.sessionToken}` });
+
+    await localAuthenticationProvider.logout!({ headers });
+
+    await expect(localAuthenticationProvider.authenticate({ headers })).resolves.toEqual({
+      status: "unauthenticated",
+    });
+  });
+});
+
 describe("resolver", () => {
-  it("dev 模式返回默认身份并创建租户/身份/绑定", async () => {
-    setAuthMode("dev");
-    const principal = await resolvePrincipal(new Headers(), "employee");
+  it("有效会话返回真实身份并创建统一主体绑定", async () => {
+    const admin = await bootstrapLocalAdmin({
+      email: "admin@example.com",
+      displayName: "管理员",
+      password: "correct horse battery staple",
+    });
+    const login = await localAuthenticationProvider.login!({
+      email: "admin@example.com",
+      password: "correct horse battery staple",
+    });
+    if (login.status !== "authenticated") throw new Error("登录失败");
+    const headers = new Headers({ cookie: `snow_session=${login.sessionToken}` });
+    const principal = await resolvePrincipal(headers, "employee");
 
     expect(principal.tenantId).toBe(DEFAULT_TENANT_ID);
     expect(principal.tenantKey).toBe(DEFAULT_TENANT_KEY);
-    expect(principal.externalSubject).toBe(DEFAULT_USER_ID);
-    expect(principal.email).toBe(DEFAULT_USER_EMAIL);
-    expect(principal.displayName).toBe(DEFAULT_USER_NAME);
+    expect(principal.externalSubject).toBe(admin.externalSubject);
+    expect(principal.email).toBe("admin@example.com");
+    expect(principal.displayName).toBe("管理员");
     expect(principal.audience).toBe("employee");
-    expect(principal.userIdentityId).toBeTruthy();
+    expect(principal.userIdentityId).toBe(admin.id);
 
-    // 验证身份已落库。
-    const identity = await getUserIdentityById(principal.userIdentityId);
-    expect(identity).not.toBeNull();
-    expect(identity?.externalSubject).toBe(DEFAULT_USER_ID);
-
-    // 验证绑定已落库。
-    const binding = await getPrincipalBinding(principal.tenantId, "user", DEFAULT_USER_ID);
+    const binding = await getPrincipalBinding(principal.tenantId, "user", admin.externalSubject);
     expect(binding).not.toBeNull();
     expect(binding?.userIdentityId).toBe(principal.userIdentityId);
   });
 
-  it("dev 模式二次调用复用同一 userIdentityId", async () => {
-    setAuthMode("dev");
-    const first = await resolvePrincipal(new Headers());
-    const second = await resolvePrincipal(new Headers());
-    expect(second.userIdentityId).toBe(first.userIdentityId);
-    expect(second.tenantId).toBe(first.tenantId);
+  it("没有会话时不会自动生成开发用户", async () => {
+    await expect(resolvePrincipal(new Headers())).rejects.toMatchObject({
+      code: "missing_identity",
+    });
   });
 
-  it("企业适配器不可用时不得用原始 SSO 覆盖已停用身份，且 employee Principal 必须拒绝", async () => {
-    setAuthMode("trusted-headers");
+  it("认证提供器返回已停用身份时 employee Principal 必须拒绝", async () => {
     const tenant = await ensureDefaultTenant();
     // 测试仅用状态做 setup：普通创建后，用测试专用的 DB 状态更新把身份标记为 disabled。
     // （普通创建路径不拥有 status 写权限。）
@@ -513,15 +589,24 @@ describe("resolver", () => {
       .update(userIdentity)
       .set({ status: "disabled" })
       .where(eq(userIdentity.id, disabled.id));
-    const headers = new Headers({
-      "x-snow-user-id": "employee-disabled-1",
-      "x-snow-user-email": "untrusted-sso@example.test",
-      "x-snow-user-name": "Untrusted SSO name",
-    });
+    const provider: UserAuthenticationProvider = {
+      name: "controlled-disabled-user",
+      async authenticate() {
+        return {
+          status: "authenticated",
+          evidence: {
+            externalSubject: "employee-disabled-1",
+            email: "untrusted-auth@example.test",
+            displayName: "Untrusted Auth name",
+            trustedAuthenticationClaims: {},
+          },
+        };
+      },
+    };
 
-    await expect(resolvePrincipal(headers, "employee")).rejects.toMatchObject({
-      code: "user_disabled",
-    });
+    await expect(
+      resolvePrincipal(new Headers(), "employee", { authenticationProvider: provider }),
+    ).rejects.toMatchObject({ code: "user_disabled" });
 
     const after = await getUserIdentityById(disabled.id);
     expect(after).toMatchObject({
@@ -638,192 +723,6 @@ describe("resolver", () => {
     );
     expect(facts?.attributes ?? []).toEqual([]);
     expect(facts?.syncState).toBeNull();
-  });
-
-  it("F01 callback 成功后必须等待统一 Core 接纳，已停用身份不得返回成功", async () => {
-    const tenant = await ensureDefaultTenant();
-    const disabled = await upsertUserIdentity({
-      tenantId: tenant.id,
-      externalSubject: "callback-disabled",
-      email: "directory-record@example.test",
-      displayName: "Disabled User",
-    });
-    await db
-      .update(userIdentity)
-      .set({ status: "disabled" })
-      .where(eq(userIdentity.id, disabled.id));
-
-    const calls = { authenticate: 0, callback: 0 };
-    profileSourceState.authenticationProviderOverride = {
-      name: "callback-core-rejection",
-      async authenticate() {
-        calls.authenticate += 1;
-        return { status: "unauthenticated" };
-      },
-      async callback() {
-        calls.callback += 1;
-        return {
-          status: "authenticated",
-          evidence: {
-            externalSubject: "callback-disabled",
-            email: "untrusted-callback@example.test",
-            displayName: "Untrusted Callback",
-            trustedAuthenticationClaims: {},
-          },
-        };
-      },
-    };
-
-    const response = await authOperationPost(
-      new NextRequest("http://localhost/api/auth/callback", {
-        method: "POST",
-        headers: { "x-request-id": "req_f01_disabled" },
-      }),
-      { params: Promise.resolve({ operation: ["callback"] }) },
-    );
-
-    expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({
-      error: { code: "AUTHENTICATION_REQUIRED", request_id: "req_f01_disabled" },
-    });
-    expect(calls).toEqual({ authenticate: 0, callback: 1 });
-    expect(await getPrincipalBinding(tenant.id, "user", "callback-disabled")).toBeNull();
-    expect(await getUserIdentityById(disabled.id)).toMatchObject({
-      status: "disabled",
-      email: "directory-record@example.test",
-      displayName: "Disabled User",
-    });
-  });
-
-  it("F01 callback 的认证证据直接进入统一身份与企业资料接纳，不得二次认证", async () => {
-    const now = Date.now();
-    const calls = { authenticate: 0, callback: 0 };
-    profileSourceState.authenticationProviderOverride = {
-      name: "callback-core-success",
-      async authenticate() {
-        calls.authenticate += 1;
-        return { status: "unauthenticated" };
-      },
-      async callback() {
-        calls.callback += 1;
-        return {
-          status: "authenticated",
-          evidence: {
-            externalSubject: "callback-accepted",
-            email: "callback-accepted@example.test",
-            displayName: "Accepted User",
-            trustedAuthenticationClaims: {},
-            enterpriseProfileObservation: {
-              tenantId: DEFAULT_TENANT_ID,
-              externalSubject: "callback-accepted",
-              sourceSystem: "directory",
-              attributes: { employeeNo: "E-F01", departmentCode: "D-F01" },
-              verifiedAt: new Date(now - 1_000),
-              freshUntil: new Date(now + 30 * 60_000),
-              staleUntil: new Date(now + 90 * 60_000),
-            },
-          },
-        };
-      },
-    };
-
-    const response = await authOperationPost(
-      new NextRequest("http://localhost/api/auth/callback", { method: "POST" }),
-      { params: Promise.resolve({ operation: ["callback"] }) },
-    );
-
-    expect(response.status).toBe(200);
-    expect(calls).toEqual({ authenticate: 0, callback: 1 });
-    const identity = await getUserIdentityBySubject(DEFAULT_TENANT_ID, "callback-accepted");
-    expect(identity).not.toBeNull();
-    expect(await getPrincipalBinding(DEFAULT_TENANT_ID, "user", "callback-accepted")).toMatchObject(
-      {
-        userIdentityId: identity!.id,
-      },
-    );
-    const facts = await getEnterpriseUserProfileFacts(DEFAULT_TENANT_ID, identity!.id);
-    expect(attributesFromRows(facts!.attributes)).toMatchObject({
-      employeeNo: "E-F01",
-      departmentCode: "D-F01",
-    });
-    expect(facts?.syncState?.sourceSystem).toBe("directory");
-  });
-
-  it("trusted-headers 模式从 header 解析身份", async () => {
-    setAuthMode("trusted-headers");
-    const headers = new Headers();
-    headers.set("x-snow-user-id", "sso-42");
-    headers.set("x-snow-user-email", "bob@example.com");
-    headers.set("x-snow-user-name", "Bob");
-
-    const principal = await resolvePrincipal(headers, "admin");
-    expect(principal.externalSubject).toBe("sso-42");
-    expect(principal.email).toBe("bob@example.com");
-    expect(principal.displayName).toBe("Bob");
-    expect(principal.audience).toBe("admin");
-  });
-
-  it("trusted-headers 模式缺 externalId → AuthenticationError missing_identity", async () => {
-    setAuthMode("trusted-headers");
-    const headers = new Headers();
-    headers.set("x-snow-user-email", "bob@example.com");
-    await expect(resolvePrincipal(headers)).rejects.toThrow(AuthenticationError);
-    try {
-      await resolvePrincipal(headers);
-    } catch (e) {
-      expect((e as AuthenticationError).code).toBe("missing_identity");
-    }
-  });
-
-  it("trusted-headers 模式缺 email → AuthenticationError missing_email", async () => {
-    setAuthMode("trusted-headers");
-    const headers = new Headers();
-    headers.set("x-snow-user-id", "sso-42");
-    await expect(resolvePrincipal(headers)).rejects.toThrow(AuthenticationError);
-    try {
-      await resolvePrincipal(headers);
-    } catch (e) {
-      expect((e as AuthenticationError).code).toBe("missing_email");
-    }
-  });
-
-  it("trusted-headers 模式 header 值仅空白 → 视为缺失", async () => {
-    setAuthMode("trusted-headers");
-    const headers = new Headers();
-    headers.set("x-snow-user-id", "   ");
-    headers.set("x-snow-user-email", "bob@example.com");
-    await expect(resolvePrincipal(headers)).rejects.toThrow(AuthenticationError);
-  });
-
-  it("trusted-headers 模式 email 漂移时更新", async () => {
-    setAuthMode("trusted-headers");
-    const h1 = new Headers();
-    h1.set("x-snow-user-id", "sso-42");
-    h1.set("x-snow-user-email", "bob@example.com");
-    h1.set("x-snow-user-name", "Bob");
-    const first = await resolvePrincipal(h1);
-
-    const h2 = new Headers();
-    h2.set("x-snow-user-id", "sso-42");
-    h2.set("x-snow-user-email", "bob.new@example.com");
-    h2.set("x-snow-user-name", "Bob Smith");
-    const second = await resolvePrincipal(h2);
-
-    expect(second.userIdentityId).toBe(first.userIdentityId);
-    expect(second.email).toBe("bob.new@example.com");
-    expect(second.displayName).toBe("Bob Smith");
-  });
-
-  it("getCurrentPrincipal dev 模式可用", async () => {
-    setAuthMode("dev");
-    const principal = await getCurrentPrincipal("runtime");
-    expect(principal.externalSubject).toBe(DEFAULT_USER_ID);
-    expect(principal.audience).toBe("runtime");
-  });
-
-  it("getCurrentPrincipal trusted-headers 模式抛 AuthenticationError", async () => {
-    setAuthMode("trusted-headers");
-    await expect(getCurrentPrincipal()).rejects.toThrow(AuthenticationError);
   });
 
   it("authErrorResponse 把 AuthenticationError 转 401", async () => {

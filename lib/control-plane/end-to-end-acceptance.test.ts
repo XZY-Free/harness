@@ -4,7 +4,7 @@
  * 覆盖专题01最终架构收敛文档（§十九）要求的 20 个场景。
  * 真实 MySQL 8 Testcontainers + 真实 ed25519 DSSE 签名，不使用 mock。
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  *
  * 对于已有完整覆盖的场景（1/2/3/4/20），写新的端到端断言；
@@ -134,20 +134,20 @@ import {
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-routes.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 admin-routes.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 const RUNNER_KEY = generateTestRunnerKey("e2e-test-runner");
 const RUNNER_IDENTITY = "ci/runtime-conformance";
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
   resetArtifactStoreOverrides();
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ═══════════════════════════════════════════════════════════

@@ -53,12 +53,12 @@ function rule(patch: Partial<PolicyRuleInput>): PolicyRuleInput {
 
 beforeEach(async () => {
   await resetDatabase(db);
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await ensureDefaultTenant();
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
 });
 
 describe("resolveBindingGovernance（02-6 P4 §10/§11/§41/§54-P4）", () => {

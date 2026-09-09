@@ -16,7 +16,11 @@
  * 才算真正证明「Web 通过 Event 看到 Desktop 的结果」。
  */
 import { type Page, expect, test } from "@playwright/test";
-import { type LaunchedDesktop, launchDesktopApp } from "./support/launch-desktop";
+import {
+  type LaunchedDesktop,
+  authenticateDesktopWindow,
+  launchDesktopApp,
+} from "./support/launch-desktop";
 
 const ADMIN_BASE = "/admin/api/v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,6 +51,7 @@ test.describe("§20.6 跨端一致性", () => {
   test.beforeAll(async () => {
     desktop = await launchDesktopApp();
     desktopWindow = await desktop.app.firstWindow();
+    await authenticateDesktopWindow(desktopWindow);
   });
 
   test.afterAll(async () => {

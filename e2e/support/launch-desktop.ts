@@ -15,7 +15,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ElectronApplication, _electron as electron } from "@playwright/test";
+import {
+  type ElectronApplication,
+  type Page,
+  _electron as electron,
+  expect,
+} from "@playwright/test";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "../../lib/test-support/e2e-credentials";
 import { E2E_ORIGIN } from "../../playwright.config";
 
 const PACKAGE_APP_DIR = join(process.cwd(), "desktop/package-app");
@@ -26,6 +32,17 @@ export interface LaunchedDesktop {
   app: ElectronApplication;
   /** 关闭应用并清理临时 user-data-dir。 */
   dispose(): Promise<void>;
+}
+
+/** Desktop 使用独立 Electron Session，因此必须通过与 Web 相同的正式登录接口。 */
+export async function authenticateDesktopWindow(window: Page): Promise<void> {
+  await expect(window.getByRole("heading", { name: "登录" })).toBeVisible({
+    timeout: 90_000,
+  });
+  await window.getByLabel("邮箱").fill(E2E_ADMIN_EMAIL);
+  await window.getByLabel("密码").fill(E2E_ADMIN_PASSWORD);
+  await window.getByRole("button", { name: "登录" }).click();
+  await expect(window.getByLabel("消息输入框")).toBeEnabled({ timeout: 90_000 });
 }
 
 /**

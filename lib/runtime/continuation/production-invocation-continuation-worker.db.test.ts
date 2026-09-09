@@ -32,7 +32,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
-const originalAuthMode = process.env.SNOW_AUTH_MODE;
+const originalAuthMode = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 interface ExternalRuntimeFixture {
   server: Server;
@@ -99,13 +99,13 @@ describe("生产 continuation worker durable topology", () => {
   const runtimes: ExternalRuntimeFixture[] = [];
 
   beforeEach(async () => {
-    process.env.SNOW_AUTH_MODE = "dev";
+    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
     await ensureDefaultTenant();
   });
 
   afterEach(async () => {
-    process.env.SNOW_AUTH_MODE = originalAuthMode;
+    process.env.SNOW_VITEST_IDENTITY_FIXTURE = originalAuthMode;
     for (const scenario of scenarios) {
       delete process.env[scenario.credentialEnvVar];
       await scenario.provider.close();

@@ -50,11 +50,9 @@ export type { Principal };
 /**
  * 解析员工身份（employee audience）。
  *
- * 走 resolvePrincipal(headers, "employee")：
- * - dev 模式返回默认身份。
- * - trusted-headers 模式从 SSO 注入 header 解析。
+ * 走 resolvePrincipal(headers, "employee")，只接受有效的数据库会话 cookie。
  *
- * @throws AuthenticationError 缺少身份（trusted-headers 模式缺 header）
+ * @throws AuthenticationError 缺少、过期或已撤销的会话
  */
 export async function resolveEmployeePrincipal(headers: Headers): Promise<Principal> {
   return resolvePrincipal(headers, "employee");

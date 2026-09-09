@@ -2,14 +2,12 @@
  * S11-W01 nav-visibility 单元测试。
  *
  * 覆盖：
- * - dev 模式 + DEFAULT_USER_ID → 全部可见
- * - dev 模式 + 非 DEFAULT_USER_ID → 按 binding 计算
+ * - 所有环境和身份统一按 binding 计算
  * - 无任何 binding → 全部隐藏（fail-closed）
  * - 部分绑定 → 任意匹配的菜单可见
  * - 查询异常 → 全部隐藏（fail-closed）
  * - NAV_ACTION_MAPPING 完整性：8 个 navId 全部覆盖
  */
-import { authConfig } from "@/lib/config";
 import { DEFAULT_USER_ID } from "@/lib/constants";
 import type { Principal } from "@/lib/identity/resolver";
 import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
@@ -18,16 +16,11 @@ import {
   STUDIO_NAV_IDS,
   computeStudioNavVisibility,
 } from "@/lib/studio/nav-visibility";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock listActiveActionBindingsForUser（避免触发 DB）
 vi.mock("@/lib/identity/role-action-queries", () => ({
   listActiveActionBindingsForUser: vi.fn(),
-}));
-
-// Mock authConfig（可动态切换 mode）
-vi.mock("@/lib/config", () => ({
-  authConfig: { mode: "trusted-headers" },
 }));
 
 const { listActiveActionBindingsForUser } = await import("@/lib/identity/role-action-queries");
@@ -62,31 +55,16 @@ describe("computeStudioNavVisibility", () => {
     vi.mocked(listActiveActionBindingsForUser).mockReset();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("dev 模式 + DEFAULT_USER_ID → 全部可见", async () => {
-    (authConfig as { mode: string }).mode = "dev";
+  it("旧默认用户标识也不能绕过真实权限绑定", async () => {
     vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([]);
 
     const visibility = await computeStudioNavVisibility(makePrincipal());
 
-    expect(visibility.agents).toBe(true);
-    expect(visibility.capabilities).toBe(true);
-    expect(visibility.conversations).toBe(true);
-    expect(visibility.runtime).toBe(true);
-    expect(visibility.observability).toBe(true);
-    expect(visibility.security).toBe(true);
-    expect(visibility.operations).toBe(true);
-    expect(visibility.settings).toBe(true);
-
-    // dev 模式应跳过 DB 查询
-    expect(listActiveActionBindingsForUser).not.toHaveBeenCalled();
+    expect(Object.values(visibility).every((visible) => visible === false)).toBe(true);
+    expect(listActiveActionBindingsForUser).toHaveBeenCalledWith("tenant-test", "identity-test");
   });
 
-  it("trusted-headers 模式 + 无 binding → 全部隐藏", async () => {
-    (authConfig as { mode: string }).mode = "trusted-headers";
+  it("无 binding → 全部隐藏", async () => {
     vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([]);
 
     const visibility = await computeStudioNavVisibility(makePrincipal("non-default-user"));
@@ -101,8 +79,7 @@ describe("computeStudioNavVisibility", () => {
     expect(visibility.settings).toBe(false);
   });
 
-  it("trusted-headers 模式 + agent.publish 绑定 → agents 菜单可见", async () => {
-    (authConfig as { mode: string }).mode = "trusted-headers";
+  it("agent.publish 绑定 → agents 菜单可见", async () => {
     vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([makeBinding("agent.publish")]);
 
     const visibility = await computeStudioNavVisibility(makePrincipal("non-default-user"));
@@ -117,8 +94,7 @@ describe("computeStudioNavVisibility", () => {
     expect(visibility.settings).toBe(false);
   });
 
-  it("trusted-headers 模式 + 多 action 绑定 → 任意匹配的菜单可见", async () => {
-    (authConfig as { mode: string }).mode = "trusted-headers";
+  it("多 action 绑定 → 任意匹配的菜单可见", async () => {
     vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([
       makeBinding("skill.create"),
       makeBinding("tool.create"),
@@ -144,7 +120,6 @@ describe("computeStudioNavVisibility", () => {
   });
 
   it("平台设置只随 user.manage 显示，不因 policy.publish 误显示", async () => {
-    (authConfig as { mode: string }).mode = "trusted-headers";
     vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([makeBinding("policy.publish")]);
     expect((await computeStudioNavVisibility(makePrincipal("non-default-user"))).settings).toBe(
       false,
@@ -157,7 +132,6 @@ describe("computeStudioNavVisibility", () => {
   });
 
   it("查询异常 → 全部隐藏（fail-closed）", async () => {
-    (authConfig as { mode: string }).mode = "trusted-headers";
     vi.mocked(listActiveActionBindingsForUser).mockRejectedValue(new Error("DB down"));
 
     const visibility = await computeStudioNavVisibility(makePrincipal("non-default-user"));

@@ -20,15 +20,15 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 async function seedContext() {

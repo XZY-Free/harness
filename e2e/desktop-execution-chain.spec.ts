@@ -26,7 +26,11 @@ import { resolve } from "node:path";
  */
 import { type Page, expect, test } from "@playwright/test";
 import { E2E_ORIGIN } from "../playwright.config";
-import { type LaunchedDesktop, launchDesktopApp } from "./support/launch-desktop";
+import {
+  type LaunchedDesktop,
+  authenticateDesktopWindow,
+  launchDesktopApp,
+} from "./support/launch-desktop";
 
 const ADMIN_BASE = "/admin/api/v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -58,6 +62,7 @@ test.describe("§20.5 Desktop 正式执行链", () => {
   test.beforeAll(async () => {
     desktop = await launchDesktopApp();
     window = await desktop.app.firstWindow();
+    await authenticateDesktopWindow(window);
     window.on("console", (message) => {
       if (message.type() === "error") console.log(`[e2e][desktop][console] ${message.text()}`);
     });

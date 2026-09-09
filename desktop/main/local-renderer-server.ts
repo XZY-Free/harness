@@ -53,13 +53,30 @@ function withoutHopByHopHeaders(
 
 function proxyResponseHeaders(
   headers: IncomingMessage["headers"],
+  upstreamBasePath: string,
 ): Record<string, string | string[]> {
   const result: Record<string, string | string[]> = {};
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined || name === "connection" || name === "transfer-encoding") continue;
+    if (name === "set-cookie") {
+      const cookies = Array.isArray(value) ? value : [value];
+      result[name] = cookies.map((cookie) =>
+        upstreamBasePath
+          ? cookie.replace(
+              new RegExp(`(^|;\\s*)Path=${escapeRegExp(upstreamBasePath)}(?=;|$)`, "i"),
+              "$1Path=/",
+            )
+          : cookie,
+      );
+      continue;
+    }
     result[name] = value;
   }
   return result;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function rendererFilePath(rendererRoot: string, pathname: string): string | null {
@@ -104,12 +121,15 @@ function proxyRequest(request: IncomingMessage, response: ServerResponse, upstre
       headers: {
         ...withoutHopByHopHeaders(request.headers),
         host: upstream.host,
+        // Renderer 页面与本机 proxy 同源；转发到远端后重写为远端 origin，
+        // 让认证端点继续执行严格的同源 POST 校验。
+        ...(request.headers.origin ? { origin: upstream.origin } : {}),
       },
     },
     (upstreamResponse) => {
       response.writeHead(
         upstreamResponse.statusCode ?? 502,
-        proxyResponseHeaders(upstreamResponse.headers),
+        proxyResponseHeaders(upstreamResponse.headers, basePath),
       );
       upstreamResponse.pipe(response);
     },

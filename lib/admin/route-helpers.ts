@@ -30,20 +30,20 @@ import { WorkloadTokenError } from "@/lib/identity/workload-token";
 
 // ─── 身份解析 ──────────────────────────────────────────────
 
-/** admin audience 解析后的主体（SSO 用户或 Service Identity）。 */
+/** admin audience 解析后的主体（已登录用户或 Service Identity）。 */
 export type AdminPrincipal = Principal | WorkloadPrincipal;
 
 /**
- * 解析 admin audience 主体：优先 Service Identity Bearer Token，否则 SSO trusted-headers。
+ * 解析 admin audience 主体：优先 Service Identity Bearer Token，否则使用登录会话。
  *
  * 分发规则：
  * - 携带 `Authorization: Bearer <token>` → resolveWorkloadPrincipal(headers, "admin")。
  * - type=service：CI/CD Service Identity（如 cicd）。
  * - type=runtime/gateway：admin audience 不允许，assertAudienceMatch 通过但 callerType=workload，
  * requireActionScope 会拒绝（workload_not_action_scoped）。
- * - 无 Authorization → resolvePrincipal(headers, "admin")（SSO 管理员）。
+ * - 无 Authorization → resolvePrincipal(headers, "admin")（已登录管理员）。
  *
- * @throws AuthenticationError 缺少身份（SSO 模式缺 header）
+ * @throws AuthenticationError 缺少、过期或已撤销的会话
  * @throws WorkloadTokenError Bearer Token 解析/过期/audience 不匹配
  */
 export async function resolveAdminPrincipalAsync(headers: Headers): Promise<AdminPrincipal> {

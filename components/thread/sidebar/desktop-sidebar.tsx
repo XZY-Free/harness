@@ -8,6 +8,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { apiPath } from "@/lib/api-fetch";
+import { logoutClientSession } from "@/lib/client/logout";
 import { cn } from "@/lib/utils";
 import { LogOut, PanelLeft, Plus, Search, User } from "lucide-react";
 /**
@@ -297,15 +299,21 @@ export function DesktopSidebar({
                 </div>
                 <DropdownMenuSeparator className="mx-1 my-1.5" />
                 <DropdownMenuItem
-                  onSelect={async () => {
+                  onClick={async () => {
                     const desktop = (
                       window as unknown as {
-                        desktop?: { auth?: { logout: () => Promise<{ ok: boolean }> } };
+                        snowDesktop?: { auth?: { logout: () => Promise<{ ok: boolean }> } };
                       }
-                    ).desktop;
-                    if (desktop?.auth?.logout) {
-                      await desktop.auth.logout();
-                    }
+                    ).snowDesktop;
+                    await logoutClientSession({
+                      cleanupDesktop: desktop?.auth?.logout
+                        ? async () => {
+                            await desktop.auth?.logout();
+                          }
+                        : undefined,
+                      loginPath: surface === "desktop" ? "/desktop" : "/login",
+                      navigate: (path) => window.location.assign(apiPath(path)),
+                    });
                   }}
                   className="min-h-9 gap-2.5 rounded-lg px-2 py-1.5 text-sm text-foreground focus:bg-accent focus:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
                 >

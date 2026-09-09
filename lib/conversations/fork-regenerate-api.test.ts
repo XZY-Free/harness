@@ -12,7 +12,7 @@ import { POST as steerPOST } from "@/app/api/v1/turns/[turn_id]/steer/route";
  * - POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn
  * - POST /api/v1/turns/{turn_id}/steer — Steer Turn
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { acceptUserMessageTurn, updateTurnState } from "@/lib/conversations/turn-queries";
@@ -31,16 +31,16 @@ import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn"
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 employee-api.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 employee-api.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 辅助：seed 默认身份 + 可调度 Agent + Ready Route ───────

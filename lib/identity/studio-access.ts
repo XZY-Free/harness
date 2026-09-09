@@ -18,8 +18,6 @@
  * 只解析当前主体（不校验动作）：
  *   const principal = await resolveStudioPrincipal(request);
  */
-import { studioConfig } from "@/lib/config";
-import { DEFAULT_USER_ID } from "@/lib/constants";
 import { generateRequestId } from "@/lib/http";
 import type { ActionCode, ResourceScopeType } from "@/lib/identity/action-codes";
 import { checkActionScope, requireActionScope } from "@/lib/identity/authorization";
@@ -75,12 +73,6 @@ export async function requireStudioAction(
     throw error; // 非认证异常上抛，由路由 catch 统一转 500。
   }
 
-  // dev/test 零回归旁路（与原 lib/rbac.ts 一致）：devOpen 下默认用户免查 DB。
-  // 生产（trusted-headers）不触发，仍走真实 RoleActionBinding 校验。
-  if (studioConfig.devOpen && principal.externalSubject === DEFAULT_USER_ID) {
-    return { ok: true, principal };
-  }
-
   const target = resolveResourceTarget(resource, principal);
   const result = await requireActionScope(principal, { actionCode, resource: target }, requestId);
   if (!result.ok) return { ok: false, response: result.response };
@@ -90,7 +82,7 @@ export async function requireStudioAction(
 /**
  * Studio 动作布尔谓词（替代旧 hasPermission(user.id, "X")）。
  *
- * 用于路由内根据权限分支（如 admin vs member 差异）。devOpen 默认用户返回 true。
+ * 用于路由内根据权限分支（如 admin vs member 差异），所有环境都查询真实权限绑定。
  * resource 缺省为 {type:"tenant", id: principal.tenantId}。
  */
 export async function hasStudioAction(
@@ -98,9 +90,6 @@ export async function hasStudioAction(
   actionCode: ActionCode,
   resource?: { type: ResourceScopeType; id?: string },
 ): Promise<boolean> {
-  if (studioConfig.devOpen && principal.externalSubject === DEFAULT_USER_ID) {
-    return true;
-  }
   const target = resolveResourceTarget(resource, principal);
   const result = await checkActionScope(principal.tenantId, principal.userIdentityId, {
     actionCode,

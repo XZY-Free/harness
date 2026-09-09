@@ -1,5 +1,3 @@
-import { authConfig } from "@/lib/config";
-import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import type { EnterpriseProfileObservation } from "@/lib/identity/enterprise-profile-source";
 
 export interface AuthenticatedUserEvidence {
@@ -16,19 +14,25 @@ export type AuthenticationResult =
   | { readonly status: "denied"; readonly reason: string };
 
 export interface AuthenticationLoginContext {
-  readonly returnTo: string;
+  readonly email: string;
+  readonly password: string;
 }
 
-export interface AuthenticationRedirect {
-  readonly location: string;
-}
+export type AuthenticationLoginResult =
+  | {
+      readonly status: "authenticated";
+      readonly sessionToken: string;
+      readonly expiresAt: Date;
+      readonly user: { readonly email: string; readonly displayName: string | null };
+    }
+  | { readonly status: "denied" }
+  | { readonly status: "rate_limited"; readonly retryAfterSeconds: number };
 
 export interface UserAuthenticationProvider {
   readonly name: string;
   authenticate(input: { readonly headers: Headers }): Promise<AuthenticationResult>;
-  login?(context: AuthenticationLoginContext): Promise<AuthenticationRedirect>;
-  callback?(request: Request): Promise<AuthenticationResult>;
-  logout?(input: { readonly headers: Headers }): Promise<AuthenticationRedirect | undefined>;
+  login?(context: AuthenticationLoginContext): Promise<AuthenticationLoginResult>;
+  logout?(input: { readonly headers: Headers }): Promise<void>;
 }
 
 export class AuthenticationProviderConfigurationError extends Error {
@@ -36,43 +40,4 @@ export class AuthenticationProviderConfigurationError extends Error {
     super(message);
     this.name = "AuthenticationProviderConfigurationError";
   }
-}
-
-/** 开源主仓认证提供器：保留现有 dev / trusted-headers 两种正式入口。 */
-export const openSourceAuthenticationProvider: UserAuthenticationProvider = {
-  name: "open-source",
-  async authenticate({ headers }) {
-    if (authConfig.mode === "dev") {
-      return {
-        status: "authenticated",
-        evidence: {
-          externalSubject: DEFAULT_USER_ID,
-          email: DEFAULT_USER_EMAIL,
-          displayName: DEFAULT_USER_NAME,
-          trustedAuthenticationClaims: {},
-        },
-      };
-    }
-
-    const externalSubject = headerValue(headers, authConfig.externalIdHeader);
-    const email = headerValue(headers, authConfig.emailHeader);
-    const displayName = headerValue(headers, authConfig.nameHeader);
-    if (!externalSubject) return { status: "unauthenticated" };
-    if (!email) return { status: "denied", reason: "缺少 SSO 用户邮箱" };
-
-    return {
-      status: "authenticated",
-      evidence: {
-        externalSubject,
-        email,
-        displayName,
-        trustedAuthenticationClaims: {},
-      },
-    };
-  },
-};
-
-function headerValue(headers: Headers, name: string): string | null {
-  const value = headers.get(name);
-  return value?.trim() ? value.trim() : null;
 }

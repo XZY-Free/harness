@@ -11,19 +11,22 @@
  * 必须真正成功，不允许"schema 不兼容，所以跳过 Agent Seed"之类逻辑。
  *
  * 正式系统惰性自举：`ensureDefaultTenant` 每请求、`ensureRouteSet` 惰性，
- * seed 不承载关键基建——本 seed 只做幂等引导正式对象：
- *   tenant → UserIdentity → principalBinding → PermissionGrant。
+ * seed 不承载关键基建——CLI seed 只引导默认租户。用户、主体绑定与权限必须由
+ * `auth:bootstrap-admin` 显式创建，不能让空库启动后凭空出现已登录用户。
  *
  * 专题01 §15：不再创建默认 Agent（Agent 空表是合法平台状态，§6.2/§33.1）；
  * 基础 Harness Runtime 初始化走正式 Runtime 控制面（§15.3/§11.4），不伪装成 Agent seed。
  *
- * 每个步骤都是 upsert / get-then-create 幂等，重复执行不产生重复行、
- * 不抛 unique 冲突，天然满足"Migration → Seed 成功"。
+ * 测试和迁移工具可显式调用下方身份/授权 helper；这些 helper 同样保持幂等。
  */
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import type { ActionCode } from "@/lib/identity/action-codes";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import {
+  grantActionBinding,
+  listActionBindingsByPrincipal,
+  parseBindingScope,
+} from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 
@@ -57,7 +60,7 @@ export const DEFAULT_GRANT_ACTION_CODES: ActionCode[] = [
  * 不用 tenant scope：tenant-wildcard 只覆盖 type=tenant 的请求资源，
  * scopeCovers 要求 type 严格相等，必须按动作显式给 agent / runtime wildcard。
  */
-const ONBOARDING_GRANT_ACTION_SCOPES: ReadonlyArray<{
+export const ONBOARDING_GRANT_ACTION_SCOPES: ReadonlyArray<{
   actionCode: ActionCode;
   resourceScopeType: "agent" | "runtime";
 }> = [
@@ -108,39 +111,47 @@ export async function seedDefaultIdentity(): Promise<{
  * type 相同），故默认用户需同时持有 tenant + self 两态，才能通过
  * requireStudioAction(…, { type: "self" }) 门禁（创建/管理自己的 thread）。
  *
- * 幂等：grantActionBinding 每次写入新绑定，重复执行会产生重复行；
- * 这里不依赖唯一约束（RoleActionBinding 无 (tenant,principal,action) unique），
- * 交由调用方（CLI seed / 测试 setup）决定是否重复调用。
+ * 幂等：写入前读取当前主体的有效绑定，同 action + 同 wildcard scope 已存在时跳过。
+ * RoleActionBinding 没有业务唯一约束，因此幂等由本服务在单次管理流程中保证。
  */
 export async function seedDefaultGrants(
   tenantId: string,
   principalBindingId: string,
 ): Promise<void> {
-  for (const actionCode of DEFAULT_GRANT_ACTION_CODES) {
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
+  const desired = [
+    ...DEFAULT_GRANT_ACTION_CODES.map((actionCode) => ({
       actionCode,
-      resourceScope: { type: "tenant", wildcard: true },
-    });
-  }
-  // thread 类动作：self 范围（旧 thread.write.self 语义），默认用户 admin 等值。
-  for (const actionCode of ["thread.read", "thread.write"] as const) {
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
+      resourceScope: { type: "tenant" as const, wildcard: true as const },
+    })),
+    ...(["thread.read", "thread.write"] as const).map((actionCode) => ({
       actionCode,
-      resourceScope: { type: "self", wildcard: true },
-    });
-  }
-  // 外部 Agent onboarding：按动作显式 agent / runtime wildcard（见上方说明）。
-  for (const { actionCode, resourceScopeType } of ONBOARDING_GRANT_ACTION_SCOPES) {
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
+      resourceScope: { type: "self" as const, wildcard: true as const },
+    })),
+    ...ONBOARDING_GRANT_ACTION_SCOPES.map(({ actionCode, resourceScopeType }) => ({
       actionCode,
-      resourceScope: { type: resourceScopeType, wildcard: true },
+      resourceScope: { type: resourceScopeType, wildcard: true as const },
+    })),
+  ];
+  const existing = await listActionBindingsByPrincipal(tenantId, principalBindingId);
+  const now = new Date();
+
+  for (const grant of desired) {
+    const alreadyActive = existing.some((binding) => {
+      if (binding.actionCode !== grant.actionCode) return false;
+      if (binding.validFrom > now || (binding.validUntil !== null && binding.validUntil <= now)) {
+        return false;
+      }
+      const scope = parseBindingScope(binding);
+      return scope?.type === grant.resourceScope.type && scope.wildcard === true;
     });
+    if (!alreadyActive) {
+      await grantActionBinding({
+        tenantId,
+        principalBindingId,
+        actionCode: grant.actionCode,
+        resourceScope: grant.resourceScope,
+      });
+    }
   }
 }
 
@@ -148,20 +159,12 @@ export async function seedDefaultGrants(
 
 async function main() {
   console.log("[seed] 开始正式 schema seed...");
-
-  const identity = await seedDefaultIdentity();
-  console.log(
-    `[seed] 默认租户 + 用户身份就绪：tenant=${identity.tenantId} userIdentity=${identity.userIdentityId}`,
-  );
-
-  await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
-  console.log(
-    `[seed] 默认用户授予 ${DEFAULT_GRANT_ACTION_CODES.length} 个 Studio 动作码（tenant-wildcard）` +
-      ` + ${ONBOARDING_GRANT_ACTION_SCOPES.length} 个外部 Agent onboarding 动作码（agent/runtime wildcard）`,
-  );
+  const tenant = await ensureDefaultTenant();
+  console.log(`[seed] 默认租户就绪：tenant=${tenant.id}`);
 
   // 专题01 §15：不创建默认 Agent（Agent 空表合法）。基础 Harness Runtime 走正式控制面初始化。
-  console.log("[seed] 正式 schema seed 完成");
+  // 用户和权限只能通过 auth:bootstrap-admin 显式创建，seed 不再制造可登录的默认身份。
+  console.log("[seed] 正式 schema seed 完成（未创建默认用户）");
   process.exit(0);
 }
 

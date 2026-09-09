@@ -6,7 +6,8 @@
  * - 启动 e2e 确定性模型服务（OpenAI 兼容端点），使 Agent Loop 能真正产出回复。
  * - 引导正式执行链（published RuntimeRevision → 无 Agent 约束的基础 Route → Projection），
  *   使客户端首条消息能走通 Route Resolver → ExecutionBinding → Runtime。
- * - 用注入的 DATABASE_URL / LLM_* 构建并启动 Next server（APP_ENV=test，认证回退默认用户）。
+ * - 显式创建临时管理员，浏览器与 Desktop 都走正式账号密码登录和数据库会话。
+ * - 用注入的 DATABASE_URL / LLM_* 构建并启动 Next server（APP_ENV=test）。
  * - 转发 SIGTERM / SIGINT 到子进程，关闭容器后退出。
  *
  * 设计要点：
@@ -45,8 +46,8 @@ function e2eRuntimeDescriptorPath(port: string): string {
  * 解析 .env 文件为键值对（只支持 KEY=VALUE 与 # 注释，够用即可）。
  *
  * 为什么需要：`next start` 会把 NODE_ENV 设为 production，Next 因此加载
- * `.env.production` 而不是 `.env.test`——若不显式注入，SNOW_AUTH_MODE 等
- * 测试配置会取到生产值，导致鉴权失败、助手列表为空。
+ * `.env.production` 而不是 `.env.test`——若不显式注入，测试数据库和模型配置
+ * 会取到生产值，导致测试连错事实源。
  * 显式读取 `.env.test` 可让它继续作为 e2e 配置的唯一事实源，避免在代码里复制一份。
  */
 function loadEnvFile(path: string): Record<string, string> {

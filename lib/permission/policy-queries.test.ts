@@ -49,12 +49,12 @@ function rule(patch: Partial<PolicyRuleInput>): PolicyRuleInput {
 
 beforeEach(async () => {
   await resetDatabase(db);
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await ensureDefaultTenant();
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
 });
 
 describe("Permission Policy Revision（02-6 P3 §6/§7/§30/§31/§33/§35/§55.2）", () => {

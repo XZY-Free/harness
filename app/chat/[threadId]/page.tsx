@@ -1,4 +1,5 @@
 import { WebThreadShell } from "@/components/thread/web-thread-shell";
+import { requireAuthenticatedPage } from "@/lib/identity/page-session";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ export default async function ChatThreadPage({
 }) {
   const { threadId } = await params;
   if (!isValidUUID(threadId)) notFound();
+  await requireAuthenticatedPage(`/chat/${threadId}`);
   return <WebThreadShell threadId={threadId} />;
 }
 

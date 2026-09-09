@@ -348,37 +348,6 @@ export const capabilityMarketConfig = {
 } as const;
 
 /**
- * 认证配置（）。
- *
- * 采用 trusted-headers 作为公司 SSO 的稳定接入边界：生产由公司网关 / SSO 代理注入
- * 用户 header，应用只消费已认证身份；开发 / 测试保留 dev fallback。
- * 协议未知时不引入 OAuth / OIDC / SAML 依赖。
- */
-export const authConfig = {
-  /** 认证模式：dev（默认用户）/ trusted-headers（可信网关注入）。生产默认 trusted-headers。 */
-  get mode(): "dev" | "trusted-headers" {
-    const fallback = appConfig.isProd ? "trusted-headers" : "dev";
-    const raw = optionalEnv("SNOW_AUTH_MODE", fallback);
-    if (raw !== "dev" && raw !== "trusted-headers") {
-      throw new Error(`[config] 无效的 SNOW_AUTH_MODE="${raw}"`);
-    }
-    return raw;
-  },
-  /** 注入 externalId 的 header 名（小写）。 */
-  get externalIdHeader(): string {
-    return optionalEnv("SNOW_AUTH_HEADER_EXTERNAL_ID", "x-snow-user-id").toLowerCase();
-  },
-  /** 注入 email 的 header 名（小写）。 */
-  get emailHeader(): string {
-    return optionalEnv("SNOW_AUTH_HEADER_EMAIL", "x-snow-user-email").toLowerCase();
-  },
-  /** 注入显示名的 header 名（小写）。 */
-  get nameHeader(): string {
-    return optionalEnv("SNOW_AUTH_HEADER_NAME", "x-snow-user-name").toLowerCase();
-  },
-} as const;
-
-/**
  * 外部 Agent 的宿主交互配置。
  *
  * 这些均为平台侧策略：Agent Revision 只能声明希望使用的能力，不能自行延长确认时间、
@@ -443,19 +412,6 @@ export const runtimeGatewayConfig = {
     } catch {
       return "";
     }
-  },
-} as const;
-
-/**
- * Agent Studio 后台配置（）。
- *
- * `devOpen`：dev/test 下默认用户（DEFAULT_USER_ID）是否自动获得 admin 直进 /studio，
- * 兼容本地与既有测试（零回归）。生产**强制 false**——生产用户角色必须由 UserRole 表决定，
- * 无角色 = 无 studio 权限 → /studio 返回 403。
- */
-export const studioConfig = {
-  get devOpen(): boolean {
-    return appConfig.isProd ? false : optionalEnv("SNOW_STUDIO_OPEN", "true") === "true";
   },
 } as const;
 
@@ -1016,20 +972,6 @@ export function assertRuntimeConfig(): void {
     throw new Error(
       `[config] 缺少必填环境变量（APP_ENV="${APP_ENV}"）：\n${lines}\n` +
         `请在 .env.${APP_ENV}.local 配置，或由部署平台（K8s / docker -e）注入。`,
-    );
-  }
-
-  // 生产环境禁止隐式 dev auth fallback——必须接入 trusted-headers SSO 边界。
-  if (appConfig.isProd && authConfig.mode === "dev") {
-    throw new Error("[config] production 禁止 SNOW_AUTH_MODE=dev；请接入 trusted-headers SSO");
-  }
-  // trusted-headers 模式：身份由网关注入的 x-snow-user-* header 决定。
-  // Next 16 route handler 无法获取 TCP 对端 IP（NextRequest.ip 已移除），应用层不再做来源校验，
-  // 必须靠网络隔离（K8s NetworkPolicy / 防火墙）保证仅网关能达 pod——否则任意客户端可伪造
-  // x-snow-user-* header 越权（含冒充 admin）。启动 warn 提示该部署约束。
-  if (authConfig.mode === "trusted-headers") {
-    console.warn(
-      "[config] SNOW_AUTH_MODE=trusted-headers：身份 header 由网关注入，应用层不做来源校验。必须靠 K8s NetworkPolicy / 防火墙保证仅网关能达 pod，否则可被伪造 x-snow-user-* header 越权。",
     );
   }
 

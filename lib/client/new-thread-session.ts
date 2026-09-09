@@ -23,6 +23,13 @@ export interface NewThreadSession {
   submit(submission: ClientNewThreadSubmission): Promise<ClientThreadSummary>;
 }
 
+export class AuthenticationRequiredError extends Error {
+  constructor() {
+    super("需要登录");
+    this.name = "AuthenticationRequiredError";
+  }
+}
+
 function createIdempotencyKey(): string {
   return crypto.randomUUID();
 }
@@ -33,6 +40,7 @@ function createIdempotencyKey(): string {
  */
 async function requireJson<T>(response: Response, message: string): Promise<T> {
   if (!response.ok) {
+    if (response.status === 401) throw new AuthenticationRequiredError();
     const bodyText = await response.text().catch(() => "");
     let serverMessage: string | null = null;
     try {

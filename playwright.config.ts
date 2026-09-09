@@ -22,6 +22,7 @@
  * - webServer.timeout=180s 容纳 MySQL 启动 + migration + Next.js 首次编译。
  */
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_AUTH_STATE } from "./lib/test-support/e2e-credentials";
 
 /**
  * e2e 专用端口。
@@ -52,8 +53,14 @@ export default defineConfig({
   },
   projects: [
     {
+      name: "authentication",
+      testMatch: "**/auth.setup.ts",
+    },
+    {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["authentication"],
+      testIgnore: "**/auth.setup.ts",
+      use: { ...devices["Desktop Chrome"], storageState: E2E_AUTH_STATE },
     },
   ],
   webServer: {

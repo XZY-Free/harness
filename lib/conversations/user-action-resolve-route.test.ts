@@ -40,12 +40,12 @@ import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn"
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 let provider: A2ATestProvider;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
   setCommandGatewayHostedApplicationServiceForTest(null);
   provider = await startA2ATestProvider("completed");
@@ -55,7 +55,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await provider.close();
   setCommandGatewayHostedApplicationServiceForTest(null);
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 种子辅助 ──────────────────────────────────────────────

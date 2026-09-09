@@ -17,7 +17,7 @@ import {
  * - PATCH  /api/v1/pending-inputs/{pending_input_id} — 编辑 PendingInput
  * - DELETE /api/v1/pending-inputs/{pending_input_id} — 移除 PendingInput
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
@@ -30,16 +30,16 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 employee-api.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 employee-api.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 辅助：seed 默认身份 + Agent ───────────────────────────

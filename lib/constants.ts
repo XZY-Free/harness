@@ -1,4 +1,4 @@
-// Dev auth 默认用户。真实用户由 lib/auth 的 dev/trusted-header 模式解析。
+// 仅供显式测试夹具与旧数据迁移使用；产品运行时不会自动登录该身份。
 export const DEFAULT_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEFAULT_USER_EMAIL = "owner@snow-harness.local";
 export const DEFAULT_USER_NAME = "SnowHarness 管理员";

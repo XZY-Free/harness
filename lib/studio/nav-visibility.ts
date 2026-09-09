@@ -24,8 +24,6 @@
  * if (visibility.agents) <Link href="/studio/agents">智能体</Link>
  * ```
  */
-import { authConfig } from "@/lib/config";
-import { DEFAULT_USER_ID } from "@/lib/constants";
 import { ACTION_CODES, type ActionCode } from "@/lib/identity/action-codes";
 import type { Principal } from "@/lib/identity/resolver";
 import { listActiveActionBindingsForUser } from "@/lib/identity/role-action-queries";
@@ -126,11 +124,6 @@ const ALL_HIDDEN: StudioNavVisibility = {
 export async function computeStudioNavVisibility(
   principal: Principal,
 ): Promise<StudioNavVisibility> {
-  // dev 模式 + 默认用户 → 全部可见（与 lib/rbac devOpen 行为一致）
-  if (authConfig.mode === "dev" && principal.externalSubject === DEFAULT_USER_ID) {
-    return ALL_VISIBLE;
-  }
-
   try {
     const bindings = await listActiveActionBindingsForUser(
       principal.tenantId,

@@ -31,14 +31,14 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 function setAuthMode(mode: string | undefined) {
-  process.env.SNOW_AUTH_MODE = mode;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = mode;
 }
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
   await resetDatabase(db);
-  setAuthMode("dev");
+  setAuthMode("enabled");
 });
 
 afterEach(() => {

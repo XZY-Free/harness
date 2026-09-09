@@ -4,7 +4,7 @@
  * 目标行为：授权管理员给出判别 target + route_scope_key + route_scope，即可
  * 创建或复用对应 Target+Scope 的正式 RouteSet，无需知道/粘贴 RouteSet id。
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID），
+ * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID），
  * 真实 MySQL 8 Testcontainers，真实路由 handler 动态 import，不使用 mock。
  */
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
@@ -29,15 +29,15 @@ async function loadCreateRouteSetRoute() {
   return await import("@/app/admin/api/v1/deployment-route-sets/route");
 }
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 辅助：seed admin（可含/不含 route.update 授权） ────────

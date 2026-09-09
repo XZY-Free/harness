@@ -15,7 +15,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
  * 2. publishRuntimeRevision 集成：持久化 conformance 结果 + 失败不持久化。
  * 3. Admin API 路由：GET 列表 / POST 持久化 / POST 发布 / 门禁失败 / 跨租户隔离。
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 DB mock。
  */
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
@@ -87,8 +87,8 @@ import { createConformanceHostedApplicationService } from "@/lib/runtime/test-su
 import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-api.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 admin-api.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 const ORIGINAL_RUNNER_SIGNING_IDENTITIES = process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON;
 const TEST_RUNNER_KEY = generateTestRunnerKey("runner-api-test");
 const RUNNER_IDENTITY = "ci/runtime-conformance";
@@ -114,13 +114,13 @@ const CONFIG_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = RUNNER_SIGNING_IDENTITIES_JSON;
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
   process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = ORIGINAL_RUNNER_SIGNING_IDENTITIES;
 });
 

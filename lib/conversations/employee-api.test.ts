@@ -10,7 +10,7 @@ import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/r
  * - POST /api/v1/threads/{thread_id}/turns — 创建 Turn
  * - GET /api/v1/threads/{thread_id}/items — 查询 Item
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
@@ -24,16 +24,16 @@ import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 identity.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 identity.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 辅助：seed enabled Agent ─────────────────────────────

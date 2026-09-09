@@ -1,9 +1,14 @@
+import { LoginScreen } from "@/components/auth/login-screen";
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
 import { NewThreadPage } from "@/components/thread/new-thread-page";
 import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
 import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
 import { ThreadPage } from "@/components/thread/thread-page";
-import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread-session";
+import {
+  AuthenticationRequiredError,
+  createNewThreadSession,
+  loadThreadShell,
+} from "@/lib/client/new-thread-session";
 import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
 import { getDesktopBridge, getDesktopCapabilities } from "@/lib/desktop/capabilities";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -18,29 +23,47 @@ function DesktopError({ children }: { readonly children: ReactNode }) {
   );
 }
 
+function DesktopLogin({ onAuthenticated }: { readonly onAuthenticated: () => void }) {
+  return <LoginScreen returnTo="/desktop" onAuthenticated={onAuthenticated} />;
+}
+
 function DesktopShell() {
   const pathname = usePathname();
   const route = parseDesktopRoute(pathname);
   const [shell, setShell] = useState<ClientThreadShellResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [loadVersion, setLoadVersion] = useState(0);
   const [newThreadError, setNewThreadError] = useState<string | null>(null);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const newThreadSession = useRef(createNewThreadSession()).current;
   const viewerId = shell?.viewer_id;
 
   useEffect(() => {
+    // 登录成功后递增版本号，显式触发一次新的受认证 shell 请求。
+    void loadVersion;
     let active = true;
     void loadThreadShell()
       .then((data) => {
-        if (active) setShell(data);
+        if (active) {
+          setShell(data);
+          setAuthRequired(false);
+          setError(null);
+        }
       })
-      .catch(() => {
-        if (active) setError("无法连接服务器，请检查网络后重试。");
+      .catch((loadError) => {
+        if (!active) return;
+        if (loadError instanceof AuthenticationRequiredError) {
+          setAuthRequired(true);
+          setError(null);
+        } else {
+          setError("无法连接服务器，请检查网络后重试。");
+        }
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadVersion]);
 
   // /desktop 恒为新建空态页，不自动跳转最近会话；
   // 假 new 路由 /desktop/new 已移除。进入已有会话由 sidebar 导航到 /desktop/chat/{id}。
@@ -109,6 +132,17 @@ function DesktopShell() {
     [],
   );
 
+  if (authRequired) {
+    return (
+      <DesktopLogin
+        onAuthenticated={() => {
+          setAuthRequired(false);
+          setShell(null);
+          setLoadVersion((version) => version + 1);
+        }}
+      />
+    );
+  }
   if (error) return <DesktopError>{error}</DesktopError>;
   if (!shell) return <DesktopError>正在连接服务器…</DesktopError>;
   if (route.kind === "not-found") return <DesktopError>页面不存在。</DesktopError>;

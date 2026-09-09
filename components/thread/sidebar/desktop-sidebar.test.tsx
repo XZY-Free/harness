@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesktopSidebar } from "./desktop-sidebar";
 import { SidebarProvider } from "./sidebar-context";
 
+const logoutClientSessionMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/client/logout", () => ({ logoutClientSession: logoutClientSessionMock }));
+
 // CmdkPanel 引入 cmdk/dialog，拖入 happy-dom 易碎；overlay drawer 行为与其无关，这里替身。
 vi.mock("@/components/thread/command/cmdk-panel", () => ({
   CmdkPanel: () => null,
@@ -34,6 +37,7 @@ vi.mock("next/link", () => ({
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  logoutClientSessionMock.mockReset();
 });
 
 function createMatchMedia(initialMatches: boolean) {
@@ -92,6 +96,16 @@ describe("Web 侧栏 overlay drawer 行为", () => {
     expect(menu.className).toContain("w-[calc(var(--sidebar-width)-1.5rem)]");
     expect(menu.className).toContain("rounded-2xl");
     expect(menu.getAttribute("data-align")).toBe("start");
+  });
+
+  it("点击退出登录会调用服务端会话退出", async () => {
+    logoutClientSessionMock.mockResolvedValue(undefined);
+    renderSidebar(false);
+    fireEvent.click(screen.getByRole("button", { name: "sunshine" }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "退出登录" }));
+
+    expect(logoutClientSessionMock).toHaveBeenCalledOnce();
   });
 
   it("侧栏宽度由共享流式变量控制，不把桌面宽度写死进组件", () => {

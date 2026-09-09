@@ -7,15 +7,15 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 289,
+    "unit": 291,
     "db": 112,
     "integration": 10,
     "contract": 28,
-    "e2e-web": 3,
-    "e2e-desktop": 1,
+    "e2e-web": 4,
+    "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 445,
+  "total": 449,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -338,6 +338,17 @@
     },
     {
       "file": "app/studio/route-states.test.tsx",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "components/auth/login-form.test.tsx",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -1415,9 +1426,31 @@
       ]
     },
     {
+      "file": "e2e/auth-flow.spec.ts",
+      "group": "e2e-web",
+      "command": "pnpm exec playwright test e2e/auth-flow.spec.ts",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "e2e/cross-client.spec.ts",
       "group": "e2e-cross-client",
       "command": "pnpm exec playwright test e2e/cross-client.spec.ts",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "e2e/desktop-auth-flow.spec.ts",
+      "group": "e2e-desktop",
+      "command": "pnpm exec playwright test e2e/desktop-auth-flow.spec.ts",
       "needsDB": true,
       "serial": true,
       "inFullAcceptance": true,
@@ -1999,6 +2032,17 @@
     },
     {
       "file": "lib/client/error-messages.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/client/logout.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,

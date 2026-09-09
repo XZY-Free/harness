@@ -96,6 +96,43 @@ beforeEach(() => {
 });
 
 describe("DesktopRendererApp", () => {
+  it("未登录时显示登录页，认证成功后进入 Desktop 会话页", async () => {
+    apiFetch
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: "AUTHENTICATION_REQUIRED" } }), {
+          status: 401,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ authenticated: true, return_to: "/desktop" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ viewer_id: "viewer-1", viewer_name: "sunshine", threads: [] }),
+        ),
+      );
+
+    render(<DesktopRendererApp />);
+
+    expect(await screen.findByRole("heading", { name: "登录" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("邮箱"), {
+      target: { value: "admin@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: "correct horse battery staple" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    await screen.findByTestId("desktop-new-thread-page");
+    expect(apiFetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/auth/login?returnTo=%2Fdesktop",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
+  });
+
   it("打开新建页时不创建会话，发送首条消息后才创建并加入侧栏", async () => {
     const existingThreadId = "6c34a4f3-1b47-4acb-9b2e-7bdbff3e04cf";
     const createdThreadId = "6fd2a5b8-4d43-43e5-a436-80adb4f73b23";

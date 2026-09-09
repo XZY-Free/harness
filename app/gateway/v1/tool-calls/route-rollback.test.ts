@@ -293,13 +293,13 @@ function toolCallBody(patch: Partial<Record<string, unknown>>): Record<string, u
 beforeEach(async () => {
   await resetDatabase(db);
   catalogTool = null;
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
   await ensureDefaultTenant();
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
 });
 

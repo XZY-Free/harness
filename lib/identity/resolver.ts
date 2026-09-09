@@ -4,10 +4,8 @@
  * 从请求 header 解析可信身份 → 映射到租户内稳定 userIdentity → 返回 Principal。
  *
  * 安全边界：
- * - dev 模式仅由明确的开发配置启用，返回默认身份。
- * - trusted-headers 模式从网关注入的 header 解析，应用层不做来源校验
- * （靠网络隔离 K8s NetworkPolicy / 防火墙保证仅网关能达 pod）。
- * - 生产环境缺少可信身份直接 401 AUTHENTICATION_REQUIRED。
+ * - Web 与 Desktop 都使用相同的数据库会话 cookie。
+ * - 缺少、过期或已撤销的会话直接 401 AUTHENTICATION_REQUIRED。
  *
  * audience=runtime/gateway/admin 的 Workload Token 验证见 resolveWorkloadPrincipal。
  */
@@ -131,7 +129,7 @@ export async function resolvePrincipal(
   const authenticationProvider = options.authenticationProvider ?? extension.authenticationProvider;
   const authentication = await authenticationProvider.authenticate({ headers });
   if (authentication.status === "unauthenticated") {
-    throw new AuthenticationError("missing_identity", "缺少 SSO 用户标识");
+    throw new AuthenticationError("missing_identity", "登录会话不存在或已失效");
   }
   if (authentication.status === "denied") {
     const code = authentication.reason.includes("邮箱") ? "missing_email" : "authentication_denied";
@@ -280,14 +278,6 @@ export async function resolveCurrentUserContext(
     throw new Error("当前用户上下文缺少企业资料状态");
   }
   return principal as CurrentUserContext;
-}
-
-/**
- * 无 Request 上下文时解析 主体（仅 dev 模式可用）。
- * trusted-headers 模式下因无 header 会抛 AuthenticationError。
- */
-export async function getCurrentPrincipal(audience: ApiAudience = "employee"): Promise<Principal> {
-  return resolvePrincipal(new Headers(), audience);
 }
 
 // ─── Workload / Service Identity（S02-C02）─────────────────────

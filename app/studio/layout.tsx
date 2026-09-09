@@ -6,12 +6,13 @@ import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-a
 import { computeStudioNavVisibility } from "@/lib/studio/nav-visibility";
 import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
 /**
  * 统一管理后台 layout（S11-W01 重组）。
  *
  * server component，在渲染子页前：
- * 1. 校验 SSO 身份（AuthError → 401 页）。
+ * 1. 校验登录会话（AuthError → 401 页）。
  * 2. 校验旧 studio.access 权限（PERMISSIONS 体系）→ 403 页。
  * 3. 解析 Principal（admin audience）→ 计算 8 大菜单可见性。
  * 4. 通过 → 左侧 <StudioNav visibleItems={...} /> + 右侧子页。
@@ -19,8 +20,7 @@ import { headers } from "next/headers";
  * 安全边界：
  * - studio.access 仍是入口校验（PERMISSIONS 体系），Action Scope 校验由各 API 路由负责。
  * - 菜单可见性仅是 UX 层，隐藏菜单不能代替授权校验（方案 S11-W01）。
- * - dev 模式下 DEFAULT_USER_ID 全部可见（与 devOpen 行为一致）。
- * - Principal 解析失败 fail-open（旧 studio.access 通过即放行），菜单全部隐藏。
+ * - Principal 解析失败时拒绝进入；菜单可见性始终基于真实权限绑定。
  *
  * /studio/api/* 路由不经过本 layout（API 不走渲染），各自 requirePermission / requireActionScope 守卫。
  */
@@ -36,7 +36,7 @@ export default async function StudioLayout({
     principal = await resolveStudioPrincipal(await headers());
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      return <StudioGatePage status={401} message="当前身份无法进入管理后台" fullScreen />;
+      redirect("/login?returnTo=%2Fstudio");
     }
     throw error;
   }
@@ -51,7 +51,6 @@ export default async function StudioLayout({
   }
 
   // S11-W01：解析 Principal 并计算 8 大菜单可见性。
-  // 解析失败 fail-open：保留 studio.access 入口校验，但菜单全部隐藏。
   let visibility: StudioNavVisibility = {
     agents: false,
     capabilities: false,
@@ -67,8 +66,7 @@ export default async function StudioLayout({
     const principal = await resolvePrincipal(h, "admin");
     visibility = await computeStudioNavVisibility(principal);
   } catch {
-    // dev 模式或身份解析失败：保留 studio.access 入口校验，菜单全部隐藏
-    // 实际生产中此分支几乎不触发（trusted-headers 模式由网关注入）
+    // 菜单计算异常时全部隐藏；后台 API 仍各自执行权限校验。
   }
 
   return (

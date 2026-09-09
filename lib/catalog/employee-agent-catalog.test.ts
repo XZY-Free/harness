@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
  * 8. 无 CatalogEntry 或无 eligible default route 均 fail-closed。
  * 9. Delivery 确实由 route_projection consumer 完成（state=completed）。
  *
- * 环境：APP_ENV=test + SNOW_AUTH_MODE=dev（员工身份 = DEFAULT_USER，默认租户）。
+ * 环境：APP_ENV=test + SNOW_VITEST_IDENTITY_FIXTURE=enabled（员工身份 = DEFAULT_USER，默认租户）。
  */
 import { GET as catalogOptionsGET } from "@/app/api/v1/catalog/options/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
@@ -57,15 +57,15 @@ import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 装配：真实 Outbox Delivery Worker（route_projection consumer）─────────

@@ -46,10 +46,10 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 function setAuthMode(mode: string | undefined) {
-  process.env.SNOW_AUTH_MODE = mode;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = mode;
 }
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 const ACTOR = { tenantId: DEFAULT_TENANT_ID, actorType: "user" as const, actorId: "test-user" };
 const REQ_ID = "req-governance-1";
@@ -63,7 +63,7 @@ const NEW_CONFIG: GovernanceConfig = {
 
 beforeEach(async () => {
   await resetDatabase(db);
-  setAuthMode("dev");
+  setAuthMode("enabled");
   await ensureDefaultTenant();
 });
 

@@ -21,6 +21,7 @@ import { getPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { getTenantByKey } from "@/lib/identity/tenant-queries";
 import { getUserIdentityBySubject } from "@/lib/identity/user-identity-queries";
 import { agentTable } from "@/lib/persistence/schema/agents";
+import { roleActionBinding } from "@/lib/persistence/schema/authorization";
 import { principalBinding, tenant, userIdentity } from "@/lib/persistence/schema/identity";
 
 beforeEach(async () => {
@@ -127,6 +128,16 @@ describe("seedDefaultGrants：Agent 管理与调用授权", () => {
       resource: { type: "agent", id: null },
     });
     expect(decision).toEqual({ allowed: false, reason: "unknown_action" });
+  });
+
+  it("重复授权不会累积相同的有效绑定", async () => {
+    const identity = await seedDefaultIdentity();
+    await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
+    const firstCount = (await db.select().from(roleActionBinding)).length;
+
+    await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
+
+    expect((await db.select().from(roleActionBinding)).length).toBe(firstCount);
   });
 });
 

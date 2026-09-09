@@ -17,20 +17,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  *   { target: {kind:"runtime"} | {kind:"agent", agent_id}, route_scope_key, route_scope }
  * 旧扁平 { agent_id, route_scope_key, route_scope } 一律 400 且零落库。
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers。
  */
 import { POST } from "./route";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 /** seed 管理员 + 授予 route.update（全 Agent wildcard）+ 一个 draft Agent。 */
