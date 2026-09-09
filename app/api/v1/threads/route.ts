@@ -59,6 +59,7 @@ export async function GET(request: Request): Promise<Response> {
   return apiSuccess(
     {
       viewer_id: principal.userIdentityId,
+      viewer_name: principal.displayName?.trim() || principal.email,
       threads: threads.map((thread) => ({
         id: thread.id,
         title: thread.title,

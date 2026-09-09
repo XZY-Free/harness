@@ -28,6 +28,8 @@ describe("GET /api/v1/threads（Desktop/Web shell）", () => {
     mocks.resolveEmployeePrincipal.mockResolvedValue({
       tenantId: "tenant-1",
       userIdentityId: "viewer-1",
+      email: "sunshine@example.com",
+      displayName: "sunshine",
     });
     mocks.listThreadsForUser.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue([]);
@@ -40,6 +42,13 @@ describe("GET /api/v1/threads（Desktop/Web shell）", () => {
     const body = (await response.json()) as { default_model_ref: string };
     expect(body.default_model_ref).toBe(aiConfig.chatModel);
     expect(body.default_model_ref.length).toBeGreaterThan(0);
+  });
+
+  it("把当前员工的真实显示名投影给账户菜单", async () => {
+    const response = await GET(new Request("http://localhost/api/v1/threads") as never);
+
+    const body = (await response.json()) as { viewer_name?: string };
+    expect(body.viewer_name).toBe("sunshine");
   });
 
   it("把每个会话的最新 Turn 状态投影给侧栏，首次加载即可识别需要用户输入", async () => {

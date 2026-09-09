@@ -5,6 +5,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -18,7 +19,7 @@ import { LogOut, PanelLeft, Plus, Search, User } from "lucide-react";
  * 3. 新建会话。
  * 4. "会话"区标题。
  * 5. 会话列表（按主智能体分组；未选助手的平铺顶部）。
- * 6. 底部账号行（点击弹出菜单：设置 / 退出登录）。
+ * 6. 底部账号行（点击弹出账户身份与退出入口）。
  *
  * 侧栏可收起（⌘\ 或品牌行按钮），收起后主区左移。
  */
@@ -105,6 +106,11 @@ export function DesktopSidebar({
   const currentThreadId =
     currentThreadIdProp ?? pathname?.replace("/desktop/chat/", "").split("/")[0];
   const isFullScreen = nativeTitlebar && nativeIsFullScreen === true;
+  const displayName = userName?.trim() || "用户";
+  const avatarLabel =
+    displayName.charCodeAt(0) <= 0x7f
+      ? displayName.slice(0, 2).toUpperCase()
+      : Array.from(displayName)[0];
   // 无论普通窗口还是原生全屏，顶部都要为窗口控制保留一行，避免与品牌行重叠。
   const titlebarSpacerClass = nativeTitlebar ? "h-8" : "h-0";
   const titlebarControlsClass = nativeTitlebar
@@ -113,7 +119,9 @@ export function DesktopSidebar({
       : "top-2 left-3"
     : collapsed
       ? "top-2 left-3"
-      : "top-2 left-[168px]";
+      : surface === "web" && isNarrow
+        ? "top-[calc(var(--sidebar-overlay-inset)+0.5rem)] left-[calc(var(--sidebar-overlay-inset)+var(--sidebar-width)-6.75rem)]"
+        : "top-2 left-[calc(var(--sidebar-width)-6.75rem)]";
   const titlebarIconClass =
     "flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40";
   const panelButton = (
@@ -187,25 +195,34 @@ export function DesktopSidebar({
         )}
       </div>
       {surface === "web" && isNarrow && !collapsed && (
-        <button
-          type="button"
-          aria-label="关闭会话侧栏"
-          onClick={toggle}
-          className="fixed inset-0 z-20 bg-black/15"
-        />
+        <>
+          <div
+            data-testid="desktop-sidebar-backdrop"
+            aria-hidden="true"
+            className="pointer-events-none fixed inset-0 z-20 bg-black/10 backdrop-blur-[1px]"
+          />
+          <button
+            type="button"
+            aria-label="关闭会话侧栏"
+            onClick={toggle}
+            className="fixed top-0 right-0 bottom-0 left-[calc(var(--sidebar-overlay-inset)+var(--sidebar-width))] z-20 cursor-default"
+          />
+        </>
       )}
       <aside
+        data-testid="desktop-sidebar-shell"
         aria-label="会话侧栏"
         className={cn(
-          // <1360px 一律 overlay drawer（不参与主布局）；≥1360px 为固定侧栏（参与布局）。
-          "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out max-[1359px]:fixed max-[1359px]:inset-y-0 max-[1359px]:left-0 max-[1359px]:z-30",
-          collapsed ? "w-0" : "w-[276px]",
+          // 窄屏为带安全边距的浮动 drawer；宽屏为参与主布局的固定侧栏。
+          "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out max-[84.9375rem]:fixed max-[84.9375rem]:inset-y-[var(--sidebar-overlay-inset)] max-[84.9375rem]:left-[var(--sidebar-overlay-inset)] max-[84.9375rem]:h-auto max-[84.9375rem]:z-30",
+          collapsed ? "w-0" : "w-[var(--sidebar-width)]",
         )}
       >
         <div
+          data-testid="desktop-sidebar-panel"
           aria-hidden={collapsed}
           className={cn(
-            "absolute inset-y-0 left-0 flex w-[276px] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[opacity,transform] duration-200 ease-out",
+            "absolute inset-y-0 left-0 flex w-[var(--sidebar-width)] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[opacity,transform] duration-200 ease-out max-[84.9375rem]:rounded-[clamp(1rem,1.5vw,1.25rem)] max-[84.9375rem]:border max-[84.9375rem]:shadow-[0_18px_48px_-20px_rgba(15,23,42,0.28),0_4px_14px_-8px_rgba(15,23,42,0.18)]",
             collapsed
               ? "pointer-events-none -translate-x-2 opacity-0"
               : "translate-x-0 opacity-100",
@@ -255,14 +272,30 @@ export function DesktopSidebar({
                 <div className="flex size-7 items-center justify-center rounded-full bg-sidebar-accent text-xs font-medium text-sidebar-accent-foreground">
                   <User className="size-3.5" />
                 </div>
-                <span className="truncate text-sm text-foreground">{userName ?? "用户"}</span>
+                <span className="truncate text-sm text-foreground">{displayName}</span>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 side="top"
                 align="start"
-                sideOffset={10}
-                className="w-[212px] rounded-[18px] border border-foreground/[0.08] bg-popover/95 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_24px_60px_-24px_rgba(15,23,42,0.30),0_8px_20px_-12px_rgba(15,23,42,0.20)] ring-1 ring-inset ring-white/65 backdrop-blur-xl dark:ring-white/10"
+                alignOffset={12}
+                sideOffset={8}
+                className="w-[calc(var(--sidebar-width)-1.5rem)] rounded-2xl border border-foreground/10 bg-popover p-2 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.22),0_2px_8px_-4px_rgba(15,23,42,0.14)] ring-0"
               >
+                <div
+                  data-testid="account-menu-identity"
+                  className="flex min-w-0 items-center gap-2.5 px-2 py-1.5"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-[11px] text-muted-foreground"
+                  >
+                    {avatarLabel}
+                  </span>
+                  <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                    {displayName}
+                  </span>
+                </div>
+                <DropdownMenuSeparator className="mx-1 my-1.5" />
                 <DropdownMenuItem
                   onSelect={async () => {
                     const desktop = (
@@ -274,9 +307,9 @@ export function DesktopSidebar({
                       await desktop.auth.logout();
                     }
                   }}
-                  className="min-h-10 gap-2.5 rounded-[11px] px-3 py-2 text-[13px] text-foreground/85 focus:bg-destructive/[0.06] focus:text-destructive"
+                  className="min-h-9 gap-2.5 rounded-lg px-2 py-1.5 text-sm text-foreground focus:bg-accent focus:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
                 >
-                  <LogOut className="size-[15px] text-muted-foreground group-focus/dropdown-menu-item:text-destructive" />
+                  <LogOut className="size-4 text-muted-foreground" />
                   退出登录
                 </DropdownMenuItem>
               </DropdownMenuContent>

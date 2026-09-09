@@ -70,10 +70,12 @@ vi.mock("@/components/thread/new-thread-page", () => ({
 vi.mock("@/components/thread/sidebar/desktop-sidebar", () => ({
   DesktopSidebar: ({
     threads,
+    userName,
   }: {
     readonly threads: readonly { id: string; latest_turn_state?: string | null }[];
+    readonly userName?: string;
   }) => (
-    <div data-testid="desktop-thread-list">
+    <div data-testid="desktop-thread-list" data-user-name={userName ?? ""}>
       {threads.map((thread) => `${thread.id}:${thread.latest_turn_state ?? "none"}`).join(",")}
     </div>
   ),
@@ -102,6 +104,7 @@ describe("DesktopRendererApp", () => {
         new Response(
           JSON.stringify({
             viewer_id: "viewer-1",
+            viewer_name: "sunshine",
             threads: [{ id: existingThreadId, title: "已有会话" }],
           }),
         ),
@@ -152,6 +155,7 @@ describe("DesktopRendererApp", () => {
         new Response(
           JSON.stringify({
             viewer_id: "viewer-1",
+            viewer_name: "sunshine",
             threads: [{ id: "thread-1", title: "已有会话" }],
             default_model_ref: "deepseek-v4-flash",
           }),
@@ -170,6 +174,24 @@ describe("DesktopRendererApp", () => {
     render(<DesktopRendererApp />);
     const threadPage = await screen.findByTestId("desktop-thread-page");
     expect(threadPage.dataset.defaultModelRef).toBe("deepseek-v4-flash");
+  });
+
+  it("把 shell.viewer_name 传给账户菜单，不显示内部用户 ID", async () => {
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          viewer_id: "viewer-1",
+          viewer_name: "sunshine",
+          threads: [],
+          default_model_ref: "deepseek-v4-flash",
+        }),
+      ),
+    );
+
+    render(<DesktopRendererApp />);
+
+    const sidebar = await screen.findByTestId("desktop-thread-list");
+    expect(sidebar.dataset.userName).toBe("sunshine");
   });
 
   it("工作台展开状态由 Desktop 外壳持有，创建会话后保持展开", async () => {

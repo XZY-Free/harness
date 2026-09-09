@@ -57,7 +57,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
     return (
       <output
         aria-label="会话页面加载中"
-        className="fixed inset-0 flex items-center justify-center"
+        className="fixed inset-0 flex h-dvh w-dvw items-center justify-center"
       >
         <span className="text-sm text-muted-foreground">正在加载会话…</span>
       </output>
@@ -65,7 +65,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
   }
   if (!shell) {
     return (
-      <main className="fixed inset-0 flex items-center justify-center text-sm text-muted-foreground">
+      <main className="fixed inset-0 flex h-dvh w-dvw items-center justify-center text-sm text-muted-foreground">
         {error}
       </main>
     );
@@ -105,9 +105,14 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
     <SidebarProvider>
       <div
         data-testid="web-thread-shell"
-        className="fixed inset-0 flex overflow-hidden bg-background text-foreground"
+        className="fixed inset-0 flex h-dvh min-h-0 w-dvw overflow-hidden bg-background text-foreground"
       >
-        <DesktopSidebar threads={threads} currentThreadId={activeThreadId ?? ""} surface="web" />
+        <DesktopSidebar
+          threads={threads}
+          currentThreadId={activeThreadId ?? ""}
+          surface="web"
+          userName={shell.viewer_name}
+        />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {activeThreadId === null ? (
             <NewThreadPage

@@ -12,7 +12,7 @@ import { navigateDesktop, usePathname } from "../next-navigation";
 
 function DesktopError({ children }: { readonly children: ReactNode }) {
   return (
-    <main className="flex h-screen items-center justify-center text-sm text-muted-foreground">
+    <main className="flex h-dvh items-center justify-center text-sm text-muted-foreground">
       {children}
     </main>
   );
@@ -122,12 +122,12 @@ function DesktopShell() {
   // Agent 目录为空是合法状态；无 Agent 时不阻断会话创建，也不 fallback 第一个 Agent。
   return (
     <SidebarProvider>
-      <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      <div className="flex h-dvh min-h-0 overflow-hidden bg-background text-foreground">
         <DesktopSidebar
           threads={threads}
           agents={[]}
           currentThreadId={route.kind === "thread" ? route.threadId : ""}
-          userName={shell.viewer_id.slice(0, 8)}
+          userName={shell.viewer_name}
           hasNativeTitlebar
         />
         <main className="flex min-w-0 flex-1 flex-col">

@@ -215,7 +215,8 @@ describe("globals.css 消息宽度合同（读取真实样式文件）", () => {
     expect(trackBlock).toContain("width: 100%");
     expect(trackBlock).toContain("max-width: var(--conversation-track-max)");
     expect(composerBlock).toContain("max-width: var(--conversation-track-max)");
-    expect(globalsCss).toMatch(/--conversation-track-max\s*:\s*760px/);
+    expect(globalsCss).toMatch(/--conversation-track-max\s*:\s*clamp\(/);
+    expect(globalsCss).not.toMatch(/--conversation-track-max\s*:\s*760px/);
   });
 
   it("助手正文 .conversation-copy 不再使用 76ch 固定可读宽度", () => {

@@ -357,11 +357,13 @@
 }
 
 html {
+  height: 100%;
   min-height: 100%;
 }
 
 body {
-  min-height: 100vh;
+  min-height: 100%;
+  min-height: 100dvh;
   margin: 0;
   color: var(--foreground);
   background: var(--background);
@@ -677,7 +679,7 @@ body {
 
 /* 对话与输入共用稳定的阅读轴。
  * Codex 风格的对话区不会随窗口无限拉宽；消息、过程反馈和 composer 始终围绕
- * 同一条 760px 阅读列排布，仅保留各自独立的语义轨道。
+ * 同一条流式阅读列排布，仅保留各自独立的语义轨道。
  * 两者均按 16/24/32px 响应式安全内边距居中。
  *
  * 消息宽度体系（Web/Desktop 共用同一组件与 CSS）：
@@ -689,9 +691,17 @@ body {
  *   - 中等宽度（≥640px）：user 82% / assistant 96%
  *   - 宽屏（≥1024px）：user 78% / assistant 92% */
 :root {
-  --conversation-track-max: 760px;
+  --sidebar-width: clamp(15.5rem, 19vw, 17.25rem);
+  --sidebar-overlay-inset: clamp(0.5rem, 1.2vw, 1rem);
+  --conversation-track-max: clamp(40rem, 58vw, 50rem);
   --conversation-user-max: 88%;
   --conversation-assistant-max: 100%;
+}
+
+@media (max-width: 84.9375rem) {
+  :root {
+    --sidebar-width: min(82vw, 18rem);
+  }
 }
 
 .message-track {

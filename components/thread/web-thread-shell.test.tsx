@@ -15,13 +15,15 @@ vi.mock("@/lib/client/new-thread-session", () => ({
 vi.mock("@/components/thread/sidebar/desktop-sidebar", () => ({
   DesktopSidebar: ({
     threads,
+    userName,
   }: {
     readonly threads: readonly {
       readonly id: string;
       readonly latest_turn_state?: string | null;
     }[];
+    readonly userName?: string;
   }) => (
-    <div data-testid="desktop-sidebar">
+    <div data-testid="desktop-sidebar" data-user-name={userName ?? ""}>
       {threads.map((thread) => `${thread.id}:${thread.latest_turn_state ?? "none"}`).join(",")}
     </div>
   ),
@@ -94,12 +96,21 @@ beforeEach(() => {
   mocks.createNewThreadSession.mockReturnValue({ submit: vi.fn().mockResolvedValue({ id: "t" }) });
   mocks.loadThreadShell.mockResolvedValue({
     viewer_id: "viewer-1",
+    viewer_name: "sunshine",
     threads: [{ id: "thread-1", title: "已有会话" }],
     default_model_ref: "deepseek-v4-flash",
   });
 });
 
 describe("WebThreadShell 透传平台默认模型", () => {
+  it("外壳使用动态视口高度，窗口纵向缩放时不留下固定画布", async () => {
+    render(<WebThreadShell threadId={null} />);
+
+    const shell = await screen.findByTestId("web-thread-shell");
+    expect(shell.className).toContain("h-dvh");
+    expect(shell.className).toContain("w-dvw");
+  });
+
   it("新会话（threadId=null）把 shell.default_model_ref 传给 NewThreadPage", async () => {
     render(<WebThreadShell threadId={null} />);
 
@@ -114,6 +125,13 @@ describe("WebThreadShell 透传平台默认模型", () => {
 
     await screen.findByTestId("thread-page");
     expect(screen.getByTestId("thread-page").dataset.defaultModelRef).toBe("deepseek-v4-flash");
+  });
+
+  it("把 shell.viewer_name 传给账户菜单", async () => {
+    render(<WebThreadShell threadId={null} />);
+
+    await screen.findByTestId("desktop-sidebar");
+    expect(screen.getByTestId("desktop-sidebar").dataset.userName).toBe("sunshine");
   });
 
   it("新会话提交成功后同一组件树立即切换到 ThreadPage，不触发 router.replace 也不重载 shell", async () => {

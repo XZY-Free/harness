@@ -33,6 +33,8 @@ export interface ClientAgentSummary {
 
 export interface ClientThreadShellResponse {
   readonly viewer_id: string;
+  /** 当前员工的真实显示名；账户菜单只展示该公开字段，不暴露内部 user id。 */
+  readonly viewer_name: string;
   readonly threads: readonly ClientThreadSummary[];
   /**
    * 平台默认模型（服务端配置事实源 aiConfig.chatModel 的投影，snake_case）。
