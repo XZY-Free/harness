@@ -231,6 +231,10 @@ def parse_parameters(section: list[str]) -> tuple[list[dict[str, Any]], dict[str
 
 
 def security_for(path: str) -> list[dict[str, list[str]]]:
+    # attachment reference 本身是短期、调用绑定、可撤销的 bearer capability。
+    # 外部 Agent 不应额外持有 SnowHarness 内部 Gateway Workload Token。
+    if path == "/gateway/v1/attachments/resolve":
+        return []
     if path.endswith("/auth/callback"):
         return [{"employeeSession": []}]
     if path.startswith("/api/"):

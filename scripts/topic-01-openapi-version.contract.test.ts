@@ -43,6 +43,14 @@ describe("Topic01 OpenAPI API 版本单一来源契约", () => {
     expect(openapi.info!.version).toBe(API_VERSION);
   });
 
+  it("附件短期 reference 是唯一 bearer capability，不要求外部 Agent 持有内部 workload token", () => {
+    const openapi = JSON.parse(readFileSync(OPENAPI_PATH, "utf8")) as {
+      paths?: Record<string, { post?: { security?: Array<Record<string, string[]>> } }>;
+    };
+
+    expect(openapi.paths?.["/gateway/v1/attachments/resolve"]?.post?.security).toEqual([]);
+  });
+
   it("generate_openapi.py 以 contract-manifest.json/api_version 为唯一 API 版本来源，无硬编码 11.0.0", () => {
     const source = readFileSync(GENERATOR_PATH, "utf8");
     const normalized = normalize(source);

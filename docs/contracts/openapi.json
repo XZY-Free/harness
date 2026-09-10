@@ -4289,11 +4289,7 @@
         "tags": [
           "gateway"
         ],
-        "security": [
-          {
-            "workloadAuth": []
-          }
-        ],
+        "security": [],
         "parameters": [],
         "responses": {
           "200": {
