@@ -46,7 +46,7 @@ test.describe("Desktop 登录闭环", () => {
         if (!mainWindow) throw new Error("Desktop 主窗口不存在");
         mainWindow.setSize(nextSize.width, nextSize.height);
       }, size);
-      await expect(window.getByLabel("邮箱")).toBeVisible();
+      await expect(window.getByLabel("账号")).toBeVisible();
       await expect(window.getByRole("button", { name: "登录" })).toBeVisible();
       expect(
         await window.evaluate(() => document.documentElement.scrollWidth <= globalThis.innerWidth),
@@ -54,10 +54,10 @@ test.describe("Desktop 登录闭环", () => {
     }
     await capture(window, "02-desktop-login-min-size.png");
 
-    await window.getByLabel("邮箱").fill(E2E_ADMIN_EMAIL);
+    await window.getByLabel("账号").fill(E2E_ADMIN_EMAIL);
     await window.getByLabel("密码").fill("wrong-password");
     await window.getByRole("button", { name: "登录" }).click();
-    await expect(window.getByRole("alert")).toHaveText("邮箱或密码错误");
+    await expect(window.getByRole("alert")).toHaveText("账号或密码错误");
 
     await window.getByLabel("密码").fill(E2E_ADMIN_PASSWORD);
     await window.getByRole("button", { name: "登录" }).click();
@@ -71,7 +71,7 @@ test.describe("Desktop 登录闭环", () => {
 
     await expect(window.getByRole("button", { name: "登录" })).toBeVisible({ timeout: 90_000 });
     await expect(window.getByRole("heading", { name: "登录" })).toHaveCount(0);
-    await expect(window.getByLabel("邮箱")).toHaveValue("");
+    await expect(window.getByLabel("账号")).toHaveValue("");
     await capture(window, "03-desktop-after-logout.png");
   });
 });

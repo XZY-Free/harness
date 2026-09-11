@@ -160,6 +160,10 @@ export async function acceptAuthenticatedEvidence(
   const identity = await upsertUserIdentity({
     tenantId: tenant.id,
     externalSubject,
+    loginAccount:
+      existingIdentity?.status === "disabled"
+        ? existingIdentity.loginAccount
+        : evidence.loginAccount,
     email: existingIdentity?.status === "disabled" ? existingIdentity.email : email,
     displayName:
       existingIdentity?.status === "disabled" ? existingIdentity.displayName : displayName,

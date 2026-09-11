@@ -12,7 +12,7 @@ interface LoginFormProps {
 }
 
 export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProps) {
-  const [email, setEmail] = useState("");
+  const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -32,7 +32,7 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
               method: "POST",
               credentials: "include",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ email: email.trim(), password }),
+              body: JSON.stringify({ account: account.trim(), password }),
             },
           );
           const body = (await response.json().catch(() => null)) as
@@ -60,17 +60,16 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
       }}
     >
       <div className="space-y-2">
-        <Label htmlFor="login-email" className="text-sm font-medium tracking-[-0.01em]">
-          邮箱
+        <Label htmlFor="login-account" className="text-sm font-medium tracking-[-0.01em]">
+          账号
         </Label>
         <Input
-          id="login-email"
-          name="email"
-          type="email"
+          id="login-account"
+          name="account"
+          type="text"
           autoComplete="username"
-          inputMode="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          value={account}
+          onChange={(event) => setAccount(event.target.value)}
           disabled={submitting}
           required
           autoFocus

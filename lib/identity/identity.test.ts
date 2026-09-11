@@ -18,6 +18,9 @@ import type {
 import { getEnterpriseUserProfileFacts } from "@/lib/identity/enterprise-user-profile-queries";
 import {
   bootstrapLocalAdmin,
+  completePasswordEnrollment,
+  establishExternalSession,
+  getPasswordEnrollment,
   localAuthenticationProvider,
   verifyPassword,
 } from "@/lib/identity/local-authentication";
@@ -26,7 +29,12 @@ import {
   listPrincipalBindingsByUser,
   upsertPrincipalBinding,
 } from "@/lib/identity/principal-binding-queries";
-import { AuthenticationError, authErrorResponse, resolvePrincipal } from "@/lib/identity/resolver";
+import {
+  AuthenticationError,
+  acceptAuthenticatedEvidence,
+  authErrorResponse,
+  resolvePrincipal,
+} from "@/lib/identity/resolver";
 import {
   DEFAULT_TENANT_ID,
   DEFAULT_TENANT_KEY,
@@ -462,7 +470,7 @@ describe("local-authentication", () => {
     });
 
     const login = await localAuthenticationProvider.login!({
-      email: "admin@example.com",
+      account: "admin@example.com",
       password: "correct horse battery staple",
     });
     expect(login.status).toBe("authenticated");
@@ -473,7 +481,7 @@ describe("local-authentication", () => {
     expect(credential).toBeDefined();
     expect(session).toBeDefined();
     if (!credential || !session) throw new Error("认证记录未写入");
-    expect(credential.normalizedEmail).toBe("admin@example.com");
+    expect(credential.normalizedAccount).toBe("admin@example.com");
     expect(credential.passwordHash).not.toContain("correct horse battery staple");
     expect(session.tokenHash).not.toBe(login.sessionToken);
 
@@ -484,6 +492,7 @@ describe("local-authentication", () => {
       status: "authenticated",
       evidence: {
         externalSubject: admin.externalSubject,
+        loginAccount: "admin@example.com",
         email: "admin@example.com",
         displayName: "管理员",
         trustedAuthenticationClaims: {},
@@ -500,7 +509,7 @@ describe("local-authentication", () => {
 
     await expect(
       localAuthenticationProvider.login!({
-        email: "missing@example.com",
+        account: "missing@example.com",
         password: "wrong password",
       }),
     ).resolves.toEqual({ status: "denied" });
@@ -508,13 +517,13 @@ describe("local-authentication", () => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await expect(
         localAuthenticationProvider.login!({
-          email: "admin@example.com",
+          account: "admin@example.com",
           password: "wrong password",
         }),
       ).resolves.toEqual({ status: "denied" });
     }
     const locked = await localAuthenticationProvider.login!({
-      email: "admin@example.com",
+      account: "admin@example.com",
       password: "wrong password",
     });
     expect(locked.status).toBe("rate_limited");
@@ -527,7 +536,7 @@ describe("local-authentication", () => {
       password: "correct horse battery staple",
     });
     const login = await localAuthenticationProvider.login!({
-      email: "admin@example.com",
+      account: "admin@example.com",
       password: "correct horse battery staple",
     });
     if (login.status !== "authenticated") throw new Error("登录失败");
@@ -539,6 +548,108 @@ describe("local-authentication", () => {
       status: "unauthenticated",
     });
   });
+
+  it("首次企业登录只能用短期设密会话查看可信账号，设密后才签发正式会话", async () => {
+    const principal = await acceptAuthenticatedEvidence({
+      externalSubject: "enterprise-subject-1",
+      loginAccount: " ZhangSan ",
+      email: "zhangsan@example.com",
+      displayName: "张三",
+      trustedAuthenticationClaims: {},
+    });
+    const identity = await getUserIdentityById(principal.userIdentityId);
+    expect(identity?.loginAccount).toBe("zhangsan");
+
+    const setup = await establishExternalSession({
+      userIdentityId: principal.userIdentityId,
+      loginAccount: "zhangsan",
+    });
+    expect(setup.status).toBe("password_setup_required");
+    const setupHeaders = new Headers({ cookie: `snow_session=${setup.sessionToken}` });
+    await expect(
+      localAuthenticationProvider.authenticate({ headers: setupHeaders }),
+    ).resolves.toEqual({
+      status: "unauthenticated",
+    });
+    await expect(getPasswordEnrollment({ headers: setupHeaders })).resolves.toMatchObject({
+      account: "zhangsan",
+      displayName: "张三",
+    });
+
+    const completed = await completePasswordEnrollment({
+      headers: setupHeaders,
+      password: "correct horse battery staple",
+    });
+    expect(completed.status).toBe("authenticated");
+    await expect(getPasswordEnrollment({ headers: setupHeaders })).resolves.toBeNull();
+    await expect(
+      localAuthenticationProvider.authenticate({
+        headers: new Headers({ cookie: `snow_session=${completed.sessionToken}` }),
+      }),
+    ).resolves.toMatchObject({
+      status: "authenticated",
+      evidence: { externalSubject: "enterprise-subject-1", loginAccount: "zhangsan" },
+    });
+    await expect(
+      localAuthenticationProvider.login!({
+        account: "ZHANGSAN",
+        password: "correct horse battery staple",
+      }),
+    ).resolves.toMatchObject({ status: "authenticated", user: { account: "zhangsan" } });
+  });
+
+  it("企业账号变更后同步本地登录凭证，旧账号立即失效", async () => {
+    const first = await acceptAuthenticatedEvidence({
+      externalSubject: "enterprise-subject-rename",
+      loginAccount: "old-account",
+      email: "employee@example.com",
+      displayName: "员工",
+      trustedAuthenticationClaims: {},
+    });
+    const setup = await establishExternalSession({
+      userIdentityId: first.userIdentityId,
+      loginAccount: "old-account",
+    });
+    const completed = await completePasswordEnrollment({
+      headers: new Headers({ cookie: `snow_session=${setup.sessionToken}` }),
+      password: "correct horse battery staple",
+    });
+    expect(completed.status).toBe("authenticated");
+
+    const renamed = await acceptAuthenticatedEvidence({
+      externalSubject: "enterprise-subject-rename",
+      loginAccount: "new-account",
+      email: "employee@example.com",
+      displayName: "员工",
+      trustedAuthenticationClaims: {},
+    });
+    await expect(
+      localAuthenticationProvider.login!({
+        account: "old-account",
+        password: "correct horse battery staple",
+      }),
+    ).resolves.toEqual({ status: "denied" });
+
+    await expect(
+      establishExternalSession({
+        userIdentityId: renamed.userIdentityId,
+        loginAccount: "new-account",
+      }),
+    ).resolves.toMatchObject({ status: "authenticated" });
+
+    await expect(
+      localAuthenticationProvider.login!({
+        account: "old-account",
+        password: "correct horse battery staple",
+      }),
+    ).resolves.toEqual({ status: "denied" });
+    await expect(
+      localAuthenticationProvider.login!({
+        account: "new-account",
+        password: "correct horse battery staple",
+      }),
+    ).resolves.toMatchObject({ status: "authenticated", user: { account: "new-account" } });
+  });
 });
 
 describe("resolver", () => {
@@ -549,7 +660,7 @@ describe("resolver", () => {
       password: "correct horse battery staple",
     });
     const login = await localAuthenticationProvider.login!({
-      email: "admin@example.com",
+      account: "admin@example.com",
       password: "correct horse battery staple",
     });
     if (login.status !== "authenticated") throw new Error("登录失败");

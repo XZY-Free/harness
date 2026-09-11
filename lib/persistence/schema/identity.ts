@@ -75,6 +75,8 @@ export const userIdentity = mysqlTable(
       .references(() => tenant.id),
     /** SSO subject / employee id（公司用户中心稳定标识）。作租户内 upsert 键。 */
     externalSubject: varchar("externalSubject", { length: 128 }).notNull(),
+    /** 可信认证提供器确认的登录账号；尚未接入账号认证的历史身份允许为空。 */
+    loginAccount: varchar("loginAccount", { length: 128 }),
     /** email 允许漂移更新，不再是身份主键。 */
     email: varchar("email", { length: 128 }).notNull(),
     displayName: text("displayName"),
@@ -92,6 +94,7 @@ export const userIdentity = mysqlTable(
       t.externalSubject,
     ),
     tenantEmailIdx: index("UserIdentity_tenant_email_idx").on(t.tenantId, t.email),
+    tenantAccountUq: uniqueIndex("UserIdentity_tenant_account_uq").on(t.tenantId, t.loginAccount),
   }),
 );
 
@@ -101,7 +104,7 @@ export type NewUserIdentity = InferInsertModel<typeof userIdentity>;
 // ─── Local authentication ───────────────────────────────────
 
 /**
- * 本地登录凭证。UserIdentity 仍是唯一用户事实源，本表只保存认证所需的邮箱索引、
+ * 本地登录凭证。UserIdentity 仍是唯一用户事实源，本表只保存认证所需的账号索引、
  * 密码摘要与失败锁定状态，不复制姓名、状态或组织资料。
  */
 export const localCredential = mysqlTable(
@@ -117,7 +120,7 @@ export const localCredential = mysqlTable(
     userIdentityId: varchar("userIdentityId", { length: 36 })
       .notNull()
       .references(() => userIdentity.id),
-    normalizedEmail: varchar("normalizedEmail", { length: 254 }).notNull(),
+    normalizedAccount: varchar("normalizedAccount", { length: 128 }).notNull(),
     passwordHash: varchar("passwordHash", { length: 512 }).notNull(),
     failedLoginCount: int("failedLoginCount").notNull().default(0),
     lockedUntil: datetime("lockedUntil", { mode: "date", fsp: 3 }),
@@ -132,7 +135,10 @@ export const localCredential = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (t) => ({
-    tenantEmailUq: uniqueIndex("LocalCredential_tenant_email_uq").on(t.tenantId, t.normalizedEmail),
+    tenantAccountUq: uniqueIndex("LocalCredential_tenant_account_uq").on(
+      t.tenantId,
+      t.normalizedAccount,
+    ),
     userUq: uniqueIndex("LocalCredential_user_uq").on(t.userIdentityId),
   }),
 );
@@ -143,6 +149,9 @@ export type NewLocalCredential = InferInsertModel<typeof localCredential>;
 /**
  * 可撤销登录会话。客户端持有随机令牌，数据库只保存 SHA-256 摘要；退出和改密均可立即撤销。
  */
+export const AUTH_SESSION_KINDS = ["authenticated", "password_enrollment"] as const;
+export type AuthSessionKind = (typeof AUTH_SESSION_KINDS)[number];
+
 export const authSession = mysqlTable(
   "AuthSession",
   {
@@ -157,6 +166,7 @@ export const authSession = mysqlTable(
       .notNull()
       .references(() => userIdentity.id),
     tokenHash: varchar("tokenHash", { length: 64 }).notNull(),
+    sessionKind: mysqlEnum("sessionKind", AUTH_SESSION_KINDS).notNull().default("authenticated"),
     expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }).notNull(),
     revokedAt: datetime("revokedAt", { mode: "date", fsp: 3 }),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })

@@ -941,6 +941,7 @@
         "`tenantId` varchar(36) NOT NULL",
         "`userIdentityId` varchar(36) NOT NULL",
         "`tokenHash` varchar(64) NOT NULL",
+        "`sessionKind` enum('authenticated','password_enrollment') NOT NULL DEFAULT 'authenticated'",
         "`expiresAt` datetime(3) NOT NULL",
         "`createdAt` datetime(3) NOT NULL",
         "CONSTRAINT `AuthSession_id` PRIMARY KEY(`id`)",
@@ -1641,7 +1642,8 @@
         "lib/conversations/environment-takeover-queries.ts",
         "lib/desktop-bridge/bridge-server.ts",
         "lib/identity/device-queries.ts",
-        "lib/identity/device-signature.ts"
+        "lib/identity/device-signature.ts",
+        "lib/workspace/desktop-workspace-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -1679,6 +1681,7 @@
         "lib/desktop-bridge/bridge-server.ts",
         "lib/identity/device-queries.ts",
         "lib/identity/device-signature.ts",
+        "lib/workspace/desktop-workspace-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -2790,6 +2793,7 @@
       "productionWriters": [
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/interrupt-queries.ts",
+        "lib/conversations/pause-resume-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/steer-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
@@ -2832,6 +2836,7 @@
         "lib/persistence/schema/conversation.ts#invocationCommandTable",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/interrupt-queries.ts",
+        "lib/conversations/pause-resume-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/steer-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
@@ -3349,14 +3354,14 @@
         "`id` varchar(36) NOT NULL",
         "`tenantId` varchar(36) NOT NULL",
         "`userIdentityId` varchar(36) NOT NULL",
-        "`normalizedEmail` varchar(254) NOT NULL",
+        "`normalizedAccount` varchar(128) NOT NULL",
         "`passwordHash` varchar(512) NOT NULL",
         "`failedLoginCount` int NOT NULL DEFAULT 0",
         "`passwordChangedAt` datetime(3) NOT NULL",
         "`createdAt` datetime(3) NOT NULL",
         "`updatedAt` datetime(3) NOT NULL",
         "CONSTRAINT `LocalCredential_id` PRIMARY KEY(`id`)",
-        "CONSTRAINT `LocalCredential_tenant_email_uq` UNIQUE(`tenantId`,`normalizedEmail`)",
+        "CONSTRAINT `LocalCredential_tenant_account_uq` UNIQUE(`tenantId`,`normalizedAccount`)",
         "CONSTRAINT `LocalCredential_user_uq` UNIQUE(`userIdentityId`)",
         "ALTER TABLE `LocalCredential` ADD CONSTRAINT `LocalCredential_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `LocalCredential` ADD CONSTRAINT `LocalCredential_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action"
@@ -5006,6 +5011,7 @@
         "lib/conversations/environment-takeover-queries.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/interrupt-queries.ts",
+        "lib/conversations/pause-resume-queries.ts",
         "lib/conversations/pending-input-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/steer-queries.ts",
@@ -5070,6 +5076,7 @@
         "lib/conversations/environment-takeover-queries.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/interrupt-queries.ts",
+        "lib/conversations/pause-resume-queries.ts",
         "lib/conversations/pending-input-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/steer-queries.ts",
@@ -5688,6 +5695,7 @@
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
+        "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/recovery-queries.ts"
       ],
@@ -5696,6 +5704,7 @@
         "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/interrupt-queries.ts",
+        "lib/conversations/pause-resume-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/steer-queries.ts",
         "lib/conversations/thread-queries.ts",
@@ -5706,6 +5715,7 @@
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
+        "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/invocation-queries.ts",
         "lib/runtime/recovery-queries.ts"
@@ -5744,12 +5754,14 @@
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
+        "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/interrupt-queries.ts",
+        "lib/conversations/pause-resume-queries.ts",
         "lib/conversations/regenerate-queries.ts",
         "lib/conversations/steer-queries.ts",
         "lib/conversations/thread-queries.ts",
@@ -5760,6 +5772,7 @@
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/dispatcher.ts",
+        "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/invocation-queries.ts",
         "lib/runtime/recovery-queries.ts",
@@ -5970,6 +5983,7 @@
         "`updatedAt` datetime(3) NOT NULL",
         "CONSTRAINT `UserIdentity_id` PRIMARY KEY(`id`)",
         "CONSTRAINT `UserIdentity_tenant_subject_uq` UNIQUE(`tenantId`,`externalSubject`)",
+        "CONSTRAINT `UserIdentity_tenant_account_uq` UNIQUE(`tenantId`,`loginAccount`)",
         "ALTER TABLE `UserIdentity` ADD CONSTRAINT `UserIdentity_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `UserIdentity_tenant_email_idx` ON `UserIdentity` (`tenantId`,`email`)"
       ],
@@ -6103,6 +6117,7 @@
       "domainOwner": "workspace",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts"
       ],
       "productionReaders": [
@@ -6110,6 +6125,7 @@
         "components/studio/audit-log-table.tsx",
         "components/studio/settings-user-role-manager.tsx",
         "components/thread/thread-header.tsx",
+        "desktop/renderer/src/desktop-renderer-app.tsx",
         "lib/db/seed.ts",
         "lib/identity/action-codes.ts",
         "lib/identity/role-templates.ts",
@@ -6117,6 +6133,7 @@
         "lib/runtime/scoped-workspace-store.ts",
         "lib/skill/repo.ts",
         "lib/studio/admin-audit.ts",
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
         "scripts/architecture-gate.ts"
       ],
@@ -6145,11 +6162,13 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/workspace.ts#workspace",
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
         "app/api/v1/threads/[thread_id]/workspace/[...path]/route.ts",
         "components/studio/audit-log-table.tsx",
         "components/studio/settings-user-role-manager.tsx",
         "components/thread/thread-header.tsx",
+        "desktop/renderer/src/desktop-renderer-app.tsx",
         "lib/db/seed.ts",
         "lib/identity/action-codes.ts",
         "lib/identity/role-templates.ts",
@@ -6157,6 +6176,7 @@
         "lib/runtime/scoped-workspace-store.ts",
         "lib/skill/repo.ts",
         "lib/studio/admin-audit.ts",
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
         "scripts/architecture-gate.ts",
         "drizzle/0000_initial_schema.sql"
@@ -6318,9 +6338,11 @@
       "domainOwner": "workspace",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts"
       ],
       "productionReaders": [
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -6350,7 +6372,9 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/workspace.ts#workspaceBinding",
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
+        "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],

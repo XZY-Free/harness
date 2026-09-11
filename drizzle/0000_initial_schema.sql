@@ -858,6 +858,7 @@ CREATE TABLE `AuthSession` (
 	`tenantId` varchar(36) NOT NULL,
 	`userIdentityId` varchar(36) NOT NULL,
 	`tokenHash` varchar(64) NOT NULL,
+	`sessionKind` enum('authenticated','password_enrollment') NOT NULL DEFAULT 'authenticated',
 	`expiresAt` datetime(3) NOT NULL,
 	`revokedAt` datetime(3),
 	`createdAt` datetime(3) NOT NULL,
@@ -883,7 +884,7 @@ CREATE TABLE `LocalCredential` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`userIdentityId` varchar(36) NOT NULL,
-	`normalizedEmail` varchar(254) NOT NULL,
+	`normalizedAccount` varchar(128) NOT NULL,
 	`passwordHash` varchar(512) NOT NULL,
 	`failedLoginCount` int NOT NULL DEFAULT 0,
 	`lockedUntil` datetime(3),
@@ -891,7 +892,7 @@ CREATE TABLE `LocalCredential` (
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `LocalCredential_id` PRIMARY KEY(`id`),
-	CONSTRAINT `LocalCredential_tenant_email_uq` UNIQUE(`tenantId`,`normalizedEmail`),
+	CONSTRAINT `LocalCredential_tenant_account_uq` UNIQUE(`tenantId`,`normalizedAccount`),
 	CONSTRAINT `LocalCredential_user_uq` UNIQUE(`userIdentityId`)
 );
 --> statement-breakpoint
@@ -944,13 +945,15 @@ CREATE TABLE `UserIdentity` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`externalSubject` varchar(128) NOT NULL,
+	`loginAccount` varchar(128),
 	`email` varchar(128) NOT NULL,
 	`displayName` text,
 	`status` enum('active','disabled') NOT NULL DEFAULT 'active',
 	`createdAt` datetime NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `UserIdentity_id` PRIMARY KEY(`id`),
-	CONSTRAINT `UserIdentity_tenant_subject_uq` UNIQUE(`tenantId`,`externalSubject`)
+	CONSTRAINT `UserIdentity_tenant_subject_uq` UNIQUE(`tenantId`,`externalSubject`),
+	CONSTRAINT `UserIdentity_tenant_account_uq` UNIQUE(`tenantId`,`loginAccount`)
 );
 --> statement-breakpoint
 CREATE TABLE `JobCommand` (

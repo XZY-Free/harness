@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { db } from "@/lib/db/client";
 import * as canonicalSchema from "@/lib/persistence/schema";
-import { Table, getTableName, is } from "drizzle-orm";
+import { Table, getTableColumns, getTableName, is } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
@@ -60,6 +60,13 @@ function tableBlock(source: string, symbol: string, nextSymbol: string): string 
 }
 
 describe("Schema 单一 Authority", () => {
+  it("企业登录账号结构属于 Canonical Schema", () => {
+    expect(getTableColumns(canonicalSchema.userIdentity)).toHaveProperty("loginAccount");
+    expect(getTableColumns(canonicalSchema.localCredential)).toHaveProperty("normalizedAccount");
+    expect(getTableColumns(canonicalSchema.localCredential)).not.toHaveProperty("normalizedEmail");
+    expect(getTableColumns(canonicalSchema.authSession)).toHaveProperty("sessionKind");
+  });
+
   it("旧 Schema Root 与旧查询聚合文件已物理删除", () => {
     expect(existsSync(join(ROOT, "lib/db/schema.ts"))).toBe(false);
     expect(existsSync(join(ROOT, "lib/db/queries.ts"))).toBe(false);

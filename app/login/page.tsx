@@ -1,4 +1,5 @@
 import { LoginScreen } from "@/components/auth/login-screen";
+import { getIdentityExtensions } from "@/lib/identity/identity-extension-bootstrap";
 import { AuthenticationError, resolvePrincipal } from "@/lib/identity/resolver";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -20,7 +21,13 @@ export default async function LoginPage({
   }
   if (authenticated) redirect(returnTo);
 
-  return <LoginScreen returnTo={returnTo} />;
+  const { authenticationProvider } = await getIdentityExtensions();
+  const externalLoginLabel =
+    authenticationProvider.beginExternalLogin && authenticationProvider.completeExternalLogin
+      ? authenticationProvider.externalLoginLabel
+      : undefined;
+
+  return <LoginScreen returnTo={returnTo} externalLoginLabel={externalLoginLabel} />;
 }
 
 function safeReturnTo(value: string | string[] | undefined): string {

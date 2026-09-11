@@ -136,7 +136,7 @@ describe("DesktopRendererApp", () => {
     render(<DesktopRendererApp />);
 
     expect(await screen.findByLabelText("SnowHarness 登录")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("邮箱"), {
+    fireEvent.change(screen.getByLabelText("账号"), {
       target: { value: "admin@example.com" },
     });
     fireEvent.change(screen.getByLabelText("密码"), {

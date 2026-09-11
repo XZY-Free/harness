@@ -15,6 +15,7 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 export const SESSION_COOKIE_NAME = "snow_session";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+const PASSWORD_ENROLLMENT_TTL_MS = 15 * 60 * 1_000;
 const MAX_FAILED_LOGINS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1_000;
 const SCRYPT_KEY_LENGTH = 64;
@@ -49,6 +50,7 @@ export async function bootstrapLocalAdmin(input: BootstrapLocalAdminInput) {
   const identity = await upsertUserIdentity({
     tenantId: tenant.id,
     externalSubject: `local:${normalizedEmail}`,
+    loginAccount: normalizedEmail,
     email: normalizedEmail,
     displayName,
   });
@@ -62,7 +64,7 @@ export async function bootstrapLocalAdmin(input: BootstrapLocalAdminInput) {
       .where(
         and(
           eq(localCredential.tenantId, tenant.id),
-          eq(localCredential.normalizedEmail, normalizedEmail),
+          eq(localCredential.normalizedAccount, normalizedEmail),
         ),
       )
       .limit(1);
@@ -83,7 +85,7 @@ export async function bootstrapLocalAdmin(input: BootstrapLocalAdminInput) {
       await tx.insert(localCredential).values({
         tenantId: tenant.id,
         userIdentityId: identity.id,
-        normalizedEmail,
+        normalizedAccount: normalizedEmail,
         passwordHash,
         passwordChangedAt: now,
         createdAt: now,
@@ -120,6 +122,7 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
     const [row] = await db
       .select({
         externalSubject: userIdentity.externalSubject,
+        loginAccount: userIdentity.loginAccount,
         email: userIdentity.email,
         displayName: userIdentity.displayName,
         userStatus: userIdentity.status,
@@ -129,6 +132,7 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
       .where(
         and(
           eq(authSession.tokenHash, hashSessionToken(token)),
+          eq(authSession.sessionKind, "authenticated"),
           isNull(authSession.revokedAt),
           gt(authSession.expiresAt, now),
         ),
@@ -141,6 +145,7 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
       status: "authenticated",
       evidence: {
         externalSubject: row.externalSubject,
+        loginAccount: row.loginAccount ?? undefined,
         email: row.email,
         displayName: row.displayName,
         trustedAuthenticationClaims: {},
@@ -148,8 +153,8 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
     };
   },
 
-  async login({ email, password }): Promise<AuthenticationLoginResult> {
-    const normalizedEmail = normalizeEmail(email);
+  async login({ account, password }): Promise<AuthenticationLoginResult> {
+    const normalizedAccount = normalizeAccount(account);
     const tenant = await ensureDefaultTenant();
 
     return db.transaction(async (tx) => {
@@ -160,6 +165,7 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
           failedLoginCount: localCredential.failedLoginCount,
           lockedUntil: localCredential.lockedUntil,
           userIdentityId: userIdentity.id,
+          loginAccount: userIdentity.loginAccount,
           userEmail: userIdentity.email,
           displayName: userIdentity.displayName,
           userStatus: userIdentity.status,
@@ -169,7 +175,7 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
         .where(
           and(
             eq(localCredential.tenantId, tenant.id),
-            eq(localCredential.normalizedEmail, normalizedEmail),
+            eq(localCredential.normalizedAccount, normalizedAccount),
           ),
         )
         .limit(1)
@@ -191,7 +197,11 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
           ),
         };
       }
-      if (!passwordMatches || row.userStatus !== "active") {
+      if (
+        !passwordMatches ||
+        row.userStatus !== "active" ||
+        row.loginAccount !== normalizedAccount
+      ) {
         const failedLoginCount = row.failedLoginCount + 1;
         const lockedUntil =
           failedLoginCount >= MAX_FAILED_LOGINS ? new Date(now.getTime() + LOCK_DURATION_MS) : null;
@@ -225,7 +235,11 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
         status: "authenticated",
         sessionToken,
         expiresAt,
-        user: { email: row.userEmail, displayName: row.displayName },
+        user: {
+          account: row.loginAccount ?? normalizedAccount,
+          email: row.userEmail,
+          displayName: row.displayName,
+        },
       };
     });
   },
@@ -241,6 +255,215 @@ export const localAuthenticationProvider: UserAuthenticationProvider = {
       );
   },
 };
+
+export type ExternalSessionResult = {
+  readonly status: "authenticated" | "password_setup_required";
+  readonly sessionToken: string;
+  readonly expiresAt: Date;
+};
+
+export interface PasswordEnrollmentView {
+  readonly account: string;
+  readonly displayName: string | null;
+}
+
+export class PasswordEnrollmentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PasswordEnrollmentError";
+  }
+}
+
+/**
+ * 企业认证完成后的本地会话收口。已有密码的用户直接进入正式会话；首次用户只能
+ * 获得 15 分钟设密会话，该会话不能通过 authenticate() 访问业务接口。
+ */
+export async function establishExternalSession(input: {
+  readonly userIdentityId: string;
+  readonly loginAccount: string;
+}): Promise<ExternalSessionResult> {
+  const normalizedAccount = normalizeAccount(input.loginAccount);
+  if (!normalizedAccount || normalizedAccount.length > 128) {
+    throw new PasswordEnrollmentError("企业登录账号无效");
+  }
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const [identity] = await tx
+      .select({
+        id: userIdentity.id,
+        tenantId: userIdentity.tenantId,
+        loginAccount: userIdentity.loginAccount,
+        status: userIdentity.status,
+      })
+      .from(userIdentity)
+      .where(eq(userIdentity.id, input.userIdentityId))
+      .limit(1)
+      .for("update");
+    if (!identity || identity.status !== "active" || identity.loginAccount !== normalizedAccount) {
+      throw new PasswordEnrollmentError("企业登录身份与账号不一致");
+    }
+
+    const [credential] = await tx
+      .select({
+        id: localCredential.id,
+        normalizedAccount: localCredential.normalizedAccount,
+      })
+      .from(localCredential)
+      .where(eq(localCredential.userIdentityId, identity.id))
+      .limit(1);
+    const status = credential ? "authenticated" : "password_setup_required";
+    const sessionKind = credential ? "authenticated" : "password_enrollment";
+    const expiresAt = new Date(
+      now.getTime() + (credential ? SESSION_TTL_MS : PASSWORD_ENROLLMENT_TTL_MS),
+    );
+    const sessionToken = randomBytes(32).toString("base64url");
+
+    if (credential && credential.normalizedAccount !== normalizedAccount) {
+      await tx
+        .update(localCredential)
+        .set({
+          normalizedAccount,
+          failedLoginCount: 0,
+          lockedUntil: null,
+          updatedAt: now,
+        })
+        .where(eq(localCredential.id, credential.id));
+      await tx
+        .update(authSession)
+        .set({ revokedAt: now })
+        .where(and(eq(authSession.userIdentityId, identity.id), isNull(authSession.revokedAt)));
+    }
+
+    if (!credential) {
+      await tx
+        .update(authSession)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(authSession.userIdentityId, identity.id),
+            eq(authSession.sessionKind, "password_enrollment"),
+            isNull(authSession.revokedAt),
+          ),
+        );
+    }
+    await tx.insert(authSession).values({
+      tenantId: identity.tenantId,
+      userIdentityId: identity.id,
+      tokenHash: hashSessionToken(sessionToken),
+      sessionKind,
+      expiresAt,
+      createdAt: now,
+    });
+    return { status, sessionToken, expiresAt };
+  });
+}
+
+export async function getPasswordEnrollment(input: {
+  readonly headers: Headers;
+}): Promise<PasswordEnrollmentView | null> {
+  const token = readCookie(input.headers, SESSION_COOKIE_NAME);
+  if (!token) return null;
+  const [row] = await db
+    .select({ account: userIdentity.loginAccount, displayName: userIdentity.displayName })
+    .from(authSession)
+    .innerJoin(userIdentity, eq(userIdentity.id, authSession.userIdentityId))
+    .where(
+      and(
+        eq(authSession.tokenHash, hashSessionToken(token)),
+        eq(authSession.sessionKind, "password_enrollment"),
+        isNull(authSession.revokedAt),
+        gt(authSession.expiresAt, new Date()),
+        eq(userIdentity.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row?.account ? { account: row.account, displayName: row.displayName } : null;
+}
+
+export async function completePasswordEnrollment(input: {
+  readonly headers: Headers;
+  readonly password: string;
+}): Promise<Extract<AuthenticationLoginResult, { status: "authenticated" }>> {
+  if (input.password.length < 12 || input.password.length > 1024) {
+    throw new PasswordEnrollmentError("密码长度需要在 12 到 1024 个字符之间");
+  }
+  const token = readCookie(input.headers, SESSION_COOKIE_NAME);
+  if (!token) throw new PasswordEnrollmentError("首次设密会话不存在或已失效");
+  const passwordHash = await hashPassword(input.password);
+  const now = new Date();
+
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        sessionId: authSession.id,
+        tenantId: authSession.tenantId,
+        userIdentityId: userIdentity.id,
+        account: userIdentity.loginAccount,
+        email: userIdentity.email,
+        displayName: userIdentity.displayName,
+        userStatus: userIdentity.status,
+        expiresAt: authSession.expiresAt,
+        revokedAt: authSession.revokedAt,
+        sessionKind: authSession.sessionKind,
+      })
+      .from(authSession)
+      .innerJoin(userIdentity, eq(userIdentity.id, authSession.userIdentityId))
+      .where(eq(authSession.tokenHash, hashSessionToken(token)))
+      .limit(1)
+      .for("update");
+    if (
+      !row ||
+      row.sessionKind !== "password_enrollment" ||
+      row.revokedAt ||
+      row.expiresAt <= now ||
+      row.userStatus !== "active" ||
+      !row.account
+    ) {
+      throw new PasswordEnrollmentError("首次设密会话不存在或已失效");
+    }
+    const [existingCredential] = await tx
+      .select({ id: localCredential.id })
+      .from(localCredential)
+      .where(eq(localCredential.userIdentityId, row.userIdentityId))
+      .limit(1);
+    if (existingCredential) {
+      throw new PasswordEnrollmentError("该账号已经设置密码，请直接登录");
+    }
+
+    await tx.insert(localCredential).values({
+      tenantId: row.tenantId,
+      userIdentityId: row.userIdentityId,
+      normalizedAccount: row.account,
+      passwordHash,
+      passwordChangedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await tx
+      .update(authSession)
+      .set({ revokedAt: now })
+      .where(
+        and(eq(authSession.userIdentityId, row.userIdentityId), isNull(authSession.revokedAt)),
+      );
+
+    const sessionToken = randomBytes(32).toString("base64url");
+    const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
+    await tx.insert(authSession).values({
+      tenantId: row.tenantId,
+      userIdentityId: row.userIdentityId,
+      tokenHash: hashSessionToken(sessionToken),
+      sessionKind: "authenticated",
+      expiresAt,
+      createdAt: now,
+    });
+    return {
+      status: "authenticated",
+      sessionToken,
+      expiresAt,
+      user: { account: row.account, email: row.email, displayName: row.displayName },
+    };
+  });
+}
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("base64url");
@@ -258,6 +481,10 @@ export async function verifyPassword(password: string, encoded: string): Promise
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function normalizeAccount(account: string): string {
+  return account.trim().toLowerCase();
 }
 
 function isValidEmail(email: string): boolean {

@@ -36,10 +36,10 @@ export interface LaunchedDesktop {
 
 /** Desktop 使用独立 Electron Session，因此必须通过与 Web 相同的正式登录接口。 */
 export async function authenticateDesktopWindow(window: Page): Promise<void> {
-  await expect(window.getByRole("heading", { name: "登录" })).toBeVisible({
+  await expect(window.getByLabel("SnowHarness 登录")).toBeVisible({
     timeout: 90_000,
   });
-  await window.getByLabel("邮箱").fill(E2E_ADMIN_EMAIL);
+  await window.getByLabel("账号").fill(E2E_ADMIN_EMAIL);
   await window.getByLabel("密码").fill(E2E_ADMIN_PASSWORD);
   await window.getByRole("button", { name: "登录" }).click();
   await expect(window.getByLabel("消息输入框")).toBeEnabled({ timeout: 90_000 });

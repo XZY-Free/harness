@@ -14,11 +14,13 @@ import { and, eq } from "drizzle-orm";
 export async function upsertUserIdentity(params: {
   tenantId: string;
   externalSubject: string;
+  loginAccount?: string | null;
   email: string;
   displayName: string | null;
   client?: DbOrTx;
 }): Promise<UserIdentity> {
   const { tenantId, externalSubject: subject, email, displayName, client = db } = params;
+  const loginAccount = normalizeLoginAccount(params.loginAccount);
 
   const [existing] = await client
     .select()
@@ -30,10 +32,19 @@ export async function upsertUserIdentity(params: {
     // email / displayName 漂移才轻量 update，避免无谓写入。
     // 普通展示更新不拥有 status 写权限：status 只由已授权的停用写入者维护，
     // 比较与写入都不得包含 status，否则会把并发停用错误恢复为 active。
-    if (existing.email !== email || existing.displayName !== displayName) {
+    if (
+      existing.email !== email ||
+      existing.displayName !== displayName ||
+      (loginAccount !== undefined && existing.loginAccount !== loginAccount)
+    ) {
       await client
         .update(userIdentity)
-        .set({ email, displayName, updatedAt: new Date() })
+        .set({
+          email,
+          displayName,
+          ...(loginAccount !== undefined ? { loginAccount } : {}),
+          updatedAt: new Date(),
+        })
         .where(eq(userIdentity.id, existing.id));
       // 回查权威行，避免用旧快照拼装出偏离数据库的 status。
       const [updated] = await client
@@ -53,6 +64,7 @@ export async function upsertUserIdentity(params: {
   await client.insert(userIdentity).ignore().values({
     tenantId,
     externalSubject: subject,
+    loginAccount,
     email,
     displayName,
     status: "active",
@@ -68,6 +80,12 @@ export async function upsertUserIdentity(params: {
     throw new Error("无法创建或读取用户身份");
   }
   return created;
+}
+
+function normalizeLoginAccount(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return normalized || null;
 }
 
 /** 按 id 查找用户身份。 */
