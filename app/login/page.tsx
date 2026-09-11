@@ -22,12 +22,14 @@ export default async function LoginPage({
   if (authenticated) redirect(returnTo);
 
   const { authenticationProvider } = await getIdentityExtensions();
-  const externalLoginLabel =
-    authenticationProvider.beginExternalLogin && authenticationProvider.completeExternalLogin
-      ? authenticationProvider.externalLoginLabel
+  const externalAuth =
+    authenticationProvider.beginExternalLogin &&
+    authenticationProvider.completeExternalLogin &&
+    authenticationProvider.describeExternalAuth
+      ? await authenticationProvider.describeExternalAuth({ returnTo })
       : undefined;
 
-  return <LoginScreen returnTo={returnTo} externalLoginLabel={externalLoginLabel} />;
+  return <LoginScreen returnTo={returnTo} externalAuth={externalAuth} />;
 }
 
 function safeReturnTo(value: string | string[] | undefined): string {

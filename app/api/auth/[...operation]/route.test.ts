@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const provider = vi.hoisted(() => ({
   name: "test-provider",
-  externalLoginLabel: "企业账号登录",
   authenticate: vi.fn(),
   login: vi.fn(),
   beginExternalLogin: vi.fn(),

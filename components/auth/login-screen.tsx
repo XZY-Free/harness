@@ -1,15 +1,16 @@
+import type { ExternalAuthZoneConfig } from "@/lib/identity/authentication-provider";
 import { LoginForm } from "./login-form";
 
 interface LoginScreenProps {
   readonly returnTo?: string;
   readonly onAuthenticated?: (returnTo: string) => void;
-  readonly externalLoginLabel?: string;
+  readonly externalAuth?: ExternalAuthZoneConfig;
 }
 
 export function LoginScreen({
   returnTo = "/chat",
   onAuthenticated,
-  externalLoginLabel,
+  externalAuth,
 }: LoginScreenProps) {
   return (
     <main className="flex min-h-dvh items-center overflow-auto bg-background px-[clamp(1.5rem,6vw,6rem)] py-[clamp(2.5rem,10vh,7rem)] text-foreground">
@@ -24,7 +25,7 @@ export function LoginScreen({
           <LoginForm
             returnTo={returnTo}
             onAuthenticated={onAuthenticated}
-            externalLoginLabel={externalLoginLabel}
+            externalAuth={externalAuth}
           />
         </div>
       </section>

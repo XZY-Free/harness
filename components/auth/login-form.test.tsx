@@ -73,19 +73,42 @@ describe("LoginScreen", () => {
     expect(screen.queryByText(/账号由/)).toBeNull();
   });
 
-  it("认证提供器启用企业登录时将入口放在密码框与登录按钮之间", () => {
-    render(<LoginScreen returnTo="/chat" externalLoginLabel="企业账号登录" />);
+  it("认证提供器启用外部登录时将认证区沉底于登录按钮之后", () => {
+    render(
+      <LoginScreen
+        returnTo="/chat"
+        externalAuth={{
+          dividerLabel: "或使用企业账号登录",
+          methods: [
+            {
+              id: "sso",
+              label: "集团统一 SSO",
+              icon: "building",
+              recommended: true,
+              href: "/api/auth/sso?returnTo=%2Fchat",
+            },
+          ],
+        }}
+      />,
+    );
 
-    const link = screen.getByRole("link", { name: "企业账号登录" });
-    const password = screen.getByLabelText("密码");
+    const link = screen.getByRole("link", { name: /集团统一 SSO/ });
     const submit = screen.getByRole("button", { name: "登录" });
+    const password = screen.getByLabelText("密码");
     const controls = Array.from(
       screen.getByLabelText("SnowHarness 登录").querySelectorAll("input, a, button"),
     );
     expect(link.getAttribute("href")).toBe("/api/auth/sso?returnTo=%2Fchat");
-    expect(controls.indexOf(password)).toBeLessThan(controls.indexOf(link));
-    expect(controls.indexOf(link)).toBeLessThan(controls.indexOf(submit));
-    expect(screen.queryByText("或使用密码")).toBeNull();
+    expect(controls.indexOf(password)).toBeLessThan(controls.indexOf(submit));
+    expect(controls.indexOf(submit)).toBeLessThan(controls.indexOf(link));
+    expect(screen.getByText("或使用企业账号登录")).toBeTruthy();
+  });
+
+  it("未配置外部认证时不渲染认证区与分隔线", () => {
+    render(<LoginScreen returnTo="/chat" />);
+
+    expect(screen.queryByText(/或使用/)).toBeNull();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
   });
 });
 

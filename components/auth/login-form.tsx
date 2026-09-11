@@ -1,22 +1,20 @@
 "use client";
 
+import { ExternalAuthZone } from "@/components/auth/external-auth-zone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch, apiPath } from "@/lib/api-fetch";
+import type { ExternalAuthZoneConfig } from "@/lib/identity/authentication-provider";
 import { useState } from "react";
 
 interface LoginFormProps {
   readonly returnTo?: string;
   readonly onAuthenticated?: (returnTo: string) => void;
-  readonly externalLoginLabel?: string;
+  readonly externalAuth?: ExternalAuthZoneConfig;
 }
 
-export function LoginForm({
-  returnTo = "/chat",
-  onAuthenticated,
-  externalLoginLabel,
-}: LoginFormProps) {
+export function LoginForm({ returnTo = "/chat", onAuthenticated, externalAuth }: LoginFormProps) {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -102,18 +100,6 @@ export function LoginForm({
           {error}
         </p>
       ) : null}
-      {externalLoginLabel ? (
-        <div className="flex items-center gap-3 pt-0.5">
-          <span aria-hidden="true" className="h-px flex-1 bg-border" />
-          <a
-            href={apiPath(`/api/auth/sso?returnTo=${encodeURIComponent(returnTo)}`)}
-            className="shrink-0 rounded-sm px-1 text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
-          >
-            {externalLoginLabel}
-          </a>
-          <span aria-hidden="true" className="h-px flex-1 bg-border" />
-        </div>
-      ) : null}
       <Button
         type="submit"
         disabled={submitting}
@@ -121,6 +107,7 @@ export function LoginForm({
       >
         {submitting ? "正在登录…" : "登录"}
       </Button>
+      {externalAuth ? <ExternalAuthZone config={externalAuth} /> : null}
     </form>
   );
 }
