@@ -9,9 +9,14 @@ import { useState } from "react";
 interface LoginFormProps {
   readonly returnTo?: string;
   readonly onAuthenticated?: (returnTo: string) => void;
+  readonly externalLoginLabel?: string;
 }
 
-export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProps) {
+export function LoginForm({
+  returnTo = "/chat",
+  onAuthenticated,
+  externalLoginLabel,
+}: LoginFormProps) {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +101,18 @@ export function LoginForm({ returnTo = "/chat", onAuthenticated }: LoginFormProp
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
+      ) : null}
+      {externalLoginLabel ? (
+        <div className="flex items-center gap-3 pt-0.5">
+          <span aria-hidden="true" className="h-px flex-1 bg-border" />
+          <a
+            href={apiPath(`/api/auth/sso?returnTo=${encodeURIComponent(returnTo)}`)}
+            className="shrink-0 rounded-sm px-1 text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+          >
+            {externalLoginLabel}
+          </a>
+          <span aria-hidden="true" className="h-px flex-1 bg-border" />
+        </div>
       ) : null}
       <Button
         type="submit"
