@@ -32,7 +32,7 @@
       "desktop/renderer-dist/**",
       "desktop/package-app/**",
       "output/**",
-      "/release/**"
+      "release/**"
     ]
   },
   "overrides": [
