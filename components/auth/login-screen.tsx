@@ -1,3 +1,7 @@
+"use client";
+
+import { useBrand } from "@/components/brand/brand-provider";
+import { BrandWordmark } from "@/components/brand/brand-wordmark";
 import type { ExternalAuthZoneConfig } from "@/lib/identity/authentication-provider";
 import { LoginForm } from "./login-form";
 
@@ -12,14 +16,15 @@ export function LoginScreen({
   onAuthenticated,
   externalAuth,
 }: LoginScreenProps) {
+  const brand = useBrand();
   return (
     <main className="flex min-h-dvh items-center overflow-auto bg-background px-[clamp(1.5rem,6vw,6rem)] py-[clamp(2.5rem,10vh,7rem)] text-foreground">
       <section
-        aria-label="SnowHarness 登录"
+        aria-label={`${brand.name} 登录`}
         className="mx-auto grid w-full max-w-5xl items-center gap-[clamp(3rem,6vw,5rem)] md:grid-cols-2"
       >
         <p className="font-semibold text-[clamp(1.5rem,2.6vw,2.25rem)] tracking-[-0.04em]">
-          SnowHarness
+          <BrandWordmark />
         </p>
         <div className="w-full max-w-[28rem] md:justify-self-end">
           <LoginForm

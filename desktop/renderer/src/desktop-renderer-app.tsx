@@ -1,4 +1,5 @@
 import { LoginScreen } from "@/components/auth/login-screen";
+import { BrandName } from "@/components/brand/brand-wordmark";
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
 import { NewThreadPage } from "@/components/thread/new-thread-page";
 import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
@@ -222,6 +223,8 @@ export function DesktopRendererApp() {
   return getDesktopCapabilities() ? (
     <DesktopShell />
   ) : (
-    <DesktopError>需要 SnowHarness Desktop。</DesktopError>
+    <DesktopError>
+      需要 <BrandName /> Desktop。
+    </DesktopError>
   );
 }

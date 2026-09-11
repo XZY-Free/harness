@@ -79,6 +79,10 @@ export const API_ERROR_CODES = {
   /** : ExecutionBinding 冻结的 Policy digest 与实际 frozen Revision 不一致（§16.3 fail-closed）。 */
   POLICY_INTEGRITY_MISMATCH: { http: 409, retryable: false },
   POLICY_BLOCKED: { http: 403, retryable: false },
+  /** : 品牌写入未通过合同校验（名称长度/资源路径/格式非法）。 */
+  BRAND_VALIDATION_FAILED: { http: 400, retryable: false },
+  /** : 品牌字段已被 branding.json 或环境变量 pin，接口拒绝写入。 */
+  BRAND_FIELD_PINNED: { http: 409, retryable: false },
   RATE_LIMITED: { http: 429, retryable: true },
   REQUEST_SCHEMA_INVALID: { http: 400, retryable: false },
   RESOURCE_NOT_FOUND: { http: 404, retryable: false },

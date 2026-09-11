@@ -363,6 +363,17 @@ async function main(): Promise<void> {
   );
   updateManager.initialize();
 
+  // Desktop Control Plane：control_brand_invalidated → 品牌重设；control_update_hint → 冷却后立即检查升级。
+  const { attachDesktopControlPlane } = await import("../bridge/control-wiring");
+  attachDesktopControlPlane({
+    baseUrl: localRenderer.origin,
+    setAppName: (name) => app.setName(name),
+    setAllWindowTitles: (name) => {
+      for (const window of BrowserWindow.getAllWindows()) window.setTitle(name);
+    },
+    checkForUpdates: () => updateManager.checkForUpdates(),
+  });
+
   registerIpcHandlers(
     ipcMain,
     capabilities,

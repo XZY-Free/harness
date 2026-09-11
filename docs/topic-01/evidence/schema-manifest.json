@@ -5,10 +5,10 @@
   "cleanMigration": "drizzle/0000_initial_schema.sql",
   "inventory": "docs/topic-01/evidence/schema-inventory.json",
   "counts": {
-    "canonical": 127,
-    "runtimeLoaded": 127,
-    "migration": 127,
-    "freshDbPlanned": 127
+    "canonical": 129,
+    "runtimeLoaded": 129,
+    "migration": 129,
+    "freshDbPlanned": 129
   },
   "tables": [
     "Agent",
@@ -26,6 +26,8 @@
     "AttestationRevocationRecord",
     "AuditEvent",
     "AuthSession",
+    "BrandChangeAudit",
+    "BrandSettings",
     "CapabilityReview",
     "CapabilityUse",
     "CatalogEntry",

@@ -1,11 +1,25 @@
+import { BrandInitial } from "@/components/brand/brand-initial";
 import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "SnowHarness",
-  description: "AI 驱动的「从想法到上线」工作台",
-};
+/**
+ * 品牌化元数据：标题/描述/图标来自 BrandStore（DB 主存储 + pin 层）。
+ * build 期或品牌源不可用时回退代码默认品牌，保证构建不因品牌源失败。
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const { DEFAULT_BRAND } = await import("@/lib/branding/brand-contract");
+  const { getBrandStore } = await import("@/lib/branding/brand-store");
+  const snapshot = await getBrandStore()
+    .get()
+    .catch(() => null);
+  const contract = snapshot?.contract ?? DEFAULT_BRAND;
+  return {
+    title: contract.name,
+    description: contract.tagline ?? "AI 驱动的「从想法到上线」工作台",
+    ...(contract.icon ? { icons: [{ url: contract.icon }] } : {}),
+  };
+}
 
 /**
  * P2 修复（12 Studio P2-2）：暗色模式防 FOUC。
@@ -20,7 +34,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head />
       <body>
         <Script id="theme-init" src={`${basePath}/theme-init.js`} strategy="beforeInteractive" />
-        {children}
+        <BrandInitial>{children}</BrandInitial>
       </body>
     </html>
   );

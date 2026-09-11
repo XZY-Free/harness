@@ -1,3 +1,4 @@
+import { DEFAULT_BRAND } from "@/lib/branding/brand-contract";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -135,7 +136,7 @@ describe("DesktopRendererApp", () => {
 
     render(<DesktopRendererApp />);
 
-    expect(await screen.findByLabelText("SnowHarness 登录")).toBeTruthy();
+    expect(await screen.findByLabelText(`${DEFAULT_BRAND.name} 登录`)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("账号"), {
       target: { value: "admin@example.com" },
     });

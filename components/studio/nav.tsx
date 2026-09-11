@@ -1,5 +1,6 @@
 "use client";
 
+import { BrandName } from "@/components/brand/brand-wordmark";
 import { ThemeToggle } from "@/components/studio/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -196,7 +197,9 @@ function NavPanel({ variant, pathname, groups, query, onQueryChange }: NavPanelP
 
       <div className="px-5 pt-5 pb-3">
         <div className="text-sm font-semibold tracking-tight">管理后台</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">SnowHarness</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          <BrandName />
+        </p>
       </div>
 
       <div className="relative px-3 pb-3">

@@ -39,6 +39,7 @@ import { getAuthSignPayload, signData } from "../../lib/desktop/signing";
 import type { AiLockManager } from "../browser/ai-lock";
 import { executeActionCommand, executeReadCommand } from "./command-executor";
 import type { BrowserActionTarget, BrowserCommandTarget } from "./command-executor";
+import { dispatchControlEvent } from "./control-handlers";
 import type { DeviceIdentity } from "./device-identity";
 
 /**
@@ -242,6 +243,11 @@ export class BridgeClient {
   private handleMessage(data: unknown): void {
     const parsed = parseServerMessage(data);
     if (!parsed.ok) {
+      // 向前兼容合同：服务端可先于客户端扩展 control_* 事件；未知控制事件忽略不断连。
+      const rawType = (data as { type?: unknown } | null)?.type;
+      if (typeof rawType === "string" && rawType.startsWith("control_")) {
+        return;
+      }
       // 检查是否为协议版本不匹配（challenge 消息的 protocolVersion 与本地不一致）
       if (this.isChallengeProtocolMismatch(data)) {
         this.handleProtocolMismatch();
@@ -287,6 +293,10 @@ export class BridgeClient {
           msg.runId,
           Date.now(),
         );
+        break;
+      case "control_brand_invalidated":
+      case "control_update_hint":
+        dispatchControlEvent(msg);
         break;
       case "error":
         console.error(`[snowharness:bridge] Server 错误: ${msg.error.code} - ${msg.error.message}`);

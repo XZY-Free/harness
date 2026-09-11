@@ -2998,3 +2998,24 @@ CREATE INDEX `HostedProvisioningRequest_claimable_idx` ON `HostedProvisioningReq
 CREATE TRIGGER `RouteRevision_prevent_update` BEFORE UPDATE ON `RouteRevision` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteRevision is append-only'; END;
 --> statement-breakpoint
 CREATE TRIGGER `RouteActivation_prevent_update` BEFORE UPDATE ON `RouteActivation` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteActivation is append-only'; END;
+--> statement-breakpoint
+CREATE TABLE `BrandSettings` (
+`id` int NOT NULL DEFAULT 1,
+`document` json NOT NULL,
+`revision` bigint NOT NULL DEFAULT 0,
+`updatedAt` datetime(3) NOT NULL,
+`updatedBy` varchar(128),
+CONSTRAINT `BrandSettings_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `BrandChangeAudit` (
+`id` bigint NOT NULL AUTO_INCREMENT,
+`revisionBefore` bigint NOT NULL,
+`revisionAfter` bigint NOT NULL,
+`patch` json NOT NULL,
+`changedAt` datetime(3) NOT NULL,
+`changedBy` varchar(128),
+CONSTRAINT `BrandChangeAudit_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE INDEX `BrandChangeAudit_revision_idx` ON `BrandChangeAudit` (`revisionAfter`);

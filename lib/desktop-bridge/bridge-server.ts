@@ -31,6 +31,7 @@ import {
 import { PROTOCOL_VERSION } from "../desktop/protocol";
 import { CancelService } from "./cancel-service";
 import { generateChallenge, generateServerKeyPair, verifyAuthResponse } from "./challenge-auth";
+import { type ControlEvent, subscribeControlEvents } from "./control-event-bus";
 import { DeviceRegistry } from "./device-registry";
 import { LeaseService } from "./lease-service";
 import { type DispatchParams, prepareDispatch } from "./rpc-dispatcher";
@@ -106,6 +107,7 @@ export class BridgeServer {
   // 待响应 RPC：requestId → resolver
   private pendingRpcs = new Map<string, PendingRpc>();
   private running = false;
+  private controlUnsubscribe: (() => void) | null = null;
 
   constructor(config: BridgeServerConfig) {
     this.config = {
@@ -113,6 +115,25 @@ export class BridgeServer {
       heartbeatTimeoutMs: 90000,
       ...config,
     };
+    this.controlUnsubscribe = subscribeControlEvents((event) => {
+      this.broadcastControlEvent(event);
+    });
+  }
+
+  /**
+   * Desktop Control Plane：向所有已认证 Desktop 会话广播控制事件。
+   *
+   * 事件只携带失效信号/提示；Desktop 收到后自行以 ETag 拉取权威状态。
+   * 未认证或连接未开放的会话跳过；客户端对未知 control_* 类型忽略（向前兼容合同）。
+   */
+  broadcastControlEvent(event: ControlEvent): void {
+    if (!this.running) return;
+    for (const device of this.registry.getAuthenticatedDevices()) {
+      if (!device.authenticated) continue;
+      const ws = device.ws as WebSocket;
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      ws.send(serializeMessage(event as ServerMessage));
+    }
   }
 
   /**
@@ -154,6 +175,10 @@ export class BridgeServer {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+    if (this.controlUnsubscribe) {
+      this.controlUnsubscribe();
+      this.controlUnsubscribe = null;
     }
     // 拒绝所有待响应 RPC
     for (const [requestId, pending] of this.pendingRpcs) {

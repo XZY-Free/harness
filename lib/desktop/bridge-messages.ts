@@ -228,6 +228,31 @@ export const cancelCommandMessageSchema = z.object({
 });
 
 // ──────────────────────────────────────────────
+// Desktop Control Plane 控制事件（Server → Desktop）
+// ──────────────────────────────────────────────
+//
+// 向前兼容合同：控制事件族（type 以 control_ 前缀）允许服务端先于客户端扩展。
+// Desktop 收到无法识别的 control_* 类型必须忽略并记 debug 日志，不得断开或报错；
+// 非 control_ 前缀的未知类型仍按不兼容处理。因此新增控制事件不递增 PROTOCOL_VERSION。
+// 事件只携带失效信号/提示，不携带状态全文；Desktop 收到后以 ETag 拉取权威状态。
+
+/** 品牌失效信号：Desktop 应以 etag 拉取 /api/brand 并重设窗口/托盘/菜单等。 */
+export const controlBrandInvalidatedMessageSchema = z.object({
+  type: z.literal("control_brand_invalidated"),
+  revision: z.number().int().min(0),
+  etag: z.string().min(1),
+  occurredAt: z.number().int(),
+});
+
+/** 升级提示：触发 Desktop updater 立即检查（带冷却），周期检查仍兜底。 */
+export const controlUpdateHintMessageSchema = z.object({
+  type: z.literal("control_update_hint"),
+  latestVersion: z.string().min(1),
+  feedUrl: z.string().min(1).optional(),
+  occurredAt: z.number().int(),
+});
+
+// ──────────────────────────────────────────────
 // 消息联合类型
 // ──────────────────────────────────────────────
 
@@ -243,6 +268,8 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   leaseReleasedMessageSchema,
   commandCancelledMessageSchema,
   serverErrorMessageSchema,
+  controlBrandInvalidatedMessageSchema,
+  controlUpdateHintMessageSchema,
 ]);
 
 /** Desktop → Server 消息 schema 联合 */
@@ -268,6 +295,8 @@ export type LeaseLockedMessage = z.infer<typeof leaseLockedMessageSchema>;
 export type LeaseReleasedMessage = z.infer<typeof leaseReleasedMessageSchema>;
 export type CommandCancelledMessage = z.infer<typeof commandCancelledMessageSchema>;
 export type ServerErrorMessage = z.infer<typeof serverErrorMessageSchema>;
+export type ControlBrandInvalidatedMessage = z.infer<typeof controlBrandInvalidatedMessageSchema>;
+export type ControlUpdateHintMessage = z.infer<typeof controlUpdateHintMessageSchema>;
 
 export type AuthMessage = z.infer<typeof authMessageSchema>;
 export type RpcResultMessage = z.infer<typeof rpcResultMessageSchema>;

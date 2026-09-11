@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "authority": "lib/persistence/schema/index.ts",
   "counts": {
-    "canonical": 127,
-    "runtimeLoaded": 127,
-    "migration": 127,
-    "freshDbPlanned": 127
+    "canonical": 129,
+    "runtimeLoaded": 129,
+    "migration": 129,
+    "freshDbPlanned": 129
   },
   "freshDbVerification": {
     "status": "planned-for-batch-07",
@@ -955,6 +955,80 @@
         "lib/persistence/schema/identity.ts#authSession",
         "lib/identity/local-authentication.ts",
         "lib/identity/local-authentication.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "BrandChangeAudit",
+      "schemaDeclaration": "lib/persistence/schema/branding.ts#brandChangeAudit",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "branding",
+      "tenantBoundary": "通过父记录外键或不可变绑定继承租户；访问前由父 Authority 校验",
+      "productionWriters": [
+        "lib/branding/brand-queries.ts"
+      ],
+      "productionReaders": [
+        "lib/branding/brand-audit-queries.ts"
+      ],
+      "lifecycle": "由生产写入者创建不可变事实，并按领域保留策略归档或清理",
+      "authorityKind": "append-only-fact",
+      "authorityStatement": "lib/persistence/schema/branding.ts#brandChangeAudit 是 BrandChangeAudit 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` bigint NOT NULL AUTO_INCREMENT",
+        "`revisionBefore` bigint NOT NULL",
+        "`revisionAfter` bigint NOT NULL",
+        "`patch` json NOT NULL",
+        "`changedAt` datetime(3) NOT NULL",
+        "CONSTRAINT `BrandChangeAudit_id` PRIMARY KEY(`id`)",
+        "CREATE INDEX `BrandChangeAudit_revision_idx` ON `BrandChangeAudit` (`revisionAfter`);"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/branding.ts#brandChangeAudit",
+        "lib/branding/brand-queries.ts",
+        "lib/branding/brand-audit-queries.ts",
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "BrandSettings",
+      "schemaDeclaration": "lib/persistence/schema/branding.ts#brandSettings",
+      "migrationSource": [
+        "drizzle/0000_initial_schema.sql"
+      ],
+      "domainOwner": "branding",
+      "tenantBoundary": "通过父记录外键或不可变绑定继承租户；访问前由父 Authority 校验",
+      "productionWriters": [
+        "lib/branding/brand-queries.ts"
+      ],
+      "productionReaders": [
+        "lib/branding/brand-queries.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/branding.ts#brandSettings 是 BrandSettings 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` int NOT NULL DEFAULT 1",
+        "`document` json NOT NULL",
+        "`revision` bigint NOT NULL DEFAULT 0",
+        "`updatedAt` datetime(3) NOT NULL",
+        "CONSTRAINT `BrandSettings_id` PRIMARY KEY(`id`)"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/branding.ts#brandSettings",
+        "lib/branding/brand-queries.ts",
+        "lib/branding/brand-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"

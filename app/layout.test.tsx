@@ -3,6 +3,10 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("@/components/brand/brand-initial", () => ({
+  BrandInitial: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 vi.mock("next/script", () => ({
   default: ({
     strategy: _strategy,
@@ -12,12 +16,16 @@ vi.mock("next/script", () => ({
 
 import RootLayout from "./layout";
 
-function extractThemeInitScript(): string {
-  const markup = renderToStaticMarkup(
+function renderLayoutMarkup(): string {
+  return renderToStaticMarkup(
     <RootLayout>
       <div>content</div>
     </RootLayout>,
   );
+}
+
+function extractThemeInitScript(): string {
+  const markup = renderLayoutMarkup();
   expect(markup).toMatch(/<script[^>]*id="theme-init"[^>]*src="\/theme-init\.js"[^>]*><\/script>/);
   return readFileSync(join(process.cwd(), "public/theme-init.js"), "utf8");
 }
@@ -52,11 +60,7 @@ describe("themeInitScript", () => {
   it("子路径部署时从 basePath 加载主题初始化脚本", () => {
     vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
     try {
-      const markup = renderToStaticMarkup(
-        <RootLayout>
-          <div>content</div>
-        </RootLayout>,
-      );
+      const markup = renderLayoutMarkup();
       expect(markup).toMatch(
         /<script[^>]*id="theme-init"[^>]*src="\/snowharness\/theme-init\.js"[^>]*><\/script>/,
       );

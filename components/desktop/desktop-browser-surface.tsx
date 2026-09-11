@@ -236,7 +236,7 @@ export function DesktopBrowserSurface({
   }, [activeTab, closeTab, createTab, navigate]);
 
   if (!bridge) {
-    return <BrowserError message={error ?? "请在 SnowHarness Desktop 中打开"} />;
+    return <BrowserError message={error ?? "请在桌面客户端中打开"} />;
   }
 
   return (

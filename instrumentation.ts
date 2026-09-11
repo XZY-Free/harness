@@ -36,6 +36,10 @@ export async function register() {
     const { runMigrations } = await import("./lib/db/migrate");
     await runMigrations();
 
+    // Desktop Control Plane：品牌失效信号经控制事件总线 → bridge 广播到 Desktop 会话。
+    const { startBrandControlBridge } = await import("./lib/branding/brand-control-bridge");
+    startBrandControlBridge();
+
     // Phase 5 Stage B：docker 可用性探测预热（best-effort，不阻塞启动）。
     // defaultType=container 但 docker 不可用 → warmup 内降级 warn；host 模式下探测跳过。
     const { warmupDockerAvailable } = await import("./lib/runtime/container/availability");

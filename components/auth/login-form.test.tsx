@@ -1,3 +1,4 @@
+import { DEFAULT_BRAND } from "@/lib/branding/brand-contract";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LoginForm } from "./login-form";
@@ -63,10 +64,10 @@ describe("LoginScreen", () => {
   it("用左右分栏组织品牌与表单，不再显示独立登录标题", () => {
     render(<LoginScreen />);
 
-    expect(screen.getAllByText("SnowHarness")).toHaveLength(1);
+    expect(screen.getAllByText(DEFAULT_BRAND.name)).toHaveLength(1);
     expect(screen.queryByRole("heading", { name: "登录" })).toBeNull();
     expect(screen.getByRole("button", { name: "登录" })).toBeTruthy();
-    const loginRegion = screen.getByLabelText("SnowHarness 登录");
+    const loginRegion = screen.getByLabelText(`${DEFAULT_BRAND.name} 登录`);
     expect(loginRegion.className).toContain("md:grid-cols-2");
     expect(loginRegion.querySelector("form")?.parentElement?.className).toContain("max-w-[28rem]");
     expect(screen.queryByText(/管理员/)).toBeNull();
@@ -96,7 +97,7 @@ describe("LoginScreen", () => {
     const submit = screen.getByRole("button", { name: "登录" });
     const password = screen.getByLabelText("密码");
     const controls = Array.from(
-      screen.getByLabelText("SnowHarness 登录").querySelectorAll("input, a, button"),
+      screen.getByLabelText(`${DEFAULT_BRAND.name} 登录`).querySelectorAll("input, a, button"),
     );
     expect(link.getAttribute("href")).toBe("/api/auth/sso?returnTo=%2Fchat");
     expect(controls.indexOf(password)).toBeLessThan(controls.indexOf(submit));
@@ -136,7 +137,7 @@ describe("PasswordSetupScreen", () => {
     fireEvent.change(screen.getByLabelText("确认密码"), {
       target: { value: "correct horse battery" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存并进入 SnowHarness" }));
+    fireEvent.click(screen.getByRole("button", { name: `保存并进入 ${DEFAULT_BRAND.name}` }));
 
     await waitFor(() => expect(onAuthenticated).toHaveBeenCalledWith("/chat"));
     expect(apiFetch).toHaveBeenCalledWith("/api/auth/setup-password?returnTo=%2Fchat", {
@@ -158,7 +159,7 @@ describe("PasswordSetupScreen", () => {
     fireEvent.change(screen.getByLabelText("确认密码"), {
       target: { value: "different password" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存并进入 SnowHarness" }));
+    fireEvent.click(screen.getByRole("button", { name: `保存并进入 ${DEFAULT_BRAND.name}` }));
 
     expect((await screen.findByRole("alert")).textContent).toBe("两次输入的密码不一致");
     expect(apiFetch).not.toHaveBeenCalled();

@@ -1,6 +1,10 @@
 {
   "contract_version": "11.3.0",
   "errors": {
+    "A2A_CONFIRMATION_PROPOSAL_CONFLICT": {
+      "http": 409,
+      "retryable": false
+    },
     "ACCESS_DENIED": {
       "http": 403,
       "retryable": false
@@ -9,12 +13,12 @@
       "http": 403,
       "retryable": false
     },
-    "AGENT_ACTION_NOT_ALLOWED": {
-      "http": 403,
+    "ACTIVE_LEGAL_HOLD": {
+      "http": 409,
       "retryable": false
     },
-    "AGENT_CALL_EXECUTOR_UNAVAILABLE": {
-      "http": 503,
+    "AGENT_ACTION_NOT_ALLOWED": {
+      "http": 403,
       "retryable": false
     },
     "AGENT_CALL_BINDING_INVALID": {
@@ -22,6 +26,10 @@
       "retryable": false
     },
     "AGENT_CALL_CREDENTIAL_UNAVAILABLE": {
+      "http": 503,
+      "retryable": false
+    },
+    "AGENT_CALL_EXECUTOR_UNAVAILABLE": {
       "http": 503,
       "retryable": false
     },
@@ -37,29 +45,21 @@
       "http": 503,
       "retryable": true
     },
-    "AGENT_CONTEXT_REQUIREMENT_UNSATISFIED": {
+    "AGENT_CAPABILITY_UNSUPPORTED": {
       "http": 422,
       "retryable": false
     },
-    "AGENT_ROUTE_UNAVAILABLE": {
-      "http": 503,
-      "retryable": true
-    },
-    "A2A_CONFIRMATION_PROPOSAL_CONFLICT": {
-      "http": 409,
-      "retryable": false
-    },
-    "ACTIVE_LEGAL_HOLD": {
-      "http": 409,
-      "retryable": false
-    },
-    "AGENT_CAPABILITY_UNSUPPORTED": {
+    "AGENT_CONTEXT_REQUIREMENT_UNSATISFIED": {
       "http": 422,
       "retryable": false
     },
     "AGENT_CONTRACT_SNAPSHOT_MISSING": {
       "http": 409,
       "retryable": false
+    },
+    "AGENT_ROUTE_UNAVAILABLE": {
+      "http": 503,
+      "retryable": true
     },
     "ARTIFACT_ATTESTATION_FAILED": {
       "http": 422,
@@ -83,6 +83,14 @@
     },
     "AUTHENTICATION_REQUIRED": {
       "http": 401,
+      "retryable": false
+    },
+    "BRAND_FIELD_PINNED": {
+      "http": 409,
+      "retryable": false
+    },
+    "BRAND_VALIDATION_FAILED": {
+      "http": 400,
       "retryable": false
     },
     "BUSINESS_CONSTRAINT_VIOLATION": {
@@ -185,10 +193,6 @@
       "http": 503,
       "retryable": true
     },
-    "HOSTED_REVISION_BINDING_INVALID": {
-      "http": 422,
-      "retryable": false
-    },
     "HARNESS_ACTION_EXECUTOR_UNAVAILABLE": {
       "http": 503,
       "retryable": false
@@ -206,6 +210,10 @@
       "retryable": false
     },
     "HARNESS_LOOP_STEP_LIMIT_EXCEEDED": {
+      "http": 422,
+      "retryable": false
+    },
+    "HOSTED_REVISION_BINDING_INVALID": {
       "http": 422,
       "retryable": false
     },
@@ -233,13 +241,13 @@
       "http": 409,
       "retryable": false
     },
-    "KNOWLEDGE_ACTION_FAILED": {
-      "http": 503,
-      "retryable": true
-    },
     "JOB_USER_ACTION_NOT_ALLOWED": {
       "http": 409,
       "retryable": false
+    },
+    "KNOWLEDGE_ACTION_FAILED": {
+      "http": 503,
+      "retryable": true
     },
     "MEMORY_CANDIDATE_ALREADY_RESOLVED": {
       "http": 409,
@@ -345,12 +353,12 @@
       "http": 429,
       "retryable": true
     },
-    "TOOL_SCHEMA_CHANGED": {
-      "http": 409,
-      "retryable": true
-    },
     "TOOL_ACTION_FAILED": {
       "http": 503,
+      "retryable": true
+    },
+    "TOOL_SCHEMA_CHANGED": {
+      "http": 409,
       "retryable": true
     },
     "TURN_ALREADY_TERMINAL": {

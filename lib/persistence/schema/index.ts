@@ -18,6 +18,7 @@ export * from "@/lib/persistence/schema/agents";
 export * from "@/lib/persistence/schema/agent-calls";
 export * from "@/lib/persistence/schema/audit";
 export * from "@/lib/persistence/schema/authorization";
+export * from "@/lib/persistence/schema/branding";
 export * from "@/lib/persistence/schema/capability-use";
 export * from "@/lib/persistence/schema/catalog";
 export * from "@/lib/persistence/schema/context-checkpoint";

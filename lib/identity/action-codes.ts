@@ -85,6 +85,7 @@ export const ACTION_CODES = [
   "workspace.write",
   "analytics.read",
   "audit.read",
+  "brand.manage",
 ] as const;
 
 export type ActionCode = (typeof ACTION_CODES)[number];
@@ -158,6 +159,7 @@ export const ACTION_RESOURCE_TYPES: Record<ActionCode, readonly ResourceScopeTyp
   "policy.read": ["tenant", "policy"],
   "policy.write": ["tenant", "policy"],
   "user.manage": ["tenant"],
+  "brand.manage": ["tenant"],
   "agent.read": ["tenant", "agent"],
   "agent.invoke": ["tenant", "agent"],
   "workspace.read": ["tenant", "workspace"],

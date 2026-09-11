@@ -1,5 +1,6 @@
 "use client";
 
+import { BrandName } from "@/components/brand/brand-wordmark";
 import { CmdkPanel } from "@/components/thread/command/cmdk-panel";
 import {
   DropdownMenu,
@@ -182,7 +183,7 @@ export function DesktopSidebar({
                 data-testid="desktop-titlebar-brand"
                 className="px-1 font-semibold text-sm text-foreground"
               >
-                SnowHarness
+                <BrandName />
               </span>
               {searchButton}
               {panelButton}
@@ -248,7 +249,7 @@ export function DesktopSidebar({
           {!isFullScreen && (
             <div className="px-4 pt-2 pb-1.5 [-webkit-app-region:no-drag]">
               <span className="font-semibold text-[15px] tracking-[-0.01em] text-sidebar-foreground">
-                SnowHarness
+                <BrandName />
               </span>
             </div>
           )}
