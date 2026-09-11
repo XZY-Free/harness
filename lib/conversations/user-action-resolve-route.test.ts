@@ -269,6 +269,20 @@ async function callResolve(
   );
 }
 
+async function waitForInvocationCompletion(
+  tenantId: string,
+  invocationId: string,
+  timeoutMs = 5_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let invocation = await getInvocationById(tenantId, invocationId);
+  while (invocation?.executionState !== "completed" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    invocation = await getInvocationById(tenantId, invocationId);
+  }
+  return invocation;
+}
+
 // ─── 用例 ─────────────────────────────────────────────────
 
 describe("POST resolve — Resume 调度真值（03 专项）", () => {
@@ -343,7 +357,7 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.resume_dispatch).toMatchObject({ mode: "runtime", command_state: "acknowledged" });
     expect("resume_command_state" in body).toBe(false);
-    expect((await getInvocationById(ctx.tenantId, invocation.id))?.executionState).toBe(
+    expect((await waitForInvocationCompletion(ctx.tenantId, invocation.id))?.executionState).toBe(
       "completed",
     );
     expect(decisionViews).toHaveLength(1);
