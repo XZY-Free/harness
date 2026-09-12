@@ -1,5 +1,6 @@
 import {
   type ActivityEntry,
+  mergeThinkEntries,
   projectActivityEvent,
   projectProgressItem,
 } from "@/lib/client/activity-projection";
@@ -107,5 +108,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
   merged.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
-  return apiSuccess({ entries: merged }, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(
+    { entries: mergeThinkEntries(merged) },
+    { headers: { [REQUEST_ID_HEADER]: requestId } },
+  );
 }

@@ -22,7 +22,7 @@
 "use client";
 
 import type { ActivityEntry } from "@/lib/client/activity-projection";
-import { projectProgressItem } from "@/lib/client/activity-projection";
+import { mergeThinkEntries, projectProgressItem } from "@/lib/client/activity-projection";
 import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/types";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
@@ -216,7 +216,9 @@ export function ThreadTimeline({
       });
       return entry ? [entry] : [];
     });
-    return [...fromRing, ...fromItems].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+    return mergeThinkEntries(
+      [...fromRing, ...fromItems].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)),
+    );
   }, [activity, items, activeTurn]);
 
   // 渲染节点流：segments 与历史回合收敛条交错（虚拟化按节点计数）
@@ -473,7 +475,10 @@ export function ThreadTimeline({
               />
             ) : null
           ) : liveEntries.length > 0 ? (
-            <HarnessActivityFeed entries={liveEntries} turnActive />
+            <HarnessActivityFeed
+              entries={liveEntries}
+              turnActive={activeTurn?.turn_state !== "waiting_user"}
+            />
           ) : (
             <TurnRunningIndicator turn={activeTurn} items={items} />
           )}

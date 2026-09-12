@@ -238,11 +238,13 @@ export class HarnessLoop {
           );
         }
 
-        const beforeDecision = this.durableContextFingerprint();
-        // 过程透明合同 v2.3：决策开始发射思考进度（落 user_guidance item，历史可重建）
+        // 过程透明合同 v2.3：决策开始发射思考进度（落 user_guidance item，历史可重建）。
+        // 必须在指纹快照前发射：自身写入会改变持久指纹，若放在快照后会触发
+        // 「指纹变化 → continue」的自我打断死循环（丢弃决策结果无限重思）。
         await this.params.eventWriter.write("progress.snapshot", {
           message: "正在思考下一步…",
         });
+        const beforeDecision = this.durableContextFingerprint();
         const rawAction = await this.params.decisionPort.decideNextAction(
           this.buildView(),
           this.params.abortSignal,

@@ -1,6 +1,7 @@
 import {
   activityKindFor,
   isRiskAction,
+  mergeThinkEntries,
   projectActivityEvent,
   projectProgressItem,
 } from "@/lib/client/activity-projection";
@@ -125,5 +126,36 @@ describe("threadProjectionReducer activity ring", () => {
       latestEventCursor: { sequence: 5, event_id: "ev-x" },
     } as never);
     expect(state.activity).toHaveLength(0);
+  });
+});
+
+describe("mergeThinkEntries", () => {
+  it("思考摘要并入前一条思考行，一次决策一行", () => {
+    const merged = mergeThinkEntries([
+      {
+        key: "a",
+        turnId: "t",
+        kind: "think",
+        phase: "think",
+        label: "正在思考下一步…",
+        block: null,
+        risk: false,
+        actionId: null,
+        occurredAt: "2026-09-12T08:00:00.000Z",
+      },
+      {
+        key: "b",
+        turnId: "t",
+        kind: "think",
+        phase: "think",
+        label: "思考完成",
+        block: "决定：查询排班",
+        risk: false,
+        actionId: null,
+        occurredAt: "2026-09-12T08:00:01.000Z",
+      },
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.block).toBe("决定：查询排班");
   });
 });

@@ -149,3 +149,27 @@ export function projectProgressItem(item: {
     occurredAt: item.created_at ?? "",
   };
 }
+
+/**
+ * 思考行合并：带 think 摘要的 progress（思考完成）并入前一条无 block 的思考行，
+ * 一次决策一行、整行可展开看摘要（合同 v2.3.1）。live 与历史共用。
+ */
+export function mergeThinkEntries(entries: readonly ActivityEntry[]): ActivityEntry[] {
+  const out: ActivityEntry[] = [];
+  for (const entry of entries) {
+    if (entry.phase === "think" && entry.block) {
+      let merged = false;
+      for (let i = out.length - 1; i >= 0; i -= 1) {
+        const prev = out[i];
+        if (prev && prev.phase === "think" && !prev.block) {
+          out[i] = { ...prev, block: entry.block };
+          merged = true;
+          break;
+        }
+      }
+      if (merged) continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
