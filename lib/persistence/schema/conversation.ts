@@ -230,6 +230,9 @@ export const threadTable = mysqlTable(
     title: text("title"),
     /** 下一新 Invocation 的模型偏好；实际值写 ExecutionBinding。 */
     defaultModelRef: varchar("defaultModelRef", { length: 256 }),
+    toolPermissionMode: mysqlEnum("toolPermissionMode", ["auto", "ask", "full_access"])
+      .notNull()
+      .default("auto"),
     /** 默认环境偏好，非实际 Lease。 */
     defaultEnvironmentDefinitionId: varchar("defaultEnvironmentDefinitionId", { length: 36 }),
     lifecycleState: mysqlEnum("lifecycleState", THREAD_LIFECYCLE_STATES)

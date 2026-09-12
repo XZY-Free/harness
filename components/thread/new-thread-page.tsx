@@ -97,7 +97,9 @@ export function NewThreadPage({
             onModelChange={setModelRef}
             onWorkspaceSelect={onWorkspaceSelect}
             workspaceName={workspaceName}
-            onSubmitText={(text) => onSubmit({ text, modelRef, agentId, workspaceId })}
+            onSubmitText={(text, permissionMode) =>
+              onSubmit({ text, modelRef, agentId, workspaceId, permissionMode })
+            }
           />
         </div>
         <DesktopWorkbench

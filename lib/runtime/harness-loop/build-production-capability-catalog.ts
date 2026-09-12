@@ -15,6 +15,7 @@ import {
   listTools,
 } from "@/lib/capability/tool-queries";
 import { listDiscoverableKnowledgeBases } from "@/lib/context/knowledge-queries";
+import { getThreadById } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
 import { POLICY_SET_KEY, loadFrozenPolicyRevision } from "@/lib/permission/policy-queries";
@@ -77,7 +78,10 @@ export async function buildProductionCapabilityCatalog(input: {
       description: base.description ?? "",
     };
   });
+  const thread = await getThreadById(input.tenantId, input.threadId);
+  if (!thread) throw new Error("CAPABILITY_CATALOG_THREAD_MISSING");
   return buildCapabilityCatalogSnapshot({
+    toolPermissionMode: thread.toolPermissionMode,
     invocationId: input.invocationId,
     preferredAgentId: input.preferredAgentId,
     agentCandidate,

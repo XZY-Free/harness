@@ -50,6 +50,7 @@ function projectThread(thread: Thread): Record<string, unknown> {
     active_goal_id: thread.activeGoalId,
     default_workspace_id: thread.defaultWorkspaceId,
     default_model_ref: thread.defaultModelRef,
+    tool_permission_mode: thread.toolPermissionMode,
     default_environment_definition_id: thread.defaultEnvironmentDefinitionId,
     lifecycle_state: thread.lifecycleState,
     last_activity_at: thread.lastActivityAt.toISOString(),

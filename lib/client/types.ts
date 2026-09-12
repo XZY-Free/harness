@@ -47,6 +47,7 @@ export interface ClientThreadShellResponse {
 }
 
 export interface ClientNewThreadSubmission {
+  readonly permissionMode?: "auto" | "ask" | "full_access";
   readonly text: string;
   readonly modelRef: string | null;
   /** Desktop 选择的逻辑 Workspace；null/undefined 表示使用 Cloud/无本地目录。 */
@@ -246,6 +247,7 @@ export interface ClientVisibleError {
 
 /** GET /api/v1/threads/{thread_id} 返回的 Thread 投影。 */
 export interface ClientThread {
+  readonly tool_permission_mode?: "auto" | "ask" | "full_access";
   readonly id: string;
   readonly title: string | null;
   readonly active_goal_id: string | null;

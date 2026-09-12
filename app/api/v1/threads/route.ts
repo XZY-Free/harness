@@ -73,6 +73,7 @@ export async function GET(request: Request): Promise<Response> {
 
 /** 请求体 schema（与 §3.1 requestBody 对齐）。 */
 interface CreateThreadBody {
+  tool_permission_mode?: "auto" | "ask" | "full_access";
   title?: string;
   workspace_id?: string;
 }
@@ -81,6 +82,11 @@ interface CreateThreadBody {
 function validateBody(body: unknown): body is CreateThreadBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
+  if (
+    b.tool_permission_mode !== undefined &&
+    !["auto", "ask", "full_access"].includes(b.tool_permission_mode as string)
+  )
+    return false;
   if (b.title !== undefined && typeof b.title !== "string") return false;
   if (b.workspace_id !== undefined && typeof b.workspace_id !== "string") return false;
   return true;
@@ -177,6 +183,7 @@ export async function POST(request: Request): Promise<Response> {
     const { thread } = await createThread({
       tenantId: principal.tenantId,
       ownerUserId: principal.userIdentityId,
+      toolPermissionMode: body.tool_permission_mode,
       title: body.title ?? null,
       defaultWorkspaceId: body.workspace_id ?? null,
       actorId: principal.userIdentityId,

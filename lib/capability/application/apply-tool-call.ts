@@ -27,6 +27,7 @@ import {
 } from "@/lib/permission/permission-queries";
 import { type PolicyRuleView, evaluatePolicy } from "@/lib/permission/policy-evaluator";
 import { POLICY_SET_KEY, loadFrozenPolicyRevision } from "@/lib/permission/policy-queries";
+import { applyToolPermissionMode } from "@/lib/permission/tool-permission-mode";
 import {
   TOOL_PERMISSION_CONFIRMATION_PURPOSE,
   createUserActionRequest,
@@ -261,15 +262,22 @@ async function applyToolCallTx(
     };
   }
 
-  const evaluation = evaluatePolicy({
-    toolKey: `tool.${facts.tool.toolKey}`,
-    arguments: input.arguments,
-    toolRiskClass: facts.tool.riskClass,
-    scopeContext: { threadId: invocation.threadId, projectId: null, skillId: null },
-    defaultDecision: frozenPolicy.defaultDecision,
-    rules: toRuleViews(frozenPolicy.rules),
-    agentRequirements: null,
-    grantScopes: [],
+  const evaluation = applyToolPermissionMode({
+    mode: catalog.toolPermissionMode,
+    sideEffect: executionContract.sideEffectMode,
+    riskClass: facts.tool.riskClass,
+    executorKind,
+    targetKind: catalogTool.executionTarget?.kind,
+    evaluation: evaluatePolicy({
+      toolKey: `tool.${facts.tool.toolKey}`,
+      arguments: input.arguments,
+      toolRiskClass: facts.tool.riskClass,
+      scopeContext: { threadId: invocation.threadId, projectId: null, skillId: null },
+      defaultDecision: frozenPolicy.defaultDecision,
+      rules: toRuleViews(frozenPolicy.rules),
+      agentRequirements: null,
+      grantScopes: [],
+    }),
   });
   let approvedPause = false;
   if (toolCall.callState === "paused") {
@@ -482,7 +490,7 @@ async function createPauseRequest(
     purpose: TOOL_PERMISSION_CONFIRMATION_PURPOSE,
     state: "pending",
     title: `确认${tool?.displayName ?? "工具操作"}`,
-    summary: decision.decisionSummary || "本次操作需要你的确认。",
+    summary: "请确认是否执行以下操作，也可以补充要求或提出其他方案。",
     preview: redactArguments(toolCall.argumentsRedactedJson),
   };
   const item = await createThreadItem(tx, {

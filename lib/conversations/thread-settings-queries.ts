@@ -54,6 +54,7 @@ export async function updateThreadSettingsWithEvents(params: {
   threadId: string;
   expectedVersionNo: number;
   updates: {
+    toolPermissionMode?: "auto" | "ask" | "full_access";
     defaultModelRef?: string | null;
     defaultWorkspaceId?: string | null;
     defaultEnvironmentDefinitionId?: string | null;
@@ -95,7 +96,10 @@ export async function updateThreadSettingsWithEvents(params: {
       params.updates.defaultWorkspaceId !== thread.defaultWorkspaceId;
 
     const hasEventToWrite = modelChanged || envChanged;
-    const hasAnyChange = hasEventToWrite || workspaceChanged;
+    const permissionChanged =
+      params.updates.toolPermissionMode !== undefined &&
+      params.updates.toolPermissionMode !== thread.toolPermissionMode;
+    const hasAnyChange = hasEventToWrite || workspaceChanged || permissionChanged;
 
     if (!hasAnyChange) {
       // 无变更：不递增 versionNo，不写 Event
@@ -148,6 +152,7 @@ export async function updateThreadSettingsWithEvents(params: {
       versionNo: thread.versionNo + 1,
       updatedAt: new Date(),
     };
+    if (permissionChanged) setClause.toolPermissionMode = params.updates.toolPermissionMode;
     if (modelChanged) setClause.defaultModelRef = params.updates.defaultModelRef ?? null;
     if (envChanged) {
       setClause.defaultEnvironmentDefinitionId =

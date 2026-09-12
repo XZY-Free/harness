@@ -43,7 +43,7 @@ async function seedThread(id: string): Promise<void> {
     defaultEnvironmentDefinitionId: null,
     lastActivityAt: new Date(),
     lastTurnSequence: 0,
-    lastItemSequence: 0,
+    lastItemSequence: 1,
     lastEventSequence: 0,
     pendingQueueVersionNo: 1,
     versionNo: 1,
@@ -505,4 +505,67 @@ describe("外部 Agent confirmation 过期", () => {
       .where(eq(invocationCommandTable.invocationId, seeded.invocationId));
     expect(commands).toHaveLength(0);
   });
+});
+
+it("自定义替代回复原子取消请求并写入可恢复的用户引导", async () => {
+  const seeded = await seedWaitingInputRequest();
+  const result = await resolveGenericUserAction({
+    tenantId: TENANT,
+    requestId: seeded.requestId,
+    resolvedBy: "user-1",
+    resolution: "cancel",
+    userNote: "以上选项都不合适，请先说明其他方案",
+  });
+  const [guidance] = await db
+    .select()
+    .from(threadItemTable)
+    .where(
+      and(
+        eq(threadItemTable.invocationId, seeded.invocationId),
+        eq(threadItemTable.itemType, "user_guidance"),
+      ),
+    );
+  expect(guidance!.authorType).toBe("user");
+  expect(guidance!.contextPolicy).toBe("include");
+  expect(guidance!.itemState).toBe("completed");
+  expect(guidance!.contentJson).toMatchObject({ text: "以上选项都不合适，请先说明其他方案" });
+  expect(result.resumeCommand.commandPayloadJson).toMatchObject({
+    resume_source: "user_action_resolution",
+  });
+});
+
+it("补充说明不污染严格输入 schema，保存正文和说明", async () => {
+  const seeded = await seedWaitingInputRequest();
+  const result = await resolveGenericUserAction({
+    tenantId: TENANT,
+    requestId: seeded.requestId,
+    resolvedBy: "user-1",
+    resolution: "submit",
+    responseRedactedJson: { text: "周一" },
+    userNote: "请用中文答复",
+  });
+  expect(result.request.responseRedactedJson).toEqual({ text: "周一" });
+  expect(result.resumeCommand.commandPayloadJson).toMatchObject({
+    resume_payload: { text: "周一" },
+    user_note: "请用中文答复",
+  });
+});
+
+it("无效补充说明不消费请求，也不写用户引导", async () => {
+  const seeded = await seedWaitingInputRequest();
+  await expect(
+    resolveGenericUserAction({
+      tenantId: TENANT,
+      requestId: seeded.requestId,
+      resolvedBy: "user-1",
+      resolution: "cancel",
+      userNote: "x".repeat(4001),
+    }),
+  ).rejects.toBeInstanceOf(UserActionValidationError);
+  const [request] = await db
+    .select()
+    .from(userActionRequestTable)
+    .where(eq(userActionRequestTable.id, seeded.requestId));
+  expect(request!.requestState).toBe("pending");
+  expect(await db.select().from(invocationCommandTable)).toHaveLength(0);
 });

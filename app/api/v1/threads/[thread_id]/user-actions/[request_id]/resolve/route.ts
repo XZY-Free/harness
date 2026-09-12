@@ -83,11 +83,17 @@ interface ResolveUserActionBody {
   resolution: UserActionResolution;
   /** input 类型 submit 时必填：已脱敏的响应 JSON。 */
   response_redacted?: unknown;
+  user_note?: string;
 }
 
 function validateBody(body: unknown): body is ResolveUserActionBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
+  if (
+    b.user_note !== undefined &&
+    (typeof b.user_note !== "string" || !b.user_note.trim() || b.user_note.length > 4000)
+  )
+    return false;
   const resolution = b.resolution;
   if (
     resolution !== "approve" &&
@@ -211,6 +217,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       tenantId: principal.tenantId,
       requestId: userActionRequestId,
       resolution: body.resolution,
+      userNote: body.user_note,
       resolvedBy: principal.userIdentityId,
       actorType: "user",
       actorId: principal.userIdentityId,

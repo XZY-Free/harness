@@ -59,6 +59,7 @@ interface ThreadEventInput {
 export async function createThread(params: {
   tenantId: string;
   ownerUserId: string;
+  toolPermissionMode?: "auto" | "ask" | "full_access";
   title?: string | null;
   defaultWorkspaceId?: string | null;
   defaultModelRef?: string | null;
@@ -76,6 +77,7 @@ export async function createThread(params: {
       id: threadId,
       tenantId: params.tenantId,
       ownerUserId: params.ownerUserId,
+      toolPermissionMode: params.toolPermissionMode ?? "auto",
       title: params.title ?? null,
       defaultWorkspaceId: params.defaultWorkspaceId ?? null,
       defaultModelRef: params.defaultModelRef ?? null,
@@ -106,6 +108,7 @@ export async function createThread(params: {
         title: params.title ?? null,
         default_workspace_id: params.defaultWorkspaceId ?? null,
         default_model_ref: params.defaultModelRef ?? null,
+        tool_permission_mode: params.toolPermissionMode ?? "auto",
       },
       idempotencyKey: params.idempotencyKey ?? null,
       occurredAt: now,

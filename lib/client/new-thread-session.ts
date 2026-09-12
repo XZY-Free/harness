@@ -71,6 +71,7 @@ function submissionsEqual(
   return (
     left.text === right.text &&
     left.modelRef === right.modelRef &&
+    (left.permissionMode ?? "auto") === (right.permissionMode ?? "auto") &&
     (left.workspaceId ?? null) === (right.workspaceId ?? null) &&
     (left.agentId ?? null) === (right.agentId ?? null)
   );
@@ -98,6 +99,9 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
           },
           body: JSON.stringify({
             title,
+            ...(submission.permissionMode
+              ? { tool_permission_mode: submission.permissionMode }
+              : {}),
             ...(submission.workspaceId ? { workspace_id: submission.workspaceId } : {}),
           }),
         });

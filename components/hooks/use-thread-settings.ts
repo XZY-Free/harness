@@ -39,6 +39,7 @@ import { useCallback, useState } from "react";
 
 /** PATCH settings 更新字段（与服务端 UpdateSettingsBody 对齐）。 */
 export interface ThreadSettingsUpdate {
+  readonly tool_permission_mode?: "auto" | "ask" | "full_access";
   readonly default_model_ref?: string | null;
   readonly default_workspace_id?: string | null;
   readonly default_environment_definition_id?: string | null;
@@ -100,6 +101,7 @@ export function useThreadSettings({ threadId }: UseThreadSettingsParams): UseThr
       readonly updates: ThreadSettingsUpdate;
     }): Promise<boolean> => {
       const hasUpdate =
+        updates.tool_permission_mode !== undefined ||
         updates.default_model_ref !== undefined ||
         updates.default_workspace_id !== undefined ||
         updates.default_environment_definition_id !== undefined;

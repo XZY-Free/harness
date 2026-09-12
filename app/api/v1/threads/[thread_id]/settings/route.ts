@@ -7,6 +7,17 @@ import {
   resolveEmployeePrincipal,
   schemaInvalidTable,
 } from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { updateThreadSettingsWithEvents } from "@/lib/conversations/thread-settings-queries";
+import {
+  ETAG_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  parseIfMatch,
+  resourceNotFound,
+} from "@/lib/http";
 /**
  * PATCH /api/v1/threads/{thread_id}/settings — 更新 Thread 默认设置（§3.2）。
  *
@@ -24,17 +35,10 @@ import {
  * - ETag 格式非法 → 400 REQUEST_SCHEMA_INVALID
  * - 乐观锁冲突 → 412 ETAG_MISMATCH
  */
-import { getThreadById } from "@/lib/conversations/thread-queries";
-import { updateThreadSettingsWithEvents } from "@/lib/conversations/thread-settings-queries";
 import {
-  ETAG_HEADER,
-  REQUEST_ID_HEADER,
-  apiSuccess,
-  etagHeader,
-  getRequestId,
-  parseIfMatch,
-  resourceNotFound,
-} from "@/lib/http";
+  type ToolPermissionMode,
+  isToolPermissionMode,
+} from "@/lib/permission/tool-permission-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +49,7 @@ interface RouteContext {
 
 /** 请求体 schema（§3.2 requestBody：所有字段可选，至少一个）。 */
 interface UpdateSettingsBody {
+  tool_permission_mode?: ToolPermissionMode;
   default_model_ref?: string | null;
   default_workspace_id?: string | null;
   default_environment_definition_id?: string | null;
@@ -54,7 +59,10 @@ interface UpdateSettingsBody {
 function validateBody(body: unknown): body is UpdateSettingsBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
+  if (b.tool_permission_mode !== undefined && !isToolPermissionMode(b.tool_permission_mode))
+    return false;
   const allowedKeys = [
+    "tool_permission_mode",
     "default_model_ref",
     "default_workspace_id",
     "default_environment_definition_id",
@@ -119,6 +127,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
       threadId,
       expectedVersionNo,
       updates: {
+        toolPermissionMode: body.tool_permission_mode,
         defaultModelRef: body.default_model_ref,
         defaultWorkspaceId: body.default_workspace_id,
         defaultEnvironmentDefinitionId: body.default_environment_definition_id,
@@ -130,6 +139,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
     // 6. 返回 200 + 新 ETag + event_ids
     const responseBody = {
       thread_id: updatedThread.id,
+      tool_permission_mode: updatedThread.toolPermissionMode,
       default_model_ref: updatedThread.defaultModelRef,
       default_workspace_id: updatedThread.defaultWorkspaceId,
       default_environment_definition_id: updatedThread.defaultEnvironmentDefinitionId,

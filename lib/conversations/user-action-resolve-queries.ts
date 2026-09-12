@@ -31,8 +31,10 @@ import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-pl
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { ThreadNotFoundError } from "@/lib/conversations/errors";
+import { createThreadItem } from "@/lib/conversations/thread-item-queries";
 import {
   allocateEventSequences,
+  allocateItemSequence,
   computeEventPayloadHash,
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
@@ -116,6 +118,7 @@ export interface ResolveGenericUserActionParams {
   readonly resolvedBy: string;
   /** input 类型 submit 时必填：已脱敏的响应 JSON。 */
   readonly responseRedactedJson?: unknown | null;
+  readonly userNote?: string;
   /** 触发事件的 actor 类型（默认 user）。 */
   readonly actorType?: ThreadEventActorType;
   readonly actorId?: string;
@@ -181,6 +184,15 @@ export async function resolveGenericUserAction(
     throw new UserActionValidationError("resolvedBy 不能为空");
   }
 
+  if (
+    params.userNote !== undefined &&
+    (typeof params.userNote !== "string" ||
+      !params.userNote.trim() ||
+      params.userNote.length > 4000)
+  ) {
+    throw new UserActionValidationError("补充说明必须为 1–4000 字的文字");
+  }
+  const userNote = params.userNote?.trim();
   const actorType: ThreadEventActorType = params.actorType ?? "user";
   const now = new Date();
 
@@ -479,6 +491,43 @@ export async function resolveGenericUserAction(
         correlationId: params.correlationId,
       });
       const events: ThreadEvent[] = [userActionResolvedEvent];
+      // 与请求解析同事务落地。独立于 input schema，不伪造枚举答案或扩大批准范围。
+      if (userNote) {
+        const guidance = await createThreadItem(tx, {
+          threadId: thread.id,
+          turnId: request.turnId,
+          invocationId: invocation.id,
+          itemSequence: await allocateItemSequence(tx, thread.id),
+          itemType: "user_guidance",
+          itemState: "completed",
+          authorType: "user",
+          authorId: params.resolvedBy,
+          contextPolicy: "include",
+          content: { text: userNote, request_id: request.id, resolution: params.resolution },
+        });
+        const sequence = await allocateEventSequences(tx, thread.id, 2);
+        const itemPayload = {
+          item_id: guidance.id,
+          item_sequence: guidance.itemSequence,
+          author_type: "user",
+          item_type: "user_guidance",
+          item_state: "completed",
+          content: guidance.contentJson,
+        };
+        for (const [offset, eventType] of (["item.created", "item.completed"] as const).entries()) {
+          events.push(
+            await insertThreadEvent(tx, thread.id, sequence + offset, {
+              eventType,
+              turnId: request.turnId,
+              invocationId: invocation.id,
+              itemId: guidance.id,
+              actorType: "user",
+              actorId: params.resolvedBy,
+              payload: itemPayload,
+            }),
+          );
+        }
+      }
 
       // 9. INSERT InvocationCommand (resume)
       const resumeCommandId = randomUUID();
@@ -491,6 +540,13 @@ export async function resolveGenericUserAction(
         ...(grantId ? { grant_id: grantId } : {}),
         ...(params.responseRedactedJson ? { has_response: true } : {}),
         ...agentCallResumeRefs(request.promptJson),
+        ...(userNote
+          ? {
+              user_note: userNote,
+              resume_source: "user_action_resolution",
+              resume_payload: { request_id: request.id, resolution: params.resolution },
+            }
+          : {}),
         // input+submit：精确脱敏响应对象 + 内部来源标记（post-authority Resume 凭证，
         // 其他类型不发明 resume_payload）。
         ...(request.requestType === "input" && params.resolution === "submit"

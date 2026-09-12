@@ -16,6 +16,7 @@ import {
   sortPolicyRules,
   tighterDecision,
 } from "./policy-evaluator";
+import { applyToolPermissionMode } from "./tool-permission-mode";
 
 type Decision = "allow" | "pause" | "block";
 
@@ -214,5 +215,81 @@ describe("sortPolicyRules / tighterDecision", () => {
     expect(tighterDecision("allow", "pause")).toBe("pause");
     expect(tighterDecision("pause", "block")).toBe("block");
     expect(tighterDecision("block", "allow")).toBe("block");
+  });
+});
+
+describe("会话工具权限模式", () => {
+  const base = () => ({
+    mode: "auto" as const,
+    evaluation: evaluatePolicy(input({ defaultDecision: "pause", rules: [] })),
+    sideEffect: "read",
+    riskClass: "low",
+    executorKind: "builtin.web-fetch",
+  });
+  it("自动模式无需确认低风险读取", () => {
+    expect(applyToolPermissionMode(base()).decision).toBe("allow");
+  });
+  it.each(["host", "desktop"])("自动模式仍确认 %s 命令", (targetKind) => {
+    expect(
+      applyToolPermissionMode({
+        ...base(),
+        executorKind: "builtin.shell",
+        sideEffect: "write",
+        riskClass: "high",
+        targetKind,
+      }).decision,
+    ).toBe("pause");
+  });
+  it("自动模式允许隔离容器命令", () => {
+    expect(
+      applyToolPermissionMode({
+        ...base(),
+        executorKind: "builtin.shell",
+        sideEffect: "write",
+        riskClass: "high",
+        targetKind: "container",
+      }).decision,
+    ).toBe("allow");
+  });
+  it("完全访问允许现有环境写操作", () => {
+    expect(
+      applyToolPermissionMode({
+        ...base(),
+        mode: "full_access",
+        sideEffect: "write",
+        riskClass: "high",
+      }).decision,
+    ).toBe("allow");
+  });
+  it("询问模式收紧原本允许的读取", () => {
+    expect(
+      applyToolPermissionMode({
+        ...base(),
+        mode: "ask",
+        evaluation: evaluatePolicy(input({ defaultDecision: "allow", rules: [] })),
+      }).decision,
+    ).toBe("pause");
+  });
+  it.each(["pause", "block"] as const)("完全访问不能覆盖明确 %s 规则", (decision) => {
+    const evaluation = evaluatePolicy(input({ rules: [view({ decision })] }));
+    expect(applyToolPermissionMode({ ...base(), mode: "full_access", evaluation }).decision).toBe(
+      decision,
+    );
+  });
+  it("完全访问不能覆盖默认拒绝或智能体门禁", () => {
+    const evaluation = evaluatePolicy(input({ defaultDecision: "block", rules: [] }));
+    expect(applyToolPermissionMode({ ...base(), mode: "full_access", evaluation }).decision).toBe(
+      "block",
+    );
+    expect(
+      applyToolPermissionMode({
+        ...base(),
+        mode: "full_access",
+        evaluation: { ...base().evaluation, agentGated: true },
+      }).decision,
+    ).toBe("pause");
+  });
+  it("没有冻结模式的旧执行保持原策略", () => {
+    expect(applyToolPermissionMode({ ...base(), mode: undefined }).decision).toBe("pause");
   });
 });

@@ -360,9 +360,11 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const displayTitle =
     content.title ?? (isAgentInputRequired ? `${agentDisplayName}需要补充信息` : requestTypeLabel);
   const displayReason =
-    [content.prompt, content.summary, content.reason].find(
-      (value) => typeof value === "string" && value.trim().length > 0,
-    ) ?? "需要你的操作";
+    content.purpose === "tool_permission_confirmation"
+      ? "请确认是否执行以下操作，也可以补充要求或提出其他方案。"
+      : ([content.prompt, content.summary, content.reason].find(
+          (value) => typeof value === "string" && value.trim().length > 0,
+        ) ?? "需要你的操作");
   const preview = isStructuredPreview(content.preview) ? content.preview : null;
 
   // input 类型的字段（schema 缺失/空/不支持/非法 pattern → ok=false，fail-closed）
@@ -376,6 +378,8 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
       ? inputFields[0]
       : null;
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  const [userNote, setUserNote] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -389,12 +393,69 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
 
   const handleUserActionResolve = (
     resolution: UserActionResolution,
-    options?: { responseRedactedJson?: unknown },
+    options?: { responseRedactedJson?: unknown; userNote?: string },
   ) => {
     if (busy || !showActions || !requestId) return;
     clearError();
-    void userActionHook.resolve(requestId, resolution, options);
+    void userActionHook.resolve(requestId, resolution, {
+      ...options,
+      ...(userNote.trim() ? { userNote: userNote.trim() } : {}),
+    });
   };
+
+  const customReply = showActions ? (
+    <div className="px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setCustomOpen((open) => !open)}
+        aria-expanded={customOpen}
+        className="text-xs text-muted-foreground hover:text-foreground"
+        disabled={busy}
+      >
+        自定义回复
+      </button>
+      {customOpen ? (
+        <div className="mt-2 space-y-2">
+          <textarea
+            aria-label="补充说明"
+            maxLength={4000}
+            value={userNote}
+            onChange={(event) => setUserNote(event.target.value)}
+            disabled={busy}
+            rows={3}
+            placeholder="补充要求，或说明你希望怎样调整…"
+            className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          />
+          <p className="text-xs text-muted-foreground">
+            可随上面的选项一起提交；需要更换方案时，请选择按说明调整。
+          </p>
+          <button
+            type="button"
+            disabled={busy || !requestId || !userNote.trim()}
+            onClick={() => {
+              // A2A 的自由文本输入沿用原 schema 和同一 AgentCall 恢复路径。
+              if (
+                isAgentInputRequired &&
+                inputFields.length === 1 &&
+                inputFields[0]?.key === "text"
+              ) {
+                submitInputValues({ text: userNote });
+              } else {
+                handleUserActionResolve(
+                  content.request_type === "confirmation" || content.request_type === "grant"
+                    ? "deny"
+                    : "cancel",
+                );
+              }
+            }}
+            className="rounded-full border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-40"
+          >
+            按我的说明调整
+          </button>
+        </div>
+      ) : null}
+    </div>
+  ) : null;
 
   const handleInputChange = (key: string, value: string) => {
     setInputValues((prev) => ({ ...prev, [key]: value }));
@@ -746,6 +807,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
             </div>
           ) : null}
 
+          {customReply}
           <footer className="mt-3 flex items-center justify-end gap-2">
             <button
               type="button"
@@ -913,6 +975,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
             </div>
           ) : null}
 
+          {customReply}
           {showActions && !requestId ? (
             <div
               role="alert"
@@ -1055,6 +1118,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
           </section>
         ) : null}
 
+        {customReply}
         {/* Authority 引用缺失：fail-closed，所有操作不可用，绝不 fallback 到 item.id */}
         {showActions && !requestId && (
           <div

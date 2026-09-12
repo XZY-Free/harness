@@ -49,6 +49,7 @@ interface UseUserActionParams {
 export interface ResolveUserActionOptions {
   /** input 类型 submit 时必填：已脱敏的响应 JSON（对象或数组）。 */
   readonly responseRedactedJson?: unknown;
+  readonly userNote?: string;
 }
 
 /** Hook 返回值。 */
@@ -139,6 +140,7 @@ export function useUserAction({ threadId }: UseUserActionParams): UseUserActionR
       try {
         const idempotencyKey = generateIdempotencyKey();
         const body: Record<string, unknown> = { resolution };
+        if (options?.userNote?.trim()) body.user_note = options.userNote.trim();
         if (options?.responseRedactedJson !== undefined) {
           body.response_redacted = options.responseRedactedJson;
         }

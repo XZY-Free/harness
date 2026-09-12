@@ -713,3 +713,44 @@ describe("跨租户隔离", () => {
     expect(response.status).toBe(404);
   });
 });
+
+it.each(["auto", "ask", "full_access"] as const)("创建和 CAS 更新会话权限 %s", async (mode) => {
+  await seedContext();
+  const created = await createThreadPOST(
+    buildApiRequest({
+      audience: "employee",
+      method: "POST",
+      path: "/threads",
+      idempotencyKey: `mode-${mode}`,
+      body: { tool_permission_mode: "ask" },
+    }),
+  );
+  const { id } = await created.json();
+  const context = { params: Promise.resolve({ thread_id: id }) };
+  const request = () =>
+    buildApiRequest({
+      audience: "employee",
+      method: "PATCH",
+      path: `/threads/${id}/settings`,
+      ifMatch: "thread-settings-1",
+      body: { tool_permission_mode: mode },
+    });
+  const patched = await updateSettingsPATCH(request(), context);
+  expect(patched.status).toBe(200);
+  expect(await patched.json()).toMatchObject({
+    tool_permission_mode: mode,
+    applies_to_new_invocations: true,
+  });
+  if (mode !== "ask") expect((await updateSettingsPATCH(request(), context)).status).toBe(412);
+  const invalid = await updateSettingsPATCH(
+    buildApiRequest({
+      audience: "employee",
+      method: "PATCH",
+      path: `/threads/${id}/settings`,
+      ifMatch: "thread-settings-2",
+      body: { tool_permission_mode: "bypass-everything" },
+    }),
+    context,
+  );
+  expect(invalid.status).toBe(400);
+});

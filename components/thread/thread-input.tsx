@@ -24,6 +24,7 @@ import { useThreadInput } from "@/components/hooks/use-thread-input";
 import { useTurnControls } from "@/components/hooks/use-turn-controls";
 import { Button } from "@/components/ui/button";
 import type { ClientPendingInput, ClientThread, ClientTurn } from "@/lib/client/types";
+import type { ToolPermissionMode } from "@/lib/permission/tool-permission-mode";
 import { cn } from "@/lib/utils";
 import { Folder, Loader2, Play, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -33,6 +34,7 @@ import {
   ModelSelectorPopover,
   PlusMenuPopover,
 } from "./input/input-popovers";
+import { ToolPermissionSelector } from "./input/tool-permission-selector";
 import { PendingInputQueue } from "./pending-input-queue";
 
 interface ThreadInputProps {
@@ -48,7 +50,7 @@ interface ThreadInputProps {
   /** 草稿隔离键；默认使用 threadId。 */
   readonly draftKey?: string;
   /** 新建页首条消息提交器；存在时不调用既有 Thread 的 turns 接口。 */
-  readonly onSubmitText?: (text: string) => Promise<boolean>;
+  readonly onSubmitText?: (text: string, permissionMode: ToolPermissionMode) => Promise<boolean>;
   readonly currentAgentId?: string | null;
   readonly currentModelRef?: string | null;
   /** 平台默认模型（shell.default_model_ref）；未显式选择时的即时展示。 */
@@ -80,6 +82,14 @@ export function ThreadInput({
   onWorkspaceSelect,
   workspaceName,
 }: ThreadInputProps) {
+  const [permissionSelection, setPermissionSelection] = useState<{
+    threadId: string | null;
+    mode: ToolPermissionMode;
+  } | null>(null);
+  const permissionMode =
+    permissionSelection?.threadId === threadId
+      ? permissionSelection.mode
+      : (thread?.tool_permission_mode ?? "auto");
   // 选择器只做客户端预填；每次发送仍把当前选择显式写入新 Turn，
   // null 表示本 Turn 不带 directive，不建立 Thread 默认绑定。
   // undefined 表示尚未手动选择，null 表示用户明确选择“不指定助手”。
@@ -167,7 +177,9 @@ export function ThreadInput({
     setCustomBusy(Boolean(onSubmitText));
     let ok = false;
     try {
-      ok = onSubmitText ? await onSubmitText(text) : await send(text, selectedAgentId);
+      ok = onSubmitText
+        ? await onSubmitText(text, permissionMode)
+        : await send(text, selectedAgentId);
     } finally {
       sending.current = false;
       setCustomBusy(false);
@@ -299,6 +311,13 @@ export function ThreadInput({
             )}
 
             <div className="flex-1" />
+            <ToolPermissionSelector
+              key={threadId ?? "new"}
+              threadId={threadId}
+              value={permissionMode}
+              disabled={busy}
+              onChange={(mode) => setPermissionSelection({ threadId, mode })}
+            />
 
             <ModelSelectorPopover
               currentModelRef={currentModelRef ?? thread?.default_model_ref ?? null}

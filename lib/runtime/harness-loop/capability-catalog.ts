@@ -1,4 +1,8 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
+import {
+  type ToolPermissionMode,
+  isToolPermissionMode,
+} from "@/lib/permission/tool-permission-mode";
 import Ajv from "ajv";
 import type { ToolExecutionTarget } from "../tool-execution-target";
 import type { HarnessNextAction } from "./types";
@@ -44,6 +48,7 @@ export interface CapabilityCatalogKnowledgeSource {
 }
 
 export interface CapabilityCatalogSnapshot {
+  toolPermissionMode?: ToolPermissionMode;
   version: typeof CAPABILITY_CATALOG_VERSION;
   invocationId: string;
   createdAt: string;
@@ -82,6 +87,7 @@ export class CapabilityActionValidationError extends Error {
 }
 
 export function buildCapabilityCatalogSnapshot(input: {
+  toolPermissionMode?: ToolPermissionMode;
   invocationId: string;
   preferredAgentId: string | null;
   agentCandidate: CapabilityCatalogAgent | null;
@@ -96,6 +102,7 @@ export function buildCapabilityCatalogSnapshot(input: {
   }
   const createdAt = input.now ?? new Date();
   const snapshot: CapabilityCatalogSnapshot = {
+    ...(input.toolPermissionMode ? { toolPermissionMode: input.toolPermissionMode } : {}),
     version: CAPABILITY_CATALOG_VERSION,
     invocationId: input.invocationId,
     createdAt: createdAt.toISOString(),
@@ -137,6 +144,8 @@ export function verifyCapabilityCatalogSnapshot(
   }
   const snapshot = value as CapabilityCatalogSnapshot;
   if (
+    (snapshot.toolPermissionMode !== undefined &&
+      !isToolPermissionMode(snapshot.toolPermissionMode)) ||
     snapshot.version !== CAPABILITY_CATALOG_VERSION ||
     typeof snapshot.invocationId !== "string" ||
     !Array.isArray(snapshot.agents) ||

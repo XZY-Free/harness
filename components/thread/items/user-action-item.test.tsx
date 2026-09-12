@@ -479,3 +479,44 @@ describe("UserActionItem external confirmation preview", () => {
     expect(JSON.parse(init.body as string)).toEqual({ resolution: "approve" });
   });
 });
+
+it("确认卡片允许自定义替代意见，不把文字当成批准", async () => {
+  const fetchMock = makeFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <UserActionItem
+      threadId="thread-1"
+      item={makeInputItem({
+        request_type: "confirmation",
+        purpose: "tool_permission_confirmation",
+      })}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "自定义回复" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "补充说明" }), {
+    target: { value: "不要读取这个网址，改查官方文档" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "按我的说明调整" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body)).toEqual({
+    resolution: "deny",
+    user_note: "不要读取这个网址，改查官方文档",
+  });
+});
+
+it("自定义自由文本输入沿用同一智能体的正式 submit 接口", async () => {
+  const fetchMock = makeFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+  render(<UserActionItem threadId="thread-1" item={makeInputItem()} />);
+  fireEvent.click(screen.getByRole("button", { name: "自定义回复" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "补充说明" }), {
+    target: { value: "请先说明其他方案" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "按我的说明调整" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body)).toEqual({
+    resolution: "submit",
+    response_redacted: { text: "请先说明其他方案" },
+    user_note: "请先说明其他方案",
+  });
+});

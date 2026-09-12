@@ -257,10 +257,16 @@ async function seedInvocation(opts: {
 /** 直接插入不可变 ExecutionBinding（其余 digest 用占位值）。 */
 async function seedBinding(
   invocationId: string,
-  frozen: { policyRevisionId: string; policyRulesDigest: string; workspaceBindingId?: string },
+  frozen: {
+    policyRevisionId: string;
+    policyRulesDigest: string;
+    workspaceBindingId?: string;
+    toolPermissionMode?: "auto" | "ask" | "full_access";
+  },
 ): Promise<void> {
   if (!catalogTool) throw new Error("seedToolchain must run first");
   const catalog = buildCapabilityCatalogSnapshot({
+    toolPermissionMode: frozen.toolPermissionMode,
     invocationId,
     preferredAgentId: null,
     agentCandidate: null,
@@ -1678,6 +1684,7 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
       tenantId: TENANT,
       requestId: userActionRequestId,
       resolution: "deny",
+      userNote: "不要写入文件，先解释方案",
       resolvedBy: "user-1",
       actorType: "user",
       actorId: "user-1",
@@ -1688,6 +1695,12 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
     );
     expect(tc.callState).toBe("cancelled");
     expect(tc.errorCode).toBe("USER_DENIED");
+    expect(await createToolExecutionWorker().runOnce()).toBe("idle");
+    const [guidance] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.itemType, "user_guidance"));
+    expect(guidance?.contentJson).toMatchObject({ text: "不要写入文件，先解释方案" });
   });
 
   it("approve 后 arguments 变化 → 原确认无效，同 operation 不同 args → 409（§20.1/§55.6）", async () => {
@@ -1749,3 +1762,50 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
     expect(decisions[1]!.decision).toBe("block");
   });
 });
+
+it.each(["auto", "ask", "full_access"] as const)(
+  "冻结 %s 模式决定网页工具是否询问，模型参数不能覆盖",
+  async (mode) => {
+    await registerBuiltinTools({ tenantId: TENANT, ownerUserId: "test-admin" });
+    const tools = await listTools({ tenantId: TENANT });
+    const tool = tools.items.find((item) => item.toolKey === "web-fetch")!;
+    const revision = (await getCurrentToolSchemaRevision({ tenantId: TENANT, toolId: tool.id }))!;
+    catalogTool = {
+      toolId: tool.id,
+      operationId: tool.toolKey,
+      schemaRevisionId: revision.id,
+      schemaHash: revision.schemaHash,
+      executionContractDigest: revision.executionContractDigest,
+      displayName: tool.displayName,
+      description: "读取网页",
+      inputSchema: revision.inputSchemaJson as Record<string, unknown>,
+      sideEffect: "read",
+      idempotent: false,
+    };
+    const policy = await seedPolicy("pause", []);
+    const invocationId = await seedInvocation({ threadId: "mode-thread", turnId: "mode-turn" });
+    await seedThread("mode-thread");
+    await seedRunningTurn("mode-thread", "mode-turn", invocationId);
+    await seedBinding(invocationId, { ...policy, toolPermissionMode: mode });
+    // 当前 Thread 偏好与冻结模式相反，执行仍遵从冻结值。
+    await db
+      .update(threadTable)
+      .set({ toolPermissionMode: mode === "ask" ? "full_access" : "ask" })
+      .where(eq(threadTable.id, "mode-thread"));
+    const response = await POST(
+      gatewayRequest(
+        gatewayToken(invocationId),
+        toolCallBody({
+          invocation_id: invocationId,
+          tool_id: tool.id,
+          tool_schema_revision_id: revision.id,
+          schema_hash: revision.schemaHash,
+          arguments: { url: "https://example.com" },
+        }),
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).call_state).toBe(mode === "ask" ? "paused" : "queued");
+    expect(await db.select().from(userActionRequestTable)).toHaveLength(mode === "ask" ? 1 : 0);
+  },
+);
