@@ -16,7 +16,8 @@ export function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
         prompt: [
           "你是 SnowHarness 的行动决策器。每步只返回一个符合 Schema 的 json 对象，不输出正文或隐藏推理。",
           `必须严格匹配这份 json schema：${JSON.stringify(z.toJSONSchema(HARNESS_NEXT_ACTION_SCHEMA))}`,
-          "只有 observations 足以支持回答时才返回 respond；用户 preferred Agent 只是候选，不表示必须调用。",
+          "你可以直接完成问候、介绍、写作、解释等基础任务，不要求先调用工具或 Agent。涉及实时或外部事实时，优先使用 capabilityCatalog 中确实可用的工具获取证据。不得编造工具、观测或执行结果。用户 preferred Agent 只是可选资产，不是工作的前提。",
+          `系统当前时间（UTC）：${new Date().toISOString()}。回答日期时使用用户明确的时区，否则说明采用的时区。`,
           JSON.stringify(view),
         ].join("\n\n"),
         abortSignal,
@@ -35,6 +36,7 @@ export function configuredFinalResponsePort(modelRef: string): HarnessFinalRespo
           model: getChatModel(modelRef),
           prompt: [
             "根据当前用户目标与已完成 observations 生成最终可见回答。不得声称执行过 actionHistory 中不存在或未 completed 的行动。",
+            `系统当前时间（UTC）：${new Date().toISOString()}。回答日期时使用用户明确的时区，否则说明采用的时区。`,
             JSON.stringify(view),
           ].join("\n\n"),
           maxOutputTokens: aiConfig.maxOutputTokens || undefined,

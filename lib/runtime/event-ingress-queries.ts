@@ -44,6 +44,7 @@ import {
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import {
+  type ContextPolicy,
   type ThreadEventActorType,
   type ThreadItem,
   type ThreadItemAuthorType,
@@ -646,6 +647,7 @@ async function createThreadItem(
     authorType: ThreadItemAuthorType;
     authorId: string | null;
     content: Record<string, unknown>;
+    contextPolicy?: ContextPolicy;
     invocationId: string;
   },
 ): Promise<ThreadItem> {
@@ -663,7 +665,7 @@ async function createThreadItem(
     authorId: params.authorId,
     contentJson: params.content,
     contentHash,
-    contextPolicy: "include",
+    contextPolicy: params.contextPolicy ?? "include",
     invocationId: params.invocationId,
     createdAt: now,
     updatedAt: now,
@@ -702,6 +704,8 @@ async function mapProgressSnapshot(
     itemState: "completed",
     authorType: "assistant",
     authorId: null,
+    // 进度仅供时间线展示，不能进入下一轮模型上下文或冒充用户引导。
+    contextPolicy: "exclude",
     content: {
       kind: "progress.snapshot",
       ...ctx.event.payload,

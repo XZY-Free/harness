@@ -100,6 +100,20 @@ describe("MySQL Harness recovery durable input", () => {
       contentJson: { text: "改为后天下午" },
       contentHash: "sha256:guidance",
     });
+    // 旧版本进度记录曾标记 include；不能因此被恢复成用户已确认的引导。
+    await db.insert(threadItemTable).values({
+      id: randomUUID(),
+      threadId: seeded.threadId,
+      turnId: seeded.turnId,
+      invocationId: seeded.invocationId,
+      itemSequence: 2,
+      itemType: "user_guidance",
+      itemState: "completed",
+      authorType: "assistant",
+      contextPolicy: "include",
+      contentJson: { kind: "progress.snapshot", message: "正在思考下一步…" },
+      contentHash: "sha256:progress",
+    });
 
     const recovered = await createMySqlHarnessLoopRecoveryPort(TENANT_ID).load(seeded.invocationId);
 

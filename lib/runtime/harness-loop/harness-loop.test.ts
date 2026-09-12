@@ -97,7 +97,10 @@ describe("HarnessLoop", () => {
     const result = await running;
 
     expect(result).toMatchObject({ completed: false, cancelled: true });
-    expect(writer.events.map((event) => event.type)).toEqual(["execution.cancelled"]);
+    expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "execution.cancelled",
+    ]);
   });
 
   it("执行租约丢失时 fail closed，不冒充用户取消", async () => {
@@ -135,7 +138,10 @@ describe("HarnessLoop", () => {
       errorCode: "INVOCATION_EXECUTION_LEASE_LOST",
     });
     expect(result.cancelled).toBeUndefined();
-    expect(writer.events.map((event) => event.type)).toEqual(["execution.failed"]);
+    expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "execution.failed",
+    ]);
   });
 
   it("cancel 保留已确认 Effect，且不会发起下一项 side effect", async () => {
@@ -294,8 +300,11 @@ describe("HarnessLoop", () => {
 
     expect(result).toMatchObject({ completed: true, responseText: "制度回答" });
     expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
+      "progress.snapshot",
       "response.completed",
       "harness.action.completed",
       "execution.completed",
@@ -486,6 +495,8 @@ describe("HarnessLoop", () => {
       errorCode: "HARNESS_ACTION_EXECUTOR_UNAVAILABLE",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.failed",
       "execution.failed",
@@ -522,6 +533,8 @@ describe("HarnessLoop", () => {
 
     expect(result).toMatchObject({ completed: false, errorCode: "KNOWLEDGE_ACTION_FAILED" });
     expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
       "harness.action.failed",
@@ -573,6 +586,8 @@ describe("HarnessLoop", () => {
 
     expect(result).toMatchObject({ completed: false, waitingForUser: true });
     expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
       "user_action.requested",
@@ -640,6 +655,8 @@ describe("HarnessLoop", () => {
       errorCode: "AGENT_CALL_EXECUTOR_UNAVAILABLE",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.failed",
       "execution.failed",
@@ -681,6 +698,8 @@ describe("HarnessLoop", () => {
     expect(result).toMatchObject({ completed: false, pending: true });
     expect(result.actionHistory.at(-1)?.state).toBe("started");
     expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
     ]);
@@ -721,6 +740,8 @@ describe("HarnessLoop", () => {
 
     expect(result).toMatchObject({ completed: false, errorCode: "AGENT_ROUTE_UNAVAILABLE" });
     expect(writer.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
       "harness.action.failed",

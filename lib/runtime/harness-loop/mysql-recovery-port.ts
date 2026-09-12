@@ -112,6 +112,10 @@ export function createMySqlHarnessLoopRecoveryPort(
             eq(threadItemTable.invocationId, invocationId),
             eq(threadItemTable.itemType, "user_guidance"),
             eq(threadItemTable.itemState, "completed"),
+            // Runtime 进度也使用 user_guidance 展示，但不具有用户指令权威。
+            // 作者检查同时覆盖旧版本误标 include 的进度记录。
+            eq(threadItemTable.authorType, "user"),
+            eq(threadItemTable.contextPolicy, "include"),
           ),
         )
         .orderBy(asc(threadItemTable.itemSequence));

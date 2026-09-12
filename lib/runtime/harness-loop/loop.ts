@@ -239,8 +239,8 @@ export class HarnessLoop {
         }
 
         // 过程透明合同 v2.3：决策开始发射思考进度（落 user_guidance item，历史可重建）。
-        // 必须在指纹快照前发射：自身写入会改变持久指纹，若放在快照后会触发
-        // 「指纹变化 → continue」的自我打断死循环（丢弃决策结果无限重思）。
+        // 进度只是展示事实，恢复端不得将其当作用户输入；只有真实持久上下文变化
+        // 才应使下面的决策结果失效，单纯调整写入顺序无法建立这一边界。
         await this.params.eventWriter.write("progress.snapshot", {
           message: "正在思考下一步…",
         });

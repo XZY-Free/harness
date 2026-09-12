@@ -46,6 +46,32 @@ describe("configured Harness model ports", () => {
     expect(prompt).toContain('"actionType"');
   });
 
+  it("决策与正文共享系统当前时间，基础聊天无需工具观测", async () => {
+    process.env.LLM_API_KEY = "test-key";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-12T12:00:00.000Z"));
+    try {
+      await configuredDecisionPort("test-model").decideNextAction({
+        objective: "今天日期是多少",
+      } as never);
+      expect(mocks.generateObject.mock.calls[0]?.[0].prompt).toContain("2026-09-12T12:00:00.000Z");
+      mocks.streamText.mockReturnValueOnce({
+        fullStream: parts([
+          { type: "text-delta", text: "日期回复" },
+          { type: "finish", finishReason: "stop" },
+        ]),
+      });
+      await configuredFinalResponsePort("test-model").generateFinalResponse(
+        { objective: "今天日期是多少" } as never,
+        vi.fn(),
+        undefined,
+      );
+      expect(mocks.streamText.mock.calls[0]?.[0].prompt).toContain("2026-09-12T12:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("正文流截断时静默重试一次并重试不重复发射 delta", async () => {
     process.env.LLM_API_KEY = "test-key";
     mocks.streamText

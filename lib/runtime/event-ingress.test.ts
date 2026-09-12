@@ -26,6 +26,7 @@ import {
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
+import { listRecentContextItemsByThread } from "@/lib/conversations/thread-item-queries";
 import { computeEventPayloadHash, createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
@@ -62,6 +63,8 @@ import {
   getIngressByProducerEventId,
   ingressEventBatch,
 } from "@/lib/runtime/event-ingress-queries";
+import { HarnessLoop } from "@/lib/runtime/harness-loop/loop";
+import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import {
   getInvocationById,
   setInvocationOutputItem,
@@ -438,6 +441,84 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(ingress?.ingressState).toBe("mapped");
     expect(ingress?.mappedItemId).toBe(mapped?.itemId);
     expect(ingress?.mappedThreadEventId).toBe(mapped?.threadEventId);
+  });
+
+  it("运行进度保留时间线记录，但不能成为用户指令或后续模型上下文", async () => {
+    const { invocationId, threadId } = await seedRunningInvocation(ctx);
+    const result = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 1,
+      events: [makeEvent("progress-only", 1, "progress.snapshot", { message: "正在思考下一步…" })],
+    });
+    const itemId = result.mappedEvents[0]?.itemId;
+    const [item] = await db.select().from(threadItemTable).where(eq(threadItemTable.id, itemId!));
+    expect(item).toMatchObject({ authorType: "assistant", contextPolicy: "exclude" });
+    const recovery = await createMySqlHarnessLoopRecoveryPort(ctx.tenantId).load(invocationId);
+    expect(recovery.observations).toEqual([]);
+    const recent = await listRecentContextItemsByThread(ctx.tenantId, threadId);
+    expect(recent.some((entry) => entry.id === itemId)).toBe(false);
+  });
+
+  it("无智能体时 Harness 经真实进度入库和恢复直接回答，不能被自己的进度反复打断", async () => {
+    const { invocationId, threadId, turnId } = await seedRunningInvocation(ctx);
+    let sequence = 0;
+    let decisions = 0;
+    const loop = new HarnessLoop({
+      invocationId,
+      tenantId: ctx.tenantId,
+      threadId,
+      turnId,
+      objective: "直接回答问题",
+      modelRef: "test-model",
+      executors: {},
+      recoveryPort: createMySqlHarnessLoopRecoveryPort(ctx.tenantId),
+      decisionPort: {
+        async decideNextAction(view) {
+          decisions += 1;
+          // 为旧实现设置确定的停止条件，避免回归本身无限重思。
+          if (decisions > 2) throw new Error("运行进度导致重复决策");
+          expect(view.capabilities.preferredAgentCandidate).toBeNull();
+          expect(view.capabilities.supportedActionTypes).toEqual(["respond"]);
+          return {
+            actionId: "direct-response",
+            stepNo: 1,
+            actionType: "respond",
+            purposeCode: "answer_user",
+            shortPurpose: "直接回答",
+            payload: {},
+          };
+        },
+      },
+      finalResponsePort: {
+        async generateFinalResponse() {
+          return "Harness 可以直接完成回答。";
+        },
+      },
+      eventWriter: {
+        async write(type, payload) {
+          sequence += 1;
+          await ingressEventBatch({
+            tenantId: ctx.tenantId,
+            invocationId,
+            producerSequenceStart: sequence,
+            events: [makeEvent(`direct-${sequence}`, sequence, type, payload)],
+          });
+        },
+      },
+    });
+    const result = await loop.run();
+    expect(result).toMatchObject({ completed: true, responseText: "Harness 可以直接完成回答。" });
+    expect(decisions).toBe(1);
+    expect(result.observations.filter((entry) => entry.observationType === "user_input")).toEqual(
+      [],
+    );
+    const items = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.invocationId, invocationId));
+    expect(items.filter((item) => item.itemType === "assistant_message")).toHaveLength(1);
+    expect(items.filter((item) => item.itemType === "user_guidance")).toHaveLength(3);
   });
 
   it("response.completed：内容 Authority——assistant_message + outputItemId，不改执行终态", async () => {
