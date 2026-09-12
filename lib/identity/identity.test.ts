@@ -650,6 +650,36 @@ describe("local-authentication", () => {
       }),
     ).resolves.toMatchObject({ status: "authenticated", user: { account: "new-account" } });
   });
+
+  it("设密服务端与前端同用强度估算器：8位达标密码放行、常见弱密码拒绝", async () => {
+    const principal = await acceptAuthenticatedEvidence({
+      externalSubject: "enterprise-subject-strength",
+      loginAccount: " StrengthUser ",
+      email: "strength@example.com",
+      displayName: "强度用户",
+      trustedAuthenticationClaims: {},
+    });
+    const setup = await establishExternalSession({
+      userIdentityId: principal.userIdentityId,
+      loginAccount: "strengthuser",
+    });
+    expect(setup.status).toBe("password_setup_required");
+    const setupHeaders = new Headers({ cookie: `snow_session=${setup.sessionToken}` });
+
+    // 命中常见片段的弱密码：长度虽达标但强度不足，服务端必须拒绝。
+    // 密码校验先于会话消费，拒绝后设密会话仍存活，可继续用同一 headers 重试。
+    await expect(
+      completePasswordEnrollment({ headers: setupHeaders, password: "passwordpassword" }),
+    ).rejects.toThrow("密码强度不足");
+
+    // 8 位、含大小写与数字 3 类字符、无弱模式 → 强度达标，服务端必须放行。
+    // 旧的 <12 长度校验会误拒这类合规密码，正是前端提示 8–128 却在设密提交时被卡的 UAT 断点。
+    const completed = await completePasswordEnrollment({
+      headers: setupHeaders,
+      password: "Snow2026",
+    });
+    expect(completed.status).toBe("authenticated");
+  });
 });
 
 describe("resolver", () => {
