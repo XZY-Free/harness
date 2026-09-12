@@ -83,6 +83,7 @@ import {
   type CreateInvocationParams,
   createInvocation,
   getInvocationById,
+  markBoundTurnRunning,
   updateInvocationState,
 } from "@/lib/runtime/invocation-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
@@ -430,7 +431,7 @@ export async function dispatchInvocationForTurn(params: {
     binding,
     routeResolution,
     attempt,
-    turn: updatedTurn,
+    turn: (await getTurnById(params.tenantId, params.turnId)) ?? updatedTurn,
     invocationQueuedEvent,
     turnQueuedEvent,
     runtimeDispatch,
@@ -767,6 +768,8 @@ async function dispatchToRuntime(params: {
         .where(eq(invocationTable.id, params.invocation.id));
     }
 
+    await markBoundTurnRunning(tx, params.invocation);
+
     // 分配 event sequence + 写 invocation.started Event
     const seq = await allocateEventSequences(tx, params.threadId, 1);
     return insertThreadEvent(tx, params.threadId, seq, {
@@ -842,6 +845,7 @@ async function handleIdempotencyConflict(params: {
     }
 
     await updateInvocationState(tx, params.tenantId, params.invocation.id, "running");
+    await markBoundTurnRunning(tx, params.invocation);
 
     await tx
       .update(invocationTable)

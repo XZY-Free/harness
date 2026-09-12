@@ -488,3 +488,26 @@ export async function listInvocationsByThread(
     .orderBy(asc(invocationTable.invocationSequence))
     .limit(limit);
 }
+
+/** 启动 Authority 在同一事务同步顶层 Turn；不覆盖已暂停、终结或由其他 Invocation 接管的回合。 */
+export async function markBoundTurnRunning(
+  tx: Tx,
+  invocation: Pick<Invocation, "id" | "threadId" | "turnId">,
+): Promise<void> {
+  if (!invocation.threadId || !invocation.turnId) return;
+  await tx
+    .update(turnTable)
+    .set({
+      turnState: "running",
+      startedAt: sql`COALESCE(${turnTable.startedAt}, ${new Date()})`,
+      versionNo: sql`${turnTable.versionNo} + 1`,
+    })
+    .where(
+      and(
+        eq(turnTable.id, invocation.turnId),
+        eq(turnTable.threadId, invocation.threadId),
+        eq(turnTable.activeInvocationId, invocation.id),
+        eq(turnTable.turnState, "queued"),
+      ),
+    );
+}

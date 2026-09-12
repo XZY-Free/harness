@@ -45,7 +45,11 @@ import {
   RuntimeSessionBindingConflictError,
 } from "@/lib/runtime/errors";
 import { getAttemptById, updateAttemptState } from "@/lib/runtime/invocation-attempt-queries";
-import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
+import {
+  getInvocationById,
+  markBoundTurnRunning,
+  updateInvocationState,
+} from "@/lib/runtime/invocation-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
@@ -505,6 +509,7 @@ async function applyAttemptStartAccepted(params: {
       startedAt: now,
     });
 
+    await markBoundTurnRunning(tx, updated);
     if (updated.threadId) {
       const seq = await allocateEventSequences(tx, updated.threadId, 1);
       invocationStartedEvent = await insertThreadEvent(tx, updated.threadId, seq, {
@@ -606,6 +611,7 @@ async function applyAttemptStartIdempotencyConflict(params: {
       startedAt: now,
     });
 
+    await markBoundTurnRunning(tx, updated);
     if (updated.threadId) {
       const seq = await allocateEventSequences(tx, updated.threadId, 1);
       invocationStartedEvent = await insertThreadEvent(tx, updated.threadId, seq, {

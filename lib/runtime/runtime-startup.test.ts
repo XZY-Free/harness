@@ -27,7 +27,7 @@ import {
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { resolveContextHandle } from "@/lib/context/context-handle";
 import { createThread } from "@/lib/conversations/thread-queries";
-import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
+import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
@@ -694,6 +694,10 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
 
     // Invocation 应已转为 running
     expect(result.invocation?.executionState).toBe("running");
+    const runningTurn = await getTurnById(ctx.tenantId, ctx.turnId);
+    expect(runningTurn?.turnState).toBe("running");
+    expect(runningTurn?.activeInvocationId).toBe(result.invocation?.id);
+    expect(runningTurn?.startedAt).toBeInstanceOf(Date);
     // mock client 被调用一次
     expect(mockClient.calls.startInvocation).toHaveLength(1);
     const startup = mockClient.calls.startInvocation[0]?.requestBody;
