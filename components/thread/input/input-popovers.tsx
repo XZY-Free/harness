@@ -273,7 +273,7 @@ export function AgentSelectorPopover({
           />
           <span
             data-slot="agent-label"
-            className="max-w-[72px] truncate font-medium leading-none tracking-[-0.005em] sm:max-w-[104px]"
+            className="max-w-[40px] truncate font-medium leading-none tracking-[-0.005em] sm:max-w-[104px]"
           >
             {currentAgent?.displayName ?? "选择助手"}
           </span>
@@ -406,7 +406,7 @@ export function ModelSelectorPopover({
             className="size-[15px] shrink-0 stroke-[1.65]"
             aria-hidden="true"
           />
-          <span className="max-w-[84px] truncate font-medium leading-none tracking-[-0.01em] sm:max-w-[120px]">
+          <span className="max-w-[52px] truncate font-medium leading-none tracking-[-0.01em] sm:max-w-[120px]">
             {selectedModelRef ?? "模型"}
           </span>
           <ChevronDown

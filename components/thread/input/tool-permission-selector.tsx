@@ -72,10 +72,12 @@ export function ToolPermissionSelector({
         disabled={disabled || saving}
         aria-label={`工具权限：${choices.find((choice) => choice.value === value)?.label}`}
       >
-        <span className="inline-flex h-[30px] items-center gap-1 rounded-full px-2 text-xs text-muted-foreground hover:bg-muted">
+        <span className="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground hover:bg-muted">
           <Shield aria-hidden="true" className="size-3.5" />
-          <span>{choices.find((choice) => choice.value === value)?.label}</span>
-          <ChevronDown aria-hidden="true" className="size-3" />
+          <span className="hidden whitespace-nowrap sm:inline">
+            {choices.find((choice) => choice.value === value)?.label}
+          </span>
+          <ChevronDown aria-hidden="true" className="hidden size-3 sm:block" />
         </span>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" className="w-72 max-w-[calc(100vw-24px)] p-2">
