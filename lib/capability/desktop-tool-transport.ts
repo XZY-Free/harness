@@ -5,7 +5,7 @@ import {
   ProviderExecutionError,
   type ProviderExecutionInput,
   readLimitedBody,
-} from "./provider-executor";
+} from "./provider-execution";
 
 export async function executeDesktopTool(
   input: ProviderExecutionInput,

@@ -5,7 +5,7 @@ import {
   ProviderExecutionError,
   type ProviderExecutionInput,
   type ProviderExecutionResult,
-} from "./provider-executor";
+} from "./provider-execution";
 
 export async function executeBuiltinShell(
   input: ProviderExecutionInput,

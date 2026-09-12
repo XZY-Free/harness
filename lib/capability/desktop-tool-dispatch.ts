@@ -10,7 +10,7 @@ import { verifyCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capa
 import { resolveToolExecutionTarget } from "@/lib/runtime/resolve-tool-execution-target";
 import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { and, eq, gt, isNull } from "drizzle-orm";
-import { ProviderExecutionError } from "./provider-executor";
+import { ProviderExecutionError } from "./provider-execution";
 import { getToolCallById } from "./tool-call-queries";
 import { parseToolExecutionContract } from "./tool-execution-contract";
 import { getToolSchemaRevisionById } from "./tool-queries";
