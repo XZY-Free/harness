@@ -272,6 +272,30 @@ describe("auth operation facade", () => {
     expect(response.headers.get("set-cookie")).toContain("snow_session=authenticated-token");
   });
 
+  it("首次设密拒绝弱密码与超短密码（PASSWORD_TOO_WEAK）", async () => {
+    for (const password of ["abc", "abc12345", "password123"]) {
+      const request = new NextRequest(
+        "https://snow.example.com/api/auth/setup-password?returnTo=/chat",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: "snow_session=setup-token",
+            origin: "https://snow.example.com",
+          },
+          body: JSON.stringify({ password, confirmPassword: password }),
+        },
+      );
+      const response = await POST(request, {
+        params: Promise.resolve({ operation: ["setup-password"] }),
+      });
+      expect(response.status).toBe(422);
+      const body = (await response.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("PASSWORD_TOO_WEAK");
+    }
+    expect(completePasswordEnrollment).not.toHaveBeenCalled();
+  });
+
   it("首次设密拒绝浏览器自报账号以及不一致的确认密码", async () => {
     for (const body of [
       {

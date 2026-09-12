@@ -115,29 +115,46 @@ describe("LoginScreen", () => {
 });
 
 describe("PasswordSetupScreen", () => {
-  it("只读展示企业账号，提交体只包含两次密码", async () => {
+  it("只读账号以弱底表面与企业身份 chip 呈现，规则说明仅对读屏可见", () => {
+    render(<PasswordSetupScreen account="zhangsan" returnTo="/chat" />);
+    expect(screen.getByText("zhangsan")).toBeTruthy();
+    expect(screen.getByText("企业身份")).toBeTruthy();
+    expect(screen.getByText("8–128 个字符，避免常见密码。").className).toContain("sr-only");
+  });
+
+  it("强度与匹配随输入实时判断", () => {
+    render(<PasswordSetupScreen account="zhangsan" returnTo="/chat" />);
+    const pwd = screen.getByLabelText("设置密码");
+    fireEvent.change(pwd, { target: { value: "abc12345" } });
+    expect(screen.getByText("太弱")).toBeTruthy();
+    expect(pwd.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(pwd, { target: { value: "wuchao@2026" } });
+    expect(screen.queryByText("太弱")).toBeNull();
+    expect(pwd.getAttribute("aria-invalid")).toBeNull();
+    const confirm = screen.getByLabelText("确认密码");
+    fireEvent.change(confirm, { target: { value: "wuchao@2026" } });
+    expect(screen.getByText("一致")).toBeTruthy();
+    fireEvent.change(confirm, { target: { value: "wuchao@2027" } });
+    expect(screen.getByText("不一致")).toBeTruthy();
+  });
+
+  it("弱密码在客户端拦截且不触达服务端", () => {
+    render(<PasswordSetupScreen account="zhangsan" returnTo="/chat" />);
+    fireEvent.change(screen.getByLabelText("设置密码"), { target: { value: "abc12345" } });
+    fireEvent.click(screen.getByRole("button", { name: `保存并进入 ${DEFAULT_BRAND.name}` }));
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("达标密码提交体只包含两次密码", async () => {
     apiFetch.mockResolvedValue(
       new Response(JSON.stringify({ authenticated: true, return_to: "/chat" }), { status: 200 }),
     );
     const onAuthenticated = vi.fn();
     render(
-      <PasswordSetupScreen
-        account="zhangsan"
-        displayName="张三"
-        returnTo="/chat"
-        onAuthenticated={onAuthenticated}
-      />,
+      <PasswordSetupScreen account="zhangsan" returnTo="/chat" onAuthenticated={onAuthenticated} />,
     );
-
-    const account = screen.getByLabelText("账号") as HTMLInputElement;
-    expect(account.value).toBe("zhangsan");
-    expect(account.readOnly).toBe(true);
-    fireEvent.change(screen.getByLabelText("设置密码"), {
-      target: { value: "correct horse battery" },
-    });
-    fireEvent.change(screen.getByLabelText("确认密码"), {
-      target: { value: "correct horse battery" },
-    });
+    fireEvent.change(screen.getByLabelText("设置密码"), { target: { value: "wuchao@2026" } });
+    fireEvent.change(screen.getByLabelText("确认密码"), { target: { value: "wuchao@2026" } });
     fireEvent.click(screen.getByRole("button", { name: `保存并进入 ${DEFAULT_BRAND.name}` }));
 
     await waitFor(() => expect(onAuthenticated).toHaveBeenCalledWith("/chat"));
@@ -145,24 +162,7 @@ describe("PasswordSetupScreen", () => {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        password: "correct horse battery",
-        confirmPassword: "correct horse battery",
-      }),
+      body: JSON.stringify({ password: "wuchao@2026", confirmPassword: "wuchao@2026" }),
     });
-  });
-
-  it("两次密码不一致时在浏览器内阻止提交", async () => {
-    render(<PasswordSetupScreen account="zhangsan" returnTo="/chat" />);
-    fireEvent.change(screen.getByLabelText("设置密码"), {
-      target: { value: "correct horse battery" },
-    });
-    fireEvent.change(screen.getByLabelText("确认密码"), {
-      target: { value: "different password" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: `保存并进入 ${DEFAULT_BRAND.name}` }));
-
-    expect((await screen.findByRole("alert")).textContent).toBe("两次输入的密码不一致");
-    expect(apiFetch).not.toHaveBeenCalled();
   });
 });

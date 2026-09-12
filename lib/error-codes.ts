@@ -83,6 +83,8 @@ export const API_ERROR_CODES = {
   BRAND_VALIDATION_FAILED: { http: 400, retryable: false },
   /** : 品牌字段已被 branding.json 或环境变量 pin，接口拒绝写入。 */
   BRAND_FIELD_PINNED: { http: 409, retryable: false },
+  /** : 首次设密密码强度不足（长度合规但估算分低于门槛或命中弱模式）。 */
+  PASSWORD_TOO_WEAK: { http: 422, retryable: false },
   RATE_LIMITED: { http: 429, retryable: true },
   REQUEST_SCHEMA_INVALID: { http: 400, retryable: false },
   RESOURCE_NOT_FOUND: { http: 404, retryable: false },

@@ -277,6 +277,10 @@
       "http": 409,
       "retryable": false
     },
+    "PASSWORD_TOO_WEAK": {
+      "http": 422,
+      "retryable": false
+    },
     "POLICY_BLOCKED": {
       "http": 403,
       "retryable": false

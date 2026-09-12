@@ -16,13 +16,7 @@ export default async function PasswordSetupPage({
     redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
-  return (
-    <PasswordSetupScreen
-      account={enrollment.account}
-      displayName={enrollment.displayName}
-      returnTo={returnTo}
-    />
-  );
+  return <PasswordSetupScreen account={enrollment.account} returnTo={returnTo} />;
 }
 
 function safeReturnTo(value: string | string[] | undefined): string {

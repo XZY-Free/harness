@@ -7,6 +7,7 @@ import {
   completePasswordEnrollment,
   establishExternalSession,
 } from "@/lib/identity/local-authentication";
+import { PASSWORD_MAX_LENGTH, isPasswordAcceptable } from "@/lib/identity/password-strength";
 import { acceptAuthenticatedEvidence } from "@/lib/identity/resolver";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
@@ -30,8 +31,8 @@ const loginSchema = z.object({
 
 const passwordSetupSchema = z
   .object({
-    password: z.string().min(12).max(1024),
-    confirmPassword: z.string().min(12).max(1024),
+    password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+    confirmPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
   })
   .strict()
   .refine((value) => value.password === value.confirmPassword, {
@@ -205,7 +206,12 @@ async function handle(
     }
     const parsed = passwordSetupSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
-      return apiError("REQUEST_SCHEMA_INVALID", "密码至少需要 12 个字符，且两次输入必须一致", {
+      return apiError("REQUEST_SCHEMA_INVALID", "密码长度需 8-128 个字符，且两次输入必须一致", {
+        requestId,
+      });
+    }
+    if (!isPasswordAcceptable(parsed.data.password)) {
+      return apiError("PASSWORD_TOO_WEAK", "密码强度不足：请避免常见密码并增加长度或字符种类", {
         requestId,
       });
     }
