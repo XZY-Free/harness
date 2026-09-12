@@ -3,6 +3,7 @@ import {
   resolveAgentActionBinding,
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { createProductionProviderExecutorRegistry } from "@/lib/capability/provider-executor";
+import { providerExecutorKind } from "@/lib/capability/provider-executor-kind";
 import {
   computeToolExecutionContractDigest,
   parseToolExecutionContract,
@@ -24,6 +25,7 @@ import {
   agentTable,
 } from "@/lib/persistence/schema/agents";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
+import { resolveToolExecutionTarget } from "@/lib/runtime/resolve-tool-execution-target";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { and, asc, eq } from "drizzle-orm";
 import {
@@ -37,6 +39,8 @@ export async function buildProductionCapabilityCatalog(input: {
   tenantId: string;
   invocationId: string;
   threadId: string;
+  workspaceBindingId?: string | null;
+  workspaceUnavailable?: boolean;
   preferredAgentId: string | null;
   runtimeRevisionId: string;
   policyRevisionId: string;
@@ -49,7 +53,9 @@ export async function buildProductionCapabilityCatalog(input: {
   if (input.executionSubject.tenantId !== input.tenantId || !input.executionSubject.subjectId) {
     throw new Error("CAPABILITY_CATALOG_SUBJECT_TENANT_MISMATCH");
   }
-  const unavailableFacts: string[] = [];
+  const unavailableFacts: string[] = input.workspaceUnavailable
+    ? ["execution_environment_unavailable:workspace_binding"]
+    : [];
   const sourceRefs = [
     `runtime-revision:${input.runtimeRevisionId}`,
     `policy-revision:${input.policyRevisionId}`,
@@ -216,7 +222,11 @@ async function loadAuthorizedTools(
         providerId: tool.providerId,
       });
       if (!provider || provider.lifecycleState !== "enabled") continue;
-      const executorKind = provider.providerType === "webhook" ? "webhook.post_json" : null;
+      const contract = parseToolExecutionContract(revision.executionContractJson);
+      const executorKind = providerExecutorKind(
+        provider.providerType,
+        contract.providerOperationMetadata,
+      );
       if (!executorKind || !registry.supports(provider.providerType, executorKind)) continue;
       const connection = provider.connectionId
         ? await getConnectionById({
@@ -224,25 +234,43 @@ async function loadAuthorizedTools(
             connectionId: provider.connectionId,
           })
         : null;
-      if (!connection || connection.lifecycleState !== "enabled" || !connection.endpointRef) {
+      if (
+        provider.providerType === "webhook" &&
+        (!connection || connection.lifecycleState !== "enabled" || !connection.endpointRef)
+      ) {
         continue;
       }
-      if (!["none", "bearer"].includes(connection.authMethod)) {
+      if (connection && !["none", "bearer"].includes(connection.authMethod)) {
         unavailableFacts.push(`tool_unavailable:${tool.id}:unsupported_auth_method`);
         continue;
       }
-      const contract = parseToolExecutionContract(revision.executionContractJson);
       if (computeToolExecutionContractDigest(contract) !== revision.executionContractDigest) {
         unavailableFacts.push(`tool_unavailable:${tool.id}:execution_contract_integrity`);
+        continue;
+      }
+      const executionTarget =
+        executorKind === "builtin.shell"
+          ? input.workspaceUnavailable
+            ? null
+            : await resolveToolExecutionTarget({
+                tenantId: input.tenantId,
+                threadId: input.threadId,
+                workspaceBindingId: input.workspaceBindingId ?? null,
+                ownerUserId: input.executionSubject.subjectId,
+              })
+          : undefined;
+      if (executionTarget === null) {
+        unavailableFacts.push(`tool_unavailable:${tool.id}:execution_environment_unavailable`);
         continue;
       }
       sourceRefs.push(
         `tool-schema:${revision.id}:${revision.schemaHash}`,
         `tool-execution-contract:${revision.id}:${revision.executionContractDigest}`,
         `tool-provider:${provider.id}:${provider.versionNo}`,
-        `connection:${connection.id}:${connection.versionNo}`,
+        ...(connection ? [`connection:${connection.id}:${connection.versionNo}`] : []),
       );
       result.push({
+        ...(executionTarget ? { executionTarget } : {}),
         toolId: tool.id,
         operationId: tool.toolKey,
         schemaRevisionId: revision.id,

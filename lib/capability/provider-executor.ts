@@ -1,4 +1,5 @@
 import { redactArguments } from "@/lib/capability/redact-arguments";
+import type { ToolExecutionTarget } from "@/lib/runtime/tool-execution-target";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
 export type ProviderRetryClass = "safe_transient" | "permanent" | "unknown_effect";
@@ -16,7 +17,11 @@ export class ProviderExecutionError extends Error {
 }
 
 export interface ProviderExecutionInput {
+  attemptId?: string;
+  executionTarget?: ToolExecutionTarget;
   endpoint: string;
+  /** 来自持久 ToolCall，不接受模型传入执行上下文。 */
+  threadId?: string;
   arguments: Record<string, unknown>;
   executionSubject: ExecutionSubject;
   invocationId: string;
@@ -52,6 +57,15 @@ export function createProductionProviderExecutorRegistry(
 ): ProductionProviderExecutorRegistry {
   const executors = new Map<string, ProductionProviderExecutor>([
     ["webhook\u0000webhook.post_json", createWebhookExecutor(options)],
+    ["builtin\u0000builtin.web_search", createBuiltinWebExecutor("web_search")],
+    ["builtin\u0000builtin.web_fetch", createBuiltinWebExecutor("web_fetch")],
+    [
+      "builtin\u0000builtin.shell",
+      {
+        execute: async (input) =>
+          (await import("./builtin-shell-executor")).executeBuiltinShell(input),
+      },
+    ],
   ]);
   return {
     supports(providerType, executorKind) {
@@ -213,9 +227,10 @@ function validateEndpoint(raw: string, allowLoopbackHttp: boolean): URL {
   return endpoint;
 }
 
-async function readLimitedBody(response: Response, maxBytes: number): Promise<unknown> {
+export async function readLimitedBody(response: Response, maxBytes: number): Promise<unknown> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel();
     throw new ProviderExecutionError(
       "PROVIDER_RESPONSE_TOO_LARGE",
       "Provider 响应超过合同限制",
@@ -263,4 +278,90 @@ function redactProviderResult(value: unknown): unknown {
 
 function canRetryAfterUncertainDispatch(input: ProviderExecutionInput): boolean {
   return input.sideEffectMode !== "write" || input.externalIdempotencyKey !== null;
+}
+
+function createBuiltinWebExecutor(
+  operation: "web_search" | "web_fetch",
+): ProductionProviderExecutor {
+  return {
+    async execute(input) {
+      if (!input.threadId || input.sideEffectMode !== "read") {
+        throw new ProviderExecutionError(
+          "BUILTIN_CONTEXT_INVALID",
+          "内置工具执行上下文不完整",
+          "permanent",
+          false,
+        );
+      }
+      const { webConfig } = await import("@/lib/config");
+      if (webConfig.domainAllowlist.length === 0) {
+        throw new ProviderExecutionError(
+          "WEB_ACCESS_NOT_CONFIGURED",
+          "当前执行环境未配置可访问域名",
+          "permanent",
+          false,
+        );
+      }
+      let result:
+        | Awaited<ReturnType<typeof import("@/lib/external/search").webSearch>>
+        | Awaited<ReturnType<typeof import("@/lib/external/fetch").fetchUrl>>;
+      if (operation === "web_search") {
+        const { webSearch } = await import("@/lib/external/search");
+        if (typeof input.arguments.query !== "string" || !input.arguments.query.trim())
+          throw new ProviderExecutionError(
+            "BUILTIN_ARGUMENT_INVALID",
+            "搜索词不能为空",
+            "permanent",
+            false,
+          );
+        result = await webSearch({
+          query: input.arguments.query,
+          threadId: input.threadId,
+          timeoutMs: input.timeoutMs,
+        });
+      } else {
+        const { classifyDomain, fetchUrl } = await import("@/lib/external/fetch");
+        if (typeof input.arguments.url !== "string")
+          throw new ProviderExecutionError(
+            "BUILTIN_ARGUMENT_INVALID",
+            "网页地址不能为空",
+            "permanent",
+            false,
+          );
+        const access = classifyDomain(input.arguments.url);
+        if (access.decision !== "allow")
+          throw new ProviderExecutionError(
+            "WEB_DOMAIN_NOT_ALLOWED",
+            "网页域名不在当前执行环境允许范围内",
+            "permanent",
+            false,
+          );
+        result = await fetchUrl({
+          url: input.arguments.url,
+          threadId: input.threadId,
+          timeoutMs: input.timeoutMs,
+        });
+      }
+      if (!result.ok)
+        throw new ProviderExecutionError(
+          "WEB_REQUEST_FAILED",
+          "网页工具未取得有效结果",
+          "permanent",
+          true,
+        );
+      if (Buffer.byteLength(JSON.stringify(result)) > input.responseMaxBytes)
+        throw new ProviderExecutionError(
+          "PROVIDER_RESPONSE_TOO_LARGE",
+          "网页结果超过执行合同限制",
+          "permanent",
+          true,
+        );
+      return {
+        status: "succeeded",
+        statusCode: 200,
+        result: redactArguments({ result }).result,
+        providerRequestRef: null,
+      };
+    },
+  };
 }

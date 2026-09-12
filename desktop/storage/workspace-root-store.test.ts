@@ -1,5 +1,9 @@
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
+import { executeWorkspaceCommand } from "../bridge/workspace-command";
 import type { MigrationDb, PreparedStmt } from "./db-interface";
 import { WorkspaceRootStore } from "./workspace-root-store";
 
@@ -23,6 +27,56 @@ function createDb(): { raw: Database.Database; db: MigrationDb } {
 }
 
 describe("WorkspaceRootStore", () => {
+  it.runIf(process.platform === "darwin")(
+    "本机命令使用 SQLite 绑定目录和真实沙箱，不能读取工作区外文件",
+    async () => {
+      const { raw, db } = createDb();
+      const root = await realpath(await mkdtemp(join(tmpdir(), "snow-native-shell-")));
+      const outside = `${root}-outside`;
+      await writeFile(outside, "test-only-outside-marker");
+      const store = new WorkspaceRootStore(db);
+      store.upsert({
+        bindingId: "bound",
+        workspaceId: "workspace",
+        absolutePath: root,
+        displayName: "native test",
+      });
+      try {
+        const result = await executeWorkspaceCommand(store, {
+          bindingId: "bound",
+          command: "/bin/date -u +%Y-%m-%d",
+          timeoutMs: 5000,
+          logCapBytes: 8192,
+        });
+        expect(result, JSON.stringify(result)).toMatchObject({
+          ok: true,
+          exitCode: 0,
+          workingDirectory: root,
+          stdout: expect.stringMatching(/^\d{4}-\d{2}-\d{2}/),
+        });
+        const denied = await executeWorkspaceCommand(store, {
+          bindingId: "bound",
+          command: `/bin/cat '${outside}'`,
+          timeoutMs: 5000,
+          logCapBytes: 8192,
+        });
+        expect(denied.ok).toBe(false);
+        expect(denied.stdout).not.toContain("test-only-outside-marker");
+        await expect(
+          executeWorkspaceCommand(store, {
+            bindingId: "missing",
+            command: "date",
+            timeoutMs: 5000,
+            logCapBytes: 8192,
+          }),
+        ).rejects.toThrow();
+      } finally {
+        raw.close();
+        await rm(root, { recursive: true, force: true });
+        await rm(outside, { force: true });
+      }
+    },
+  );
   it("按 binding id 保存并更新只留在本机的绝对路径", () => {
     const { raw, db } = createDb();
     const store = new WorkspaceRootStore(db);

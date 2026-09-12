@@ -37,10 +37,12 @@ import {
 import { NonceDeduplicator, validateRpcEnvelope } from "../../lib/desktop/rpc-security";
 import { getAuthSignPayload, signData } from "../../lib/desktop/signing";
 import type { AiLockManager } from "../browser/ai-lock";
+import type { WorkspaceRootStore } from "../storage/workspace-root-store";
 import { executeActionCommand, executeReadCommand } from "./command-executor";
 import type { BrowserActionTarget, BrowserCommandTarget } from "./command-executor";
 import { dispatchControlEvent } from "./control-handlers";
 import type { DeviceIdentity } from "./device-identity";
+import { executeWorkspaceCommand } from "./workspace-command";
 
 /**
  * Bridge 客户端配置。
@@ -63,6 +65,7 @@ export interface BridgeClientConfig {
   commandTarget: BrowserCommandTarget;
   /** 操作类命令执行目标（BrowserController 适配器） */
   actionTarget: BrowserActionTarget;
+  workspaceRoots?: Pick<WorkspaceRootStore, "get">;
   /** 心跳间隔（毫秒），默认 30000 */
   heartbeatIntervalMs?: number;
   /** 重连基础延迟（毫秒），默认 1000 */
@@ -88,6 +91,14 @@ interface RpcResultError {
  * 管理 WebSocket 连接生命周期、认证握手、RPC 收发、心跳和重连。
  */
 export class BridgeClient {
+  private workspaceCommands = new Map<AbortController, { threadId: string; runId: string }>();
+
+  private abortWorkspaceCommands(threadId?: string, runId?: string): void {
+    for (const [controller, command] of this.workspaceCommands) {
+      if ((!threadId || command.threadId === threadId) && (!runId || command.runId === runId))
+        controller.abort();
+    }
+  }
   private ws: WebSocket | null = null;
   private stateMachine = new ConnectionStateMachine();
   private nonceDedup = new NonceDeduplicator();
@@ -128,6 +139,7 @@ export class BridgeClient {
    * 主动断开不会触发自动重连。
    */
   disconnect(): void {
+    this.abortWorkspaceCommands();
     this.manualDisconnect = true;
     this.stopHeartbeat();
     this.clearReconnectTimer();
@@ -273,6 +285,7 @@ export class BridgeClient {
         this.handleHeartbeat(msg.timestamp);
         break;
       case "lease_revoked":
+        this.abortWorkspaceCommands(msg.threadId);
         this.handleLeaseRevoked(msg.threadId, msg.reason);
         break;
       case "lease_locked":
@@ -287,6 +300,7 @@ export class BridgeClient {
         );
         break;
       case "command_cancelled":
+        this.abortWorkspaceCommands(msg.threadId, msg.runId);
         this.config.aiLockManager?.release(
           msg.threadId,
           this.config.deviceIdentity.deviceId,
@@ -460,19 +474,48 @@ export class BridgeClient {
     }
 
     // 3. 根据命令类型分发：操作类 → executeActionCommand，读取类 → executeReadCommand
-    const result = isActionCommand(validation.envelope.command)
-      ? await executeActionCommand({
-          target: this.config.actionTarget,
-          command: validation.envelope.command,
-          payload: validation.envelope.payload,
-          threadId: validation.envelope.threadId,
-        })
-      : await executeReadCommand({
-          target: this.config.commandTarget,
-          command: validation.envelope.command,
-          payload: validation.envelope.payload,
-          threadId: validation.envelope.threadId,
-        });
+    const result =
+      validation.envelope.command === "workspace.execute"
+        ? await (async () => {
+            if (!this.config.workspaceRoots)
+              return { ok: false, code: "workspace_unavailable", message: "本机工作区未就绪" };
+            if (!validation.envelope.runId)
+              return { ok: false, code: "lease_required", message: "命令必须绑定执行租约" };
+            const controller = new AbortController();
+            this.workspaceCommands.set(controller, {
+              threadId: validation.envelope.threadId,
+              runId: validation.envelope.runId,
+            });
+            try {
+              const output = await executeWorkspaceCommand(
+                this.config.workspaceRoots,
+                validation.envelope.payload as Parameters<typeof executeWorkspaceCommand>[1],
+                controller.signal,
+              );
+              return { ok: true, result: output };
+            } catch {
+              return {
+                ok: false,
+                code: "workspace_execution_rejected",
+                message: "本机工作区或沙箱不可用，未执行命令",
+              };
+            } finally {
+              this.workspaceCommands.delete(controller);
+            }
+          })()
+        : isActionCommand(validation.envelope.command)
+          ? await executeActionCommand({
+              target: this.config.actionTarget,
+              command: validation.envelope.command,
+              payload: validation.envelope.payload,
+              threadId: validation.envelope.threadId,
+            })
+          : await executeReadCommand({
+              target: this.config.commandTarget,
+              command: validation.envelope.command,
+              payload: validation.envelope.payload,
+              threadId: validation.envelope.threadId,
+            });
 
     // 4. 签名并发送结果
     if (result.ok) {
@@ -670,6 +713,7 @@ export class BridgeClient {
    * 处理 WebSocket 断开。
    */
   private handleClose(): void {
+    this.abortWorkspaceCommands();
     this.stopHeartbeat();
     this.serverPublicKeyBase64 = null;
 

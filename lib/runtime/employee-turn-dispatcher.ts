@@ -67,8 +67,7 @@ export interface EmployeeTurnDispatchResult {
     | "no_effective_route"
     | "ambiguous_route_configuration"
     | "invalid_traffic_weight_total"
-    | "agent_revision_not_found"
-    | "workspace_binding_unavailable";
+    | "agent_revision_not_found";
   /** Agent Loop 的后台执行；HTTP 路由不等待它，测试可等待。 */
   completion: Promise<void>;
 }
@@ -78,7 +77,6 @@ const ROUTE_FAILURE_CODES = {
   ambiguous_route_configuration: "AMBIGUOUS_RUNTIME_ROUTE",
   invalid_traffic_weight_total: "INVALID_RUNTIME_ROUTE_WEIGHT",
   agent_revision_not_found: "RUNTIME_ROUTE_TARGET_NOT_FOUND",
-  workspace_binding_unavailable: "WORKSPACE_BINDING_UNAVAILABLE",
   dispatch_error: "TURN_DISPATCH_ERROR",
 } as const;
 

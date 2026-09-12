@@ -42,6 +42,7 @@ export async function webSearch(params: {
   domainFilter?: string[];
   fetchImpl?: typeof fetch;
   maxResults?: number;
+  timeoutMs?: number;
 }): Promise<SearchResult_> {
   const { query } = params;
   const allowlist = params.domainFilter ?? webConfig.domainAllowlist;
@@ -57,7 +58,8 @@ export async function webSearch(params: {
   const max = params.maxResults ?? 8;
   const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), webConfig.timeoutMs);
+  const timeoutMs = Math.min(params.timeoutMs ?? webConfig.timeoutMs, webConfig.timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetchImpl(ddgUrl, {
       signal: controller.signal,
@@ -89,8 +91,7 @@ export async function webSearch(params: {
     return { ok: true, query, results, source };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("abort"))
-      return { ok: false, error: `search 超时（${webConfig.timeoutMs}ms）` };
+    if (msg.includes("abort")) return { ok: false, error: `search 超时（${timeoutMs}ms）` };
     return { ok: false, error: msg };
   } finally {
     clearTimeout(timer);

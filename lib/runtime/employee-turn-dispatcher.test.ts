@@ -14,6 +14,7 @@ import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
+import { registerBuiltinTools } from "@/lib/capability/builtin-tools";
 import { requestInterrupt } from "@/lib/conversations/interrupt-queries";
 import { requestPausedTurnResume } from "@/lib/conversations/pause-resume-queries";
 import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regenerate-queries";
@@ -24,7 +25,7 @@ import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-que
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
-import { registerDevice } from "@/lib/identity/device-queries";
+import { registerDevice, revokeDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
@@ -513,48 +514,74 @@ async function createExternalResumeCommand(params: {
 }
 
 describe("dispatchEmployeeTurn", () => {
-  it("桌面目录选择写入不可变 ExecutionBinding，不能静默退回 Cloud 模式", async () => {
-    const fixture = await seedReadyEmployeeTurn("desktop-workspace-binding");
-    await registerDevice({
-      tenantId: fixture.tenantId,
-      userId: fixture.ownerId,
-      deviceKey: "desktop-device-1",
-      publicKey: "public-key",
-      deviceName: "Mac",
-      appVersion: "1.0.0",
-    });
-    const workspace = await ensureDesktopWorkspace({
-      tenantId: fixture.tenantId,
-      userId: fixture.ownerId,
-      deviceKey: "desktop-device-1",
-      displayName: "snow_harness",
-      locationFingerprint: `sha256:${"b".repeat(64)}`,
-    });
-    await db
-      .update(threadTable)
-      .set({ defaultWorkspaceId: workspace.workspaceId })
-      .where(eq(threadTable.id, fixture.thread.id));
-
-    const result = await dispatchEmployeeTurn({
-      tenantId: fixture.tenantId,
-      threadId: fixture.thread.id,
-      turnId: fixture.turn.id,
-      executionSubject: {
+  it.each([false, true])(
+    "桌面绑定冻结；设备撤销只禁用命令，不阻断基础聊天（revoked=%s）",
+    async (revoked) => {
+      const fixture = await seedReadyEmployeeTurn("desktop-workspace-binding");
+      await registerDevice({
         tenantId: fixture.tenantId,
-        subjectType: "user",
-        subjectId: fixture.ownerId,
-      },
-    });
+        userId: fixture.ownerId,
+        deviceKey: "desktop-device-1",
+        publicKey: "public-key",
+        deviceName: "Mac",
+        appVersion: "1.0.0",
+      });
+      const workspace = await ensureDesktopWorkspace({
+        tenantId: fixture.tenantId,
+        userId: fixture.ownerId,
+        deviceKey: "desktop-device-1",
+        displayName: "snow_harness",
+        locationFingerprint: `sha256:${"b".repeat(64)}`,
+      });
+      await db
+        .update(threadTable)
+        .set({ defaultWorkspaceId: workspace.workspaceId })
+        .where(eq(threadTable.id, fixture.thread.id));
+      await registerBuiltinTools({ tenantId: fixture.tenantId, ownerUserId: fixture.ownerId });
+      if (revoked) await revokeDevice(fixture.tenantId, "desktop-device-1");
 
-    expect(result.dispatched).toBe(true);
-    const dispatchedTurn = await getTurnById(fixture.tenantId, fixture.turn.id);
-    const [binding] = await db
-      .select()
-      .from(executionBindingTable)
-      .where(eq(executionBindingTable.invocationId, dispatchedTurn?.activeInvocationId ?? ""))
-      .limit(1);
-    expect(binding?.workspaceBindingId).toBe(workspace.bindingId);
-  });
+      const result = await dispatchEmployeeTurn({
+        tenantId: fixture.tenantId,
+        threadId: fixture.thread.id,
+        turnId: fixture.turn.id,
+        decisionPort: {
+          async decideNextAction() {
+            return {
+              actionId: "basic-reply",
+              stepNo: 1,
+              actionType: "respond",
+              purposeCode: "answer_ready",
+              shortPurpose: "直接回答",
+              payload: { evidenceRefs: [] },
+            };
+          },
+        },
+        finalResponsePort: {
+          async generateFinalResponse() {
+            return "基础聊天可以继续。";
+          },
+        },
+        executionSubject: {
+          tenantId: fixture.tenantId,
+          subjectType: "user",
+          subjectId: fixture.ownerId,
+        },
+      });
+
+      expect(result.dispatched).toBe(true);
+      const dispatchedTurn = await getTurnById(fixture.tenantId, fixture.turn.id);
+      const [binding] = await db
+        .select()
+        .from(executionBindingTable)
+        .where(eq(executionBindingTable.invocationId, dispatchedTurn?.activeInvocationId ?? ""))
+        .limit(1);
+      expect(binding?.workspaceBindingId).toBe(revoked ? null : workspace.bindingId);
+      const catalog = binding?.capabilityCatalogJson as { tools: Array<{ operationId: string }> };
+      expect(catalog.tools.some((tool) => tool.operationId === "shell")).toBe(!revoked);
+      await result.completion;
+      expect((await getTurnById(fixture.tenantId, fixture.turn.id))?.turnState).toBe("completed");
+    },
+  );
 
   it("基础 Harness Route 缺失时把已接纳 Turn 明确收口为失败，不无限停在 accepted", async () => {
     const tenant = await ensureDefaultTenant();
@@ -1084,6 +1111,11 @@ describe("dispatchEmployeeTurn", () => {
     expect((await getInvocationById(tenantId, invocationId))?.executionState).toBe("cancelled");
     expect(await listItemsByThread(tenantId, thread.id)).toEqual([
       expect.objectContaining({ itemType: "user_message" }),
+      expect.objectContaining({
+        itemType: "user_guidance",
+        contextPolicy: "exclude",
+        contentJson: expect.objectContaining({ kind: "progress.snapshot" }),
+      }),
     ]);
   });
 });

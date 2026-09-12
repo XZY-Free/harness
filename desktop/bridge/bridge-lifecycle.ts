@@ -1,5 +1,6 @@
 import type { ConnectionState } from "../../lib/desktop/connection-state";
 import type { AiLockManager } from "../browser/ai-lock";
+import type { WorkspaceRootStore } from "../storage/workspace-root-store";
 import { BridgeClient } from "./bridge-client";
 /**
  * Desktop Bridge 生命周期控制器。
@@ -39,6 +40,7 @@ export interface DesktopBridgeLifecycleDeps {
   commandTarget: BrowserCommandTarget;
   /** 操作类命令执行目标（BrowserController 适配器）。 */
   actionTarget: BrowserActionTarget;
+  workspaceRoots?: Pick<WorkspaceRootStore, "get">;
   /** 本地 AI 输入锁（可选）。 */
   aiLockManager?: AiLockManager;
 }
@@ -154,6 +156,7 @@ export class DesktopBridgeLifecycle {
       deviceVersion: this.deps.deviceVersion,
       commandTarget: this.deps.commandTarget,
       actionTarget: this.deps.actionTarget,
+      workspaceRoots: this.deps.workspaceRoots,
       aiLockManager: this.deps.aiLockManager,
     });
     this.clientUnsubscribe = this.client.onStateChange((state) => {

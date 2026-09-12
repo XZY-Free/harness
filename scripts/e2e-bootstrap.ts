@@ -23,6 +23,7 @@
  * 由 `scripts/e2e-start.mts` 以子进程方式调用，DATABASE_URL 由父进程注入。
  */
 import { randomUUID } from "node:crypto";
+import { registerBuiltinTools } from "@/lib/capability/builtin-tools";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
 import { bootstrapLocalAdmin } from "@/lib/identity/local-authentication";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
     displayName: E2E_ADMIN_NAME,
     password: E2E_ADMIN_PASSWORD,
   });
+  await registerBuiltinTools({ tenantId: tenant.id, ownerUserId: identity.id });
 
   const suffix = randomUUID().slice(0, 8);
   const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(

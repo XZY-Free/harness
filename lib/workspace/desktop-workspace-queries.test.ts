@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { registerDevice, revokeDevice } from "@/lib/identity/device-queries";
 import { tenant, userIdentity } from "@/lib/persistence/schema/identity";
+import { resolveToolExecutionTarget } from "@/lib/runtime/resolve-tool-execution-target";
 import { describe, expect, it } from "vitest";
 import { ensureDesktopWorkspace, resolveWorkspaceBindingId } from "./desktop-workspace-queries";
 
@@ -40,6 +41,23 @@ describe("Desktop Workspace 绑定", () => {
     const second = await ensureDesktopWorkspace(input);
 
     expect(second).toEqual(first);
+    const targetInput = {
+      tenantId,
+      threadId: "target-thread",
+      workspaceBindingId: first.bindingId,
+      ownerUserId: userId,
+    };
+    await expect(resolveToolExecutionTarget(targetInput)).resolves.toMatchObject({
+      kind: "desktop",
+      workspaceBindingId: first.bindingId,
+      ownerUserId: userId,
+    });
+    await expect(
+      resolveToolExecutionTarget({ ...targetInput, tenantId: randomUUID() }),
+    ).resolves.toBeNull();
+    await expect(
+      resolveToolExecutionTarget({ ...targetInput, ownerUserId: randomUUID() }),
+    ).resolves.toBeNull();
     await expect(resolveWorkspaceBindingId(tenantId, first.workspaceId, userId)).resolves.toBe(
       first.bindingId,
     );
@@ -48,6 +66,7 @@ describe("Desktop Workspace 绑定", () => {
     ).resolves.toBeNull();
 
     await revokeDevice(tenantId, "device-key-1");
+    await expect(resolveToolExecutionTarget(targetInput)).resolves.toBeNull();
     await expect(
       resolveWorkspaceBindingId(tenantId, first.workspaceId, userId),
     ).resolves.toBeNull();

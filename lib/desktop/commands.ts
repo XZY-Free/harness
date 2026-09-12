@@ -32,6 +32,7 @@ export type ReadCommand = (typeof READ_COMMANDS)[number];
  * 操作类命令（修改浏览器状态，需要 approval）。
  */
 export const ACTION_COMMANDS = [
+  "workspace.execute",
   "browser.navigate",
   "browser.click",
   "browser.doubleClick",
@@ -64,6 +65,7 @@ export type AllowedCommand = (typeof ALLOWED_COMMANDS)[number];
  * RPC 线路使用 V10 dotted 格式（browser.getTabs）。
  */
 export const TOOL_TO_COMMAND: Record<string, AllowedCommand> = {
+  shellExecute: "workspace.execute",
   browserGetTabs: "browser.getTabs",
   browserSnapshot: "browser.snapshot",
   browserGetConsole: "browser.getConsole",
@@ -91,6 +93,15 @@ export const COMMAND_TO_TOOL: Record<AllowedCommand, string> = Object.fromEntrie
  * 命令的 payload schema。
  */
 export const commandPayloadSchemas: Record<AllowedCommand, z.ZodType> = {
+  "workspace.execute": z
+    .object({
+      threadId: z.string().min(1),
+      bindingId: z.string().min(1),
+      command: z.string().min(1).max(8192),
+      timeoutMs: z.number().int().min(100).max(30000),
+      logCapBytes: z.number().int().min(1).max(10000),
+    })
+    .strict(),
   // ── 读取类 ──
   "browser.getTabs": z.object({ threadId: z.string().min(1) }),
   "browser.getPageMetadata": z.object({

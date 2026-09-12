@@ -1,5 +1,5 @@
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type ProviderExecutionError,
   createProductionProviderExecutorRegistry,
@@ -8,6 +8,9 @@ import {
 const servers: Array<ReturnType<typeof createServer>> = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await Promise.all(
     servers
       .splice(0)
@@ -25,9 +28,50 @@ async function listen(handler: (request: IncomingMessage, response: ServerRespon
 }
 
 describe("production provider executor registry", () => {
+  it("联网工具遵守执行合同超时，不使用更宽松的全局超时", async () => {
+    vi.stubEnv("WEB_FETCH_DOMAIN_ALLOWLIST", "example.com");
+    vi.stubEnv("WEB_FETCH_TIMEOUT_MS", "15000");
+    let aborted = false;
+    vi.stubGlobal(
+      "fetch",
+      (_url: unknown, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          });
+        }),
+    );
+    const executor = createProductionProviderExecutorRegistry().get(
+      "builtin",
+      "builtin.web_search",
+    );
+    const pending = executor
+      .execute({
+        endpoint: "",
+        threadId: "timeout-thread",
+        arguments: { query: "example" },
+        executionSubject: { tenantId: "tenant", subjectType: "user", subjectId: "owner" },
+        invocationId: "inv",
+        toolCallId: "call",
+        traceId: "trace",
+        externalIdempotencyKey: null,
+        sideEffectMode: "read",
+        timeoutMs: 100,
+        responseMaxBytes: 8192,
+        credential: null,
+      })
+      .catch((error) => error);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(aborted).toBe(true);
+    await expect(pending).resolves.toMatchObject({ code: "WEB_REQUEST_FAILED", dispatched: true });
+  });
   it("只注册真实 executor，不把 unsupported provider fallback 成 webhook", () => {
     const registry = createProductionProviderExecutorRegistry({ allowLoopbackHttp: true });
     expect(registry.supports("webhook", "webhook.post_json")).toBe(true);
+    expect(registry.supports("builtin", "builtin.web_search")).toBe(true);
+    expect(registry.supports("builtin", "builtin.web_fetch")).toBe(true);
+    expect(registry.supports("builtin", "builtin.shell")).toBe(true);
     expect(registry.supports("mcp", "webhook.post_json")).toBe(false);
     expect(registry.supports("custom", "webhook.post_json")).toBe(false);
   });

@@ -345,6 +345,7 @@ async function main(): Promise<void> {
     deviceVersion: app.getVersion(),
     commandTarget,
     actionTarget,
+    workspaceRoots: desktopDatabase.workspaceRoots,
     aiLockManager,
   });
 

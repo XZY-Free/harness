@@ -2,6 +2,7 @@ import { workspaceRoot } from "@/lib/workspace";
 import { execInContainer } from "./container/docker-cli";
 import { startContainer, touchActivity } from "./container/manager";
 import { type SecretEnvMap, prepareContainerStartOptions } from "./container/start-options";
+import { executeLocalCommand } from "./local-command";
 import { wrapWithHostRlimits } from "./rlimit";
 import { buildSafeEnv } from "./safe-env";
 import { wrapWithHostSandbox } from "./sandbox";
@@ -71,60 +72,18 @@ export class HostExecutionRuntime implements ExecutionRuntime {
       }
     }
     try {
-      const { execa } = await import("execa");
-      // host Linux 用 prlimit 施加 nofile/nproc 软限（非 Linux 原样返回）。
       const limited = wrapWithHostRlimits(command, this.quota);
-      // host Linux bwrap 沙箱（config-gated，默认 off，bwrap 不可用 fail-open）。
       const sandboxed = await wrapWithHostSandbox(limited, cwd);
-      const subprocess = execa(sandboxed, {
+      const result = await executeLocalCommand({
+        command: sandboxed,
         cwd,
-        shell: true,
-        // Unix 上建立独立进程组，timeout 时可以连同 shell 派生的子进程一起终止。
-        detached: process.platform !== "win32",
-        timeout,
-        reject: false,
-        maxBuffer: 1024 * 1024, // 1MB
-        // timeout 后最多等待 1s 再强制终止，避免 shell 子进程让调用超过 timeout 太久。
-        forceKillAfterDelay: 1_000,
-        // P1 修复(02-):env 白名单过滤,防 AI 命令 printenv 泄露平台 secret。
-        // 白名单(PATH/HOME/NPM_CONFIG_* 等)+ 敏感关键字黑名单兜底;secretsCache 显式注入。
+        timeoutMs: timeout,
+        logCapBytes: cap,
         env: buildSafeEnv(this.secretsCache),
-        // execa 默认继承 process.env；否则白名单会被宿主环境重新补回。
-        extendEnv: false,
-        // 注入 AbortSignal，让 execa 子进程响应取消
         signal: opts?.signal,
+        onChunk: opts?.onChunk,
       });
-      // 流式回写——caller 传 onChunk 时逐块推送 stdout/stderr
-      if (opts?.onChunk) {
-        const onChunk = opts.onChunk;
-        subprocess.stdout?.on("data", (d: Buffer) => onChunk("stdout", d.toString()));
-        subprocess.stderr?.on("data", (d: Buffer) => onChunk("stderr", d.toString()));
-      }
-      // execa 的 timeout 只 kill 外层 shell；独立进程组兜底清理其派生进程，避免管道仍被
-      // 子进程持有而让 Promise 延迟到子进程自然退出。
-      const processGroupKillTimer =
-        process.platform !== "win32" && timeout > 0
-          ? setTimeout(() => {
-              if (!subprocess.pid) return;
-              try {
-                process.kill(-subprocess.pid, "SIGKILL");
-              } catch {
-                // 进程已自然退出时忽略 ESRCH 等竞态错误。
-              }
-            }, timeout + 1_000)
-          : undefined;
-      try {
-        const result = await subprocess;
-        return {
-          ok: result.exitCode === 0,
-          exitCode: result.exitCode ?? null,
-          stdout: result.stdout.slice(0, cap),
-          stderr: result.stderr.slice(0, cap),
-          command,
-        };
-      } finally {
-        if (processGroupKillTimer) clearTimeout(processGroupKillTimer);
-      }
+      return { ...result, command };
     } catch (error) {
       // spawn 级失败（ENOENT / timeout 等）——对齐现有 runCommand/runTests 的 catch 兜底
       return {

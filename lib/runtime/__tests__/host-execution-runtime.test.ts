@@ -1,6 +1,11 @@
-import { mkdir, rm } from "node:fs/promises";
+import { access, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import {
+  type ProviderExecutionInput,
+  createProductionProviderExecutorRegistry,
+} from "@/lib/capability/provider-executor";
 import { HostExecutionRuntime } from "@/lib/runtime/execution-runtime";
+import { resolveToolExecutionTarget } from "@/lib/runtime/resolve-tool-execution-target";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -24,6 +29,83 @@ afterEach(async () => {
 });
 
 describe("HostExecutionRuntime", () => {
+  it("取消时终止派生进程，不能在取消后继续写文件", async () => {
+    const controller = new AbortController();
+    const runtime = new HostExecutionRuntime(TID);
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const pending = runtime.exec(
+      `node -e "console.log('ready'); setTimeout(() => require('fs').writeFileSync('late-write', 'unexpected'), 400)" & wait`,
+      {
+        signal: controller.signal,
+        timeoutMs: 5000,
+        onChunk: (_stream, chunk) => {
+          if (chunk.includes("ready")) started();
+        },
+      },
+    );
+    await ready;
+    controller.abort();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await expect(access(join(TEST_ROOT, TID, "late-write"))).rejects.toThrow();
+  });
+  it("内置命令使用冻结的宿主目标，返回真实时间、目录和退出码；桌面目标不降级", async () => {
+    vi.stubEnv("RUNTIME_DEFAULT", "host");
+    const target = await resolveToolExecutionTarget({
+      tenantId: "tenant",
+      threadId: TID,
+      ownerUserId: "owner",
+      workspaceBindingId: null,
+    });
+    expect(target?.kind).toBe("host");
+    const executor = createProductionProviderExecutorRegistry().get("builtin", "builtin.shell");
+    const input: ProviderExecutionInput = {
+      endpoint: "",
+      threadId: TID,
+      executionTarget: target!,
+      arguments: { command: 'node -p "new Date().toISOString()"' },
+      executionSubject: { tenantId: "tenant", subjectType: "user", subjectId: "owner" },
+      invocationId: "inv",
+      toolCallId: "call",
+      traceId: "trace",
+      externalIdempotencyKey: null,
+      sideEffectMode: "write",
+      timeoutMs: 5000,
+      responseMaxBytes: 8192,
+      credential: null,
+    };
+    // 后续配置变化不得让既有任务切换执行环境。
+    vi.stubEnv("RUNTIME_DEFAULT", "container");
+    const result = await executor.execute(input);
+    expect(result.result).toMatchObject({
+      ok: true,
+      exitCode: 0,
+      executionEnvironment: "host",
+      workingDirectory: join(TEST_ROOT, TID),
+      stdout: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+    await expect(
+      executor.execute({
+        ...input,
+        executionTarget: {
+          kind: "desktop",
+          threadId: TID,
+          workspaceBindingId: "binding",
+          deviceId: "device",
+          ownerUserId: "owner",
+          bindingVersion: "version",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "DESKTOP_EXECUTION_UNAVAILABLE", dispatched: false });
+    vi.stubEnv("SNOW_WORKSPACES_DIR", `${TEST_ROOT}-moved`);
+    await expect(executor.execute(input)).rejects.toMatchObject({
+      code: "WORKSPACE_LOCATION_CHANGED",
+      dispatched: false,
+    });
+  });
   it("真实子进程不继承平台秘密，只接收显式授权的注入", async () => {
     vi.stubEnv("SNOW_EXECUTION_TEST_SECRET", "test-only-marker");
     const runtime = new HostExecutionRuntime(TID);

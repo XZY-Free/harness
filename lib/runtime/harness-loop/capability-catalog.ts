@@ -1,5 +1,6 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import Ajv from "ajv";
+import type { ToolExecutionTarget } from "../tool-execution-target";
 import type { HarnessNextAction } from "./types";
 
 export const CAPABILITY_CATALOG_VERSION = "1" as const;
@@ -21,6 +22,7 @@ export interface CapabilityCatalogAgent {
 }
 
 export interface CapabilityCatalogTool {
+  executionTarget?: ToolExecutionTarget;
   toolId: string;
   /** Tool 内的稳定操作标识；ToolCall.operationId 由 Invocation/action 再派生。 */
   operationId: string;

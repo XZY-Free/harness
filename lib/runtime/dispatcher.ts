@@ -148,8 +148,7 @@ export interface DispatchResult {
     | "no_effective_route"
     | "ambiguous_route_configuration"
     | "invalid_traffic_weight_total"
-    | "agent_revision_not_found"
-    | "workspace_binding_unavailable";
+    | "agent_revision_not_found";
   /** 调度的 Invocation（dispatched=true 时填）。 */
   invocation?: Invocation;
   /** 调度的 ExecutionBinding（dispatched=true 时填）。 */
@@ -299,9 +298,7 @@ export async function dispatchInvocationForTurn(params: {
         thread.ownerUserId,
       )
     : null;
-  if (thread.defaultWorkspaceId && !workspaceBindingId) {
-    return { dispatched: false, reason: "workspace_binding_unavailable" };
-  }
+  const workspaceUnavailable = Boolean(thread.defaultWorkspaceId && !workspaceBindingId);
 
   // 6. createInvocation（事务内：锁 Thread、分配 invocationSequence、写 invocation.queued Event）
   const invocationParams: CreateInvocationParams = {
@@ -336,6 +333,8 @@ export async function dispatchInvocationForTurn(params: {
   const { kind: _runtimeEvidenceKind, ...runtimeControlPlaneEvidence } =
     routeResolution.controlPlaneEvidence;
   const capabilityCatalog = await buildProductionCapabilityCatalog({
+    workspaceBindingId,
+    workspaceUnavailable,
     tenantId: params.tenantId,
     invocationId: invocation.id,
     threadId: thread.id,

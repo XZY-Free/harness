@@ -12,7 +12,16 @@
  * - Policy digest mismatch → 409 POLICY_INTEGRITY_MISMATCH（fail-closed，不建 ToolCall）。
  */
 import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { BridgeClient } from "@/desktop/bridge/bridge-client";
+import type { BrowserActionTarget, BrowserCommandTarget } from "@/desktop/bridge/command-executor";
+import { createDeviceIdentity } from "@/desktop/bridge/device-identity";
+import { AiLockManager } from "@/desktop/browser/ai-lock";
+import { openDesktopDatabase } from "@/desktop/storage/database";
+import { registerBuiltinTools } from "@/lib/capability/builtin-tools";
 import {
   createEffectRecord,
   createEffectTargets,
@@ -24,16 +33,20 @@ import {
   updateToolExecutionAttempt,
 } from "@/lib/capability/tool-execution-queries";
 import { createToolExecutionWorker } from "@/lib/capability/tool-execution-worker";
+import { getCurrentToolSchemaRevision, listTools } from "@/lib/capability/tool-queries";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolve-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { BridgeServer, setBridgeServer } from "@/lib/desktop-bridge/bridge-server";
+import { registerDevice } from "@/lib/identity/device-queries";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { effectRecordTable } from "@/lib/persistence/schema/effect";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
+import { userIdentity } from "@/lib/persistence/schema/identity";
 import { permissionDecisionTable } from "@/lib/persistence/schema/permission";
 import {
   type ToolProvider,
@@ -50,8 +63,12 @@ import {
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { createInvocationContinuationHandler } from "@/lib/runtime/continuation/invocation-continuation";
 import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
+import { resolveToolExecutionTarget } from "@/lib/runtime/resolve-tool-execution-target";
+import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { and, asc, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WebSocketServer } from "ws";
+import { POST as dispatchDesktopPost } from "../desktop-tool-executions/route";
 import { POST } from "./route";
 
 const TENANT = DEFAULT_TENANT_ID;
@@ -235,7 +252,7 @@ async function seedInvocation(opts: {
 /** 直接插入不可变 ExecutionBinding（其余 digest 用占位值）。 */
 async function seedBinding(
   invocationId: string,
-  frozen: { policyRevisionId: string; policyRulesDigest: string },
+  frozen: { policyRevisionId: string; policyRulesDigest: string; workspaceBindingId?: string },
 ): Promise<void> {
   if (!catalogTool) throw new Error("seedToolchain must run first");
   const catalog = buildCapabilityCatalogSnapshot({
@@ -264,7 +281,7 @@ async function seedBinding(
     modelId: "model",
     modelRevisionRef: null,
     initialEnvironmentLeaseId: null,
-    workspaceBindingId: null,
+    workspaceBindingId: frozen.workspaceBindingId ?? null,
     policyRevisionId: frozen.policyRevisionId,
     policyRulesDigest: frozen.policyRulesDigest,
     governanceConfigRevisionId: "governance-rev-fake",
@@ -395,6 +412,271 @@ afterEach(() => {
 });
 
 describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () => {
+  it.runIf(process.platform === "darwin")(
+    "真实桌面签名桥只执行已授权命令，持久 Attempt 防止并发重复发送",
+    async () => {
+      const identity = createDeviceIdentity();
+      identity.tenantId = TENANT;
+      await db.insert(userIdentity).values({
+        id: "test-user",
+        tenantId: TENANT,
+        externalSubject: "desktop-owner",
+        email: "desktop-owner@example.com",
+      });
+      await registerDevice({
+        tenantId: TENANT,
+        userId: "test-user",
+        deviceKey: identity.deviceId,
+        publicKey: identity.keyPair.publicKeyBase64,
+        deviceName: "test",
+        appVersion: "1",
+      });
+      const workspace = await ensureDesktopWorkspace({
+        tenantId: TENANT,
+        userId: "test-user",
+        deviceKey: identity.deviceId,
+        displayName: "test",
+        locationFingerprint: `sha256:${"a".repeat(64)}`,
+      });
+      await registerBuiltinTools({ tenantId: TENANT, ownerUserId: "test-user" });
+      const tool = (await listTools({ tenantId: TENANT })).items.find(
+        (item) => item.toolKey === "shell",
+      )!;
+      const revision = (await getCurrentToolSchemaRevision({ tenantId: TENANT, toolId: tool.id }))!;
+      const executionTarget = (await resolveToolExecutionTarget({
+        tenantId: TENANT,
+        threadId: "desktop-thread",
+        ownerUserId: "test-user",
+        workspaceBindingId: workspace.bindingId,
+      }))!;
+      catalogTool = {
+        toolId: tool.id,
+        operationId: tool.toolKey,
+        schemaRevisionId: revision.id,
+        schemaHash: revision.schemaHash,
+        executionContractDigest: revision.executionContractDigest,
+        displayName: tool.displayName,
+        description: "运行命令",
+        inputSchema: revision.inputSchemaJson as Record<string, unknown>,
+        sideEffect: "write",
+        idempotent: false,
+        executionTarget,
+      };
+      const policy = await seedPolicy("allow", [rule({ toolPattern: "tool.shell" })]);
+      const invocationId = await seedInvocation({
+        threadId: "desktop-thread",
+        turnId: "desktop-turn",
+      });
+      await seedBinding(invocationId, { ...policy, workspaceBindingId: workspace.bindingId });
+      const response = await POST(
+        gatewayRequest(
+          gatewayToken(invocationId),
+          toolCallBody({
+            invocation_id: invocationId,
+            tool_id: tool.id,
+            schema_hash: revision.schemaHash,
+            arguments: { command: "date" },
+          }),
+        ),
+      );
+      expect(response.status).toBe(200);
+      const claimed = (await claimNextQueuedToolCall({
+        workerId: "desktop-test",
+        leaseMs: 60000,
+      }))!;
+      await updateToolExecutionAttempt({
+        tenantId: TENANT,
+        attemptId: claimed.attempt.id,
+        fromState: "claimed",
+        toState: "dispatched",
+        retryClass: "undetermined",
+      });
+      const nativeRoot = await realpath(await mkdtemp(join(tmpdir(), "snow-desktop-bridge-")));
+      const workspaceRoot = join(nativeRoot, "project");
+      await mkdir(workspaceRoot);
+      const nativeDb = await openDesktopDatabase(
+        join(nativeRoot, "desktop.sqlite"),
+        resolve("desktop/storage/migrations"),
+      );
+      nativeDb.workspaceRoots.upsert({
+        bindingId: workspace.bindingId,
+        workspaceId: workspace.workspaceId,
+        absolutePath: workspaceRoot,
+        displayName: "test",
+      });
+      const bridge = new BridgeServer({ port: 0 });
+      await bridge.start();
+      setBridgeServer(bridge);
+      const address = (bridge as unknown as { wss: WebSocketServer }).wss.address();
+      if (!address || typeof address === "string") throw new Error("bridge port missing");
+      const client = new BridgeClient({
+        serverUrl: `ws://127.0.0.1:${address.port}`,
+        deviceIdentity: identity,
+        tenantId: TENANT,
+        deviceName: "test",
+        deviceVersion: "1",
+        commandTarget: {} as BrowserCommandTarget,
+        actionTarget: {} as BrowserActionTarget,
+        workspaceRoots: nativeDb.workspaceRoots,
+        aiLockManager: new AiLockManager(),
+      });
+      const send = vi.spyOn(bridge, "sendRpcToBoundThread");
+      client.connect();
+      try {
+        await vi.waitFor(() => expect(client.isReady()).toBe(true), { timeout: 5000 });
+        const requestBody = {
+          toolCallId: claimed.binding.toolCallId,
+          attemptId: claimed.attempt.id,
+        };
+        const forged = await dispatchDesktopPost(
+          gatewayRequest(gatewayToken(invocationId), { ...requestBody, command: "other-command" }),
+        );
+        expect(forged.status).toBe(400);
+        expect(send).not.toHaveBeenCalled();
+        const responses = await Promise.all([
+          dispatchDesktopPost(gatewayRequest(gatewayToken(invocationId), requestBody)),
+          dispatchDesktopPost(gatewayRequest(gatewayToken(invocationId), requestBody)),
+        ]);
+        expect(responses.map((item) => item.status).sort()).toEqual([200, 409]);
+        const success = responses.find((item) => item.status === 200)!;
+        expect(await success.json()).toMatchObject({
+          ok: true,
+          result: {
+            ok: true,
+            exitCode: 0,
+            workingDirectory: workspaceRoot,
+            stdout: expect.stringMatching(/\S/),
+          },
+        });
+        expect(send).toHaveBeenCalledOnce();
+        expect(send).toHaveBeenCalledWith(
+          expect.objectContaining({
+            userId: "test-user",
+            threadId: "desktop-thread",
+            payload: expect.objectContaining({ command: "date", bindingId: workspace.bindingId }),
+          }),
+        );
+      } finally {
+        client.disconnect();
+        await bridge.stop();
+        nativeDb.close();
+        await rm(nativeRoot, { recursive: true, force: true });
+        setBridgeServer(null);
+      }
+    },
+  );
+  it("命令经过真实 Gateway、权限、Worker 和 Effect 链返回系统时间，重放不重复执行", async () => {
+    const root = await mkdtemp(join(tmpdir(), "snow-shell-gateway-"));
+    vi.stubEnv("RUNTIME_DEFAULT", "host");
+    vi.stubEnv("SNOW_WORKSPACES_DIR", root);
+    try {
+      await registerBuiltinTools({ tenantId: TENANT, ownerUserId: "test-admin" });
+      const tool = (await listTools({ tenantId: TENANT })).items.find(
+        (item) => item.toolKey === "shell",
+      )!;
+      const revision = (await getCurrentToolSchemaRevision({ tenantId: TENANT, toolId: tool.id }))!;
+      const executionTarget = (await resolveToolExecutionTarget({
+        tenantId: TENANT,
+        threadId: "shell-thread",
+        workspaceBindingId: null,
+        ownerUserId: "test-user",
+      }))!;
+      catalogTool = {
+        toolId: tool.id,
+        operationId: tool.toolKey,
+        schemaRevisionId: revision.id,
+        schemaHash: revision.schemaHash,
+        executionContractDigest: revision.executionContractDigest,
+        displayName: tool.displayName,
+        description: "运行命令",
+        inputSchema: revision.inputSchemaJson as Record<string, unknown>,
+        sideEffect: "write",
+        idempotent: false,
+        executionTarget,
+      };
+      const policy = await seedPolicy("allow", [rule({ toolPattern: "tool.shell" })]);
+      const invocationId = await seedInvocation({ threadId: "shell-thread", turnId: "shell-turn" });
+      await seedBinding(invocationId, policy);
+      const body = toolCallBody({
+        invocation_id: invocationId,
+        tool_id: tool.id,
+        schema_hash: revision.schemaHash,
+        arguments: { command: 'node -p "new Date().toISOString()"' },
+      });
+      const response = await POST(gatewayRequest(gatewayToken(invocationId), body));
+      expect(response.status, JSON.stringify(await response.json())).toBe(200);
+      await expect(createToolExecutionWorker().runOnce()).resolves.toBe("executed");
+      const call = await singleRow(db.select().from(toolCallTable));
+      expect(call).toMatchObject({
+        callState: "succeeded",
+        resultSummaryJson: {
+          exitCode: 0,
+          stdout: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+          executionEnvironment: "host",
+        },
+      });
+      expect((await POST(gatewayRequest(gatewayToken(invocationId), body))).status).toBe(200);
+      await expect(createToolExecutionWorker().runOnce()).resolves.toBe("idle");
+      expect(await db.select().from(toolExecutionAttemptTable)).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it("无 Connection 的内置网页工具通过正式授权入队，网络未配置时确定失败并写入续跑事件", async () => {
+    await registerBuiltinTools({ tenantId: TENANT, ownerUserId: "test-admin" });
+    const tools = await listTools({ tenantId: TENANT });
+    const tool = tools.items.find((item) => item.toolKey === "web-fetch")!;
+    const revision = (await getCurrentToolSchemaRevision({ tenantId: TENANT, toolId: tool.id }))!;
+    catalogTool = {
+      toolId: tool.id,
+      operationId: tool.toolKey,
+      schemaRevisionId: revision.id,
+      schemaHash: revision.schemaHash,
+      executionContractDigest: revision.executionContractDigest,
+      displayName: tool.displayName,
+      description: "读取网页",
+      inputSchema: revision.inputSchemaJson as Record<string, unknown>,
+      sideEffect: "read",
+      idempotent: false,
+    };
+    const policy = await seedPolicy("allow", []);
+    const invocationId = await seedInvocation({
+      threadId: "builtin-thread",
+      turnId: "builtin-turn",
+    });
+    await seedBinding(invocationId, policy);
+    const response = await POST(
+      gatewayRequest(
+        gatewayToken(invocationId),
+        toolCallBody({
+          invocation_id: invocationId,
+          tool_id: tool.id,
+          schema_hash: revision.schemaHash,
+          arguments: { url: "https://example.com" },
+        }),
+      ),
+    );
+    expect(response.status, JSON.stringify(await response.json())).toBe(200);
+    const binding = await singleRow(db.select().from(toolExecutionBindingTable));
+    expect(binding).toMatchObject({
+      providerType: "builtin",
+      executorKind: "builtin.web_fetch",
+      authMethod: "none",
+      connectionId: null,
+    });
+    const previous = process.env.WEB_FETCH_DOMAIN_ALLOWLIST;
+    process.env.WEB_FETCH_DOMAIN_ALLOWLIST = "";
+    try {
+      await expect(createToolExecutionWorker().runOnce()).resolves.toBe("executed");
+      const call = await singleRow(db.select().from(toolCallTable));
+      expect(call).toMatchObject({ callState: "failed", errorCode: "WEB_ACCESS_NOT_CONFIGURED" });
+      await expect(createToolExecutionWorker().runOnce()).resolves.toBe("idle");
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(process.env, "WEB_FETCH_DOMAIN_ALLOWLIST");
+      else process.env.WEB_FETCH_DOMAIN_ALLOWLIST = previous;
+    }
+  });
   it("同一 Tool 的 actual arguments 在 canonical service 分别产生 allow/block/pause", async () => {
     const { toolId, schemaHash } = await seedToolchain();
     const { policyRevisionId, policyRulesDigest } = await seedPolicy("allow", [

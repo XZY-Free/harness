@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
+import { registerBuiltinTools } from "@/lib/capability/builtin-tools";
 import { closeDbPool } from "@/lib/db/client";
 import { bootstrapLocalAdmin } from "@/lib/identity/local-authentication";
 
@@ -17,7 +18,8 @@ async function main(): Promise<void> {
     throw new Error("管理员密码文件权限过宽，请设置为仅文件所有者可读写（0600）");
   }
   const password = readFileSync(passwordFile, "utf8").replace(/[\r\n]+$/, "");
-  await bootstrapLocalAdmin({ email, displayName, password });
+  const identity = await bootstrapLocalAdmin({ email, displayName, password });
+  await registerBuiltinTools({ tenantId: identity.tenantId, ownerUserId: identity.id });
   console.log(`[auth] 管理员账号已初始化：${email.trim().toLowerCase()}`);
 }
 

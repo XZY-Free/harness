@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { providerExecutorKind } from "@/lib/capability/provider-executor-kind";
 import { redactArguments } from "@/lib/capability/redact-arguments";
 import {
   type ToolCall,
@@ -172,7 +173,11 @@ async function applyToolCallTx(
     throw new ToolApplicationError("TOOL_SCHEMA_INTEGRITY_MISMATCH", "Schema 摘要与冻结目录不一致");
   }
   validateArguments(asRecord(facts.revision.inputSchemaJson), input.arguments);
-  const executorKind = executorKindFor(facts.provider.providerType);
+  const executionContract = parseToolExecutionContract(facts.revision.executionContractJson);
+  const executorKind = providerExecutorKind(
+    facts.provider.providerType,
+    executionContract.providerOperationMetadata,
+  );
   if (!executorKind) {
     throw new ToolApplicationError(
       "PROVIDER_EXECUTOR_UNAVAILABLE",
@@ -187,7 +192,6 @@ async function applyToolCallTx(
   ) {
     throw new ToolApplicationError("PROVIDER_CONNECTION_UNAVAILABLE", "Webhook Connection 不可用");
   }
-  const executionContract = parseToolExecutionContract(facts.revision.executionContractJson);
   if (
     computeToolExecutionContractDigest(executionContract) !==
       facts.revision.executionContractDigest ||
@@ -361,7 +365,7 @@ async function applyToolCallTx(
           .orderBy(desc(credentialRefTable.createdAt))
           .limit(1)
       : [];
-  if (facts.connection?.authMethod !== "none" && !credential) {
+  if (facts.connection && facts.connection.authMethod !== "none" && !credential) {
     throw new ToolApplicationError(
       "CREDENTIAL_UNAVAILABLE",
       "Connection 缺少 active CredentialRef",
@@ -409,10 +413,6 @@ function asRecord(value: unknown): Record<string, unknown> {
     throw new ToolApplicationError("TOOL_SCHEMA_INVALID", "Tool Schema 不是对象");
   }
   return value as Record<string, unknown>;
-}
-
-function executorKindFor(providerType: string): string | null {
-  return providerType === "webhook" ? "webhook.post_json" : null;
 }
 
 function toRuleViews(

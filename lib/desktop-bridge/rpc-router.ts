@@ -45,6 +45,7 @@ export function routeRpc(params: {
   userId: string;
   threadId: string;
   now: number;
+  target?: { tenantId: string; deviceRecordId: string };
 }): RpcRouteResult {
   const { registry, leaseService, userId, threadId, now } = params;
   // 1. 查找 lease holder
@@ -87,6 +88,18 @@ export function routeRpc(params: {
       ok: false,
       code: "desktop_unauthorized",
       message: `设备 ${lease.deviceRecordId} 未认证`,
+    };
+  }
+  if (
+    params.target &&
+    (dev.tenantId !== params.target.tenantId ||
+      dev.deviceRecordId !== params.target.deviceRecordId ||
+      dev.userId !== userId)
+  ) {
+    return {
+      ok: false,
+      code: "desktop_target_mismatch",
+      message: "当前租约设备与任务绑定的执行目标不一致",
     };
   }
   // 6. 返回目标设备的内部 deviceRecordId 与外部 deviceKey、WebSocket

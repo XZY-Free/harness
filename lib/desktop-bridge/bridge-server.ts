@@ -317,6 +317,7 @@ export class BridgeServer {
    * @returns RPC 结果（路由失败返回相应 code）
    */
   async sendRpcToThread(params: {
+    target?: { tenantId: string; deviceRecordId: string };
     threadId: string;
     userId: string;
     command: string;
@@ -333,6 +334,7 @@ export class BridgeServer {
       return { ok: false, code: "interrupted", message: "命令已被取消" };
     }
     const route = routeRpc({
+      target: params.target,
       registry: this.registry,
       leaseService: this.leaseService,
       userId: params.userId,
@@ -374,6 +376,31 @@ export class BridgeServer {
       });
     }
     return result;
+  }
+
+  /** 仅为已授权工具的冻结设备申请租约；现有其他设备租约不能被覆盖。 */
+  async sendRpcToBoundThread(
+    params: Parameters<BridgeServer["sendRpcToThread"]>[0] & {
+      target: { tenantId: string; deviceRecordId: string };
+    },
+  ) {
+    const device = this.registry.getByDeviceRecordId(params.target.deviceRecordId);
+    if (
+      !device ||
+      !device.authenticated ||
+      device.tenantId !== params.target.tenantId ||
+      device.userId !== params.userId
+    ) {
+      return { ok: false, code: "desktop_unavailable", message: "绑定设备未连接或身份不匹配" };
+    }
+    const lease = this.leaseService.acquireLease({
+      threadId: params.threadId,
+      userId: params.userId,
+      deviceRecordId: params.target.deviceRecordId,
+      now: Date.now(),
+    });
+    if (!lease.ok) return { ok: false, code: lease.code, message: "绑定设备未取得任务执行权" };
+    return this.sendRpcToThread(params);
   }
 
   /**

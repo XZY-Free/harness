@@ -32,6 +32,7 @@ import { toolSchemaRevisionTable } from "@/lib/persistence/schema/tool";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { toolExecutionBindingTable } from "@/lib/persistence/schema/tool-execution";
 import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
+import { verifyCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import {
   type ExecutionSubject,
   recoverTrustedExecutionSubject,
@@ -153,8 +154,22 @@ export function createToolExecutionWorker(
         return "executed";
       }
       let subject: ExecutionSubject;
+      let executionTarget:
+        | import("@/lib/runtime/tool-execution-target").ToolExecutionTarget
+        | undefined;
       try {
         subject = recoverTrustedExecutionSubject(invocationBinding, binding.tenantId);
+        const catalog = verifyCapabilityCatalogSnapshot(
+          invocationBinding.capabilityCatalogJson,
+          invocationBinding.capabilityCatalogDigest,
+        );
+        if (catalog.invocationId !== toolCall.invocationId)
+          throw new Error("CAPABILITY_CATALOG_INVOCATION_MISMATCH");
+        executionTarget = catalog.tools.find(
+          (tool) =>
+            tool.toolId === toolCall.toolId &&
+            tool.schemaRevisionId === toolCall.toolSchemaRevisionId,
+        )?.executionTarget;
       } catch {
         await failBeforeDispatch(
           binding.tenantId,
@@ -221,7 +236,10 @@ export function createToolExecutionWorker(
       });
       try {
         const result = await registry.get(binding.providerType, binding.executorKind).execute({
+          attemptId: attempt.id,
+          executionTarget,
           endpoint: binding.endpointRef ?? "",
+          threadId: toolCall.threadId ?? undefined,
           arguments: toolCall.argumentsRedactedJson as Record<string, unknown>,
           executionSubject: subject,
           invocationId: toolCall.invocationId,

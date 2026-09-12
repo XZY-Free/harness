@@ -19,6 +19,31 @@ function setup(): { registry: DeviceRegistry; lease: LeaseService; ws: object } 
 }
 
 describe("routeRpc()", () => {
+  it("任务绑定设备和租户不匹配时拒绝，即使当前 lease 属于同一用户", () => {
+    const { registry, lease } = setup();
+    lease.acquireLease({
+      threadId: "thread-001",
+      userId: "user-001",
+      deviceRecordId: "rec-001",
+      now: NOW,
+    });
+    const input = {
+      registry,
+      leaseService: lease,
+      userId: "user-001",
+      threadId: "thread-001",
+      now: NOW,
+    };
+    expect(
+      routeRpc({ ...input, target: { tenantId: TENANT, deviceRecordId: "rec-other" } }),
+    ).toMatchObject({ ok: false, code: "desktop_target_mismatch" });
+    expect(
+      routeRpc({ ...input, target: { tenantId: "other-tenant", deviceRecordId: "rec-001" } }),
+    ).toMatchObject({ ok: false, code: "desktop_target_mismatch" });
+    expect(
+      routeRpc({ ...input, target: { tenantId: TENANT, deviceRecordId: "rec-001" } }),
+    ).toMatchObject({ ok: true, deviceRecordId: "rec-001" });
+  });
   it("无 lease 时返回 desktop_unavailable", () => {
     const { registry, lease } = setup();
     const result = routeRpc({

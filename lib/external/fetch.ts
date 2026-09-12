@@ -172,6 +172,7 @@ export async function rawFetch(params: {
   url: string;
   threadId: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }): Promise<FetchOk | { ok: false; error: string }> {
   const { url, threadId } = params;
   // : SSRF 入口守卫——协议白名单 + 内网/元数据拒绝 + DNS rebinding 校验。
@@ -179,7 +180,7 @@ export async function rawFetch(params: {
   // 域名解析到内网;此处兜底(含 DNS 解析后二次校验)。
   await assertSafeExternalUrlResolved(url, "webFetch url");
   const maxBytes = webConfig.maxBytes;
-  const timeoutMs = webConfig.timeoutMs;
+  const timeoutMs = Math.min(params.timeoutMs ?? webConfig.timeoutMs, webConfig.timeoutMs);
   const allowedContentTypes = webConfig.contentTypes;
   const fetchImpl = params.fetchImpl ?? fetch;
 
@@ -264,6 +265,7 @@ export async function fetchUrl(params: {
   url: string;
   threadId: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }): Promise<FetchResult> {
   const v = classifyDomain(params.url);
   if (v.decision === "deny") return { ok: false, denied: true, reason: v.reason };

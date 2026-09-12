@@ -9,7 +9,7 @@
 FROM node:22-alpine
 
 # git + 原生模块构建工具链；tini 作 init 接管信号（容器内进程树干净）
-RUN apk add --no-cache git python3 make g++ tini
+RUN apk add --no-cache bash git python3 make g++ tini
 
 WORKDIR /workspace
 
