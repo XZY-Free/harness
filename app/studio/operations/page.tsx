@@ -5,7 +5,7 @@ import {
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { hasStudioAction } from "@/lib/identity/studio-access";
+import { hasStudioActionInAnyScope } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
@@ -24,7 +24,7 @@ export default async function OperationsPage() {
   const gate = await requireStudioPagePermission("studio.access");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
-  const canManageRoutes = await hasStudioAction(gate.principal, "route.update");
+  const canManageRoutes = await hasStudioActionInAnyScope(gate.principal, "route.update");
 
   return (
     <StudioPage title="运营" description="管理员工侧智能体发布，并查看平台使用情况。" width="wide">

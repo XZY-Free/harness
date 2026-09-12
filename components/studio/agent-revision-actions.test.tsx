@@ -82,11 +82,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 function selectedSnapshot(): string {
-  return screen.getByLabelText("创建版本使用的合同").getAttribute("data-selected-id") ?? "";
+  return (
+    screen.getByLabelText("选择服务提供方交付的接入文件").getAttribute("data-selected-id") ?? ""
+  );
 }
 
 async function chooseSnapshot(record: number) {
-  fireEvent.click(screen.getByLabelText("创建版本使用的合同"));
+  fireEvent.click(screen.getByLabelText("选择服务提供方交付的接入文件"));
   const option = await screen.findByRole("option", { name: new RegExp(`记录 ${record}$`) });
   fireEvent.pointerDown(option, { pointerType: "mouse" });
   fireEvent.click(option);
@@ -289,6 +291,100 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
           ([url, init]) => String(url).endsWith("/withdraw") && init?.method === "POST",
         ),
       ).toHaveLength(1),
+    );
+  });
+});
+
+describe("登记流程的能力表单", () => {
+  it("企业资料使用字段选择生成严格合同，不选择字段时阻止保存", async () => {
+    const contract = snapshot("snap-0001");
+    contract.invocation_context = [
+      {
+        key: "enterprise_user_context",
+        name: { "zh-CN": "企业身份", en: null },
+        description: { "zh-CN": null, en: null },
+        necessity: "required",
+        applies_to: null,
+        trust_requirement: null,
+        declaration_source: "provider_declared",
+      },
+    ];
+    contract.interaction.input_required = true;
+    contract.interaction.resume = true;
+    stubBackend([contract]);
+    const onPublished = vi.fn();
+    render(
+      <AgentRevisionActions
+        agentId="agent-1"
+        guided
+        projectableFields={["employeeNo", "departmentCode"]}
+        onPublished={onPublished}
+      />,
+    );
+    const employee = await screen.findByRole("checkbox", { name: /员工编号/ });
+    const save = screen.getByRole("button", { name: "保存配置并继续" });
+    fireEvent.click(save);
+    await screen.findByText("请选择允许发送的身份字段。");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    fireEvent.click(employee);
+    fireEvent.change(screen.getByLabelText("需要确认的动作标识"), {
+      target: { value: "expense.submit" },
+    });
+    fireEvent.click(save);
+    await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1));
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/agent-1/revisions") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(call?.[1]?.body)).agent_interface_requirements).toEqual({
+      enterprise_user_context: {
+        profile_requirement: "fresh_required",
+        allowed_fields: ["employeeNo"],
+      },
+      host_controls: { confirmation_action_keys: ["expense.submit"] },
+    });
+    expect(screen.queryByRole("checkbox", { name: /enterprisePermissions/ })).toBeNull();
+  });
+  it("发布暂时失败后重试复用已创建草稿和幂等键，不重复创建版本", async () => {
+    stubBackend([snapshot("snap-0001")]);
+    const original = fetchMock.getMockImplementation();
+    let failed = false;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/arev-1/publish") && !failed) {
+        failed = true;
+        return Response.json(
+          {
+            error: {
+              code: "INTERNAL_ERROR",
+              message: "private internal detail",
+              request_id: "request-1",
+              retryable: true,
+            },
+          },
+          { status: 503 },
+        );
+      }
+      return original?.(url, init);
+    });
+    const onPublished = vi.fn();
+    render(<AgentRevisionActions agentId="agent-1" guided onPublished={onPublished} />);
+    const save = await screen.findByRole("button", { name: "保存配置并继续" });
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(save);
+    await screen.findByRole("alert");
+    expect(onPublished).not.toHaveBeenCalled();
+    expect(screen.queryByText("private internal detail")).toBeNull();
+    fireEvent.click(save);
+    await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1));
+    const creates = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/agent-1/revisions") && init?.method === "POST",
+    );
+    const publishes = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/arev-1/publish") && init?.method === "POST",
+    );
+    expect(creates).toHaveLength(1);
+    expect(publishes).toHaveLength(2);
+    expect(new Headers(publishes[0]?.[1]?.headers).get("Idempotency-Key")).toBe(
+      new Headers(publishes[1]?.[1]?.headers).get("Idempotency-Key"),
     );
   });
 });

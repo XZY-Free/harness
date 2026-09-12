@@ -129,12 +129,17 @@ function readFileText(file: File): Promise<string> {
 interface AgentContractRegistrationPanelProps {
   /** 登记成功后以完整响应回调（刷新 Agent/Snapshot 列表，07 §4）。 */
   readonly onRegistered?: (result: RegisterAgentContractResponse) => void;
+  readonly submitLabel?: string;
+  readonly compact?: boolean;
 }
 
 export function AgentContractRegistrationPanel({
   onRegistered,
+  submitLabel = "登记合同",
+  compact = false,
 }: AgentContractRegistrationPanelProps) {
   const fileInputId = useId();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<ContractPreview | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,12 +233,14 @@ export function AgentContractRegistrationPanel({
 
   return (
     <div className="space-y-4" aria-busy={busy}>
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">登记智能体合同</h3>
-        <p className="mt-1 text-sm leading-5 text-muted-foreground">
-          文件仅用于本次校验与登记，不会保存文件名、路径或原始内容。
-        </p>
-      </div>
+      {!compact && (
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">登记智能体合同</h3>
+          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+            文件仅用于本次校验与登记，不会保存文件名、路径或原始内容。
+          </p>
+        </div>
+      )}
 
       <div className="rounded-xl border border-dashed bg-muted/30 p-4">
         <label htmlFor={fileInputId} className="flex items-start gap-3">
@@ -247,7 +254,16 @@ export function AgentContractRegistrationPanel({
             </span>
           </span>
         </label>
+        <Button
+          variant="outline"
+          className="mt-4"
+          disabled={busy}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          选择合同文件
+        </Button>
         <Input
+          ref={fileInputRef}
           key={fileInputKey}
           id={fileInputId}
           type="file"
@@ -258,7 +274,7 @@ export function AgentContractRegistrationPanel({
             const file = e.target.files?.[0];
             void handleFile(file);
           }}
-          className="mt-3 bg-background"
+          className="sr-only"
         />
       </div>
 
@@ -294,6 +310,69 @@ export function AgentContractRegistrationPanel({
               <dd className="mt-0.5 text-foreground">{preview.interactionSummary}</dd>
             </div>
           </dl>
+          <div className="mt-5 border-t pt-4">
+            <h4 className="text-sm font-medium">提供的能力</h4>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {(preview.contract.capabilities as Array<Record<string, unknown>>).map(
+                (item, index) => (
+                  <li key={String(item.key)}>
+                    {pickLocalizedName(item.name) ?? String(item.key ?? "未命名能力")}
+                  </li>
+                ),
+              )}
+            </ul>
+          </div>
+          {Array.isArray(preview.contract.invocation_context) &&
+            preview.contract.invocation_context.length > 0 && (
+              <div className="mt-4 border-t pt-4">
+                <h4 className="text-sm font-medium">调用需要的信息</h4>
+                <ul className="mt-2 space-y-2 text-sm">
+                  {preview.contract.invocation_context
+                    .filter((raw) => raw && typeof raw === "object" && typeof raw.key === "string")
+                    .map((raw) => {
+                      const item = raw as Record<string, unknown>;
+                      return (
+                        <li key={String(item.key)} className="flex flex-wrap justify-between gap-2">
+                          <span className="break-all text-muted-foreground">
+                            {pickLocalizedName(item.name) ?? String(item.key ?? "未命名上下文")}
+                          </span>
+                          <span className="text-xs">
+                            {item.necessity === "required"
+                              ? "必须提供"
+                              : item.necessity === "preferred"
+                                ? "建议提供"
+                                : "可选"}
+                          </span>
+                        </li>
+                      );
+                    })}
+                </ul>
+              </div>
+            )}
+          {preview.contract.result_contract &&
+          typeof preview.contract.result_contract === "object" ? (
+            <details className="mt-4 border-t pt-4">
+              <summary className="cursor-pointer text-sm font-medium">
+                查看返回字段与错误类型
+              </summary>
+              <dl className="mt-3 space-y-3 text-xs text-muted-foreground">
+                {["fields", "error_codes"].map((key) => {
+                  const values = (preview.contract.result_contract as Record<string, unknown>)[key];
+                  return (
+                    <div key={key}>
+                      <dt>{key === "fields" ? "返回字段" : "错误类型"}</dt>
+                      <dd className="mt-1 break-all">
+                        {Array.isArray(values)
+                          ? values.filter((value) => typeof value === "string").join("、") ||
+                            "未声明"
+                          : "未声明"}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </details>
+          ) : null}
         </div>
       )}
       {error && (
@@ -316,7 +395,7 @@ export function AgentContractRegistrationPanel({
       )}
       <Button type="button" disabled={!preview || busy} onClick={submit}>
         {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden />}
-        {busy ? "登记中…" : "登记合同"}
+        {busy ? "登记中…" : submitLabel}
       </Button>
     </div>
   );

@@ -50,6 +50,9 @@ function credentialLabel(credential: CredentialRefSummaryDTO): string {
 
 interface RouteActivationPanelProps {
   readonly canManage: boolean;
+  readonly embedded?: boolean;
+  readonly preferredAgentId?: string | null;
+  readonly onBack?: () => void;
   /** 上游真实 AgentRevision 发布成功后递增，要求重新读取权威资产。 */
   readonly refreshToken?: number;
   /** 只有新 GET 的 published AgentRevision 中存在该 id 才会选中。 */
@@ -64,6 +67,9 @@ interface RouteActivationPanelProps {
  */
 export function RouteActivationPanel({
   canManage,
+  embedded = false,
+  preferredAgentId = null,
+  onBack,
   refreshToken = 0,
   preferredAgentRevisionId = null,
 }: RouteActivationPanelProps) {
@@ -73,7 +79,7 @@ export function RouteActivationPanel({
   const [agentRevisionId, setAgentRevisionId] = useState("");
   const [endpointRef, setEndpointRef] = useState("");
   const [networkZone, setNetworkZone] = useState("");
-  const [identityMode, setIdentityMode] = useState<"none" | "bearer">("none");
+  const [identityMode, setIdentityMode] = useState<"" | "none" | "bearer">("");
   const [credentialRefId, setCredentialRefId] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -107,13 +113,15 @@ export function RouteActivationPanel({
         client.credentials.list(),
       ]);
       const revisionLists = await Promise.all(
-        agentList.items.map((agent) =>
-          client.agents
-            .listRevisions(agent.id)
-            .then((list) =>
-              list.items.filter((revision) => revision.revision_state === "published"),
-            ),
-        ),
+        agentList.items
+          .filter((agent) => !preferredAgentId || agent.id === preferredAgentId)
+          .map((agent) =>
+            client.agents
+              .listRevisions(agent.id)
+              .then((list) =>
+                list.items.filter((revision) => revision.revision_state === "published"),
+              ),
+          ),
       );
       if (loadGeneration.current !== generation) return;
 
@@ -136,7 +144,7 @@ export function RouteActivationPanel({
     } finally {
       if (loadGeneration.current === generation) setLoading(false);
     }
-  }, [refreshToken, preferredAgentRevisionId]);
+  }, [refreshToken, preferredAgentRevisionId, preferredAgentId]);
 
   useEffect(() => {
     void loadAssets();
@@ -165,13 +173,14 @@ export function RouteActivationPanel({
   const canSubmit =
     !loading &&
     !busy &&
+    identityMode !== "" &&
     selectedAgentRevision !== null &&
     endpointRef.trim() !== "" &&
     networkZone.trim() !== "" &&
     (identityMode === "none" || credentialRefId.trim() !== "");
 
   async function publishToStaff() {
-    if (!canSubmit || !selectedAgentRevision) return;
+    if (!canSubmit || !selectedAgentRevision || !identityMode) return;
     const endpoint = endpointRef.trim();
     const zone = networkZone.trim();
     const credential = identityMode === "bearer" ? credentialRefId.trim() : null;
@@ -214,7 +223,7 @@ export function RouteActivationPanel({
           ifMatch: `route-set-${routeSet.version_no}`,
         },
       );
-      setNotice("发布成功：员工新会话现在可以选择该智能体。");
+      setNotice("发布配置已提交。员工目录更新后生效，当前尚未确认员工侧可用。");
     } catch (err) {
       setError(classifyError(err));
     } finally {
@@ -237,21 +246,26 @@ export function RouteActivationPanel({
   return (
     <section
       aria-label="发布给员工"
-      className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs"
+      className={
+        embedded
+          ? "space-y-5"
+          : "overflow-hidden rounded-2xl border border-border bg-card shadow-xs"
+      }
     >
-      <div className="flex flex-col gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h2 className="text-sm font-semibold text-foreground">发布给员工</h2>
-          <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
-            设置员工新建会话时使用的智能体与访问方式。
-          </p>
+      {!embedded && (
+        <div className="flex flex-col gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold text-foreground">发布给员工</h2>
+            <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+              设置员工新建会话时使用的智能体与访问方式。
+            </p>
+          </div>
+          <span className="w-fit shrink-0 rounded-lg bg-muted px-2 py-1 text-xs text-muted-foreground">
+            仅影响新会话
+          </span>
         </div>
-        <span className="w-fit shrink-0 rounded-lg bg-muted px-2 py-1 text-xs text-muted-foreground">
-          仅影响新会话
-        </span>
-      </div>
-
-      <div className="space-y-5 px-5 py-5">
+      )}
+      <div className={embedded ? "space-y-5" : "space-y-5 px-5 py-5"}>
         {loading && (
           <output className="flex items-center gap-2 text-sm text-muted-foreground">
             <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
@@ -289,7 +303,10 @@ export function RouteActivationPanel({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="staff-endpoint">调用地址</Label>
+            <Label htmlFor="staff-endpoint">服务地址</Label>
+            <p className="text-xs leading-5 text-muted-foreground">
+              向服务提供方索取，通常以 https:// 开头；不要填写员工登录页面的网址。
+            </p>
             <Input
               id="staff-endpoint"
               name="staffEndpoint"
@@ -297,13 +314,16 @@ export function RouteActivationPanel({
               value={endpointRef}
               onChange={(event) => setEndpointRef(event.target.value)}
               aria-label="调用地址"
-              placeholder="输入 HTTPS 调用地址…"
+              placeholder="粘贴服务提供方给出的完整地址"
               autoComplete="off"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="staff-network-zone">网络区域</Label>
+            <Label htmlFor="staff-network-zone">服务所在网络</Label>
+            <p className="text-xs leading-5 text-muted-foreground">
+              填写部署管理员提供的网络名称，例如企业内网的 internal。
+            </p>
             <Input
               id="staff-network-zone"
               name="staffNetworkZone"
@@ -316,13 +336,22 @@ export function RouteActivationPanel({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="staff-identity-mode">认证方式</Label>
+            <Label htmlFor="staff-identity-mode">服务访问保护</Label>
+            <p className="text-xs leading-5 text-muted-foreground">
+              按照服务提供方要求选择。需要访问凭证的服务，不能选“无需认证”。
+            </p>
             <Select
-              value={identityMode}
+              value={identityMode || null}
               onValueChange={(value) => changeIdentityMode(value as "none" | "bearer")}
             >
               <SelectTrigger id="staff-identity-mode" aria-label="认证方式" className="w-full">
-                <SelectValue>{identityMode === "none" ? "无需认证" : "令牌认证"}</SelectValue>
+                <SelectValue>
+                  {identityMode === "none"
+                    ? "无需认证"
+                    : identityMode === "bearer"
+                      ? "令牌认证"
+                      : "选择认证方式"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent align="start">
                 <SelectItem value="none">无需认证</SelectItem>
@@ -353,7 +382,21 @@ export function RouteActivationPanel({
                 </SelectContent>
               </Select>
               {credentials.length === 0 && !loading && (
-                <p className="text-xs text-muted-foreground">暂无可用的访问凭证。</p>
+                <div role="note" className="rounded-lg border bg-muted/30 p-3 text-sm">
+                  <p className="font-medium">尚未配置访问凭证</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    请由部署管理员配置服务端凭证引用，再点击重新检查。已保存的合同和版本可以稍后继续；需要令牌的服务不能改用无需认证。
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => void loadAssets()}
+                  >
+                    重新检查凭证
+                  </Button>
+                </div>
               )}
             </div>
           )}
@@ -375,7 +418,18 @@ export function RouteActivationPanel({
         )}
       </div>
 
-      <div className="flex justify-end border-t border-border bg-muted/30 px-5 py-4">
+      <div
+        className={
+          embedded
+            ? "flex items-center justify-between gap-3 border-t pt-5"
+            : "flex justify-end border-t border-border bg-muted/30 px-5 py-4"
+        }
+      >
+        {onBack && (
+          <Button variant="ghost" disabled={busy} onClick={onBack}>
+            上一步
+          </Button>
+        )}
         <Button type="button" disabled={!canSubmit} onClick={publishToStaff}>
           {busy ? (
             <LoaderCircle className="animate-spin" aria-hidden="true" />

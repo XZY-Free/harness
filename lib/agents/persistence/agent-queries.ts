@@ -106,7 +106,7 @@ export async function updateAgentLifecycle(
   expectedVersionNo: number,
 ): Promise<AgentRow | null> {
   const current = await getAgentById(tenantId, agentId);
-  if (!current) return null;
+  if (!current || current.deletedAt) return null;
   if (current.lifecycleState === "retired") {
     throw new AgentLifecycleError(
       agentId,
@@ -162,6 +162,7 @@ export async function setCurrentRevision(
         eq(agentTable.tenantId, tenantId),
         eq(agentTable.id, agentId),
         eq(agentTable.versionNo, expectedVersionNo),
+        isNull(agentTable.deletedAt),
       ),
     );
 

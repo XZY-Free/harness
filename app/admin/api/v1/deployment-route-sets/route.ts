@@ -20,6 +20,7 @@ import {
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
 import { getAgentById } from "@/lib/agents/persistence/agent-queries";
+import { db } from "@/lib/db/client";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -39,12 +40,14 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import { agentTable } from "@/lib/persistence/schema/agents";
 import type { RouteTarget } from "@/lib/routes/application/deployment-route-service";
 import {
   type DeploymentRouteSetRow,
   RouteSetScopeMismatchError,
   ensureRouteSetByTargetScope,
 } from "@/lib/routes/application/deployment-route-service";
+import { and, eq, isNull } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -218,12 +221,32 @@ export async function POST(request: Request): Promise<Response> {
 
   // 6. create-or-reuse（显式 target 自然键）
   try {
-    const result = await ensureRouteSetByTargetScope({
-      tenantId: principal.tenantId,
-      target,
-      routeScopeKey,
-      routeScopeJson: body.route_scope,
+    const result = await db.transaction(async (tx) => {
+      // 与删除登记共用 Agent 行锁，避免校验后被删除又建立连接。
+      if (target.kind === "agent") {
+        const [live] = await tx
+          .select({ id: agentTable.id })
+          .from(agentTable)
+          .where(
+            and(
+              eq(agentTable.tenantId, principal.tenantId),
+              eq(agentTable.id, target.agentId),
+              isNull(agentTable.deletedAt),
+            ),
+          )
+          .limit(1)
+          .for("share");
+        if (!live) return null;
+      }
+      return ensureRouteSetByTargetScope(
+        { tenantId: principal.tenantId, target, routeScopeKey, routeScopeJson: body.route_scope },
+        tx,
+      );
     });
+    if (!result) {
+      await failRecord(recordId);
+      return resourceNotFound(requestId);
+    }
     const projection = buildRouteSetProjection(result.routeSet, result.created);
     const httpStatus = result.created ? 201 : 200;
     await completeRecord({

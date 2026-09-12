@@ -25,6 +25,7 @@ import { type ApiClientConfig, createControlPlaneRequest } from "../http-client"
 export interface AgentApiClient {
   /** 列出 Agent。 */
   list(): Promise<AgentListResponse>;
+  delete(agentId: string, opts: { ifMatch: string }): Promise<{ id: string; deleted: true }>;
   /** 获取 Agent 详情。 */
   get(agentId: string): Promise<AgentDTO>;
   /** 列出 AgentRevision。 */
@@ -66,6 +67,11 @@ export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
   const request = createControlPlaneRequest(config);
 
   return {
+    delete: (agentId, opts) =>
+      request(`/admin/api/v1/agents/${agentId}`, {
+        method: "DELETE",
+        headers: { "If-Match": opts.ifMatch },
+      }),
     list: () => request<AgentListResponse>("/admin/api/v1/agents"),
     get: (agentId) => request<AgentDTO>(`/admin/api/v1/agents/${agentId}`),
     listRevisions: (agentId) =>

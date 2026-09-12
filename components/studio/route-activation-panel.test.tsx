@@ -162,7 +162,9 @@ async function chooseIdentity(mode: "none" | "bearer") {
   await chooseSelectOption("认证方式", mode === "none" ? "无需认证" : "令牌认证");
 }
 
-function fillEndpointAndZone(endpoint: string, zone: string) {
+async function fillEndpointAndZone(endpoint: string, zone: string) {
+  if (screen.getByLabelText("认证方式").textContent?.includes("选择认证方式"))
+    await chooseIdentity("none");
   fireEvent.change(screen.getByLabelText("调用地址"), { target: { value: endpoint } });
   fireEvent.change(screen.getByLabelText("网络区域"), { target: { value: zone } });
 }
@@ -221,8 +223,6 @@ describe("RouteActivationPanel「发布给员工」— identity none（happy pat
     expect(endpoint.type).toBe("url");
     expect(endpoint.name).toBe("staffEndpoint");
     expect(networkZone.name).toBe("staffNetworkZone");
-    expect(endpoint.placeholder.endsWith("…")).toBe(true);
-    expect(networkZone.placeholder.endsWith("…")).toBe(true);
   });
 
   it("identity none：填端点/网络后一次点击先 ensure nested Agent RouteSet 再激活 nested target，credential_ref_id:null", async () => {
@@ -233,13 +233,13 @@ describe("RouteActivationPanel「发布给员工」— identity none（happy pat
     expect(submitBefore.disabled).toBe(true);
     expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
 
-    fillEndpointAndZone("  https://hr.example.com/a2a  ", "  public  ");
+    await fillEndpointAndZone("  https://hr.example.com/a2a  ", "  public  ");
     const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
 
-    await waitFor(() => expect(screen.getByText(/员工新会话现在可以选择该智能体/)).toBeTruthy());
-    expect(screen.getByRole("status").textContent).toMatch(/发布成功/);
+    await waitFor(() => expect(screen.getByText(/发布配置已提交/)).toBeTruthy());
+    expect(screen.getByRole("status").textContent).toMatch(/发布配置已提交/);
 
     const writeCalls = calls.filter((call) => call.method !== "GET");
     expect(writeCalls.map((call) => `${call.method} ${call.url}`)).toEqual([
@@ -293,7 +293,7 @@ describe("RouteActivationPanel「发布给员工」— bearer identity & 输入�
     await loadPanel(defaultFixture(), "HR 智能体");
 
     await chooseIdentity("bearer");
-    fillEndpointAndZone("https://hr.example.com/a2a", "public");
+    await fillEndpointAndZone("https://hr.example.com/a2a", "public");
 
     // bearer 下未选凭证：按钮禁用、无写。
     const submitBefore = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
@@ -316,7 +316,7 @@ describe("RouteActivationPanel「发布给员工」— bearer identity & 输入�
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
 
-    await waitFor(() => expect(screen.getByText(/员工新会话现在可以选择该智能体/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/发布配置已提交/)).toBeTruthy());
     const writeCalls = calls.filter((call) => call.method !== "GET");
     const activateBody = JSON.parse(String(writeCalls[1]?.init?.body));
     expect(activateBody.routes[0].target).toEqual({
@@ -342,7 +342,7 @@ describe("RouteActivationPanel「发布给员工」— bearer identity & 输入�
     expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
 
     // 只填端点、留空网络 → 仍禁用。
-    fillEndpointAndZone("https://hr.example.com/a2a", "");
+    await fillEndpointAndZone("https://hr.example.com/a2a", "");
     expect((screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement).disabled).toBe(
       true,
     );
@@ -367,7 +367,7 @@ describe("RouteActivationPanel「发布给员工」— bearer identity & 输入�
     await loadPanel(defaultFixture(), "HR 智能体");
 
     await chooseIdentity("bearer");
-    fillEndpointAndZone("https://hr.example.com/a2a", "public");
+    await fillEndpointAndZone("https://hr.example.com/a2a", "public");
     await chooseSelectOption("访问凭证", /智能体令牌.*abcd1234/);
     expect(selectText("访问凭证")).toMatch(/abcd1234/);
 
@@ -379,7 +379,7 @@ describe("RouteActivationPanel「发布给员工」— bearer identity & 输入�
     const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
-    await waitFor(() => expect(screen.getByText(/员工新会话现在可以选择该智能体/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/发布配置已提交/)).toBeTruthy());
 
     const activateBody = JSON.parse(String(calls.filter((c) => c.method === "PUT")[0]?.init?.body));
     expect(activateBody.routes[0].target).toEqual({
@@ -404,28 +404,28 @@ describe("RouteActivationPanel「发布给员工」— 下游失败与刷新 fai
   it("ensure RouteSet 失败时显示中文错误、不出现成功文案，且绝无后续 PUT", async () => {
     await loadPanel({ ...defaultFixture(), ensureFail: true }, "HR 智能体");
 
-    fillEndpointAndZone("https://hr.example.com/a2a", "public");
+    await fillEndpointAndZone("https://hr.example.com/a2a", "public");
     const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
 
     await waitFor(() => expect(document.body.textContent ?? "").toMatch(/失败|错误|冲突/));
     expect(screen.getByRole("alert").textContent).toMatch(/失败|冲突/);
-    expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
+    expect(screen.queryByText(/发布配置已提交/)).toBeNull();
     expect(calls.filter((call) => call.method === "PUT")).toHaveLength(0);
   });
 
   it("激活失败时显示中文错误、不出现成功文案", async () => {
     await loadPanel({ ...defaultFixture(), activateFail: true }, "HR 智能体");
 
-    fillEndpointAndZone("https://hr.example.com/a2a", "public");
+    await fillEndpointAndZone("https://hr.example.com/a2a", "public");
     const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
 
     await waitFor(() => expect(document.body.textContent ?? "").toMatch(/失败|错误|冲突/));
     expect(screen.getByRole("alert").textContent).toMatch(/失败/);
-    expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
+    expect(screen.queryByText(/发布配置已提交/)).toBeNull();
   });
 
   it("多 published：preferred AgentRevision 只在真实 GET 中才被选中，失效 preferred 被忽略且不造假选项", async () => {
@@ -501,7 +501,7 @@ describe("RouteActivationPanel「发布给员工」— 下游失败与刷新 fai
     const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
-    expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
+    expect(screen.queryByText(/发布配置已提交/)).toBeNull();
   });
 
   it("重复刷新只重新 GET，不产生写或成功文案，选择保持为真实有效 preferred", async () => {
@@ -524,7 +524,7 @@ describe("RouteActivationPanel「发布给员工」— 下游失败与刷新 fai
     );
 
     expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
-    expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
+    expect(screen.queryByText(/发布配置已提交/)).toBeNull();
     expect(selectText("智能体版本")).toMatch(/HR 智能体.*第3版/);
   });
 
@@ -557,12 +557,12 @@ describe("RouteActivationPanel「发布给员工」— 全场景零 runtime GET 
     expect(runtimeGets()).toBe(0);
 
     await chooseIdentity("bearer");
-    fillEndpointAndZone("https://hr.example.com/a2a", "public");
+    await fillEndpointAndZone("https://hr.example.com/a2a", "public");
     await chooseSelectOption("访问凭证", /智能体令牌.*abcd1234/);
     const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
-    await waitFor(() => expect(screen.getByText(/员工新会话现在可以选择该智能体/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/发布配置已提交/)).toBeTruthy());
     expect(runtimeGets()).toBe(0);
   });
 
@@ -571,5 +571,29 @@ describe("RouteActivationPanel「发布给员工」— 全场景零 runtime GET 
     expect(screen.queryByLabelText("运行服务版本")).toBeNull();
     expect(screen.queryByText(/运行服务/)).toBeNull();
     expect(runtimeGets()).toBe(0);
+  });
+});
+
+describe("连接方式须明确选择", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    calls = [];
+  });
+  afterEach(cleanup);
+  it("填写地址后仍不能自动按无认证发布，选择认证方式后才允许提交", async () => {
+    await loadPanel(defaultFixture(), "HR 智能体");
+    fireEvent.change(screen.getByLabelText("调用地址"), {
+      target: { value: "https://agent.example.com/a2a" },
+    });
+    fireEvent.change(screen.getByLabelText("网络区域"), { target: { value: "public" } });
+    expect(screen.getByLabelText("认证方式").textContent).toContain("选择认证方式");
+    expect((screen.getByRole("button", { name: "发布给员工" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
+    await chooseIdentity("none");
+    expect((screen.getByRole("button", { name: "发布给员工" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });

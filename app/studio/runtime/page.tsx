@@ -5,7 +5,7 @@ import {
   StudioSettingsLinkRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { hasStudioAction } from "@/lib/identity/studio-access";
+import { hasStudioActionInAnyScope } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
@@ -20,7 +20,7 @@ export default async function RuntimePage() {
   const gate = await requireStudioPagePermission("studio.access");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
-  const canPublish = await hasStudioAction(gate.principal, "runtime.publish");
+  const canPublish = await hasStudioActionInAnyScope(gate.principal, "runtime.publish");
 
   return (
     <StudioPage

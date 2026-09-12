@@ -177,7 +177,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 6. 校验 Revision 属于当前租户的 Agent（跨租户隐藏为 404）
   //    AgentRevision schema 无 tenantId 字段，通过 Agent 归属校验。
   const agent = await getAgentById(principal.tenantId, revision.agentId);
-  if (!agent) {
+  if (!agent || agent.deletedAt) {
     return resourceNotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
   }
 

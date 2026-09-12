@@ -41,7 +41,7 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
             .limit(1)
             .for("update");
-          return agent ?? null;
+          return agent && !agent.deletedAt ? agent : null;
         },
         async findContractSnapshot(tenantId, snapshotId) {
           const [row] = await tx

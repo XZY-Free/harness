@@ -10,6 +10,7 @@ const ACTION_LABEL: Record<AuditActionType, string> = {
   "agent.contract.register": "智能体合同登记",
   "agent.revision.create": "智能体版本创建",
   "agent.publish": "智能体发布",
+  "agents.deleted": "删除智能体登记",
   "agent.retract": "智能体撤回",
   "route.update": "路由更新",
   "route.revision.create": "路由版本创建",

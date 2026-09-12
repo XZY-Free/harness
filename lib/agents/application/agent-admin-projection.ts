@@ -50,7 +50,7 @@ export async function loadAgentRevisionAdminProjection(
   const revision = await getRevisionById(revisionId);
   if (!revision) return null;
   const agent = await getAgentById(tenantId, revision.agentId);
-  if (!agent) return null;
+  if (!agent || agent.deletedAt) return null;
 
   const [publication, withdrawal] = await Promise.all([
     getPublicationRecordBySubject({

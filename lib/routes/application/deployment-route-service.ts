@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { rfc8785Canonicalize } from "@/lib/crypto/rfc-8785-canonicalize";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   type DeploymentRouteRow,
@@ -121,25 +121,29 @@ export interface EnsureRouteSetResult {
  *   仅认 isMysqlDuplicateEntryError，其余 DB 错误原样上抛；败者回读复用。
  * - 不接受旧 nullable agentId 契约：显式 target 之外的形状 fail-closed。
  */
-export async function ensureRouteSetByTargetScope(params: {
-  tenantId: string;
-  target: RouteTarget;
-  routeScopeKey: string;
-  routeScopeJson: Record<string, unknown>;
-}): Promise<EnsureRouteSetResult> {
+export async function ensureRouteSetByTargetScope(
+  params: {
+    tenantId: string;
+    target: RouteTarget;
+    routeScopeKey: string;
+    routeScopeJson: Record<string, unknown>;
+  },
+  client: DbOrTx = db,
+): Promise<EnsureRouteSetResult> {
   assertRouteScopeKey(params.routeScopeKey);
   const { targetKind, targetIdentity, agentId } = resolveRouteTarget(params.target);
   const existing = await getRouteSetByTargetScope(
     params.tenantId,
     params.target,
     params.routeScopeKey,
+    client,
   );
   if (existing)
     return { routeSet: assertScopeMatch(existing, params.routeScopeJson), created: false };
 
   const id = randomUUID();
   try {
-    await db.insert(deploymentRouteSetTable).values({
+    await client.insert(deploymentRouteSetTable).values({
       tenantId: params.tenantId,
       targetKind,
       targetIdentity,
@@ -151,7 +155,7 @@ export async function ensureRouteSetByTargetScope(params: {
     });
   } catch (error) {
     if (!isMysqlDuplicateEntryError(error)) throw error;
-    const [row] = await db
+    const [row] = await client
       .select()
       .from(deploymentRouteSetTable)
       .where(
@@ -162,11 +166,12 @@ export async function ensureRouteSetByTargetScope(params: {
           eq(deploymentRouteSetTable.routeScopeKey, params.routeScopeKey),
         ),
       )
-      .limit(1);
+      .limit(1)
+      .for("share");
     if (!row) throw error;
     return { routeSet: assertScopeMatch(row, params.routeScopeJson), created: false };
   }
-  const [row] = await db
+  const [row] = await client
     .select()
     .from(deploymentRouteSetTable)
     .where(eq(deploymentRouteSetTable.id, id))
@@ -207,9 +212,10 @@ export async function getRouteSetByTargetScope(
   tenantId: string,
   target: RouteTarget,
   routeScopeKey: string,
+  client: DbOrTx = db,
 ): Promise<DeploymentRouteSetRow | null> {
   const { targetKind, targetIdentity } = resolveRouteTarget(target);
-  const [row] = await db
+  const [row] = await client
     .select()
     .from(deploymentRouteSetTable)
     .where(

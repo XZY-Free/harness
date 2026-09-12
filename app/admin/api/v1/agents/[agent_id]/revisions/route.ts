@@ -199,7 +199,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // 3. 校验 Agent 存在且属于当前租户（跨租户隐藏为 404）
   const agent = await getAgentById(principal.tenantId, agentId);
-  if (!agent) {
+  if (!agent || agent.deletedAt) {
     return resourceNotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
   }
 
@@ -384,7 +384,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   // 校验 Agent 存在且属于当前租户
   const agent = await getAgentById(principal.tenantId, agentId);
-  if (!agent) {
+  if (!agent || agent.deletedAt) {
     return resourceNotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
   }
 

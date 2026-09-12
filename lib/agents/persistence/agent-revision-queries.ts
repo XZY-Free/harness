@@ -29,7 +29,7 @@ import {
   agentRevisionTable,
   agentTable,
 } from "@/lib/persistence/schema/agents";
-import { and, desc, eq, max } from "drizzle-orm";
+import { and, desc, eq, isNull, max } from "drizzle-orm";
 
 /** 创建 draft Revision 的入参。 */
 export interface CreateDraftRevisionParams {
@@ -57,7 +57,13 @@ export async function createDraftRevision(
     const [agent] = await tx
       .select({ id: agentTable.id })
       .from(agentTable)
-      .where(and(eq(agentTable.tenantId, params.tenantId), eq(agentTable.id, params.agentId)))
+      .where(
+        and(
+          eq(agentTable.tenantId, params.tenantId),
+          eq(agentTable.id, params.agentId),
+          isNull(agentTable.deletedAt),
+        ),
+      )
       .limit(1)
       .for("update");
     if (!agent) {

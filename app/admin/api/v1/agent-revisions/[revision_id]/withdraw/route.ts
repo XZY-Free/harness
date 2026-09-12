@@ -129,7 +129,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     return resourceNotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
   }
   const agent = await getAgentById(principal.tenantId, revision.agentId);
-  if (!agent) {
+  if (!agent || agent.deletedAt) {
     return resourceNotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
   }
   const scope = await requireAdminActionScope(

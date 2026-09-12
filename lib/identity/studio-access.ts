@@ -19,8 +19,16 @@
  *   const principal = await resolveStudioPrincipal(request);
  */
 import { generateRequestId } from "@/lib/http";
-import type { ActionCode, ResourceScopeType } from "@/lib/identity/action-codes";
-import { checkActionScope, requireActionScope } from "@/lib/identity/authorization";
+import {
+  ACTION_RESOURCE_TYPES,
+  type ActionCode,
+  type ResourceScopeType,
+} from "@/lib/identity/action-codes";
+import {
+  checkActionScope,
+  requireActionScope,
+  resolveActionScopeCoverage,
+} from "@/lib/identity/authorization";
 import { type Principal, authErrorResponse, resolvePrincipal } from "@/lib/identity/resolver";
 
 /** 只解析当前主体，不校验动作。认证失败抛 AuthenticationError（路由 catch 转 401/500）。 */
@@ -96,4 +104,27 @@ export async function hasStudioAction(
     resource: target,
   });
   return result.allowed;
+}
+
+/**
+ * 尚未选择具体资源时，判断是否展示操作区。
+ * 按动作目录允许的资源类型读取真实授权覆盖，不把 agent/runtime 等范围误当 tenant。
+ * 仅用于 UI 入口；提交操作仍须由 requireActionScope 校验具体资源，不能用此结果授权写入。
+ */
+export async function hasStudioActionInAnyScope(
+  principal: Principal,
+  actionCode: ActionCode,
+): Promise<boolean> {
+  for (const resourceType of ACTION_RESOURCE_TYPES[actionCode]) {
+    const coverage = await resolveActionScopeCoverage(
+      principal.tenantId,
+      principal.userIdentityId,
+      {
+        actionCode,
+        resourceType,
+      },
+    );
+    if (coverage.wildcard || coverage.resourceIds.length > 0) return true;
+  }
+  return false;
 }

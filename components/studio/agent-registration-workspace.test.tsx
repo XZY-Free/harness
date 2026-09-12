@@ -3,8 +3,6 @@ import type {
   AgentContractSnapshotDTO,
   AgentDTO,
   RegisterAgentContractResponse,
-  RuntimeDTO,
-  RuntimeRevisionDTO,
 } from "@/lib/control-plane-client";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -103,61 +101,6 @@ const hrSnapshot: AgentContractSnapshotDTO = {
   captured_at: "2026-08-26T00:00:00.000Z",
 };
 
-// ─── fixture：真实 Runtime 登记与发布链路（external_endpoint + conf-1） ──────
-
-const runtime: RuntimeDTO = {
-  id: "rt-1",
-  tenant_id: "tenant-1",
-  runtime_key: "hr-runtime",
-  display_name: "HR 外部运行服务",
-  kind: "external",
-  lifecycle_state: "draft",
-  owner_user_id: "user-1",
-  current_revision_id: "rtr-1",
-  version_no: 3,
-  created_at: "2026-08-26T00:00:00.000Z",
-  updated_at: "2026-08-26T00:00:00.000Z",
-};
-
-const runtimeRevision: RuntimeRevisionDTO = {
-  id: "rtr-1",
-  runtime_id: "rt-1",
-  revision_no: 1,
-  revision_state: "draft",
-  protocol_type: "a2a",
-  protocol_contract_revision: "a2a@1",
-  runtime_evidence_kind: "external_endpoint",
-  runtime_target_digest: `sha256:${"d".repeat(64)}`,
-  endpoint_ref: "https://agent.example.com",
-  artifact_id: null,
-  artifact_digest: null,
-  artifact_ref: null,
-  config_hash: `sha256:${"f".repeat(64)}`,
-  runtime_capabilities: { measured: { features: { streaming_transport: "pass" } } },
-  identity_mode: "bearer",
-  credential_ref_id: "cred-1",
-  network_zone: "public",
-  attestation_ids: [],
-  publication_record_id: null,
-  withdrawal_record_id: null,
-  latest_valid_conformance_run_id: "conf-1",
-  latest_valid_conformance_overall_result: "passed",
-  publication_conformance_run_id: null,
-  execution_eligible: false,
-  ineligibility_reasons: [],
-  created_at: "2026-08-26T00:00:00.000Z",
-  published_at: null,
-};
-
-const publishResponse = {
-  id: "rtr-1",
-  revision_state: "published" as const,
-  published_at: "2026-08-26T01:00:00.000Z",
-  publication_record_id: "pub-1",
-  conformance_run_id: "conf-1",
-  audit_event_id: "audit-1",
-};
-
 // ─── fixture：智能体版本创建/发布与路由激活（同页闭环） ───────────────────────
 
 const agentRevisionDraft = {
@@ -207,7 +150,6 @@ const routeActivationResponse = {
 // ─── fetch mock：登记前后有状态切换（初始无 Agent，登记后返回 HR） ─────────────
 
 let registered = false;
-let runtimePublished = false;
 let agentRevisionCreated = false;
 let agentRevisionPublished = false;
 
@@ -218,31 +160,6 @@ function stubBackend() {
     if (url === "/admin/api/v1/agent-registrations" && method === "POST") {
       registered = true;
       return Response.json(registerResponse);
-    }
-    if (url === "/admin/api/v1/runtimes") {
-      return Response.json({
-        items: [runtime],
-        total: 1,
-      });
-    }
-    if (url === "/admin/api/v1/runtimes/rt-1/revisions") {
-      return Response.json({
-        items: runtimePublished
-          ? [
-              {
-                ...runtimeRevision,
-                revision_state: "published",
-                publication_record_id: "pub-1",
-                published_at: "2026-08-26T01:00:00.000Z",
-              },
-            ]
-          : [runtimeRevision],
-        total: 1,
-      });
-    }
-    if (url === "/admin/api/v1/runtime-revisions/rtr-1/publish" && method === "POST") {
-      runtimePublished = true;
-      return Response.json(publishResponse);
     }
     if (url === "/admin/api/v1/agents") {
       return Response.json({
@@ -326,278 +243,102 @@ function selectHiddenValue(label: string): string {
   );
 }
 
-function publishPosts(): Array<{ body: unknown; headers: Headers }> {
-  return fetchMock.mock.calls
-    .filter(
-      ([url, init]) =>
-        String(url) === "/admin/api/v1/runtime-revisions/rtr-1/publish" && init?.method === "POST",
-    )
-    .map(([, init]) => ({
-      body: JSON.parse(String(init?.body)),
-      headers: new Headers(init?.headers),
-    }));
-}
-
-/** 全权限渲染，并完成“导入合同 → 登记成功”的连续交接前置动作。 */
-async function renderWorkspaceAndRegisterContract(
-  props?: Partial<Parameters<typeof AgentRegistrationWorkspace>[0]>,
-) {
-  render(
-    <AgentRegistrationWorkspace canReadAgents canRegisterContract canManageRevisions {...props} />,
-  );
-
-  // 初始档案：空列表（暂无智能体），不是加载失败。
-  await waitFor(() => expect(screen.getByText("暂无智能体")).toBeTruthy());
-
-  const fileInput = screen.getByLabelText("选择智能体合同文件") as HTMLInputElement;
-  selectFile(fileInput, makeFile(hrContractJson));
-  await waitFor(() =>
-    expect((screen.getByRole("button", { name: "登记合同" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    ),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "登记合同" }));
-  await waitFor(() =>
-    expect(screen.getAllByRole("status").some((item) => item.textContent?.includes("已登记"))).toBe(
-      true,
-    ),
+function renderWorkspace(props: Partial<Parameters<typeof AgentRegistrationWorkspace>[0]> = {}) {
+  return render(
+    <AgentRegistrationWorkspace
+      canReadAgents
+      canRegisterContract
+      canManageRevisions
+      canManageRoutes
+      {...props}
+    />,
   );
 }
-
+async function registerContract() {
+  fireEvent.click(screen.getByRole("button", { name: "登记智能体" }));
+  selectFile(
+    screen.getByLabelText("选择智能体合同文件") as HTMLInputElement,
+    makeFile(hrContractJson),
+  );
+  const button = await screen.findByRole("button", { name: "确认合同并继续" });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+  await screen.findByRole("heading", { name: "使用设置" });
+}
 beforeEach(() => {
   fetchMock.mockReset();
   registered = false;
-  runtimePublished = false;
   agentRevisionCreated = false;
   agentRevisionPublished = false;
+  window.history.replaceState(null, "", "/studio/resources");
   stubBackend();
 });
-
 afterEach(cleanup);
 
-describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
-  it("登记合同后不 remount/不刷新：档案显示 HR 智能体，创建版本的选择为 agent-1/snap-0001", async () => {
-    await renderWorkspaceAndRegisterContract();
-
-    // 登记后（同一次挂载，无 remount）：档案区域出现 HR 智能体行与草稿状态。
-    await waitFor(() => expect(screen.getAllByText("企业人力智能助手").length).toBeGreaterThan(0));
-    expect(screen.getByText("草稿")).toBeTruthy();
-    expect(screen.queryByText("hr-assistant")).toBeNull();
-
-    // 调用方没有 rerender；合同面板成功后允许为清空已选文件而重挂 input。
-    expect(screen.getAllByLabelText("选择智能体合同文件")).toHaveLength(1);
-
-    // 创建版本区域：智能体与合同选择都已被交接为登记结果。
-    await waitFor(() => expect(selectValue("创建版本的智能体")).toBe("agent-1"));
-    await waitFor(() => expect(selectValue("创建版本使用的合同")).toBe("snap-0001"));
-
-    // 两个值都来自重新读取的权威列表：打开选择器可看到真实选项，不是空值假通过。
-    fireEvent.click(screen.getByLabelText("创建版本的智能体"));
-    const agentOption = await screen.findByRole("option", { name: "企业人力智能助手" });
-    fireEvent.pointerDown(agentOption, { pointerType: "mouse" });
-    fireEvent.click(agentOption);
-    fireEvent.click(screen.getByLabelText("创建版本使用的合同"));
-    expect(await screen.findByRole("option", { name: /合同版本 1\.0\.0.*记录 1/ })).toBeTruthy();
-  });
-
-  it("两个选择器中文可访问名互不冲突，不再使用 aria-label=agent；不新增 URL/Git/source/secret 输入", async () => {
-    await renderWorkspaceAndRegisterContract();
-
-    // 互不冲突的中文可访问名（getByLabelText 在重复时会抛错，本身就是唯一性断言）。
-    await waitFor(() => expect(screen.getByLabelText("创建版本的智能体")).toBeTruthy());
-    await waitFor(() => expect(screen.getByLabelText("创建版本使用的合同")).toBeTruthy());
-
-    // 旧的重名 aria-label="agent" 必须消失。
-    expect(screen.queryAllByLabelText("agent")).toHaveLength(0);
-
-    // 守卫：合同登记入口不得新增 URL/Git/source/secret 输入。
-    expect(screen.queryByLabelText(/git/i)).toBeNull();
-    expect(screen.queryByLabelText(/source/i)).toBeNull();
-    expect(screen.queryByLabelText(/secret/i)).toBeNull();
-    expect(screen.queryByPlaceholderText(/secret/i)).toBeNull();
-  });
-
-  it("运行服务发布按钮须用户点击才 POST publish，body/headers 精确并刷新为已发布", async () => {
-    await renderWorkspaceAndRegisterContract({ canPublishRuntime: true });
-
-    // 运行服务列表存在（Harness Runtime），发布按钮出现。
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "发布运行服务版本" })).toBeTruthy(),
-    );
-    expect(screen.getByText("HR 外部运行服务")).toBeTruthy();
-
-    // 发布动作本身不得自动触发（必须由用户点击）。
-    expect(publishPosts()).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "发布运行服务版本" }));
-
-    await waitFor(() => expect(publishPosts()).toHaveLength(1));
-    const post = publishPosts()[0];
-    if (!post) throw new Error("publish POST 未发出");
-    expect(post.body).toEqual({
-      expected_version_no: 3,
-      attestation_id: null,
-      conformance_run_id: "conf-1",
-    });
-    expect(post.headers.get("Idempotency-Key")).toBeTruthy();
-    expect(post.headers.get("If-Match")).toBe("runtime-revision-1");
-
-    // 发布成功后刷新为已发布状态并出现撤回入口。
-    await waitFor(() => expect(screen.getByRole("button", { name: "撤回" })).toBeTruthy());
-    expect(screen.getByText("已发布")).toBeTruthy();
-  });
-
-  it("canPublishRuntime=false（默认）不渲染运行版本发布区域，无发布按钮与 POST", async () => {
-    await renderWorkspaceAndRegisterContract();
-
-    expect(screen.queryByRole("button", { name: "发布运行服务版本" })).toBeNull();
-    expect(publishPosts()).toHaveLength(0);
-  });
-
-  it("运行服务发布权限独立于智能体读取权限，不额外隐藏正式发布入口", async () => {
-    render(
-      <AgentRegistrationWorkspace
-        canReadAgents={false}
-        canRegisterContract={false}
-        canManageRevisions={false}
-        canPublishRuntime
-      />,
-    );
-
-    await waitFor(() => expect(screen.getByText("HR 外部运行服务")).toBeTruthy());
-    expect(screen.getByRole("button", { name: "发布运行服务版本" })).toBeTruthy();
-  });
-
-  it("权限守卫：canRegisterContract=false 时合同登记区域不渲染", async () => {
-    render(
-      <AgentRegistrationWorkspace canReadAgents canRegisterContract={false} canManageRevisions />,
-    );
-
-    await waitFor(() => expect(screen.getByText("暂无智能体")).toBeTruthy());
+describe("智能体登记任务流程", () => {
+  it("默认只展示列表和登记入口，不加载登记表单、Runtime 或路由资产", async () => {
+    renderWorkspace();
+    await screen.findByText("暂无智能体");
+    expect(screen.getByRole("button", { name: "登记智能体" })).toBeTruthy();
     expect(screen.queryByLabelText("选择智能体合同文件")).toBeNull();
-    expect(screen.queryByRole("button", { name: "登记合同" })).toBeNull();
-  });
-
-  it("同一挂载内完成合同登记→创建/发布智能体版本→发布给员工；Agent 发布交接刷新路由面板并选 preferred，路由写只发生在最终点击", async () => {
-    await renderWorkspaceAndRegisterContract({
-      canPublishRuntime: true,
-      canManageRoutes: true,
-    });
-
-    await waitFor(() => expect(screen.queryByText("正在加载可发布版本与访问凭证…")).toBeNull());
-
-    // 创建草稿版本（合同已交接为 snap-0001，草稿本身不是可发布状态）。
-    const createButton = (await screen.findByRole("button", {
-      name: "创建草稿版本",
-    })) as HTMLButtonElement;
-    await waitFor(() => expect(createButton.disabled).toBe(false));
-    fireEvent.click(createButton);
-    await waitFor(() => expect(screen.getByText(/已创建草稿版本/)).toBeTruthy());
-
-    // 发布智能体版本：交接只能由真实 publish API 成功返回驱动。
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(
-          ([url, init]) =>
-            String(url) === "/admin/api/v1/agent-revisions/arev-1/publish" &&
-            init?.method === "POST",
-        ),
-      ).toBe(true),
+    expect(screen.queryByLabelText("调用地址")).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/runtimes"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/credential-refs"))).toBe(
+      false,
     );
-    await waitFor(() => expect(screen.getByText(/版本 1 已发布/)).toBeTruthy());
-    // 发布后档案当前版本同步刷新，不要求用户重载页面；默认不暴露内部 revision id。
-    await waitFor(() => expect(screen.getByRole("cell", { name: "已关联版本" })).toBeTruthy());
-    expect(screen.queryByRole("cell", { name: "arev-1" })).toBeNull();
-
-    // Agent 发布后路由面板被刷新并选中真实 published arev-1（preferred 交接）。
+  });
+  it("点击登记只展示当前步骤；登记后自动交接权威合同，不提前发布路由", async () => {
+    renderWorkspace();
+    await registerContract();
+    expect(screen.queryByLabelText("选择智能体合同文件")).toBeNull();
+    expect(screen.queryByLabelText("调用地址")).toBeNull();
+    await waitFor(() => expect(selectValue("选择服务提供方交付的接入文件")).toBe("snap-0001"));
+    expect(screen.queryByLabelText("创建版本的智能体")).toBeNull();
+    expect(window.location.search).toContain("agent=agent-1");
+    expect(routeWriteCalls()).toHaveLength(0);
+  });
+  it("合同到版本再到连接发布始终在同一任务中，最终点击前不写路由", async () => {
+    renderWorkspace();
+    await registerContract();
+    const create = await screen.findByRole("button", { name: "保存配置并继续" });
+    await waitFor(() => expect((create as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(create);
+    await screen.findByRole("heading", { name: "连接与发布" });
     await waitFor(() => expect(selectHiddenValue("智能体版本")).toBe("arev-1"));
-
-    // 路由面板绝不提供运行服务版本选择（Runtime 与 Agent 端点事实解耦）。
-    const routeSection = screen.getByRole("button", { name: "发布给员工" }).closest("section");
-    if (!routeSection) throw new Error("发布给员工区域不存在");
-    expect(within(routeSection).queryByLabelText("运行服务版本")).toBeNull();
-    // 同页 RuntimeControlPanel 独立读取自己的资产；Agent Route 面板的零 Runtime
-    // 依赖由 RouteActivationPanel 单组件测试精确验证，不能在共享工作台误归因。
-
-    // 填端点/网络（identity 保持 none）后点击发布给员工。
+    expect(screen.queryByRole("button", { name: "保存配置并继续" })).toBeNull();
     fireEvent.change(screen.getByLabelText("调用地址"), {
       target: { value: "https://agent.example.com/a2a" },
     });
     fireEvent.change(screen.getByLabelText("网络区域"), { target: { value: "public" } });
-    const submit = screen.getByRole("button", {
-      name: "发布给员工",
-    }) as HTMLButtonElement;
-    await waitFor(() => expect(submit.disabled).toBe(false));
-    // 点击前仍然零路由写。
     expect(routeWriteCalls()).toHaveLength(0);
-
-    fireEvent.click(submit);
-    await waitFor(() => expect(screen.getByText(/员工新会话现在可以选择该智能体/)).toBeTruthy());
-
-    const writes = routeWriteCalls();
-    expect(writes.map((call) => `${call.method} ${call.url}`)).toEqual([
-      "POST /admin/api/v1/deployment-route-sets",
-      "PUT /admin/api/v1/deployment-route-sets/route-set-1/activation",
-    ]);
-    const ensureBody = JSON.parse(String(writes[0]?.init?.body));
-    expect(ensureBody.target).toEqual({ kind: "agent", agent_id: "agent-1" });
-    const activateBody = JSON.parse(String(writes[1]?.init?.body));
-    expect(activateBody.routes[0].target).toEqual({
+    fireEvent.click(screen.getByLabelText("认证方式"));
+    fireEvent.click(await screen.findByRole("option", { name: "无需认证" }));
+    fireEvent.click(screen.getByRole("button", { name: "发布给员工" }));
+    await screen.findByText(/发布配置已提交/);
+    expect(screen.queryByText(/现在可以选择该智能体/)).toBeNull();
+    expect(routeWriteCalls().map((c) => c.method)).toEqual(["POST", "PUT"]);
+    expect(JSON.parse(String(routeWriteCalls()[1]?.init?.body)).routes[0].target).toMatchObject({
       kind: "agent",
       agent_revision_id: "arev-1",
-      endpoint_ref: "https://agent.example.com/a2a",
-      identity_mode: "none",
       credential_ref_id: null,
-      network_zone: "public",
     });
-    expect(JSON.stringify(activateBody)).not.toContain("runtime_revision_id");
   });
-
-  it("Runtime 发布独立于 Agent 路由面板：不触发额外路由资产 GET、不 refresh 也不选 preferred", async () => {
-    await renderWorkspaceAndRegisterContract({
-      canPublishRuntime: true,
-      canManageRoutes: true,
+  it("刷新后从服务端已有合同恢复配置步骤；不伪造不存在的智能体", async () => {
+    registered = true;
+    window.history.replaceState(null, "", "/studio/resources?agent=agent-1&step=configure");
+    renderWorkspace();
+    await screen.findByRole("heading", { name: "使用设置" });
+    await waitFor(() => expect(selectValue("选择服务提供方交付的接入文件")).toBe("snap-0001"));
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+  it("只读用户可以浏览合同，但没有登记入口", async () => {
+    renderWorkspace({
+      canRegisterContract: false,
+      canManageRevisions: false,
+      canManageRoutes: false,
     });
-
-    await waitFor(() => expect(screen.queryByText("正在加载可发布版本与访问凭证…")).toBeNull());
-    await waitFor(() => expect(screen.getAllByText("企业人力智能助手").length).toBeGreaterThan(0));
-    await waitFor(() => expect(selectValue("创建版本的智能体")).toBe("agent-1"));
-    await waitFor(() => expect(selectValue("创建版本使用的合同")).toBe("snap-0001"));
-
-    // 记录发布运行服务前的 Agent Route 资产 GET 次数。
-    const agentGets = () =>
-      fetchMock.mock.calls.filter(
-        ([url, init]) =>
-          (String(url) === "/admin/api/v1/agents" ||
-            (String(url).includes("/admin/api/v1/agents/") &&
-              String(url).endsWith("/revisions"))) &&
-          (init?.method ?? "GET") === "GET",
-      ).length;
-    const agentGetsBeforePublish = agentGets();
-
-    // 发布运行服务（真实 publish API）—— Runtime 发布保持独立。
-    fireEvent.click(await screen.findByRole("button", { name: "发布运行服务版本" }));
-    await waitFor(() => expect(publishPosts()).toHaveLength(1));
-
-    // Runtime 发布后 Agent 路由面板未被刷新：无新增 Agent 资产 GET，无偏好交接。
-    expect(agentGets()).toBe(agentGetsBeforePublish);
-    expect(
-      fetchMock.mock.calls.filter(
-        ([url, init]) =>
-          String(url).startsWith("/admin/api/v1/runtimes") && (init?.method ?? "GET") === "GET",
-      ).length,
-    ).toBeGreaterThanOrEqual(1);
-
-    // 未发布智能体版本：路由面板不预选任何 AgentRevision（无 fabricated 交接）。
-    expect(selectHiddenValue("智能体版本")).toBe("");
-  });
-
-  it("canManageRoutes 缺省为 false：不渲染「发布给员工」路由区域且零路由写", async () => {
-    await renderWorkspaceAndRegisterContract({ canPublishRuntime: true });
-
-    expect(screen.queryByRole("button", { name: "发布给员工" })).toBeNull();
-    expect(screen.queryByLabelText("智能体版本")).toBeNull();
-    expect(routeWriteCalls()).toHaveLength(0);
+    await screen.findByText("暂无智能体");
+    expect(screen.queryByRole("button", { name: "登记智能体" })).toBeNull();
+    expect(screen.queryByLabelText("选择智能体合同文件")).toBeNull();
   });
 });

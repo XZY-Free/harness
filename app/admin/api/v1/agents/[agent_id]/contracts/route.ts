@@ -46,7 +46,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   // 租户归属校验（跨租户隐藏为 404）
   const agent = await getAgentById(principal.tenantId, agentId);
-  if (!agent) {
+  if (!agent || agent.deletedAt) {
     return resourceNotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
   }
 
