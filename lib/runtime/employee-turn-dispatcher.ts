@@ -79,9 +79,10 @@ const ROUTE_FAILURE_CODES = {
   invalid_traffic_weight_total: "INVALID_RUNTIME_ROUTE_WEIGHT",
   agent_revision_not_found: "RUNTIME_ROUTE_TARGET_NOT_FOUND",
   workspace_binding_unavailable: "WORKSPACE_BINDING_UNAVAILABLE",
+  dispatch_error: "TURN_DISPATCH_ERROR",
 } as const;
 
-async function failUndispatchedTurn(params: {
+export async function failUndispatchedTurn(params: {
   tenantId: string;
   threadId: string;
   turnId: string;

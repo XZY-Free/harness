@@ -50,7 +50,7 @@ import {
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
 import { logger } from "@/lib/logger";
-import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
+import { dispatchEmployeeTurn, failUndispatchedTurn } from "@/lib/runtime/employee-turn-dispatcher";
 
 export const dynamic = "force-dynamic";
 
@@ -192,6 +192,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   }
 
   // 7. 执行业务：acceptUserMessageTurn 原子接纳事务
+  let acceptedTurn: { readonly id: string; readonly threadId: string } | null = null;
   try {
     const result = await acceptUserMessageTurn({
       tenantId: principal.tenantId,
@@ -207,6 +208,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       idempotencyKey,
       correlationId: requestId,
     });
+
+    acceptedTurn = { id: result.turn.id, threadId: result.turn.threadId };
 
     const dispatch = await dispatchEmployeeTurn({
       tenantId: principal.tenantId,
@@ -274,6 +277,22 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       threadId,
       error: err instanceof Error ? err.message : String(err),
     });
+    // 原子性兜底：接纳已提交但调度抛错时，把仍处 accepted 的 Turn 明确收口为 failed，
+    // 避免客户端按投影无限展示"处理中"（仅收口 accepted；已推进 running 的交 Recovery Authority）。
+    if (acceptedTurn) {
+      await failUndispatchedTurn({
+        tenantId: principal.tenantId,
+        threadId: acceptedTurn.threadId,
+        turnId: acceptedTurn.id,
+        reason: "dispatch_error",
+        correlationId: requestId,
+      }).catch((closeErr) => {
+        logger.error("[runtime] 兜底收口 failed 失败", {
+          threadId,
+          error: closeErr instanceof Error ? closeErr.message : String(closeErr),
+        });
+      });
+    }
     await failRecord(recordId);
     const errorResp = conversationErrorToResponse(err, requestId);
     if (errorResp) return errorResp;
