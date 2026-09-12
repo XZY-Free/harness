@@ -1,7 +1,7 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { HostExecutionRuntime } from "@/lib/runtime/execution-runtime";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Phase 5 Stage A：HostExecutionRuntime 单测——覆盖 exec 成功 / 超时 / buffer 截断。
@@ -18,11 +18,28 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   process.env.SNOW_WORKSPACES_DIR = orig;
   await rm(TEST_ROOT, { recursive: true, force: true });
 });
 
 describe("HostExecutionRuntime", () => {
+  it("真实子进程不继承平台秘密，只接收显式授权的注入", async () => {
+    vi.stubEnv("SNOW_EXECUTION_TEST_SECRET", "test-only-marker");
+    const runtime = new HostExecutionRuntime(TID);
+    const result = await runtime.exec(
+      "node -e \"process.stdout.write(process.env.SNOW_EXECUTION_TEST_SECRET ? 'leaked' : 'absent')\"",
+    );
+    expect(result.ok).toBe(true);
+    expect(result.stdout).toBe("absent");
+    const injected = new HostExecutionRuntime(TID, undefined, async () => ({
+      SNOW_EXECUTION_TEST_SECRET: "explicit",
+    }));
+    const allowed = await injected.exec(
+      "node -e \"process.stdout.write(process.env.SNOW_EXECUTION_TEST_SECRET || 'absent')\"",
+    );
+    expect(allowed.stdout).toBe("explicit");
+  });
   it("exec 成功返回 ok:true + exitCode:0 + stdout", async () => {
     const runtime = new HostExecutionRuntime(TID);
     const result = await runtime.exec("echo hi", { timeoutMs: 5_000 });

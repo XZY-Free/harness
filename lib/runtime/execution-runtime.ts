@@ -89,6 +89,8 @@ export class HostExecutionRuntime implements ExecutionRuntime {
         // P1 修复(02-):env 白名单过滤,防 AI 命令 printenv 泄露平台 secret。
         // 白名单(PATH/HOME/NPM_CONFIG_* 等)+ 敏感关键字黑名单兜底;secretsCache 显式注入。
         env: buildSafeEnv(this.secretsCache),
+        // execa 默认继承 process.env；否则白名单会被宿主环境重新补回。
+        extendEnv: false,
         // 注入 AbortSignal，让 execa 子进程响应取消
         signal: opts?.signal,
       });
