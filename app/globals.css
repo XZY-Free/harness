@@ -712,6 +712,19 @@ body {
   padding-inline: 16px;
 }
 
+/* 会话定位轴始终固定在时间线视口。窄窗口仅为正文留出一段弹性起始区，
+ * 不改变输入区宽度，也不让定位轴参与主内容排版。 */
+@media (max-width: 47.999rem) {
+  .timeline-with-locator .message-track {
+    padding-inline-start: clamp(2.75rem, 12vw, 3.5rem);
+  }
+}
+
+/* 左侧自由边距不足 32px 时由组件挂该类让位正文（JS 判定，CSS 只负责隐藏）。 */
+.message-locator-hidden {
+  display: none;
+}
+
 /* 共享消息行结构：用户行与助手行都占满同一 .message-track 可用宽度 */
 .message-row {
   width: 100%;

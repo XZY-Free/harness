@@ -22,6 +22,7 @@
 "use client";
 
 import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -51,7 +52,7 @@ interface ThreadTimelineProps {
   readonly threadId?: string;
   /** 是否显示 superseded Item（默认 false）。 */
   readonly showSuperseded?: boolean;
-  /** W3-5：是否显示消息定位轴（Desktop 默认启用）。 */
+  /** 是否显示常驻的会话位置导航。 */
   readonly showMessageLocator?: boolean;
   /** 右侧工作台请求定位的 Item；requestId 支持重复定位同一条记录。 */
   readonly locateItem?: { readonly itemId: string; readonly requestId: number } | null;
@@ -226,6 +227,12 @@ export function ThreadTimeline({
     pinnedToBottomRef.current = distanceFromBottom <= 100;
   }, []);
 
+  const handleLocatorNavigate = useCallback((atBottom: boolean) => {
+    pinnedToBottomRef.current = atBottom;
+    pendingUserScrollRef.current = false;
+    continuousUserScrollRef.current = false;
+  }, []);
+
   const markKeyboardScrollIntent = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (
@@ -308,108 +315,121 @@ export function ThreadTimeline({
 
   return (
     <div
-      ref={scrollRef}
-      onWheel={markUserScrollIntent}
-      onKeyDownCapture={markKeyboardScrollIntent}
-      onTouchStart={() => {
-        continuousUserScrollRef.current = true;
-        markUserScrollIntent();
-      }}
-      onTouchEnd={() => {
-        continuousUserScrollRef.current = false;
-      }}
-      onTouchCancel={() => {
-        continuousUserScrollRef.current = false;
-      }}
-      onPointerDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        continuousUserScrollRef.current = true;
-        markUserScrollIntent();
-      }}
-      onPointerUp={() => {
-        continuousUserScrollRef.current = false;
-      }}
-      onPointerCancel={() => {
-        continuousUserScrollRef.current = false;
-      }}
-      onScroll={updatePinnedState}
-      className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-0 py-5"
-      role="log"
-      aria-label="对话时间线"
-      aria-live="polite"
-      aria-atomic="false"
+      className={cn(
+        "relative min-h-0 flex-1 overflow-hidden [container-type:inline-size]",
+        showMessageLocator && "timeline-with-locator",
+      )}
     >
-      {showMessageLocator && <MessageLocator items={visibleItems} scrollContainerRef={scrollRef} />}
-      <div ref={contentRef} className="message-track flex min-h-full min-w-0 flex-col">
-        {shouldVirtualize ? (
-          <div
-            style={{
-              height: `${virtualizer.getTotalSize()}px`,
-              position: "relative",
-              width: "100%",
-            }}
-          >
-            {virtualizer.getVirtualItems().map((virtualItem) => {
-              const segment = segments[virtualItem.index];
-              if (!segment) return null;
-              return (
-                <div
-                  key={segmentKey(segment)}
-                  data-index={virtualItem.index}
-                  ref={virtualizer.measureElement}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualItem.start}px)`,
-                  }}
-                  className="pb-2"
-                >
-                  {renderSegment(segment, threadId, turnsById)}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          segments.map((segment) => (
-            <div key={segmentKey(segment)} className="flex flex-col">
-              {renderSegment(segment, threadId, turnsById)}
+      {showMessageLocator ? (
+        <MessageLocator
+          items={visibleItems}
+          scrollContainerRef={scrollRef}
+          onNavigate={handleLocatorNavigate}
+        />
+      ) : null}
+      <div
+        ref={scrollRef}
+        onWheel={markUserScrollIntent}
+        onKeyDownCapture={markKeyboardScrollIntent}
+        onTouchStart={() => {
+          continuousUserScrollRef.current = true;
+          markUserScrollIntent();
+        }}
+        onTouchEnd={() => {
+          continuousUserScrollRef.current = false;
+        }}
+        onTouchCancel={() => {
+          continuousUserScrollRef.current = false;
+        }}
+        onPointerDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          continuousUserScrollRef.current = true;
+          markUserScrollIntent();
+        }}
+        onPointerUp={() => {
+          continuousUserScrollRef.current = false;
+        }}
+        onPointerCancel={() => {
+          continuousUserScrollRef.current = false;
+        }}
+        onScroll={updatePinnedState}
+        className="h-full min-h-0 overflow-y-auto overflow-x-hidden px-0 py-5"
+        role="log"
+        aria-label="对话时间线"
+        aria-live="polite"
+        aria-atomic="false"
+      >
+        <div ref={contentRef} className="message-track flex min-h-full min-w-0 flex-col">
+          {shouldVirtualize ? (
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                position: "relative",
+                width: "100%",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const segment = segments[virtualItem.index];
+                if (!segment) return null;
+                return (
+                  <div
+                    key={segmentKey(segment)}
+                    data-index={virtualItem.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                    className="pb-2"
+                  >
+                    {renderSegment(segment, threadId, turnsById)}
+                  </div>
+                );
+              })}
             </div>
-          ))
-        )}
+          ) : (
+            segments.map((segment) => (
+              <div key={segmentKey(segment)} className="flex flex-col">
+                {renderSegment(segment, threadId, turnsById)}
+              </div>
+            ))
+          )}
 
-        {/* 真实运行状态反馈：当前 Turn 非终态时的时间线底部指示
+          {/* 真实运行状态反馈：当前 Turn 非终态时的时间线底部指示
             （纯执行状态 UI，不创建 ThreadItem、不进入会话历史）。 */}
-        <TurnRunningIndicator turn={activeTurn} items={items} />
+          <TurnRunningIndicator turn={activeTurn} items={items} />
 
-        {/* 连接异常提示（W4-1）。
+          {/* 连接异常提示（W4-1）。
             正常连接（open）不提示——健康状态无需占用视线；
             仅在重连/重新同步时以最低视觉权重呈现一行淡灰小字，附带重连进度。 */}
-        {(streamStatus === "reconnecting" || streamStatus === "resnapshot") && (
-          <output className="flex items-center gap-1.5 py-1 text-foreground-subtle text-xs">
-            <Wifi
-              aria-hidden="true"
-              strokeWidth={1.5}
-              className="size-3.5 animate-gentle-pulse opacity-70"
-            />
-            <span>
-              {streamStatus === "reconnecting"
-                ? reconnectAttempt > 0
-                  ? `正在重新连接 ${reconnectAttempt}/${reconnectMax}`
-                  : "正在重新连接"
-                : "正在同步会话"}
-            </span>
-          </output>
-        )}
+          {(streamStatus === "reconnecting" || streamStatus === "resnapshot") && (
+            <output className="flex items-center gap-1.5 py-1 text-foreground-subtle text-xs">
+              <Wifi
+                aria-hidden="true"
+                strokeWidth={1.5}
+                className="size-3.5 animate-gentle-pulse opacity-70"
+              />
+              <span>
+                {streamStatus === "reconnecting"
+                  ? reconnectAttempt > 0
+                    ? `正在重新连接 ${reconnectAttempt}/${reconnectMax}`
+                    : "正在重新连接"
+                  : "正在同步会话"}
+              </span>
+            </output>
+          )}
 
-        {/* 空状态 */}
-        {segments.length === 0 && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-center">
-            <p className="text-muted-foreground text-sm">还没有消息</p>
-            <p className="text-foreground-subtle text-xs">发送第一条消息开始对话</p>
-          </div>
-        )}
+          {/* 空状态 */}
+          {segments.length === 0 && (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-center">
+              <p className="text-muted-foreground text-sm">还没有消息</p>
+              <p className="text-foreground-subtle text-xs">发送第一条消息开始对话</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -192,6 +192,24 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   // 回复原文入日志：内容是否正常由人工/CI 日志判断，不做脆弱断言。
   console.log(`[e2e][web] thread=${threadId} Agent 回复原文：${replyText}`);
 
+  // ─── 3.5 会话位置导航：置底默认态轴可见、刻度与回合 1:1、悬停出预览卡 ───
+  // 回归旧 bug：轴曾挂载在滚动容器内随内容滚走，置底时离屏"看不见"。
+  const locatorNav = page.getByRole("navigation", { name: "会话位置导航" });
+  await expect(locatorNav).toBeVisible();
+  const navBox = await locatorNav.boundingBox();
+  const viewport = page.viewportSize();
+  expect(navBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  if (navBox && viewport) {
+    expect(navBox.y).toBeLessThan(viewport.height);
+    expect(navBox.y + navBox.height).toBeGreaterThan(0);
+  }
+  // 一横 = 一个问答回合：此刻会话恰有一条用户消息。
+  await expect(locatorNav.getByRole("button")).toHaveCount(1);
+  // 槽位吸附：悬停轴即有聚焦回合并常显预览卡。
+  await locatorNav.hover({ position: { x: 12, y: Math.max(1, (navBox?.height ?? 8) / 2) } });
+  await expect(page.getByRole("tooltip")).toBeVisible();
+
   // ─── 4. 服务端确实生成了 Turn ───────────────────────────
   const turnsResponse = await request.get(`/api/v1/threads/${threadId}/turns`);
   expect(turnsResponse.status()).toBe(200);

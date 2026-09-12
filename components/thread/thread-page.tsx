@@ -338,6 +338,7 @@ export function ThreadPage({
                 reconnectAttempt={reconnectAttempt}
                 reconnectMax={reconnectMax}
                 threadId={threadId}
+                showMessageLocator
                 activeTurn={latestTurn}
                 turns={turns}
               />

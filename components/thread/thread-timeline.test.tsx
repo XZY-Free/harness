@@ -19,6 +19,18 @@ function agentItem(text: string): ClientItem {
   };
 }
 
+function userItem(text: string, id = "user-1"): ClientItem {
+  return {
+    id,
+    turn_id: `turn-${id}`,
+    item_sequence: 1,
+    item_type: "user_message",
+    item_state: "completed",
+    content: { text },
+    created_at: "2026-08-14T00:00:00.000Z",
+  };
+}
+
 function triggerResize(): void {
   act(() => {
     for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
@@ -144,6 +156,47 @@ describe("ThreadTimeline 底部锚定", () => {
     timelineScrollHeight = 1300;
     triggerResize();
     expect(timeline.scrollTop).toBe(1300);
+  });
+});
+
+describe("ThreadTimeline 会话位置导航", () => {
+  it("空会话也保留视口级导航轨道，且轨道不随消息滚动", () => {
+    render(<ThreadTimeline items={[]} streamStatus="idle" showMessageLocator />);
+
+    const timeline = screen.getByRole("log", { name: "对话时间线" });
+    const locator = screen.getByRole("navigation", { name: "会话位置导航" });
+    expect(timeline.contains(locator)).toBe(false);
+    expect(timeline.parentElement?.contains(locator)).toBe(true);
+  });
+
+  it("无需滚动的短会话仍显示可定位的消息节点", () => {
+    timelineScrollHeight = timelineClientHeight;
+    render(
+      <ThreadTimeline
+        items={[userItem("帮我整理今天的工作重点")]}
+        streamStatus="open"
+        showMessageLocator
+      />,
+    );
+
+    expect(screen.getByRole("navigation", { name: "会话位置导航" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /帮我整理今天的工作重点/ })).toBeTruthy();
+  });
+
+  it("键盘聚焦用户节点时显示相邻问答预览", () => {
+    render(
+      <ThreadTimeline
+        items={[userItem("总结本周交付"), agentItem("本周完成了登录与任务恢复。")]}
+        streamStatus="open"
+        showMessageLocator
+      />,
+    );
+
+    fireEvent.focus(screen.getByRole("button", { name: /总结本周交付/ }));
+
+    const locator = screen.getByRole("navigation", { name: "会话位置导航" });
+    expect(locator.textContent).toContain("总结本周交付");
+    expect(locator.textContent).toContain("本周完成了登录与任务恢复。");
   });
 });
 
