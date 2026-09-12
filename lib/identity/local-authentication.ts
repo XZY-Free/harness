@@ -6,6 +6,7 @@ import type {
   AuthenticationResult,
   UserAuthenticationProvider,
 } from "@/lib/identity/authentication-provider";
+import { isPasswordAcceptable } from "@/lib/identity/password-strength";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -384,8 +385,8 @@ export async function completePasswordEnrollment(input: {
   readonly headers: Headers;
   readonly password: string;
 }): Promise<Extract<AuthenticationLoginResult, { status: "authenticated" }>> {
-  if (input.password.length < 12 || input.password.length > 1024) {
-    throw new PasswordEnrollmentError("密码长度需要在 12 到 1024 个字符之间");
+  if (!isPasswordAcceptable(input.password)) {
+    throw new PasswordEnrollmentError("密码强度不足：8-128 个字符且避免常见密码");
   }
   const token = readCookie(input.headers, SESSION_COOKIE_NAME);
   if (!token) throw new PasswordEnrollmentError("首次设密会话不存在或已失效");
