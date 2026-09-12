@@ -195,3 +195,9 @@ it("回答正文不重复生成工具记录，命令详情展示实际参数", (
   );
   expect(command?.block).toBe("$ date; pwd");
 });
+
+it("确认请求由操作卡片展示，不在执行日志重复展示过时等待状态", () => {
+  expect(
+    projectActivityEvent(actionEvent("user_action.requested", { request_id: "request-1" })),
+  ).toBeNull();
+});

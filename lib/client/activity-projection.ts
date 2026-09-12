@@ -122,17 +122,6 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
         label: `执行失败： ${shortPurpose} · ${payload.error_code ?? "UNKNOWN"}`,
         block: payload.error_code ?? null,
       };
-    case "user_action.requested":
-      return {
-        ...base,
-        kind: "wait",
-        phase: "waiting",
-        label: `等待你确认： ${shortPurpose}`,
-        block:
-          payload.action_payload === undefined
-            ? null
-            : capBlock(actionBlock(payload.action_payload)),
-      };
     default:
       return null;
   }
