@@ -107,10 +107,17 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
       const parts: string[] = [];
       if (payload.action_payload !== undefined) parts.push(actionBlock(payload.action_payload));
       if (payload.observation !== undefined) parts.push(`→ ${prettyJson(payload.observation)}`);
+      const observation = payload.observation as
+        | { data?: { state?: string; result?: { ok?: boolean } } }
+        | undefined;
+      const failed =
+        ["failed", "cancelled", "unknown_effect"].includes(observation?.data?.state ?? "") ||
+        observation?.data?.result?.ok === false;
       return {
         ...base,
-        phase: "completed",
-        label: `已执行 · ${shortPurpose}`,
+        kind: failed ? "fail" : base.kind,
+        phase: failed ? "failed" : "completed",
+        label: failed ? `执行失败： ${shortPurpose}` : `已执行 · ${shortPurpose}`,
         block: parts.length ? capBlock(parts.join("\n")) : null,
       };
     }

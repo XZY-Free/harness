@@ -201,3 +201,13 @@ it("确认请求由操作卡片展示，不在执行日志重复展示过时等�
     projectActivityEvent(actionEvent("user_action.requested", { request_id: "request-1" })),
   ).toBeNull();
 });
+
+it("工具返回失败时不把动作结束显示为执行成功", () => {
+  const entry = projectActivityEvent(
+    actionEvent("harness.action.completed", {
+      observation: { data: { state: "failed", errorCode: "WEB_REQUEST_FAILED" } },
+    }),
+  );
+  expect(entry?.phase).toBe("failed");
+  expect(entry?.label).toContain("执行失败");
+});
