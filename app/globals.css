@@ -712,10 +712,10 @@ body {
   padding-inline: 16px;
 }
 
-/* 会话定位轴始终固定在时间线视口。窄窗口仅为正文留出一段弹性起始区，
+/* 会话位置轴始终固定在时间线视口。窄窗口仅为正文留出一段弹性起始区，
  * 不改变输入区宽度，也不让定位轴参与主内容排版。 */
 @media (max-width: 47.999rem) {
-  .timeline-with-locator .message-track {
+  .message-track {
     padding-inline-start: clamp(2.75rem, 12vw, 3.5rem);
   }
 }

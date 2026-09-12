@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   useThreadDetail: vi.fn(),
   useThreadSettings: vi.fn(),
   timelineItems: [] as string[],
-  timelineMessageLocatorEnabled: false,
 }));
 
 vi.mock("@/components/hooks/use-thread", () => ({ useThread: mocks.useThread }));
@@ -27,15 +26,8 @@ vi.mock("@/components/thread/thread-header", () => ({
   deriveTaskStatus: () => ({ tone: "idle", label: "空闲" }),
 }));
 vi.mock("@/components/thread/thread-timeline", () => ({
-  ThreadTimeline: ({
-    items,
-    showMessageLocator,
-  }: {
-    readonly items: readonly { readonly id: string }[];
-    readonly showMessageLocator?: boolean;
-  }) => {
+  ThreadTimeline: ({ items }: { readonly items: readonly { readonly id: string }[] }) => {
     mocks.timelineItems = items.map((item) => item.id);
-    mocks.timelineMessageLocatorEnabled = showMessageLocator === true;
     return <div data-testid="thread-timeline" data-item-ids={mocks.timelineItems.join(",")} />;
   },
 }));
@@ -85,7 +77,6 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  mocks.timelineMessageLocatorEnabled = false;
   mocks.useThread.mockReturnValue({
     items: [],
     streamStatus: "idle",
@@ -125,12 +116,6 @@ describe("ThreadPage 把平台默认模型传给 ThreadInput（Web 与 Desktop �
 });
 
 describe("ThreadPage 输出区", () => {
-  it.each(["web", "desktop"] as const)("%s 默认启用会话位置导航", (variant) => {
-    render(<ThreadPage threadId="t-1" variant={variant} />);
-
-    expect(mocks.timelineMessageLocatorEnabled).toBe(true);
-  });
-
   it.each(["web", "desktop"] as const)(
     "%s 默认隐藏输出工作台，用户点击标题栏入口后展开",
     (variant) => {

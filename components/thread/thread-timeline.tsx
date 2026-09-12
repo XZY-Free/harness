@@ -22,7 +22,6 @@
 "use client";
 
 import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/types";
-import { cn } from "@/lib/utils";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -52,8 +51,6 @@ interface ThreadTimelineProps {
   readonly threadId?: string;
   /** 是否显示 superseded Item（默认 false）。 */
   readonly showSuperseded?: boolean;
-  /** 是否显示常驻的会话位置导航。 */
-  readonly showMessageLocator?: boolean;
   /** 右侧工作台请求定位的 Item；requestId 支持重复定位同一条记录。 */
   readonly locateItem?: { readonly itemId: string; readonly requestId: number } | null;
   /** 最新 Turn 投影（真实运行状态反馈：非终态时时间线底部渲染运行指示）。 */
@@ -176,7 +173,6 @@ export function ThreadTimeline({
   reconnectMax = 5,
   threadId = "",
   showSuperseded = false,
-  showMessageLocator = false,
   locateItem = null,
   activeTurn = null,
   turns = [],
@@ -314,19 +310,14 @@ export function ThreadTimeline({
   }, [locateItem, segments, shouldVirtualize, virtualizer]);
 
   return (
-    <div
-      className={cn(
-        "relative min-h-0 flex-1 overflow-hidden [container-type:inline-size]",
-        showMessageLocator && "timeline-with-locator",
-      )}
-    >
-      {showMessageLocator ? (
-        <MessageLocator
-          items={visibleItems}
-          scrollContainerRef={scrollRef}
-          onNavigate={handleLocatorNavigate}
-        />
-      ) : null}
+    <div className="relative min-h-0 flex-1 overflow-hidden [container-type:inline-size]">
+      {/* 会话位置导航是时间线的固有组成（Web/Desktop 同启用），不提供关闭开关，
+          杜绝"某变体漏传 flag"导致轴缺失的回归。 */}
+      <MessageLocator
+        items={visibleItems}
+        scrollContainerRef={scrollRef}
+        onNavigate={handleLocatorNavigate}
+      />
       <div
         ref={scrollRef}
         onWheel={markUserScrollIntent}
