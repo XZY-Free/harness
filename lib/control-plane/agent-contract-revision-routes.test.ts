@@ -125,6 +125,78 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions（AgentContractSnapshot
     contractDigest = snapshot.contractDigest;
   });
 
+  it("声明 required 企业身份的通用合同允许创建并幂等保存合法资料策略", async () => {
+    const agent = await createAgent({
+      tenantId,
+      agentKey: "context-service",
+      displayName: "资料服务",
+      ownerUserId: userIdentityId,
+    });
+    const snapshot = await seedAgentContractSnapshot({
+      tenantId,
+      agentId: agent.id,
+      createdBy: userIdentityId,
+      contract: {
+        contract_version: "1.0.0",
+        agent: { id: "context-service", name: { "zh-CN": "资料服务" }, version: "1.0.0" },
+        capabilities: [
+          {
+            key: "profile-lookup",
+            name: { "zh-CN": "本人资料查询" },
+            description: { "zh-CN": "查询已授权的本人资料。" },
+          },
+        ],
+        invocation_context: [
+          {
+            key: "enterprise_user_context",
+            name: { "zh-CN": "企业用户上下文" },
+            necessity: "required",
+            applies_to: ["profile-lookup"],
+          },
+        ],
+        interaction: {
+          streaming_transport: false,
+          incremental_content: false,
+          input_required: false,
+          resume: false,
+          cancel: false,
+          durable_task_recovery: false,
+          supported_locales: ["zh-CN"],
+        },
+        result_contract: { fields: ["answer"], error_codes: ["identity_required"] },
+      },
+    });
+    const requirements = {
+      enterprise_user_context: {
+        profile_requirement: "fresh_required",
+        allowed_fields: ["employeeNo"],
+      },
+    };
+    const request = {
+      ...baseRevisionBody(),
+      agent_contract_snapshot_id: snapshot.id,
+      agent_interface_requirements: requirements,
+    };
+    const response = await buildPost(agent.id, request, "idem-generic-enterprise-context-success");
+    expect(response.status).toBe(201);
+    const result = await response.json();
+    expect(result).toMatchObject({
+      agent_id: agent.id,
+      revision_state: "draft",
+      agent_contract_snapshot_id: snapshot.id,
+    });
+    const rows = await db
+      .select()
+      .from(agentRevisionTable)
+      .where(eq(agentRevisionTable.agentId, agent.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.agentInterfaceRequirementsJson).toEqual(requirements);
+    const replay = await buildPost(agent.id, request, "idem-generic-enterprise-context-success");
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(result);
+    expect(await countRevisions(agent.id)).toBe(1);
+  });
+
   it("happy path：agent_contract_snapshot_id → 201，响应回显合同快照 id 与 digest，不回显原始合同", async () => {
     const response = await buildPost(
       agentId,
