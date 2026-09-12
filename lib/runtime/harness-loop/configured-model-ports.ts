@@ -1,6 +1,6 @@
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
-import { collectModelText } from "@/lib/runtime/model-text-stream";
+import { TRUNCATED_FINISH_REASONS, collectModelText } from "@/lib/runtime/model-text-stream";
 import { generateObject, streamText } from "ai";
 import { z } from "zod";
 import { HARNESS_NEXT_ACTION_SCHEMA } from "./action-schema";
@@ -30,16 +30,26 @@ export function configuredFinalResponsePort(modelRef: string): HarnessFinalRespo
   return {
     async generateFinalResponse(view, emitDelta, abortSignal) {
       if (!aiConfig.apiKey) throw new Error("LLM_API_KEY 未配置");
-      const result = streamText({
-        model: getChatModel(modelRef),
-        prompt: [
-          "根据当前用户目标与已完成 observations 生成最终可见回答。不得声称执行过 actionHistory 中不存在或未 completed 的行动。",
-          JSON.stringify(view),
-        ].join("\n\n"),
-        maxOutputTokens: aiConfig.maxOutputTokens || undefined,
-        abortSignal,
-      });
-      return collectModelText(result.fullStream, emitDelta);
+      const run = () =>
+        streamText({
+          model: getChatModel(modelRef),
+          prompt: [
+            "根据当前用户目标与已完成 observations 生成最终可见回答。不得声称执行过 actionHistory 中不存在或未 completed 的行动。",
+            JSON.stringify(view),
+          ].join("\n\n"),
+          maxOutputTokens: aiConfig.maxOutputTokens || undefined,
+          abortSignal,
+        });
+      let collected = await collectModelText(run().fullStream, emitDelta);
+      if (TRUNCATED_FINISH_REASONS.has(collected.finishReason)) {
+        // 流异常终结（截断/连接早断）：静默重试一次（不重复向 UI 发射 delta），
+        // 仍异常则抛错由执行链按失败关闭，禁止把残缺正文当完整回答落库。
+        collected = await collectModelText(run().fullStream);
+        if (TRUNCATED_FINISH_REASONS.has(collected.finishReason)) {
+          throw new Error(`模型正文异常终结(finish_reason=${collected.finishReason})`);
+        }
+      }
+      return collected.text;
     },
   };
 }
