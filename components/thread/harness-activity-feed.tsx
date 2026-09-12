@@ -216,8 +216,8 @@ export function TurnActivitySummary({
         {failed ? <ActivityIcon kind="fail" /> : null}
         <span className="ha-lab">
           {failed
-            ? "执行失败 · 展开查看过程"
-            : `用时 ${formatElapsed(elapsedMs ?? 0)} · 展开查看过程`}
+            ? `执行失败${entries ? ` · 已执行 ${stepCount} 步操作` : ""}`
+            : `用时 ${formatElapsed(elapsedMs ?? 0)}${entries ? ` · 已执行 ${stepCount} 步操作` : ""}`}
         </span>
       </summary>
       <div className="ha-steps">
