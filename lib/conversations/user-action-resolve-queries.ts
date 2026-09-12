@@ -499,6 +499,14 @@ export async function resolveGenericUserAction(
               resume_payload: params.responseRedactedJson,
             }
           : {}),
+        // 工具确认同样已在本事务将 Authority 推进为 running；恢复时重放原 action，
+        // 由 applyToolCall 校验一次性确认，再进入正式 Worker。
+        ...(request.purpose === TOOL_PERMISSION_CONFIRMATION_PURPOSE
+          ? {
+              resume_source: "user_action_resolution",
+              resume_payload: { request_id: request.id, resolution: params.resolution },
+            }
+          : {}),
         ...(request.requestType === "confirmation" &&
         request.purpose === "a2a_confirmation" &&
         (params.resolution === "approve" || params.resolution === "deny")

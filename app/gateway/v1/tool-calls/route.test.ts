@@ -1562,7 +1562,7 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
   }
 
   async function approve(requestId: string) {
-    await resolveGenericUserAction({
+    return resolveGenericUserAction({
       tenantId: TENANT,
       requestId,
       resolution: "approve",
@@ -1623,7 +1623,11 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
 
   it("approve：同一 ToolCall 追加 allow 后进入 queued，等待 durable worker", async () => {
     const { toolCallId, userActionRequestId, invocationId, toolId, schemaHash } = await pauseTurn();
-    await approve(userActionRequestId);
+    const resolved = await approve(userActionRequestId);
+    expect(resolved.resumeCommand.commandPayloadJson).toMatchObject({
+      resume_source: "user_action_resolution",
+      resume_payload: { request_id: userActionRequestId, resolution: "approve" },
+    });
 
     // approve 已恢复 Invocation → running + 入队 resume；此处直接重提交验证 gateway 侧。
     const body = toolCallBody({
