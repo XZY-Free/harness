@@ -44,9 +44,6 @@ import { TurnRunningIndicator } from "./turn-running-indicator";
 /** 段数量阈值；超过后启用虚拟化。 */
 const VIRTUALIZATION_THRESHOLD = 100;
 
-/** 过程透明：终态 Turn 集合（模块级常量，供 memo 依赖稳定）。 */
-const TERMINAL_TURN_STATES = new Set(["completed", "failed", "cancelled", "interrupted"]);
-
 interface ThreadTimelineProps {
   readonly items: readonly ClientItem[];
   readonly streamStatus: ClientStreamStatus;
@@ -234,20 +231,32 @@ export function ThreadTimeline({
       const turnId = turnIdOf(segment);
       if (turnId) lastSegmentIndexByTurn.set(turnId, index);
     });
+    const placed = new Set<string>();
     segments.forEach((segment, index) => {
-      nodes.push({ kind: "segment", segment, key: segmentKey(segment) });
       const turnId = turnIdOf(segment);
-      if (turnId && lastSegmentIndexByTurn.get(turnId) === index) {
-        const turn = turnsById.get(turnId);
-        if (turn && TERMINAL_TURN_STATES.has(turn.turn_state) && turn.id !== activeTurn?.id) {
-          nodes.push({ kind: "summary", turnId, key: `summary-${turnId}` });
-        }
+      const turn = turnId
+        ? (turnsById.get(turnId) ?? (activeTurn?.id === turnId ? activeTurn : undefined))
+        : undefined;
+      // 过程摘要放在正式回答之前；无正文的失败/等待回合仍有可查看的过程。
+      if (
+        turn &&
+        !placed.has(turn.id) &&
+        segment.kind === "item" &&
+        segment.item.item_type === "assistant_message"
+      ) {
+        nodes.push({ kind: "summary", turnId: turn.id, key: `summary-${turn.id}` });
+        placed.add(turn.id);
+      }
+      nodes.push({ kind: "segment", segment, key: segmentKey(segment) });
+      if (turn && !placed.has(turn.id) && lastSegmentIndexByTurn.get(turn.id) === index) {
+        nodes.push({ kind: "summary", turnId: turn.id, key: `summary-${turn.id}` });
+        placed.add(turn.id);
       }
     });
     return nodes;
   }, [segments, turnsById, activeTurn]);
 
-  const shouldVirtualize = segments.length > VIRTUALIZATION_THRESHOLD;
+  const shouldVirtualize = renderNodes.length > VIRTUALIZATION_THRESHOLD;
   const virtualizer = useVirtualizer({
     count: shouldVirtualize ? renderNodes.length : 0,
     getScrollElement: () => scrollRef.current,
@@ -350,7 +359,12 @@ export function ThreadTimeline({
     if (segmentIndex < 0) return;
 
     if (shouldVirtualize) {
-      virtualizer.scrollToIndex(segmentIndex, { align: "center" });
+      virtualizer.scrollToIndex(
+        renderNodes.findIndex(
+          (node) => node.kind === "segment" && node.segment === segments[segmentIndex],
+        ),
+        { align: "center" },
+      );
     }
     const scrollToItem = () => {
       const item = Array.from(
@@ -361,7 +375,7 @@ export function ThreadTimeline({
     scrollToItem();
     const frame = window.requestAnimationFrame(scrollToItem);
     return () => window.cancelAnimationFrame(frame);
-  }, [locateItem, segments, shouldVirtualize, virtualizer]);
+  }, [locateItem, segments, renderNodes, shouldVirtualize, virtualizer]);
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden [container-type:inline-size]">
@@ -435,7 +449,8 @@ export function ThreadTimeline({
                     ) : (
                       <TurnActivitySummary
                         threadId={threadId}
-                        turn={turnsById.get(node.turnId) as ClientTurn}
+                        turn={(turnsById.get(node.turnId) ?? activeTurn) as ClientTurn}
+                        liveEntries={node.turnId === activeTurn?.id ? liveEntries : undefined}
                       />
                     )}
                   </div>
@@ -450,7 +465,8 @@ export function ThreadTimeline({
                 ) : (
                   <TurnActivitySummary
                     threadId={threadId}
-                    turn={turnsById.get(node.turnId) as ClientTurn}
+                    turn={(turnsById.get(node.turnId) ?? activeTurn) as ClientTurn}
+                    liveEntries={node.turnId === activeTurn?.id ? liveEntries : undefined}
                   />
                 )}
               </div>
@@ -459,29 +475,7 @@ export function ThreadTimeline({
 
           {/* 真实运行状态反馈：当前 Turn 非终态时的时间线底部指示
             （纯执行状态 UI，不创建 ThreadItem、不进入会话历史）。 */}
-          {activeTurn && TERMINAL_TURN_STATES.has(activeTurn.turn_state) ? (
-            liveEntries.length > 0 ? (
-              <ActivitySummary
-                entries={liveEntries}
-                elapsedMs={
-                  activeTurn.started_at && activeTurn.finished_at
-                    ? Date.parse(activeTurn.finished_at) - Date.parse(activeTurn.started_at)
-                    : activeTurn.accepted_at && activeTurn.finished_at
-                      ? Date.parse(activeTurn.finished_at) - Date.parse(activeTurn.accepted_at)
-                      : null
-                }
-                failed={activeTurn.turn_state === "failed" || activeTurn.turn_state === "cancelled"}
-                stepCount={liveEntries.filter((entry) => entry.phase === "completed").length}
-              />
-            ) : null
-          ) : liveEntries.length > 0 ? (
-            <HarnessActivityFeed
-              entries={liveEntries}
-              turnActive={activeTurn?.turn_state !== "waiting_user"}
-            />
-          ) : (
-            <TurnRunningIndicator turn={activeTurn} items={items} />
-          )}
+          {liveEntries.length === 0 && <TurnRunningIndicator turn={activeTurn} items={items} />}
 
           {/* 连接异常提示（W4-1）。
             正常连接（open）不提示——健康状态无需占用视线；

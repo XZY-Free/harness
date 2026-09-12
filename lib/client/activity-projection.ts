@@ -98,7 +98,7 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
       return {
         ...base,
         phase: "completed",
-        label: `${risk ? "已允许高危操作 · " : "已执行 · "}${shortPurpose}`,
+        label: `已执行 · ${shortPurpose}`,
         block: parts.length ? capBlock(parts.join("\n")) : null,
       };
     }
@@ -115,7 +115,7 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
         ...base,
         kind: "wait",
         phase: "waiting",
-        label: `等待你确认高危操作： ${shortPurpose}`,
+        label: `等待你确认： ${shortPurpose}`,
         block:
           payload.action_payload === undefined
             ? null
@@ -150,26 +150,46 @@ export function projectProgressItem(item: {
   };
 }
 
-/**
- * 思考行合并：带 think 摘要的 progress（思考完成）并入前一条无 block 的思考行，
- * 一次决策一行、整行可展开看摘要（合同 v2.3.1）。live 与历史共用。
- */
-export function mergeThinkEntries(entries: readonly ActivityEntry[]): ActivityEntry[] {
+/** 同一次操作只保留一行；状态更新沿用最早位置，完成结果替换运行态。 */
+export function mergeActionEntries(entries: readonly ActivityEntry[]): ActivityEntry[] {
   const out: ActivityEntry[] = [];
   for (const entry of entries) {
-    if (entry.phase === "think" && entry.block) {
-      let merged = false;
-      for (let i = out.length - 1; i >= 0; i -= 1) {
-        const prev = out[i];
-        if (prev && prev.phase === "think" && !prev.block) {
-          out[i] = { ...prev, block: entry.block };
-          merged = true;
-          break;
-        }
-      }
-      if (merged) continue;
+    const index = entry.actionId
+      ? out.findIndex((prev) => prev.actionId === entry.actionId && prev.turnId === entry.turnId)
+      : -1;
+    const prev = out[index];
+    if (!prev) {
+      out.push(entry);
+      continue;
     }
-    out.push(entry);
+    const terminal = prev.phase === "completed" || prev.phase === "failed";
+    if (terminal && entry.phase !== "completed" && entry.phase !== "failed") continue;
+    const block = !entry.block
+      ? prev.block
+      : !prev.block || entry.block.includes(prev.block)
+        ? entry.block
+        : [prev.block, entry.block].join("\n");
+    out[index] = { ...entry, key: prev.key, occurredAt: prev.occurredAt, block };
+  }
+  return out;
+}
+
+/** 相邻状态原位更新；公开决策说明保留，不跨操作或回合合并。 */
+export function mergeThinkEntries(entries: readonly ActivityEntry[]): ActivityEntry[] {
+  const out: ActivityEntry[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (seen.has(entry.key)) continue;
+    seen.add(entry.key);
+    const prev = out[out.length - 1];
+    if (
+      entry.phase === "think" &&
+      prev?.phase === "think" &&
+      !prev.block &&
+      prev.turnId === entry.turnId
+    ) {
+      out[out.length - 1] = { ...entry, key: prev.key, occurredAt: prev.occurredAt };
+    } else out.push(entry);
   }
   return out;
 }

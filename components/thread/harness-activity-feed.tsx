@@ -1,231 +1,251 @@
 "use client";
 
-import { apiFetch, apiPath } from "@/lib/api-fetch";
-/**
- * 过程透明日志流（合同 v2.3，Web/Desktop 共用一份实现）。
- *
- * - 活跃回合：追加日志流；每行整行即展开/收起开关（无行级箭头）；运行中行 spinner，落定换类型图标；
- * - 完成/失败：全过程收敛为单行「用时 X · 已执行 N 步操作」（默认收起、顶层保留箭头），
- *   展开后每步仍可再展开到最小单元（思考摘要 / 命令 / 命令+结果）；
- * - 历史回合：TurnActivitySummary 首次展开时懒加载 GET .../turns/{turn}/activity；
- * - 无时间戳、无卡片背景；失败回合失败卡片由既有 TurnFailureNotice 担当主角。
- */
-import type { ActivityEntry, ActivityKind } from "@/lib/client/activity-projection";
+import { CodeBlock, Markdown } from "@/components/markdown";
+import { apiFetch } from "@/lib/api-fetch";
+import {
+  type ActivityEntry,
+  type ActivityKind,
+  mergeActionEntries,
+  mergeThinkEntries,
+} from "@/lib/client/activity-projection";
 import type { ClientTurn } from "@/lib/client/types";
-import { useState } from "react";
+import {
+  BookOpen,
+  Check,
+  ChevronRight,
+  LoaderCircle,
+  Pencil,
+  Search,
+  Terminal,
+  TriangleAlert,
+  X,
+} from "lucide-react";
+import { type ComponentProps, useEffect, useState } from "react";
 
-type IconKind = ActivityKind | "spin" | "chev" | "fail";
+const ACTIVITY_ICONS = {
+  think: LoaderCircle,
+  search: Search,
+  read: BookOpen,
+  write: Pencil,
+  exec: Terminal,
+  wait: TriangleAlert,
+  fail: X,
+} as const;
 
-function ActivityIcon({ kind }: { readonly kind: IconKind }) {
-  const common = {
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-  } as const;
-  switch (kind) {
-    case "spin":
-      return (
-        <svg aria-hidden="true" {...common} className="haic spin">
-          <path d="M21 12a9 9 0 1 1-6.2-8.56" />
-        </svg>
-      );
-    case "chev":
-      return (
-        <svg aria-hidden="true" {...common} className="haic chev">
-          <path d="m9 18 6-6-6-6" />
-        </svg>
-      );
-    case "fail":
-      return (
-        <svg aria-hidden="true" {...common} className="haic">
-          <path d="M18 6 6 18M6 6l12 12" />
-        </svg>
-      );
-    case "think":
-      return (
-        <svg aria-hidden="true" {...common} className="haic">
-          <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-        </svg>
-      );
-    case "search":
-      return (
-        <svg aria-hidden="true" {...common} className="haic">
-          <circle cx="11" cy="11" r="7" />
-          <path d="m20 20-3.5-3.5" />
-        </svg>
-      );
-    case "read":
-      return (
-        <svg aria-hidden="true" {...common} className="haic">
-          <path d="M4 5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 0-2 2V5Z" />
-          <path d="M4 19a2 2 0 0 1 2-2h14" />
-        </svg>
-      );
-    case "write":
-      return (
-        <svg aria-hidden="true" {...common} className="haic">
-          <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3Z" />
-        </svg>
-      );
-    case "wait":
-      return (
-        <svg aria-hidden="true" {...common} className="haic">
-          <path d="M12 3 2 21h20L12 3Zm0 7v5m0 3v.5" />
-        </svg>
-      );
-    default:
-      return (
-        <svg aria-hidden="true" {...common} className="haic">
-          <rect x="3" y="4" width="18" height="16" rx="2" />
-          <path d="m7 9 3 3-3 3M13 15h4" />
-        </svg>
-      );
-  }
-}
-
-function formatElapsed(ms: number): string {
-  const sec = Math.max(1, Math.round(ms / 1000));
-  const m = Math.floor(sec / 60);
-  const r = sec % 60;
-  return m > 0 ? `${m} 分 ${r} 秒` : `${r} 秒`;
-}
-
-/** 单行日志：整行即展开/收起开关；有 block 才可展开。 */
-function ActivityLine({
-  entry,
-  live,
-}: {
-  readonly entry: ActivityEntry;
-  readonly live: boolean;
-}) {
-  const summary = (
-    <span className={`ha-line${live ? " live" : ""}${entry.risk ? " risk" : ""}`}>
-      <ActivityIcon kind={live ? "spin" : entry.kind} />
-      <span>{entry.label}</span>
-    </span>
-  );
-  if (!entry.block) {
-    return <div className="ha-leaf">{summary}</div>;
-  }
+function ActivityIcon({
+  kind,
+  live = false,
+}: { readonly kind: ActivityKind; readonly live?: boolean }) {
+  const Glyph = live ? LoaderCircle : ACTIVITY_ICONS[kind];
   return (
-    <details className="ha-line-details">
-      <summary>{summary}</summary>
-      <pre className="ha-code">{entry.block}</pre>
+    <Glyph aria-hidden="true" strokeWidth={1.4} className={`haic${live ? " animate-spin" : ""}`} />
+  );
+}
+
+function formatElapsed(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return "执行记录";
+  const sec = Math.max(0, Math.round(ms / 1000));
+  const min = Math.floor(sec / 60);
+  return `用时 ${min ? `${min} 分钟 ` : ""}${sec % 60} 秒`;
+}
+
+function ActivityLine({ entry, live }: { readonly entry: ActivityEntry; readonly live: boolean }) {
+  // think 字段是运行时已公开的决策说明，不是模型内部推理。沿用正文 Markdown。
+  if (entry.phase === "think" && entry.block) {
+    return (
+      <div className="ha-commentary conversation-copy prose-markdown">
+        <Markdown>{entry.block}</Markdown>
+      </div>
+    );
+  }
+  const line = (
+    <>
+      <ActivityIcon kind={entry.kind} live={live} />
+      <span className="ha-label" title={entry.label}>
+        {entry.label}
+      </span>
+    </>
+  );
+  if (!entry.block)
+    return (
+      <div className="ha-line" data-phase={entry.phase}>
+        {line}
+      </div>
+    );
+  return (
+    <details className="ha-line-details" data-phase={entry.phase}>
+      <summary className="ha-line">
+        {line}
+        <ChevronRight aria-hidden="true" className="ha-chevron" strokeWidth={1.4} />
+      </summary>
+      <div className="ha-output">
+        <CodeBlock plain>{entry.block}</CodeBlock>
+        <div className="ha-output-status">
+          {entry.phase === "completed" ? (
+            <>
+              <Check aria-hidden="true" />
+              成功
+            </>
+          ) : entry.phase === "failed" ? (
+            <>
+              <X aria-hidden="true" />
+              失败
+            </>
+          ) : entry.phase === "waiting" ? (
+            "等待确认"
+          ) : (
+            "执行中"
+          )}
+        </div>
+      </div>
     </details>
   );
 }
 
-/** 活跃回合日志流（追加流；turn 终态时调用方改渲染收敛条）。 */
 export function HarnessActivityFeed({
   entries,
   turnActive,
-}: {
-  readonly entries: readonly ActivityEntry[];
-  readonly turnActive: boolean;
-}) {
-  if (entries.length === 0) return null;
-  const lastIndex = entries.length - 1;
+}: { readonly entries: readonly ActivityEntry[]; readonly turnActive: boolean }) {
+  const normalized = mergeThinkEntries(mergeActionEntries(entries));
+  // 无正文的 progress 是当前状态，不能作为完成记录反复回放。
+  const visible = normalized.filter(
+    (entry, index) =>
+      entry.phase !== "think" || entry.block || (turnActive && index === normalized.length - 1),
+  );
+  if (!visible.length) return null;
   return (
     <div className="ha-feed" data-testid="harness-activity-feed">
-      {entries.map((entry, index) => {
-        const live =
-          turnActive &&
-          index === lastIndex &&
-          (entry.phase === "think" ||
-            entry.phase === "proposed" ||
-            entry.phase === "started" ||
-            entry.phase === "waiting");
-        return <ActivityLine key={entry.key} entry={entry} live={live} />;
-      })}
+      {visible.map((entry, index) => (
+        <ActivityLine
+          key={entry.key}
+          entry={entry}
+          live={
+            turnActive &&
+            index === visible.length - 1 &&
+            ["think", "proposed", "started"].includes(entry.phase)
+          }
+        />
+      ))}
     </div>
   );
 }
 
-/** 收敛条（完成/失败共用）：默认收起、顶层箭头保留；展开为同一日志结构。 */
 export function ActivitySummary({
   entries,
   elapsedMs,
   failed,
-  stepCount,
+  status,
+  loading = false,
+  error,
+  onRetry,
+  onToggle,
 }: {
-  readonly entries: readonly ActivityEntry[];
+  readonly entries: readonly ActivityEntry[] | null;
   readonly elapsedMs: number | null;
   readonly failed: boolean;
-  readonly stepCount: number;
+  readonly status?: string;
+  readonly loading?: boolean;
+  readonly error?: boolean;
+  readonly onRetry?: () => void;
+  readonly onToggle?: ComponentProps<"details">["onToggle"];
 }) {
-  if (entries.length === 0) return null;
-  const label = failed
-    ? `执行失败 · 已执行 ${stepCount} 步操作`
-    : `用时 ${formatElapsed(elapsedMs ?? 0)} · 已执行 ${stepCount} 步操作`;
+  const label =
+    status === "cancelled"
+      ? "已停止"
+      : status === "interrupted"
+        ? "执行中断"
+        : failed
+          ? "执行失败"
+          : formatElapsed(elapsedMs);
   return (
-    <details className={`ha-proc${failed ? " fail" : ""}`} data-testid="harness-activity-summary">
+    <details className="ha-proc" data-testid="harness-activity-summary" onToggle={onToggle}>
       <summary>
-        <ActivityIcon kind="chev" />
-        {failed ? <ActivityIcon kind="fail" /> : null}
-        <span className="ha-lab">{label}</span>
+        <span>{label}</span>
+        <ChevronRight aria-hidden="true" className="ha-chevron" strokeWidth={1.4} />
       </summary>
       <div className="ha-steps">
-        {entries.map((entry) => (
-          <ActivityLine key={entry.key} entry={entry} live={false} />
-        ))}
+        {loading ? (
+          <div className="ha-line">
+            <ActivityIcon kind="think" live />
+            加载执行记录…
+          </div>
+        ) : null}
+        {error ? (
+          <div className="ha-line">
+            执行记录加载失败
+            <button type="button" onClick={onRetry} className="underline underline-offset-4">
+              重试
+            </button>
+          </div>
+        ) : null}
+        {entries ? <HarnessActivityFeed entries={entries} turnActive={false} /> : null}
+        {entries?.length === 0 && !loading && !error ? (
+          <div className="ha-line">没有工具操作记录</div>
+        ) : null}
       </div>
     </details>
   );
 }
 
-/** 历史回合收敛条：首次展开懒加载 activity 端点（与 live 同结构）。 */
+/** 同一组件覆盖实时、终态和重载后的历史。终态展开总是读持久记录，避免 ring 截断或重连丢失。 */
 export function TurnActivitySummary({
   threadId,
   turn,
+  liveEntries = [],
 }: {
   readonly threadId: string;
   readonly turn: ClientTurn;
+  readonly liveEntries?: readonly ActivityEntry[];
 }) {
+  const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(turn.turn_state);
   const [entries, setEntries] = useState<readonly ActivityEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const failed = turn.turn_state === "failed" || turn.turn_state === "cancelled";
-  const stepCount = entries ? entries.filter((e) => e.phase === "completed").length : 0;
+  const [error, setError] = useState(false);
+  const [request, setRequest] = useState(0);
+  useEffect(() => {
+    if (!request && terminal) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(false);
+    void apiFetch(`/api/v1/threads/${threadId}/turns/${turn.id}/activity`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("activity unavailable");
+        const body = (await response.json()) as { entries: ActivityEntry[] };
+        if (!controller.signal.aborted) setEntries(body.entries);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [threadId, turn.id, terminal, request]);
+  if (!terminal) {
+    const combined = [...(entries ?? []), ...liveEntries].sort((a, b) =>
+      a.occurredAt.localeCompare(b.occurredAt),
+    );
+    return (
+      <HarnessActivityFeed entries={combined} turnActive={turn.turn_state !== "waiting_user"} />
+    );
+  }
+  const since = turn.started_at ?? turn.accepted_at;
   const elapsedMs =
-    turn.started_at && turn.finished_at
-      ? Date.parse(turn.finished_at) - Date.parse(turn.started_at)
-      : turn.accepted_at && turn.finished_at
-        ? Date.parse(turn.finished_at) - Date.parse(turn.accepted_at)
-        : null;
-
+    since && turn.finished_at ? Date.parse(turn.finished_at) - Date.parse(since) : null;
   return (
-    <details
-      className={`ha-proc${failed ? " fail" : ""}`}
-      data-testid="harness-activity-summary"
+    <ActivitySummary
+      entries={entries}
+      elapsedMs={elapsedMs}
+      failed={turn.turn_state === "failed"}
+      status={turn.turn_state}
+      loading={loading}
+      error={error}
+      onRetry={() => setRequest((n) => n + 1)}
       onToggle={(event) => {
-        const open = (event.target as HTMLDetailsElement).open;
-        if (!open || entries !== null || loading) return;
-        setLoading(true);
-        void apiFetch(apiPath(`/api/v1/threads/${threadId}/turns/${turn.id}/activity`))
-          .then(async (response) => {
-            if (!response.ok) return;
-            const body = (await response.json()) as { data?: { entries?: ActivityEntry[] } };
-            setEntries(body.data?.entries ?? []);
-          })
-          .catch(() => setEntries([]))
-          .finally(() => setLoading(false));
+        if (event.currentTarget.open && request === 0) setRequest(1);
       }}
-    >
-      <summary>
-        <ActivityIcon kind="chev" />
-        {failed ? <ActivityIcon kind="fail" /> : null}
-        <span className="ha-lab">
-          {failed
-            ? `执行失败${entries ? ` · 已执行 ${stepCount} 步操作` : ""}`
-            : `用时 ${formatElapsed(elapsedMs ?? 0)}${entries ? ` · 已执行 ${stepCount} 步操作` : ""}`}
-        </span>
-      </summary>
-      <div className="ha-steps">
-        {loading ? <div className="ha-leaf">加载中…</div> : null}
-        {entries?.map((entry) => (
-          <ActivityLine key={entry.key} entry={entry} live={false} />
-        ))}
-      </div>
-    </details>
+    />
   );
 }

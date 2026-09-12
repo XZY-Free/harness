@@ -4,7 +4,7 @@
  * 结构：
  * - 大圆角（20px）容器，focus-within 边框加深 + 阴影浮起。
  * - 上方内嵌 PendingInputQueue（紧凑单行条，宽度与输入框对齐）。
- * - textarea 自增高，占位"随心输入，交给 Agent 处理…"。
+ * - textarea 自增高，占位"输入消息，开始处理任务…"。
  * - Enter 发送，Shift+Enter 换行，无常驻快捷键提示文字。
  * - 底部工具行：[＋] [助手选择器]（弹性空间）[模型选择器] [右下圆钮]
  *
@@ -255,7 +255,7 @@ export function ThreadInput({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="随心输入，交给 Agent 处理…"
+            placeholder="输入消息，开始处理任务…"
             rows={1}
             aria-label={isRunning ? "队列消息输入框" : "消息输入框"}
             className={cn(

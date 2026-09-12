@@ -1,5 +1,6 @@
 import {
   type ActivityEntry,
+  mergeActionEntries,
   mergeThinkEntries,
   projectActivityEvent,
   projectProgressItem,
@@ -75,28 +76,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const entry = projectActivityEvent(event);
     if (entry) entries.push(entry);
   }
-  // completed 结果合并回 proposed 行块（与 reducer live ring 同规则）
-  const merged: ActivityEntry[] = [];
-  for (const entry of entries) {
-    if (entry.phase === "completed" && entry.actionId) {
-      const idx = [...merged]
-        .reverse()
-        .findIndex((e) => e.actionId === entry.actionId && e.phase === "proposed");
-      if (idx >= 0) {
-        const realIdx = merged.length - 1 - idx;
-        const target = merged[realIdx];
-        if (target) {
-          merged[realIdx] = {
-            ...target,
-            block: [target.block, entry.block].filter(Boolean).join("\n"),
-            phase: "completed",
-          };
-          continue;
-        }
-      }
-    }
-    merged.push(entry);
-  }
   for (const item of itemRows) {
     const entry = projectProgressItem({
       id: item.id,
@@ -104,12 +83,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
       content: item.contentJson,
       created_at: item.createdAt.toISOString(),
     });
-    if (entry) merged.push(entry);
+    if (entry) entries.push(entry);
   }
-  merged.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+  entries.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
   return apiSuccess(
-    { entries: mergeThinkEntries(merged) },
+    { entries: mergeThinkEntries(mergeActionEntries(entries)) },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );
 }

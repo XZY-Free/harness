@@ -1,5 +1,4 @@
-import type { ActivityEntry } from "./activity-projection";
-import { projectActivityEvent } from "./activity-projection";
+import { mergeActionEntries, projectActivityEvent } from "./activity-projection";
 import { makeLocalVisibleError } from "./error-messages";
 /**
  * 员工端 Thread 投影 Reducer。
@@ -367,27 +366,7 @@ export function threadProjectionReducer(
       let activity = state.activity;
       const entry = projectActivityEvent(event);
       if (entry) {
-        if (entry.phase === "completed" && entry.actionId) {
-          const idx = [...activity]
-            .reverse()
-            .findIndex((e) => e.actionId === entry.actionId && e.phase === "proposed");
-          if (idx >= 0) {
-            const realIdx = activity.length - 1 - idx;
-            const target = activity[realIdx];
-            if (target) {
-              const merged: ActivityEntry = {
-                ...target,
-                block: [target.block, entry.block].filter(Boolean).join("\n"),
-                phase: "completed",
-              };
-              activity = [...activity.slice(0, realIdx), merged, ...activity.slice(realIdx + 1)];
-            }
-          } else {
-            activity = [...activity, entry];
-          }
-        } else {
-          activity = [...activity, entry];
-        }
+        activity = mergeActionEntries([...activity, entry]);
         if (activity.length > 300) activity = activity.slice(activity.length - 300);
       }
 

@@ -100,17 +100,19 @@ describe("threadProjectionReducer activity ring", () => {
       type: "event.received",
       event: actionEvent("harness.action.started", {}, 2),
     });
-    expect(state.activity).toHaveLength(2);
+    expect(state.activity).toHaveLength(1);
 
     state = threadProjectionReducer(state, {
       type: "event.received",
       event: actionEvent("harness.action.completed", { observation: { shift: "early" } }, 3),
     });
     // completed 不新增行，结果合并进 proposed 行
-    expect(state.activity).toHaveLength(2);
+    expect(state.activity).toHaveLength(1);
     const proposed = state.activity.find((e) => e.phase === "completed");
     expect(proposed?.block).toContain("2026-09-13");
     expect(proposed?.block).toContain("shift");
+    expect(proposed?.label).toContain("已执行");
+    expect(state.activity.some((e) => e.phase === "started")).toBe(false);
   });
 
   it("snapshot.loaded 重置 live ring", () => {
@@ -158,4 +160,16 @@ describe("mergeThinkEntries", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]?.block).toBe("决定：查询排班");
   });
+});
+
+it("连续无正文进度只更新当前状态，不积累思考行", () => {
+  const progress = (id: string, message: string) =>
+    projectProgressItem({ id, turn_id: "t", content: { kind: "progress.snapshot", message } })!;
+  const result = mergeThinkEntries([
+    progress("a", "正在思考下一步…"),
+    progress("b", "正在思考下一步…"),
+    progress("c", "正在组织回答…"),
+  ]);
+  expect(result).toHaveLength(1);
+  expect(result[0]?.label).toBe("正在组织回答…");
 });

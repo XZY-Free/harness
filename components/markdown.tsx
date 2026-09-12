@@ -67,7 +67,11 @@ function extractText(node: ReactNode): string {
 }
 
 /** 块级代码块：shiki 高亮 + 复制按钮 + 语言标签。 */
-function CodeBlock({ className, children }: { className?: string; children?: ReactNode }) {
+export function CodeBlock({
+  className,
+  children,
+  plain = false,
+}: { className?: string; children?: ReactNode; plain?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [html, setHtml] = useState<string | null>(null);
   const lang = langFromClassName(className);
@@ -77,6 +81,7 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   // 用 ref 记录上一次实际发起过高亮请求的 codeText+lang，避免 Strict Mode 或父组件重渲染导致重复 setState。
   const requestedRef = useRef<{ codeText: string; lang: string | null } | null>(null);
   useEffect(() => {
+    if (plain) return;
     const prev = requestedRef.current;
     if (prev && prev.codeText === codeText && prev.lang === lang) return;
     requestedRef.current = { codeText, lang };
@@ -103,7 +108,7 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
     return () => {
       cancelled = true;
     };
-  }, [codeText, lang]);
+  }, [codeText, lang, plain]);
 
   async function copy() {
     try {
@@ -116,7 +121,7 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   }
 
   return (
-    <div className="group relative my-3">
+    <div className={plain ? "ha-code-block group relative" : "group relative my-3"}>
       {/* 语言标签 */}
       {lang ? (
         <span className="absolute right-12 top-2 z-10 text-[11px] text-[var(--fg-subtle)]">
@@ -127,14 +132,14 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
       <button
         type="button"
         onClick={copy}
-        className="absolute right-2 top-2 z-10 flex size-6 items-center justify-center rounded text-[var(--fg-subtle)] opacity-0 transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)] group-hover:opacity-100"
+        className="absolute right-2 top-2 z-10 flex size-6 items-center justify-center rounded text-[var(--fg-subtle)] opacity-0 transition hover:bg-[var(--surface-2)] hover:text-[var(--fg)] group-hover:opacity-100 focus-visible:opacity-100"
         title="复制代码"
-        aria-label="复制代码"
+        aria-label={copied ? "已复制" : "复制代码"}
       >
         <Icon.copy size={13} />
       </button>
       {/* shiki 高亮 HTML（已含 github-dark 主题着色）；未就绪时纯文本 fallback */}
-      {html ? (
+      {html && !plain ? (
         <div
           className="shiki-block overflow-x-auto rounded-[var(--radius-md)] text-[13px] leading-6"
           // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki codeToHtml 输出受信任的语法高亮 HTML

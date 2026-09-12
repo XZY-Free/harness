@@ -3,6 +3,10 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThreadTimeline } from "./thread-timeline";
 
+vi.mock("@/lib/api-fetch", () => ({
+  apiFetch: vi.fn(async () => new Response(JSON.stringify({ entries: [] }), { status: 200 })),
+}));
+
 let timelineScrollHeight = 900;
 const timelineClientHeight = 300;
 const resizeCallbacks: ResizeObserverCallback[] = [];
