@@ -12,6 +12,12 @@ import {
   parseToolExecutionContract,
 } from "@/lib/capability/tool-execution-contract";
 import { createToolExecutionBinding } from "@/lib/capability/tool-execution-queries";
+import { createThreadItem } from "@/lib/conversations/thread-item-queries";
+import {
+  allocateEventSequences,
+  allocateItemSequence,
+  insertThreadEvent,
+} from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
@@ -35,6 +41,7 @@ import {
   toolSchemaRevisionTable,
   toolTable,
 } from "@/lib/persistence/schema/tool";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { verifyCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import {
@@ -463,6 +470,58 @@ async function createPauseRequest(
     },
     { tx },
   );
+  const [tool] = await tx
+    .select({ displayName: toolTable.displayName })
+    .from(toolTable)
+    .where(eq(toolTable.id, toolCall.toolId))
+    .limit(1);
+  const content = {
+    kind: "user_action.requested",
+    request_id: created.request.id,
+    request_type: "confirmation",
+    purpose: TOOL_PERMISSION_CONFIRMATION_PURPOSE,
+    state: "pending",
+    title: `确认${tool?.displayName ?? "工具操作"}`,
+    summary: decision.decisionSummary || "本次操作需要你的确认。",
+    preview: redactArguments(toolCall.argumentsRedactedJson),
+  };
+  const item = await createThreadItem(tx, {
+    threadId: invocation.threadId,
+    turnId: invocation.turnId,
+    itemSequence: await allocateItemSequence(tx, invocation.threadId),
+    itemType: "user_action",
+    itemState: "pending",
+    authorType: "system",
+    authorId: null,
+    content,
+    contextPolicy: "exclude",
+    invocationId: invocation.id,
+  });
+  await tx
+    .update(userActionRequestTable)
+    .set({ itemId: item.id })
+    .where(eq(userActionRequestTable.id, created.request.id));
+  const seq = await allocateEventSequences(tx, invocation.threadId, 2);
+  await insertThreadEvent(tx, invocation.threadId, seq, {
+    eventType: "item.created",
+    turnId: invocation.turnId,
+    itemId: item.id,
+    invocationId: invocation.id,
+    actorType: "system",
+    payload: {
+      item_type: "user_action",
+      content_hash: item.contentHash,
+      source: "user_action.requested",
+    },
+  });
+  await insertThreadEvent(tx, invocation.threadId, seq + 1, {
+    eventType: "user_action.requested",
+    turnId: invocation.turnId,
+    itemId: item.id,
+    invocationId: invocation.id,
+    actorType: "system",
+    payload: content,
+  });
   await updateInvocationState(tx, invocation.tenantId, invocation.id, "waiting_user");
   const turnUpdate = await tx
     .update(turnTable)

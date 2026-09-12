@@ -43,7 +43,12 @@ import { registerDevice } from "@/lib/identity/device-queries";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
-import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import {
+  threadEventTable,
+  threadItemTable,
+  threadTable,
+  turnTable,
+} from "@/lib/persistence/schema/conversation";
 import { effectRecordTable } from "@/lib/persistence/schema/effect";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { userIdentity } from "@/lib/persistence/schema/identity";
@@ -787,6 +792,22 @@ describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", 
     expect(uars[0]!.requestType).toBe("confirmation");
     expect(uars[0]!.permissionDecisionId).toBeTruthy();
     expect(uars[0]!.requestState).toBe("pending");
+    expect(uars[0]!.itemId).toBeTruthy();
+    const projected = await singleRow(
+      db.select().from(threadItemTable).where(eq(threadItemTable.id, uars[0]!.itemId!)),
+    );
+    expect(projected.itemType).toBe("user_action");
+    expect(projected.contentJson).toMatchObject({
+      request_id: uars[0]!.id,
+      request_type: "confirmation",
+      state: "pending",
+    });
+    const events = await db
+      .select()
+      .from(threadEventTable)
+      .where(eq(threadEventTable.itemId, projected.id))
+      .orderBy(asc(threadEventTable.eventSequence));
+    expect(events.map((e) => e.eventType)).toEqual(["item.created", "user_action.requested"]);
 
     const inv = await singleRow(
       db.select().from(invocationTable).where(eq(invocationTable.id, invocationId)),

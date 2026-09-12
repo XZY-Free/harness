@@ -24,6 +24,7 @@
 import { randomUUID } from "node:crypto";
 import { handleChildThreadTerminal } from "@/lib/conversations/child-thread-queries";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
+import { createThreadItem } from "@/lib/conversations/thread-item-queries";
 import {
   allocateEventSequences,
   allocateItemSequence,
@@ -44,11 +45,7 @@ import {
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import {
-  type ContextPolicy,
   type ThreadEventActorType,
-  type ThreadItem,
-  type ThreadItemAuthorType,
-  type ThreadItemType,
   threadEventTable,
   threadItemTable,
   threadTable,
@@ -633,49 +630,6 @@ async function mapHarnessActionEvent(
 /** 计算 ThreadItem 内容 hash（复用 event payload hash 算法）。 */
 function computeItemContentHash(content: Record<string, unknown>): string {
   return computeEventPayloadHash(content);
-}
-
-/** 创建 ThreadItem（事务内，调用方需先分配 itemSequence）。 */
-async function createThreadItem(
-  tx: Tx,
-  params: {
-    threadId: string;
-    turnId: string;
-    itemSequence: number;
-    itemType: ThreadItemType;
-    itemState: "pending" | "completed";
-    authorType: ThreadItemAuthorType;
-    authorId: string | null;
-    content: Record<string, unknown>;
-    contextPolicy?: ContextPolicy;
-    invocationId: string;
-  },
-): Promise<ThreadItem> {
-  const id = randomUUID();
-  const now = new Date();
-  const contentHash = computeItemContentHash(params.content);
-  await tx.insert(threadItemTable).values({
-    id,
-    threadId: params.threadId,
-    turnId: params.turnId,
-    itemSequence: params.itemSequence,
-    itemType: params.itemType,
-    itemState: params.itemState,
-    authorType: params.authorType,
-    authorId: params.authorId,
-    contentJson: params.content,
-    contentHash,
-    contextPolicy: params.contextPolicy ?? "include",
-    invocationId: params.invocationId,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const [row] = await tx.select().from(threadItemTable).where(eq(threadItemTable.id, id)).limit(1);
-  if (!row) {
-    throw new Error(`createThreadItem: ThreadItem 行未找到（id=${id}）`);
-  }
-  return row;
 }
 
 /** progress.snapshot：创建 user_guidance Item + item.created ThreadEvent。 */

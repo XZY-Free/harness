@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ItemSupersedeCycleError, ThreadItemNotFoundError } from "@/lib/conversations/errors";
 /**
  * ThreadItem 仓储。
@@ -18,12 +19,16 @@ import { ItemSupersedeCycleError, ThreadItemNotFoundError } from "@/lib/conversa
  */
 import { db } from "@/lib/db/client";
 import {
+  type ContextPolicy,
   type ThreadItem,
+  type ThreadItemAuthorType,
   type ThreadItemState,
+  type ThreadItemType,
   threadItemTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { computeEventPayloadHash } from "./thread-queries";
 
 const DIRECT_CONTEXT_ITEM_TYPES = [
   "user_message",
@@ -204,4 +209,49 @@ export async function updateItemState(
 
   if (result[0].affectedRows === 0) return null;
   return getItemById(tenantId, itemId);
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** 创建 ThreadItem（事务内，调用方需先分配 itemSequence）。 */
+export async function createThreadItem(
+  tx: Tx,
+  params: {
+    threadId: string;
+    turnId: string;
+    itemSequence: number;
+    itemType: ThreadItemType;
+    itemState: "pending" | "completed";
+    authorType: ThreadItemAuthorType;
+    authorId: string | null;
+    content: Record<string, unknown>;
+    contextPolicy?: ContextPolicy;
+    invocationId: string;
+  },
+): Promise<ThreadItem> {
+  const id = randomUUID();
+  const now = new Date();
+  const contentHash = computeEventPayloadHash(params.content);
+  await tx.insert(threadItemTable).values({
+    id,
+    threadId: params.threadId,
+    turnId: params.turnId,
+    itemSequence: params.itemSequence,
+    itemType: params.itemType,
+    itemState: params.itemState,
+    authorType: params.authorType,
+    authorId: params.authorId,
+    contentJson: params.content,
+    contentHash,
+    contextPolicy: params.contextPolicy ?? "include",
+    invocationId: params.invocationId,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const [row] = await tx.select().from(threadItemTable).where(eq(threadItemTable.id, id)).limit(1);
+  if (!row) {
+    throw new Error(`createThreadItem: ThreadItem 行未找到（id=${id}）`);
+  }
+  return row;
 }
