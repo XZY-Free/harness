@@ -68,6 +68,7 @@ describe("LoginScreen", () => {
     expect(screen.queryByRole("heading", { name: "登录" })).toBeNull();
     expect(screen.getByRole("button", { name: "登录" })).toBeTruthy();
     const loginRegion = screen.getByLabelText(`${DEFAULT_BRAND.name} 登录`);
+    expect(loginRegion.querySelector("img")).toBeNull();
     expect(loginRegion.className).toContain("md:grid-cols-2");
     expect(loginRegion.querySelector("form")?.parentElement?.className).toContain("max-w-[28rem]");
     expect(screen.queryByText(/管理员/)).toBeNull();
