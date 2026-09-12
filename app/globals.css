@@ -958,3 +958,104 @@ body {
 .hairline {
   border-color: var(--border) !important;
 }
+
+/* ─── 过程透明日志流（合同 v2.3）────────────────────────────────────── */
+.ha-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0;
+}
+.ha-line,
+.ha-line-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  list-style: none;
+}
+.ha-line.live {
+  color: var(--foreground);
+}
+.ha-line.risk,
+.ha-line-details > summary.risk {
+  color: var(--warning);
+}
+.ha-line-details > summary::-webkit-details-marker {
+  display: none;
+}
+.haic {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--foreground-subtle);
+}
+.ha-line-details > summary .haic.chev {
+  transition: transform .12s ease;
+}
+.ha-line-details[open] > summary .haic.chev {
+  transform: rotate(90deg);
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ha-code {
+  margin: 2px 0 6px 23px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  font-family: var(--font-jetbrains, ui-monospace, monospace);
+  color: #3c3e41;
+  white-space: pre-wrap;
+}
+.ha-leaf {
+  margin: 3px 0 3px 23px;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+.ha-proc {
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+.ha-proc > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.ha-proc > summary::-webkit-details-marker {
+  display: none;
+}
+.ha-proc > summary .haic.chev {
+  transition: transform .12s ease;
+}
+.ha-proc[open] > summary .haic.chev {
+  transform: rotate(90deg);
+}
+.ha-proc > summary .ha-lab {
+  flex: 1;
+  min-width: 0;
+}
+.ha-proc.fail > summary {
+  color: var(--destructive);
+}
+.ha-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 6px 23px;
+}

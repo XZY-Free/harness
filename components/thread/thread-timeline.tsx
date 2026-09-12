@@ -21,10 +21,13 @@
  */
 "use client";
 
+import type { ActivityEntry } from "@/lib/client/activity-projection";
+import { projectProgressItem } from "@/lib/client/activity-projection";
 import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/types";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { ActivitySummary, HarnessActivityFeed, TurnActivitySummary } from "./harness-activity-feed";
 import { AgentCallTimelineItem } from "./items/agent-call-timeline-item";
 import { ArtifactItem } from "./items/artifact-item";
 import { AssistantMessageItem } from "./items/assistant-message-item";
@@ -41,6 +44,9 @@ import { TurnRunningIndicator } from "./turn-running-indicator";
 /** 段数量阈值；超过后启用虚拟化。 */
 const VIRTUALIZATION_THRESHOLD = 100;
 
+/** 过程透明：终态 Turn 集合（模块级常量，供 memo 依赖稳定）。 */
+const TERMINAL_TURN_STATES = new Set(["completed", "failed", "cancelled", "interrupted"]);
+
 interface ThreadTimelineProps {
   readonly items: readonly ClientItem[];
   readonly streamStatus: ClientStreamStatus;
@@ -53,6 +59,8 @@ interface ThreadTimelineProps {
   readonly showSuperseded?: boolean;
   /** 右侧工作台请求定位的 Item；requestId 支持重复定位同一条记录。 */
   readonly locateItem?: { readonly itemId: string; readonly requestId: number } | null;
+  /** 过程透明 live ring（合同 v2.3）。 */
+  readonly activity?: readonly ActivityEntry[];
   /** 最新 Turn 投影（真实运行状态反馈：非终态时时间线底部渲染运行指示）。 */
   readonly activeTurn?: ClientTurn | null;
   /** Turn 列表：为每条用户消息关联显式偏好与真实 AgentCall。 */
@@ -176,6 +184,7 @@ export function ThreadTimeline({
   locateItem = null,
   activeTurn = null,
   turns = [],
+  activity = [],
 }: ThreadTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -193,9 +202,52 @@ export function ThreadTimeline({
   const segments = useMemo(() => buildSegments(visibleItems), [visibleItems]);
   const turnsById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
 
+  // 过程透明：活跃回合 live 条目 = live ring + progress Item（思考行），按时间排序
+  const liveEntries = useMemo(() => {
+    if (!activeTurn) return [] as ActivityEntry[];
+    const fromRing = activity.filter((entry) => entry.turnId === activeTurn.id);
+    const fromItems = items.flatMap((item) => {
+      if (item.item_type !== "user_guidance" || item.turn_id !== activeTurn.id) return [];
+      const entry = projectProgressItem({
+        id: item.id,
+        turn_id: item.turn_id,
+        content: item.content,
+        created_at: item.created_at,
+      });
+      return entry ? [entry] : [];
+    });
+    return [...fromRing, ...fromItems].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+  }, [activity, items, activeTurn]);
+
+  // 渲染节点流：segments 与历史回合收敛条交错（虚拟化按节点计数）
+  const renderNodes = useMemo(() => {
+    type Node =
+      | { kind: "segment"; segment: TimelineSegment; key: string }
+      | { kind: "summary"; turnId: string; key: string };
+    const nodes: Node[] = [];
+    const lastSegmentIndexByTurn = new Map<string, number>();
+    const turnIdOf = (segment: TimelineSegment): string | null =>
+      segment.kind === "item" ? segment.item.turn_id : (segment.items[0]?.turn_id ?? null);
+    segments.forEach((segment, index) => {
+      const turnId = turnIdOf(segment);
+      if (turnId) lastSegmentIndexByTurn.set(turnId, index);
+    });
+    segments.forEach((segment, index) => {
+      nodes.push({ kind: "segment", segment, key: segmentKey(segment) });
+      const turnId = turnIdOf(segment);
+      if (turnId && lastSegmentIndexByTurn.get(turnId) === index) {
+        const turn = turnsById.get(turnId);
+        if (turn && TERMINAL_TURN_STATES.has(turn.turn_state) && turn.id !== activeTurn?.id) {
+          nodes.push({ kind: "summary", turnId, key: `summary-${turnId}` });
+        }
+      }
+    });
+    return nodes;
+  }, [segments, turnsById, activeTurn]);
+
   const shouldVirtualize = segments.length > VIRTUALIZATION_THRESHOLD;
   const virtualizer = useVirtualizer({
-    count: shouldVirtualize ? segments.length : 0,
+    count: shouldVirtualize ? renderNodes.length : 0,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 120,
     overscan: 8,
@@ -360,11 +412,11 @@ export function ThreadTimeline({
               }}
             >
               {virtualizer.getVirtualItems().map((virtualItem) => {
-                const segment = segments[virtualItem.index];
-                if (!segment) return null;
+                const node = renderNodes[virtualItem.index];
+                if (!node) return null;
                 return (
                   <div
-                    key={segmentKey(segment)}
+                    key={node.key}
                     data-index={virtualItem.index}
                     ref={virtualizer.measureElement}
                     style={{
@@ -376,22 +428,55 @@ export function ThreadTimeline({
                     }}
                     className="pb-2"
                   >
-                    {renderSegment(segment, threadId, turnsById)}
+                    {node.kind === "segment" ? (
+                      renderSegment(node.segment, threadId, turnsById)
+                    ) : (
+                      <TurnActivitySummary
+                        threadId={threadId}
+                        turn={turnsById.get(node.turnId) as ClientTurn}
+                      />
+                    )}
                   </div>
                 );
               })}
             </div>
           ) : (
-            segments.map((segment) => (
-              <div key={segmentKey(segment)} className="flex flex-col">
-                {renderSegment(segment, threadId, turnsById)}
+            renderNodes.map((node) => (
+              <div key={node.key} className="flex flex-col">
+                {node.kind === "segment" ? (
+                  renderSegment(node.segment, threadId, turnsById)
+                ) : (
+                  <TurnActivitySummary
+                    threadId={threadId}
+                    turn={turnsById.get(node.turnId) as ClientTurn}
+                  />
+                )}
               </div>
             ))
           )}
 
           {/* 真实运行状态反馈：当前 Turn 非终态时的时间线底部指示
             （纯执行状态 UI，不创建 ThreadItem、不进入会话历史）。 */}
-          <TurnRunningIndicator turn={activeTurn} items={items} />
+          {activeTurn && TERMINAL_TURN_STATES.has(activeTurn.turn_state) ? (
+            liveEntries.length > 0 ? (
+              <ActivitySummary
+                entries={liveEntries}
+                elapsedMs={
+                  activeTurn.started_at && activeTurn.finished_at
+                    ? Date.parse(activeTurn.finished_at) - Date.parse(activeTurn.started_at)
+                    : activeTurn.accepted_at && activeTurn.finished_at
+                      ? Date.parse(activeTurn.finished_at) - Date.parse(activeTurn.accepted_at)
+                      : null
+                }
+                failed={activeTurn.turn_state === "failed" || activeTurn.turn_state === "cancelled"}
+                stepCount={liveEntries.filter((entry) => entry.phase === "completed").length}
+              />
+            ) : null
+          ) : liveEntries.length > 0 ? (
+            <HarnessActivityFeed entries={liveEntries} turnActive />
+          ) : (
+            <TurnRunningIndicator turn={activeTurn} items={items} />
+          )}
 
           {/* 连接异常提示（W4-1）。
             正常连接（open）不提示——健康状态无需占用视线；

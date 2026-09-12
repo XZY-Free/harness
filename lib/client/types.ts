@@ -110,6 +110,8 @@ export interface ClientItemsResponse {
  * 与服务端 app/api/v1/threads/[thread_id]/events/route.ts 的 projectEvent 输出一致。
  * event_type 通过 SSE `event:` 行传递，不在 data 内重复。
  */
+import type { ActivityEntry } from "@/lib/client/activity-projection";
+
 export interface ClientEventPayload {
   readonly event_id: string;
   readonly sequence: number;
@@ -189,6 +191,8 @@ export type ClientStreamStatus =
 export interface ThreadProjectionState {
   /** Thread id。 */
   readonly threadId: string;
+  /** 过程透明日志流（活跃回合 live ring；合同 v2.3）。 */
+  readonly activity: readonly ActivityEntry[];
   /** 当前 Item 投影（按 item_sequence 升序）。 */
   readonly items: readonly ClientItem[];
   /** Item id → Item（快速查找，派生于 items）。 */

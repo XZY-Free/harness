@@ -76,6 +76,7 @@ export function ThreadPage({
   const sidebar = useOptionalSidebar();
   const {
     items,
+    activity,
     streamStatus,
     reconnectAttempt,
     reconnectMax,
@@ -340,6 +341,7 @@ export function ThreadPage({
                 threadId={threadId}
                 activeTurn={latestTurn}
                 turns={turns}
+                activity={activity}
               />
               <TurnFailureNotice
                 turnState={latestTurn?.turn_state}
@@ -393,6 +395,7 @@ export function ThreadPage({
                   locateItem={locateItem}
                   activeTurn={latestTurn}
                   turns={turns}
+                  activity={activity}
                 />
                 <TurnFailureNotice
                   turnState={latestTurn?.turn_state}

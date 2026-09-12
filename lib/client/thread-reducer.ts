@@ -1,3 +1,5 @@
+import type { ActivityEntry } from "./activity-projection";
+import { projectActivityEvent } from "./activity-projection";
 import { makeLocalVisibleError } from "./error-messages";
 /**
  * 员工端 Thread 投影 Reducer。
@@ -36,6 +38,7 @@ import type {
 export function createInitialState(threadId: string): ThreadProjectionState {
   return {
     threadId,
+    activity: [],
     items: [],
     itemsById: {},
     lastAppliedEventSequence: 0,
@@ -305,6 +308,8 @@ export function threadProjectionReducer(
           : new Set(),
         latestEventCursor: action.latestEventCursor,
         hasAppliedEventSinceSnapshot: false,
+        // 历史过程由 items(progress) + 按需 activity 端点重建；live ring 重置
+        activity: [],
         snapshotStatus: "ready",
         visibleError: null,
         // snapshot 加载成功后，由客户端把 streamStatus 切到 connecting/open
@@ -358,8 +363,37 @@ export function threadProjectionReducer(
       const newAppliedEventIds = new Set(state.appliedEventIds);
       newAppliedEventIds.add(event.event_id);
 
+      // 过程透明 live ring：动作事件投影入 activity；completed 结果合并回 proposed 行块
+      let activity = state.activity;
+      const entry = projectActivityEvent(event);
+      if (entry) {
+        if (entry.phase === "completed" && entry.actionId) {
+          const idx = [...activity]
+            .reverse()
+            .findIndex((e) => e.actionId === entry.actionId && e.phase === "proposed");
+          if (idx >= 0) {
+            const realIdx = activity.length - 1 - idx;
+            const target = activity[realIdx];
+            if (target) {
+              const merged: ActivityEntry = {
+                ...target,
+                block: [target.block, entry.block].filter(Boolean).join("\n"),
+                phase: "completed",
+              };
+              activity = [...activity.slice(0, realIdx), merged, ...activity.slice(realIdx + 1)];
+            }
+          } else {
+            activity = [...activity, entry];
+          }
+        } else {
+          activity = [...activity, entry];
+        }
+        if (activity.length > 300) activity = activity.slice(activity.length - 300);
+      }
+
       return {
         ...state,
+        activity,
         items: newItems ?? state.items,
         itemsById: newItems ? buildItemsById(newItems) : state.itemsById,
         lastAppliedEventSequence: event.sequence,

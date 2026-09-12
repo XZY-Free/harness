@@ -36,11 +36,15 @@ import {
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 /** Hook 返回值。 */
+import type { ActivityEntry } from "@/lib/client/activity-projection";
+
 export interface UseThreadResult {
   /** 当前 Thread id。 */
   readonly threadId: string;
   /** Item 投影（按 item_sequence 升序）。 */
   readonly items: readonly ClientItem[];
+  /** 过程透明 live ring（合同 v2.3）。 */
+  readonly activity: readonly ActivityEntry[];
   /** SSE 连接状态。 */
   readonly streamStatus: ClientStreamStatus;
   /** 当前重连尝试次数（0 = 未处于重连）。 */
@@ -85,6 +89,7 @@ export function useThread(threadId: string): UseThreadResult {
   return {
     threadId: state.threadId,
     items: state.items,
+    activity: state.activity,
     streamStatus: state.streamStatus,
     reconnectAttempt: state.reconnectAttempt,
     reconnectMax: state.reconnectMax,

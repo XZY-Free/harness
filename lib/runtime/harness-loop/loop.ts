@@ -239,6 +239,10 @@ export class HarnessLoop {
         }
 
         const beforeDecision = this.durableContextFingerprint();
+        // 过程透明合同 v2.3：决策开始发射思考进度（落 user_guidance item，历史可重建）
+        await this.params.eventWriter.write("progress.snapshot", {
+          message: "正在思考下一步…",
+        });
         const rawAction = await this.params.decisionPort.decideNextAction(
           this.buildView(),
           this.params.abortSignal,
@@ -261,6 +265,11 @@ export class HarnessLoop {
           );
         }
         this.validateAction(action, nextStepNo);
+        // 过程透明合同 v2.3：思考完成，think 携带公开决策摘要（思考行展开的最小单元）
+        await this.params.eventWriter.write("progress.snapshot", {
+          message: "思考完成",
+          think: `决定：${action.shortPurpose || action.actionType}`,
+        });
 
         const actionDigest = computeCanonicalDigest({
           actionType: action.actionType,
@@ -415,6 +424,10 @@ export class HarnessLoop {
       historyEntry.state = "started";
       await this.writeActionEvent("harness.action.started", historyEntry);
     }
+    // 过程透明合同 v2.3：正文生成前发射组织回答进度
+    await this.params.eventWriter.write("progress.snapshot", {
+      message: "正在组织回答…",
+    });
     const responseText = await this.params.finalResponsePort.generateFinalResponse(
       this.buildView(),
       this.params.emitTextDelta,
