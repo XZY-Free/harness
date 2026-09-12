@@ -1,6 +1,8 @@
 (() => {
   try {
-    const employeeSurface = /\/(?:desktop|chat)(?:\/|$)/.test(window.location.pathname);
+    const employeeSurface = /\/(?:desktop|chat|login|setup-password)(?:\/|$)/.test(
+      window.location.pathname,
+    );
     const studioSurface = /\/studio(?:\/|$)/.test(window.location.pathname);
     let storedTheme = null;
     if (!employeeSurface) {

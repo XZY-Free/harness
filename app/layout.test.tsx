@@ -74,6 +74,11 @@ describe("themeInitScript", () => {
     expect(runThemeInit("/chat/new", null, true)).toEqual(["light"]);
   });
 
+  it("登录与首次设密等认证前页面强制浅色，不跟随系统暗色或保存主题", () => {
+    expect(runThemeInit("/login", null, true)).toEqual(["light"]);
+    expect(runThemeInit("/setup-password", "dark", true)).toEqual(["light"]);
+  });
+
   it("Studio 保存的暗色选择不污染员工 Web 与 Desktop", () => {
     expect(runThemeInit("/desktop/chat/thread-1", "dark", false)).toEqual(["light"]);
     expect(runThemeInit("/chat/new", "dark", false)).toEqual(["light"]);
