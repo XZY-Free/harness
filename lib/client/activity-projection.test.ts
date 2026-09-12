@@ -173,3 +173,25 @@ it("连续无正文进度只更新当前状态，不积累思考行", () => {
   expect(result).toHaveLength(1);
   expect(result[0]?.label).toBe("正在组织回答…");
 });
+
+it("回答正文不重复生成工具记录，命令详情展示实际参数", () => {
+  expect(
+    projectActivityEvent(
+      actionEvent("harness.action.completed", {
+        action_type: "respond",
+        action_payload: { evidenceRefs: [] },
+      }),
+    ),
+  ).toBeNull();
+  const command = projectActivityEvent(
+    actionEvent("harness.action.proposed", {
+      action_type: "tool.call",
+      action_payload: {
+        toolId: "internal-id",
+        operationId: "shell",
+        arguments: { command: "date; pwd" },
+      },
+    }),
+  );
+  expect(command?.block).toBe("$ date; pwd");
+});

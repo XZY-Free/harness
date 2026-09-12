@@ -48,6 +48,16 @@ function capBlock(text: string): string {
   return text.length > 2000 ? `${text.slice(0, 2000)}\n…（已截断）` : text;
 }
 
+function actionBlock(payload: unknown): string {
+  if (payload && typeof payload === "object" && "arguments" in payload) {
+    const args = (payload as { arguments: unknown }).arguments;
+    if (args && typeof args === "object" && "command" in args && typeof args.command === "string")
+      return `$ ${args.command}`;
+    return prettyJson(args);
+  }
+  return prettyJson(payload);
+}
+
 interface ActionEventPayload {
   readonly action_id?: string;
   readonly action_type?: string;
@@ -66,6 +76,8 @@ interface ActionEventPayload {
 export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
   const payload = (event.payload ?? {}) as Partial<ActionEventPayload>;
   const actionType = payload.action_type ?? "unknown";
+  // respond 的正文由 assistant_message 展示，不把内部 evidenceRefs 再画成工具操作。
+  if (actionType === "respond" && event.event_type !== "harness.action.failed") return null;
   const purpose = payload.purpose_code ?? null;
   const shortPurpose = payload.short_purpose ?? actionType;
   const risk = isRiskAction(actionType, purpose);
@@ -87,13 +99,13 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
         block:
           payload.action_payload === undefined
             ? null
-            : capBlock(prettyJson(payload.action_payload)),
+            : capBlock(actionBlock(payload.action_payload)),
       };
     case "harness.action.started":
       return { ...base, phase: "started", label: `正在执行： ${shortPurpose}`, block: null };
     case "harness.action.completed": {
       const parts: string[] = [];
-      if (payload.action_payload !== undefined) parts.push(prettyJson(payload.action_payload));
+      if (payload.action_payload !== undefined) parts.push(actionBlock(payload.action_payload));
       if (payload.observation !== undefined) parts.push(`→ ${prettyJson(payload.observation)}`);
       return {
         ...base,
@@ -119,7 +131,7 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
         block:
           payload.action_payload === undefined
             ? null
-            : capBlock(prettyJson(payload.action_payload)),
+            : capBlock(actionBlock(payload.action_payload)),
       };
     default:
       return null;
