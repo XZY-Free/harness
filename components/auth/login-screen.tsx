@@ -1,8 +1,7 @@
 "use client";
 
-import { useBrand } from "@/components/brand/brand-provider";
-import { BrandName } from "@/components/brand/brand-wordmark";
 import type { ExternalAuthZoneConfig } from "@/lib/identity/authentication-provider";
+import { AuthScreenLayout } from "./auth-screen-layout";
 import { LoginForm } from "./login-form";
 
 interface LoginScreenProps {
@@ -16,24 +15,13 @@ export function LoginScreen({
   onAuthenticated,
   externalAuth,
 }: LoginScreenProps) {
-  const brand = useBrand();
   return (
-    <main className="flex min-h-dvh items-center overflow-auto bg-background px-[clamp(1.5rem,6vw,6rem)] py-[clamp(2.5rem,10vh,7rem)] text-foreground">
-      <section
-        aria-label={`${brand.name} 登录`}
-        className="mx-auto grid w-full max-w-5xl items-center gap-[clamp(3rem,6vw,5rem)] md:grid-cols-2"
-      >
-        <p className="font-semibold text-[clamp(1.5rem,2.6vw,2.25rem)] tracking-[-0.04em]">
-          <BrandName />
-        </p>
-        <div className="w-full max-w-[28rem] md:justify-self-end">
-          <LoginForm
-            returnTo={returnTo}
-            onAuthenticated={onAuthenticated}
-            externalAuth={externalAuth}
-          />
-        </div>
-      </section>
-    </main>
+    <AuthScreenLayout title="登录">
+      <LoginForm
+        returnTo={returnTo}
+        onAuthenticated={onAuthenticated}
+        externalAuth={externalAuth}
+      />
+    </AuthScreenLayout>
   );
 }

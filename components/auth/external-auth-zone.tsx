@@ -1,5 +1,6 @@
 "use client";
 
+import { buttonVariants } from "@/components/ui/button";
 import { apiPath } from "@/lib/api-fetch";
 import type {
   ExternalAuthDisplayMode,
@@ -7,6 +8,8 @@ import type {
   ExternalAuthMethod,
   ExternalAuthZoneConfig,
 } from "@/lib/identity/authentication-provider";
+import { cn } from "@/lib/utils";
+import { Building2, ChevronRight, KeyRound, Mail, Share2, Smartphone } from "lucide-react";
 
 /**
  * 通用外部认证区（登录页沉底槽位）。
@@ -19,66 +22,32 @@ import type {
 
 const FOCUS_RING = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35";
 
-const STROKE_PROPS = {
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 1.8,
-  strokeLinecap: "round",
-  strokeLinejoin: "round",
+const AUTH_ICONS = {
+  building: Building2,
+  network: Share2,
+  mail: Mail,
+  phone: Smartphone,
+  key: KeyRound,
 } as const;
 
 function iconSvg(icon: ExternalAuthIcon, className: string) {
-  switch (icon) {
-    case "building":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...STROKE_PROPS}>
-          <path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M9 7h2M9 11h2M9 15h2M15 21v-8a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v8" />
-        </svg>
-      );
-    case "network":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...STROKE_PROPS}>
-          <circle cx="18" cy="5" r="3" />
-          <circle cx="6" cy="12" r="3" />
-          <circle cx="18" cy="19" r="3" />
-          <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
-        </svg>
-      );
-    case "chat":
-      return (
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          className={className}
-          fill="currentColor"
-          stroke="none"
-        >
-          <path d="M9 3C5.1 3 2 5.7 2 9c0 1.9 1 3.6 2.6 4.7l-.7 2.2 2.5-1.3c.7.2 1.4.4 2.2.4h.3a6.4 6.4 0 0 1-.3-1.9c0-3.4 3.1-6.1 7-6.1h.4C15.3 4.6 12.4 3 9 3ZM6.8 6.4a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm4.6 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z" />
-          <path d="M14.9 8.4c-3.3 0-6 2.3-6 5.1s2.7 5.1 6 5.1c.7 0 1.3-.1 1.9-.3l2.1 1.1-.6-1.9c1.6-1 2.6-2.4 2.6-4 0-2.8-2.7-5.1-6-5.1Zm-2.1 2.7a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm4.3 0a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Z" />
-        </svg>
-      );
-    case "mail":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...STROKE_PROPS}>
-          <rect x="3" y="5" width="18" height="14" rx="2" />
-          <path d="m3 7.5 9 6 9-6" />
-        </svg>
-      );
-    case "phone":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...STROKE_PROPS}>
-          <rect x="7" y="2" width="10" height="20" rx="2.5" />
-          <path d="M11 18h2" />
-        </svg>
-      );
-    case "key":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...STROKE_PROPS}>
-          <circle cx="8" cy="15" r="4" />
-          <path d="m10.8 12.2 8.2-8.2M15 5l3 3" />
-        </svg>
-      );
+  // 保留现有双气泡标识；其余通用图标复用项目已有的 Lucide。
+  if (icon === "chat") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        className={className}
+        fill="currentColor"
+        stroke="none"
+      >
+        <path d="M9 3C5.1 3 2 5.7 2 9c0 1.9 1 3.6 2.6 4.7l-.7 2.2 2.5-1.3c.7.2 1.4.4 2.2.4h.3a6.4 6.4 0 0 1-.3-1.9c0-3.4 3.1-6.1 7-6.1h.4C15.3 4.6 12.4 3 9 3ZM6.8 6.4a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm4.6 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z" />
+        <path d="M14.9 8.4c-3.3 0-6 2.3-6 5.1s2.7 5.1 6 5.1c.7 0 1.3-.1 1.9-.3l2.1 1.1-.6-1.9c1.6-1 2.6-2.4 2.6-4 0-2.8-2.7-5.1-6-5.1Zm-2.1 2.7a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm4.3 0a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Z" />
+      </svg>
+    );
   }
+  const Glyph = AUTH_ICONS[icon];
+  return <Glyph aria-hidden="true" className={className} strokeWidth={1.8} />;
 }
 
 function resolveMode(
@@ -110,10 +79,13 @@ function buttonMethod(method: ExternalAuthMethod) {
     <a
       key={method.id}
       href={apiPath(method.href)}
-      className={`flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-primary text-sm font-medium tracking-[-0.01em] text-primary-foreground transition-colors hover:bg-primary/90 ${FOCUS_RING}`}
+      className={cn(
+        buttonVariants(),
+        "h-11 w-full gap-2 rounded-[10px] tracking-[-0.01em] hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring/35",
+      )}
     >
       {method.icon ? (
-        iconSvg(method.icon, "h-[18px] w-[18px] shrink-0")
+        iconSvg(method.icon, "size-[18px] shrink-0")
       ) : (
         <span
           aria-hidden="true"
@@ -180,14 +152,11 @@ function rowMethod(method: ExternalAuthMethod) {
       )}
       <span className="flex-1 text-left text-sm font-medium text-foreground">{method.label}</span>
       {method.recommended ? recommendedTag(false) : null}
-      <svg
-        viewBox="0 0 24 24"
+      <ChevronRight
         aria-hidden="true"
         className="h-4 w-4 shrink-0 text-foreground-subtle"
-        {...STROKE_PROPS}
-      >
-        <path d="m9 18 6-6-6-6" />
-      </svg>
+        strokeWidth={1.8}
+      />
     </a>
   );
 }

@@ -34,11 +34,11 @@ export function attachDesktopControlPlane(deps: ControlPlaneWiringDeps): () => v
   let lastHintCheckAt = 0;
 
   const offBrand = registerBrandInvalidatedHandler(() => applier.refresh());
-  const offHint = registerUpdateHintHandler(() => {
+  const offHint = registerUpdateHintHandler(async () => {
     const at = now();
     if (at - lastHintCheckAt < cooldownMs) return;
     lastHintCheckAt = at;
-    return deps.checkForUpdates();
+    await deps.checkForUpdates();
   });
   return () => {
     offBrand();

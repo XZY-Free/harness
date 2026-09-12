@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch, apiPath } from "@/lib/api-fetch";
 /**
  * BrandProvider：Web 侧品牌上下文。
  *
@@ -31,7 +32,7 @@ export function BrandProvider({
     const reload = async (): Promise<void> => {
       const headers: Record<string, string> = {};
       if (etagRef.current) headers["if-none-match"] = etagRef.current;
-      const response = await fetch("/api/brand", { headers }).catch(() => null);
+      const response = await apiFetch("/api/brand", { headers }).catch(() => null);
       if (!response || closed) return;
       if (response.status === 304) return;
       if (!response.ok) return;
@@ -45,7 +46,7 @@ export function BrandProvider({
     };
 
     void reload();
-    const source = new EventSource("/api/brand/stream");
+    const source = new EventSource(apiPath("/api/brand/stream"));
     source.addEventListener("brand", () => {
       void reload();
     });

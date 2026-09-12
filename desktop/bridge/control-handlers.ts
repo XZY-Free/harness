@@ -8,7 +8,7 @@
 import type {
   ControlBrandInvalidatedMessage,
   ControlUpdateHintMessage,
-} from "@/lib/desktop/bridge-messages";
+} from "../../lib/desktop/bridge-messages";
 
 export type BrandInvalidatedHandler = (
   message: ControlBrandInvalidatedMessage,
