@@ -967,8 +967,8 @@ body {
   min-width: 0;
 }
 .ha-feed {
-  gap: 12px;
-  margin: 12px 0 18px;
+  gap: 16px;
+  margin: 12px 0 20px;
 }
 .ha-line {
   display: flex;
@@ -1001,8 +1001,8 @@ body {
   border-radius: 3px;
 }
 .haic {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   flex: none;
 }
 .ha-label {
@@ -1027,7 +1027,7 @@ body {
 .ha-output {
   position: relative;
   margin-top: 3px;
-  background: var(--muted);
+  background: color-mix(in srgb, var(--foreground) 4%, var(--background));
   border-inline: 1px solid var(--border);
 }
 .ha-code-block {
@@ -1036,6 +1036,7 @@ body {
 .ha-code-block > pre {
   margin: 0;
   max-height: 216px;
+  scrollbar-width: thin;
   overflow: auto;
   padding: 12px 36px 12px 10px;
   background: transparent;
@@ -1043,7 +1044,7 @@ body {
   border-radius: 0;
   font-family: var(--font-jetbrains, ui-monospace, monospace);
   font-size: 12px;
-  line-height: 20px;
+  line-height: 21px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

@@ -79,7 +79,7 @@ describe("projectProgressItem", () => {
       created_at: "2026-09-12T08:00:00.000Z",
     });
     expect(entry?.kind).toBe("think");
-    expect(entry?.block).toBe("决定：查询排班");
+    expect(entry?.block).toBe("查询排班");
   });
   it("非 progress item 返回 null", () => {
     expect(projectProgressItem({ id: "i2", turn_id: "t", content: { kind: "other" } })).toBeNull();
@@ -210,4 +210,50 @@ it("工具返回失败时不把动作结束显示为执行成功", () => {
   );
   expect(entry?.phase).toBe("failed");
   expect(entry?.label).toContain("执行失败");
+});
+
+it("命令记录显示原命令与输出，不泄漏执行协议元数据", () => {
+  const entry = projectActivityEvent(
+    actionEvent("harness.action.completed", {
+      action_type: "tool.call",
+      purpose_code: "fetch_time",
+      action_payload: { operationId: "shell", arguments: { command: "date +%F" } },
+      observation: {
+        summary: "运行命令 执行完成",
+        sourceRefs: ["tool-call:internal"],
+        data: {
+          state: "succeeded",
+          result: { stdout: "2026-09-13\n", stderr: "", exitCode: 0, ok: true },
+        },
+      },
+    }),
+  );
+  expect(entry?.kind).toBe("exec");
+  expect(entry?.label).toBe("已运行 date +%F");
+  expect(entry?.block).toBe("$ date +%F\n2026-09-13");
+  expect(entry?.block).not.toContain("sourceRefs");
+});
+it("网页工具使用读取图标和正文，不展示缓存路径或 hash", () => {
+  const entry = projectActivityEvent(
+    actionEvent("harness.action.completed", {
+      action_type: "tool.call",
+      action_payload: { operationId: "web-fetch", arguments: { url: "https://example.com" } },
+      observation: {
+        data: {
+          state: "succeeded",
+          result: { ok: true, text: "Example Domain", source: { artifactPath: "internal/path" } },
+        },
+      },
+    }),
+  );
+  expect(entry?.kind).toBe("read");
+  expect(entry?.block).toBe("https://example.com\nExample Domain");
+});
+
+it("用户拒绝的工具显示未执行，不误报执行失败", () => {
+  const entry = projectActivityEvent(actionEvent("harness.action.completed", {
+    action_type: "tool.call", observation: { data: { state: "cancelled", errorCode: "USER_DENIED" } },
+  }));
+  expect(entry?.phase).toBe("cancelled");
+  expect(entry?.label).toContain("未执行");
 });

@@ -25,13 +25,7 @@ export function UserMessageItem({ item, agentUse = null }: UserMessageItemProps)
 
   return (
     <div className="message-row mb-3 flex justify-end" data-testid="user-message">
-      <div
-        className={cn(
-          "conversation-user-bubble",
-          isGuidance ? "border border-warning/30 bg-warning/10" : "bg-muted",
-          isPending && "opacity-60",
-        )}
-      >
+      <div className={cn("conversation-user-bubble", "bg-muted", isPending && "opacity-60")}>
         <div className="prose-markdown text-foreground">{displayText}</div>
         {agentUse && (
           <div className="mt-1.5 text-2xs text-muted-foreground">
@@ -39,7 +33,9 @@ export function UserMessageItem({ item, agentUse = null }: UserMessageItemProps)
           </div>
         )}
         {isGuidance && (
-          <div className="mt-1 text-2xs text-warning">{isPending ? "引导待确认" : "引导"}</div>
+          <div className="mt-1 text-2xs text-muted-foreground">
+            {isPending ? "引导待确认" : "引导"}
+          </div>
         )}
       </div>
     </div>

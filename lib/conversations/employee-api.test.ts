@@ -21,11 +21,13 @@ import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixt
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { threadItemTable } from "@/lib/persistence/schema/conversation";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import {
   createManagedWorkspaceAttachment,
   listWorkspaceAttachmentUsesByTurn,
 } from "@/lib/workspace/workspace-queries";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 identity.test.ts 一致）。
@@ -637,7 +639,20 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { items: Array<{ id: string }> };
-    expect(body.items).toHaveLength(1); // 只返回第一个 Turn 的 Item
+    const expected = await db
+      .select({ id: threadItemTable.id })
+      .from(threadItemTable)
+      .where(eq(threadItemTable.turnId, turn1Body.turn.id));
+    expect(expected.length).toBeGreaterThan(0);
+    expect(body.items.map((item) => item.id).sort()).toEqual(
+      expected.map((item) => item.id).sort(),
+    );
+    const allResponse = await listItemsGET(
+      buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}/items` }),
+      { params: Promise.resolve({ thread_id: threadId }) },
+    );
+    const all = (await allResponse.json()) as { items: { turn_id: string }[] };
+    expect(all.items.some((item) => item.turn_id !== turn1Body.turn.id)).toBe(true);
   });
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {

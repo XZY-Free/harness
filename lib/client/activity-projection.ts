@@ -3,7 +3,14 @@ import type { ClientEvent } from "@/lib/client/types";
 /** 过程透明日志流的动作语义图标类别（合同 v2.2：类型独立图标）。 */
 export type ActivityKind = "think" | "search" | "read" | "write" | "exec" | "wait" | "fail";
 
-export type ActivityPhase = "think" | "proposed" | "started" | "completed" | "waiting" | "failed";
+export type ActivityPhase =
+  | "think"
+  | "proposed"
+  | "started"
+  | "completed"
+  | "waiting"
+  | "failed"
+  | "cancelled";
 
 export interface ActivityEntry {
   /** 去重键：event_id 或 item_id。 */
@@ -48,11 +55,47 @@ function capBlock(text: string): string {
   return text.length > 2000 ? `${text.slice(0, 2000)}\n…（已截断）` : text;
 }
 
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** 呈现工具的实际输出，而非 Harness/缓存/权限协议封套。 */
+function observationBlock(value: unknown): string {
+  const observation = record(value);
+  const data = record(observation.data);
+  const result = record(data.result);
+  if ("stdout" in result || "stderr" in result) {
+    return [result.stdout, result.stderr, result.exitCode && `退出码：${result.exitCode}`]
+      .filter((part) => typeof part === "string" && part.trim())
+      .join("\n")
+      .trim();
+  }
+  if (typeof result.text === "string") return result.text.trim();
+  if (Array.isArray(result.results))
+    return result.results
+      .map((item) => {
+        const hit = record(item);
+        return [hit.title, hit.url, hit.snippet].filter(Boolean).join("\n");
+      })
+      .join("\n\n");
+  if (data.errorCode) return `操作未完成：${data.errorCode}`;
+  if (Object.keys(result).length) return prettyJson(result);
+  if (Object.keys(data).length)
+    return typeof observation.summary === "string" ? observation.summary : "";
+  return prettyJson(value);
+}
+
 function actionBlock(payload: unknown): string {
   if (payload && typeof payload === "object" && "arguments" in payload) {
     const args = (payload as { arguments: unknown }).arguments;
     if (args && typeof args === "object" && "command" in args && typeof args.command === "string")
       return `$ ${args.command}`;
+    if (args && typeof args === "object") {
+      if ("url" in args && typeof args.url === "string") return args.url;
+      if ("query" in args && typeof args.query === "string") return args.query;
+    }
     return prettyJson(args);
   }
   return prettyJson(payload);
@@ -81,7 +124,24 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
   const purpose = payload.purpose_code ?? null;
   const shortPurpose = payload.short_purpose ?? actionType;
   const risk = isRiskAction(actionType, purpose);
-  const kind = activityKindFor(actionType, purpose);
+  const operation = record(payload.action_payload).operationId;
+  const args = record(record(payload.action_payload).arguments);
+  const kind =
+    operation === "shell"
+      ? "exec"
+      : operation === "web-fetch"
+        ? "read"
+        : operation === "web-search"
+          ? "search"
+          : activityKindFor(actionType, purpose);
+  const toolLabel =
+    operation === "shell" && typeof args.command === "string"
+      ? `运行 ${args.command}`
+      : operation === "web-fetch" && typeof args.url === "string"
+        ? `读取网页 ${args.url}`
+        : operation === "web-search" && typeof args.query === "string"
+          ? `搜索网页 ${args.query}`
+          : null;
   const base = {
     key: event.event_id,
     turnId: event.turn_id,
@@ -95,29 +155,41 @@ export function projectActivityEvent(event: ClientEvent): ActivityEntry | null {
       return {
         ...base,
         phase: "proposed",
-        label: `准备执行： ${shortPurpose}`,
+        label: toolLabel ? `准备${toolLabel}` : `准备执行： ${shortPurpose}`,
         block:
           payload.action_payload === undefined
             ? null
             : capBlock(actionBlock(payload.action_payload)),
       };
     case "harness.action.started":
-      return { ...base, phase: "started", label: `正在执行： ${shortPurpose}`, block: null };
+      return {
+        ...base,
+        phase: "started",
+        label: toolLabel ? `正在${toolLabel}` : `正在执行： ${shortPurpose}`,
+        block: null,
+      };
     case "harness.action.completed": {
       const parts: string[] = [];
       if (payload.action_payload !== undefined) parts.push(actionBlock(payload.action_payload));
-      if (payload.observation !== undefined) parts.push(`→ ${prettyJson(payload.observation)}`);
+      if (payload.observation !== undefined) parts.push(observationBlock(payload.observation));
       const observation = payload.observation as
         | { data?: { state?: string; result?: { ok?: boolean } } }
         | undefined;
+      const cancelled = observation?.data?.state === "cancelled";
       const failed =
         ["failed", "cancelled", "unknown_effect"].includes(observation?.data?.state ?? "") ||
         observation?.data?.result?.ok === false;
       return {
         ...base,
         kind: failed ? "fail" : base.kind,
-        phase: failed ? "failed" : "completed",
-        label: failed ? `执行失败： ${shortPurpose}` : `已执行 · ${shortPurpose}`,
+        phase: cancelled ? "cancelled" : failed ? "failed" : "completed",
+        label: cancelled
+          ? `未执行： ${shortPurpose}`
+          : failed
+            ? `执行失败： ${shortPurpose}`
+            : toolLabel
+              ? `已${toolLabel}`
+              : `已执行 · ${shortPurpose}`,
         block: parts.length ? capBlock(parts.join("\n")) : null,
       };
     }
@@ -151,7 +223,7 @@ export function projectProgressItem(item: {
     kind: "think",
     phase: "think",
     label: message,
-    block: think,
+    block: think?.replace(/^决定[：:]\s*/, "") ?? null,
     risk: false,
     actionId: null,
     occurredAt: item.created_at ?? "",
@@ -170,8 +242,8 @@ export function mergeActionEntries(entries: readonly ActivityEntry[]): ActivityE
       out.push(entry);
       continue;
     }
-    const terminal = prev.phase === "completed" || prev.phase === "failed";
-    if (terminal && entry.phase !== "completed" && entry.phase !== "failed") continue;
+    const terminal = ["completed", "failed", "cancelled"].includes(prev.phase);
+    if (terminal && !["completed", "failed", "cancelled"].includes(entry.phase)) continue;
     const block = !entry.block
       ? prev.block
       : !prev.block || entry.block.includes(prev.block)

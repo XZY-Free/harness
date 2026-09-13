@@ -73,7 +73,7 @@ export function TurnRunningIndicator({ turn, items }: TurnRunningIndicatorProps)
       ? "正在处理..."
       : "正在准备...";
   const progressMessage = latestProgressMessage(turn, items);
-  const seconds = elapsedSeconds(turn.started_at ?? turn.accepted_at, now);
+  const seconds = elapsedSeconds(turn.accepted_at ?? turn.started_at, now);
   const longRunning = seconds >= LONG_RUNNING_SECONDS;
 
   return (

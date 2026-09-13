@@ -333,7 +333,7 @@ export function ThreadInput({
                 size="icon-sm"
                 aria-label={resumeRequested ? "已请求继续" : "继续任务"}
                 title={resumeRequested ? "已请求继续，等待 Runtime 确认" : "继续任务"}
-                className="rounded-full bg-ring text-white hover:bg-ring/85"
+                className="rounded-full bg-primary text-primary-foreground hover:bg-primary/85"
               >
                 {turnBusy || resumeRequested ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -350,7 +350,7 @@ export function ThreadInput({
                 size="icon-sm"
                 aria-label={stopRequested ? "已请求暂停" : "暂停任务"}
                 title={stopRequested ? "已请求暂停，等待 Runtime 确认" : "暂停任务"}
-                className="rounded-full bg-ring text-white hover:bg-ring/85"
+                className="rounded-full bg-primary text-primary-foreground hover:bg-primary/85"
               >
                 {turnBusy || stopRequested ? (
                   <Loader2 className="size-4 animate-spin" />

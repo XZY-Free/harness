@@ -113,3 +113,25 @@ it("历史加载失败可重试，不能伪装为空记录", async () => {
   await screen.findByText("需要先查看项目文档。");
   expect(apiFetch).toHaveBeenCalledTimes(2);
 });
+
+it("实时过程完成后保持可见，耗时从接纳开始而不是最后恢复开始", async () => {
+  apiFetch.mockResolvedValue(apiSuccess({ entries }));
+  const turn = {
+    id: "t",
+    turn_state: "running",
+    accepted_at: "2026-09-12T00:00:00Z",
+    started_at: "2026-09-12T00:01:59Z",
+    finished_at: "2026-09-12T00:02:00Z",
+  } as ClientTurn;
+  const view = render(<TurnActivitySummary threadId="thread" turn={turn} liveEntries={entries} />);
+  await screen.findByText("需要先查看项目文档。");
+  view.rerender(
+    <TurnActivitySummary
+      threadId="thread"
+      turn={{ ...turn, turn_state: "completed" }}
+      liveEntries={entries}
+    />,
+  );
+  expect((screen.getByTestId("harness-activity-summary") as HTMLDetailsElement).open).toBe(true);
+  expect(screen.getByText("用时 2 分钟 0 秒")).toBeTruthy();
+});

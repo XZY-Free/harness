@@ -10,24 +10,24 @@ import {
 } from "@/lib/client/activity-projection";
 import type { ClientTurn } from "@/lib/client/types";
 import {
-  BookOpen,
   Check,
   ChevronRight,
+  Files,
   LoaderCircle,
   Pencil,
   Search,
-  Terminal,
+  SquareTerminal,
   TriangleAlert,
   X,
 } from "lucide-react";
-import { type ComponentProps, useEffect, useState } from "react";
+import { type ComponentProps, useEffect, useRef, useState } from "react";
 
 const ACTIVITY_ICONS = {
   think: LoaderCircle,
   search: Search,
-  read: BookOpen,
+  read: Files,
   write: Pencil,
-  exec: Terminal,
+  exec: SquareTerminal,
   wait: TriangleAlert,
   fail: X,
 } as const;
@@ -91,6 +91,8 @@ function ActivityLine({ entry, live }: { readonly entry: ActivityEntry; readonly
               <X aria-hidden="true" />
               失败
             </>
+          ) : entry.phase === "cancelled" ? (
+            "未执行"
           ) : entry.phase === "waiting" ? (
             "等待确认"
           ) : (
@@ -139,6 +141,7 @@ export function ActivitySummary({
   error,
   onRetry,
   onToggle,
+  open,
 }: {
   readonly entries: readonly ActivityEntry[] | null;
   readonly elapsedMs: number | null;
@@ -148,6 +151,7 @@ export function ActivitySummary({
   readonly error?: boolean;
   readonly onRetry?: () => void;
   readonly onToggle?: ComponentProps<"details">["onToggle"];
+  readonly open?: boolean;
 }) {
   const label =
     status === "cancelled"
@@ -158,7 +162,12 @@ export function ActivitySummary({
           ? "执行失败"
           : formatElapsed(elapsedMs);
   return (
-    <details className="ha-proc" data-testid="harness-activity-summary" onToggle={onToggle}>
+    <details
+      className="ha-proc"
+      data-testid="harness-activity-summary"
+      open={open}
+      onToggle={onToggle}
+    >
       <summary>
         <span>{label}</span>
         <ChevronRight aria-hidden="true" className="ha-chevron" strokeWidth={1.4} />
@@ -202,8 +211,11 @@ export function TurnActivitySummary({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [request, setRequest] = useState(0);
+  const [expanded, setExpanded] = useState(!terminal);
+  const loadedKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!request && terminal) return;
+    const key = `${threadId}:${turn.id}:${terminal}:${request}`;
+    if ((terminal && !expanded) || loadedKey.current === key) return;
     const controller = new AbortController();
     setLoading(true);
     setError(false);
@@ -213,7 +225,10 @@ export function TurnActivitySummary({
       .then(async (response) => {
         if (!response.ok) throw new Error("activity unavailable");
         const body = (await response.json()) as { entries: ActivityEntry[] };
-        if (!controller.signal.aborted) setEntries(body.entries);
+        if (!controller.signal.aborted) {
+          loadedKey.current = key;
+          setEntries(body.entries);
+        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -222,7 +237,7 @@ export function TurnActivitySummary({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [threadId, turn.id, terminal, request]);
+  }, [threadId, turn.id, terminal, request, expanded]);
   if (!terminal) {
     const combined = [...(entries ?? []), ...liveEntries].sort((a, b) =>
       a.occurredAt.localeCompare(b.occurredAt),
@@ -231,20 +246,24 @@ export function TurnActivitySummary({
       <HarnessActivityFeed entries={combined} turnActive={turn.turn_state !== "waiting_user"} />
     );
   }
-  const since = turn.started_at ?? turn.accepted_at;
+  const since = turn.accepted_at ?? turn.started_at;
   const elapsedMs =
     since && turn.finished_at ? Date.parse(turn.finished_at) - Date.parse(since) : null;
   return (
     <ActivitySummary
-      entries={entries}
+      entries={entries ?? liveEntries}
+      open={expanded}
       elapsedMs={elapsedMs}
       failed={turn.turn_state === "failed"}
       status={turn.turn_state}
       loading={loading}
       error={error}
-      onRetry={() => setRequest((n) => n + 1)}
+      onRetry={() => {
+        loadedKey.current = null;
+        setRequest((n) => n + 1);
+      }}
       onToggle={(event) => {
-        if (event.currentTarget.open && request === 0) setRequest(1);
+        setExpanded(event.currentTarget.open);
       }}
     />
   );

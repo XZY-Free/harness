@@ -5,7 +5,7 @@
  * - 非终态 Turn（accepted/queued/running）渲染运行指示；终态/等待态不渲染。
  * - accepted/queued → 正在准备...；running → 正在处理...。
  * - progress.snapshot 携带公开 message 时展示该文本；缺失时保持通用文案。
- * - elapsed 只按 started_at/accepted_at 客户端计算，不依赖服务端。
+ * - elapsed 只按 accepted_at/started_at 客户端计算，不依赖服务端。
  * - 纯 UI：不产生任何 ThreadItem。
  */
 import type { ClientItem, ClientTurn } from "@/lib/client/types";
@@ -50,11 +50,11 @@ const NO_ITEMS: readonly ClientItem[] = [];
 afterEach(cleanup);
 
 describe("TurnRunningIndicator（真实运行状态反馈）", () => {
-  it("running：显示 正在处理... 与 elapsed 秒", () => {
+  it("running：从任务接纳起计时，恢复执行不归零", () => {
     render(<TurnRunningIndicator turn={makeTurn("running")} items={NO_ITEMS} />);
     const indicator = screen.getByTestId("turn-running-indicator");
     expect(indicator.textContent).toContain("正在处理...");
-    expect(indicator.textContent).toMatch(/1 秒/);
+    expect(indicator.textContent).toMatch(/2 秒/);
   });
 
   it("accepted/queued：显示 正在准备...", () => {
