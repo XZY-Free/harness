@@ -1,5 +1,5 @@
 /**
- * POST /runtime/v1/invocations/{invocation_id}/steer — Hosted Runtime 引导（steer）Invocation（ +  参考实现）。
+ * POST /runtime/invocations/{invocationId}/steer — Hosted Runtime 引导（steer）Invocation（ +  参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
@@ -58,11 +58,11 @@ function validateBody(body: unknown): body is SteerInvocationRequestBody {
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
   const requestId = getRequestId(request);
   const params = await context.params;
-  const rawValue = params.invocation_id;
+  const rawValue = params.invocationId;
   const invocationId = typeof rawValue === "string" ? rawValue : "";
 
   if (!invocationId) {
-    return runtimeSchemaInvalidTable(requestId, "路径参数 invocation_id 缺失");
+    return runtimeSchemaInvalidTable(requestId, "路径参数 invocationId 缺失");
   }
 
   // 1. 解析 Bearer Token（audience=runtime + invocation 绑定校验）

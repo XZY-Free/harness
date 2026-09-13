@@ -131,15 +131,15 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
       body,
     });
     response.setHeader("content-type", "application/json");
-    if (request.url?.startsWith("/runtime/v1/capabilities")) {
+    if (request.url?.startsWith("/runtime/capabilities")) {
       response.end(JSON.stringify(capabilities));
       return;
     }
     const invocationId =
-      request.url === "/runtime/v1/invocations"
+      request.url === "/runtime/invocations"
         ? String(body?.invocation_id ?? "")
         : (request.url?.split("/")[4] ?? "");
-    if (request.url === "/runtime/v1/invocations") {
+    if (request.url === "/runtime/invocations") {
       if (startFailureStatus !== null) {
         response.statusCode = startFailureStatus;
         response.end(
@@ -646,7 +646,7 @@ describe("dispatchEmployeeTurn", () => {
     expect(server.requests).toHaveLength(1);
     expect(server.requests[0]).toMatchObject({
       method: "POST",
-      url: "/runtime/v1/invocations",
+      url: "/runtime/invocations",
       authorization: undefined,
     });
     expect(server.requests[0]?.body).not.toHaveProperty("tenantId");
@@ -709,7 +709,7 @@ describe("dispatchEmployeeTurn", () => {
 
     expect((await worker.tick()).attempts).toBe(1);
     const startRequests = server.requests.filter(
-      (request) => request.method === "POST" && request.url === "/runtime/v1/invocations",
+      (request) => request.method === "POST" && request.url === "/runtime/invocations",
     );
     expect(startRequests).toHaveLength(2);
     expect(startRequests[0]?.body?.invocation_id).toBe(invocation?.id);
@@ -738,7 +738,7 @@ describe("dispatchEmployeeTurn", () => {
     await result.completion;
 
     expect(hostedDecision).not.toHaveBeenCalled();
-    expect(server.requests.map((request) => request.url)).toEqual(["/runtime/v1/invocations"]);
+    expect(server.requests.map((request) => request.url)).toEqual(["/runtime/invocations"]);
     const updatedTurn = await getTurnById(tenantId, turn.id);
     const invocationId = updatedTurn?.latestInvocationId;
     if (!invocationId) throw new Error("暂态失败缺少 Invocation");
@@ -780,9 +780,7 @@ describe("dispatchEmployeeTurn", () => {
       dispatchPossiblyStarted: true,
     });
     expect(hostedDecision).not.toHaveBeenCalled();
-    expect(fixture.server.requests.map((request) => request.url)).toEqual([
-      "/runtime/v1/invocations",
-    ]);
+    expect(fixture.server.requests.map((request) => request.url)).toEqual(["/runtime/invocations"]);
   });
 
   it("External cancel 通过共享 command gateway 真实发送 HTTP", async () => {
@@ -896,7 +894,7 @@ describe("dispatchEmployeeTurn", () => {
       command: { commandState: "acknowledged" },
     });
     expect(fixture.server.requests.map((request) => request.url)).toEqual([
-      `/runtime/v1/invocations/${invocationId}/resume`,
+      `/runtime/invocations/${invocationId}/resume`,
     ]);
   });
 
@@ -956,7 +954,7 @@ describe("dispatchEmployeeTurn", () => {
       command: { commandState: "acknowledged" },
     });
     expect(fixture.server.requests.map((request) => request.url)).toEqual([
-      `/runtime/v1/invocations/${invocationId}/resume`,
+      `/runtime/invocations/${invocationId}/resume`,
     ]);
   });
 

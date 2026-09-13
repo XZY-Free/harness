@@ -36,7 +36,7 @@ flowchart LR
 
 ~~~text
 /api/v1/...                 员工交互接口
-/runtime/v1/...             Runtime 协议
+/runtime/...             Runtime 协议
 /admin/api/v1/...           管理控制与观测接口
 /gateway/v1/...             Runtime 到平台的内部网关
 ~~~
@@ -792,7 +792,7 @@ Runtime Protocol 是 SnowHarness 与 Agent 执行器之间的协议，不是员�
 
 ### 4.1 启动 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations`
+`POST {runtime_endpoint}/runtime/invocations`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -810,7 +810,7 @@ Runtime Protocol 是 SnowHarness 与 Agent 执行器之间的协议，不是员�
 | attempt | Body | object | 否 | 仅基础设施重调度时传 attempt_id、attempt_no、retry_reason、checkpoint_ref、新 lease handle 和 producer_sequence_start |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
+curl -X POST 'https://runtime.example.net/runtime/invocations' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: inv_01J:initial' \
   -H 'Content-Type: application/json' \
@@ -842,7 +842,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
 
 ### 4.2 回传 Runtime Event
 
-`POST /runtime/v1/invocations/{invocation_id}/events/batch`
+`POST /runtime/invocations/{invocationId}/events/batch`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -852,7 +852,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
 | events | Body | array | 是 | 1–100 个规范候选事件 |
 
 ```bash
-curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../events:batch' \
+curl -X POST 'https://snow.example.com/runtime/invocations/inv_01J.../events:batch' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: inv_01J-batch-4' \
   -H 'Content-Type: application/json' \
@@ -917,7 +917,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/runtime-events' \
 
 ### 4.3 回传 Transient Event
 
-`POST /runtime/v1/invocations/{invocation_id}/transient-events/batch`
+`POST /runtime/invocations/{invocationId}/transient-events/batch`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -927,7 +927,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/runtime-events' \
 | events | Body | array | 是 | response.delta、heartbeat、tool.log；1–100 条 |
 
 ```bash
-curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../transient-events:batch' \
+curl -X POST 'https://snow.example.com/runtime/invocations/inv_01J.../transient-events:batch' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: inv-01J-transient-41' \
   -H 'Content-Type: application/json' \
@@ -946,7 +946,7 @@ curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../transie
 
 ### 4.4 取消 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/cancel`
+`POST {runtime_endpoint}/runtime/invocations/{invocationId}/cancel`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -956,7 +956,7 @@ curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../transie
 | deadline | Body | string | 是 | Runtime 最晚停止时间 |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:cancel' \
+curl -X POST 'https://runtime.example.net/runtime/invocations/inv_01J...:cancel' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: cancel-inv-01J' \
   -H 'Content-Type: application/json' \
@@ -975,7 +975,7 @@ Runtime 应停止新行动并报告最终状态；无法立即停止时返回 ac
 
 ### 4.5 恢复 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/resume`
+`POST {runtime_endpoint}/runtime/invocations/{invocationId}/resume`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -986,7 +986,7 @@ Runtime 应停止新行动并报告最终状态；无法立即停止时返回 ac
 | checkpoint_ref | Body | string | 否 | Runtime 已丢失内存状态时的受控恢复点 |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:resume' \
+curl -X POST 'https://runtime.example.net/runtime/invocations/inv_01J...:resume' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: icmd_01J...' \
   -H 'Content-Type: application/json' \
@@ -1006,7 +1006,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:resu
 
 ### 4.6 引导 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/steer`
+`POST {runtime_endpoint}/runtime/invocations/{invocationId}/steer`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1017,7 +1017,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:resu
 | mode | Body | string | 是 | next_safe_point、interrupt_generation |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:steer' \
+curl -X POST 'https://runtime.example.net/runtime/invocations/inv_01J...:steer' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: icmd_steer_01J...' \
   -H 'Content-Type: application/json' \
@@ -1037,7 +1037,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:stee
 
 ### 4.7 Runtime 能力发现
 
-`GET {runtime_endpoint}/runtime/v1/capabilities`
+`GET {runtime_endpoint}/runtime/capabilities`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1045,7 +1045,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:stee
 | protocol_version | Query | string | 是 | 平台支持的协议版本 |
 
 ```bash
-curl 'https://runtime.example.net/runtime/v1/capabilities?protocol_version=1' \
+curl 'https://runtime.example.net/runtime/capabilities?protocol_version=1' \
   -H 'Authorization: Bearer <runtime-probe-token>'
 ```
 

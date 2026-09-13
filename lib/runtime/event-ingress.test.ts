@@ -1456,9 +1456,7 @@ describe("Runtime Route 级测试", () => {
 
   it("POST events:batch 成功：返回 200 + accepted_through_producer_sequence", async () => {
     const { invocationId } = await seedRunningInvocation(ctx);
-    const { POST } = await import(
-      "@/app/runtime/v1/invocations/[invocation_id]/events/batch/route"
-    );
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/events/batch/route");
 
     const token = makeWorkloadToken(ctx.tenantId, invocationId, ctx.runtimeRevision.id);
     const body = {
@@ -1474,7 +1472,7 @@ describe("Runtime Route 级测试", () => {
     };
 
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${invocationId}/events/batch`,
+      `https://example.com/runtime/invocations/${invocationId}/events/batch`,
       {
         method: "POST",
         headers: {
@@ -1503,9 +1501,7 @@ describe("Runtime Route 级测试", () => {
 
   it("POST events:batch 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { invocationId } = await seedRunningInvocation(ctx);
-    const { POST } = await import(
-      "@/app/runtime/v1/invocations/[invocation_id]/events/batch/route"
-    );
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/events/batch/route");
 
     const token = makeWorkloadToken(ctx.tenantId, invocationId, ctx.runtimeRevision.id);
     const body = {
@@ -1521,7 +1517,7 @@ describe("Runtime Route 级测试", () => {
     };
 
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${invocationId}/events/batch`,
+      `https://example.com/runtime/invocations/${invocationId}/events/batch`,
       {
         method: "POST",
         headers: {
@@ -1548,7 +1544,7 @@ describe("Runtime Route 级测试", () => {
   it("POST transient-events:batch 成功：返回 200 + persisted=false", async () => {
     const { invocationId } = await seedRunningInvocation(ctx);
     const { POST } = await import(
-      "@/app/runtime/v1/invocations/[invocation_id]/transient-events/batch/route"
+      "@/app/runtime/invocations/[invocationId]/transient-events/batch/route"
     );
 
     const token = makeWorkloadToken(ctx.tenantId, invocationId, ctx.runtimeRevision.id);
@@ -1565,7 +1561,7 @@ describe("Runtime Route 级测试", () => {
     };
 
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${invocationId}/transient-events/batch`,
+      `https://example.com/runtime/invocations/${invocationId}/transient-events/batch`,
       {
         method: "POST",
         headers: {

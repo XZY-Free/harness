@@ -51,11 +51,11 @@ async function startBlackBoxServer(
       body: rawBody ? JSON.parse(rawBody) : null,
     });
     response.setHeader("content-type", "application/json");
-    if (request.url?.startsWith("/runtime/v1/capabilities")) {
+    if (request.url?.startsWith("/runtime/capabilities")) {
       response.end(JSON.stringify(capabilities));
       return;
     }
-    if (request.url === "/runtime/v1/invocations") {
+    if (request.url === "/runtime/invocations") {
       response.end(
         JSON.stringify({
           invocation_id: "invocation-1",
@@ -141,11 +141,11 @@ describe("HttpHarnessRuntimeTransport black-box wire", () => {
     });
 
     expect(server.requests.map(({ method, url }) => ({ method, url }))).toEqual([
-      { method: "GET", url: "/runtime/v1/capabilities?protocol_version=2" },
-      { method: "POST", url: "/runtime/v1/invocations" },
-      { method: "POST", url: "/runtime/v1/invocations/invocation-1/cancel" },
-      { method: "POST", url: "/runtime/v1/invocations/invocation-1/resume" },
-      { method: "POST", url: "/runtime/v1/invocations/invocation-1/steer" },
+      { method: "GET", url: "/runtime/capabilities?protocol_version=2" },
+      { method: "POST", url: "/runtime/invocations" },
+      { method: "POST", url: "/runtime/invocations/invocation-1/cancel" },
+      { method: "POST", url: "/runtime/invocations/invocation-1/resume" },
+      { method: "POST", url: "/runtime/invocations/invocation-1/steer" },
     ]);
     expect(
       server.requests.every((request) => request.authorization === "Bearer external-test-token"),
@@ -168,7 +168,7 @@ describe("HttpHarnessRuntimeTransport black-box wire", () => {
 
   it("invalid JSON 与 503 产生稳定、可分类错误", async () => {
     const invalid = await startBlackBoxServer((request, response) => {
-      if (!request.url?.startsWith("/runtime/v1/capabilities")) return false;
+      if (!request.url?.startsWith("/runtime/capabilities")) return false;
       response.setHeader("content-type", "application/json");
       response.end("not-json");
       return true;

@@ -6,13 +6,13 @@
  * - startInvocation HTTP 客户端：mock 调用 + 网络错误 + HTTP 错误
  * - dispatchInvocationForTurn 集成：Runtime 调用 → Invocation running + invocation.started Event
  * - RuntimeSessionBinding 仓储：create/get/close 操作
- * - GET /runtime/v1/capabilities：Hosted Runtime 参考路由
- * - POST /runtime/v1/invocations：Hosted Runtime 参考路由
+ * - GET /runtime/capabilities：Hosted Runtime 参考路由
+ * - POST /runtime/invocations：Hosted Runtime 参考路由
  *
  * 真实 MySQL 8 Testcontainers + 真实 ed25519 签名，不使用 DB mock。
  */
-import { GET as capabilitiesGET } from "@/app/runtime/v1/capabilities/route";
-import { POST as invocationsPOST } from "@/app/runtime/v1/invocations/route";
+import { GET as capabilitiesGET } from "@/app/runtime/capabilities/route";
+import { POST as invocationsPOST } from "@/app/runtime/invocations/route";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -937,10 +937,10 @@ describe("S05-C02 RuntimeSessionBinding 仓储", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 5. GET /runtime/v1/capabilities
+// 5. GET /runtime/capabilities
 // ═══════════════════════════════════════════════════════════
 
-describe("S05-C02 GET /runtime/v1/capabilities", () => {
+describe("S05-C02 GET /runtime/capabilities", () => {
   it("有效 runtime Token → 200 + 能力声明", async () => {
     const token = issueWorkloadToken({
       type: "runtime",
@@ -952,7 +952,7 @@ describe("S05-C02 GET /runtime/v1/capabilities", () => {
     });
 
     const request = new Request(
-      "https://platform.internal/runtime/v1/capabilities?protocol_version=2",
+      "https://platform.internal/runtime/capabilities?protocol_version=2",
       {
         headers: {
           authorization: `Bearer ${token}`,
@@ -970,7 +970,7 @@ describe("S05-C02 GET /runtime/v1/capabilities", () => {
   });
 
   it("缺少 Authorization → 401 AUTHENTICATION_REQUIRED", async () => {
-    const request = new Request("https://platform.internal/runtime/v1/capabilities", {
+    const request = new Request("https://platform.internal/runtime/capabilities", {
       headers: { "x-request-id": "req-test-caps-2" },
     });
 
@@ -983,10 +983,10 @@ describe("S05-C02 GET /runtime/v1/capabilities", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 6. POST /runtime/v1/invocations
+// 6. POST /runtime/invocations
 // ═══════════════════════════════════════════════════════════
 
-describe("S05-C02 POST /runtime/v1/invocations", () => {
+describe("S05-C02 POST /runtime/invocations", () => {
   it("空 input_items/context_handle/workspace 按机器契约拒绝", async () => {
     const token = issueWorkloadToken({
       type: "runtime",
@@ -997,7 +997,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
     });
     const response = await invocationsPOST(
-      new Request("https://platform.internal/runtime/v1/invocations", {
+      new Request("https://platform.internal/runtime/invocations", {
         method: "POST",
         headers: {
           authorization: `Bearer ${token}`,
@@ -1076,7 +1076,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       trace_context: { trace_id: "trace-test", span_id: "span-test" },
     };
 
-    const request = new Request("https://platform.internal/runtime/v1/invocations", {
+    const request = new Request("https://platform.internal/runtime/invocations", {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
@@ -1108,7 +1108,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
     });
     const response = await invocationsPOST(
-      new Request("https://platform.internal/runtime/v1/invocations", {
+      new Request("https://platform.internal/runtime/invocations", {
         method: "POST",
         headers: {
           authorization: `Bearer ${token}`,
@@ -1209,7 +1209,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       ],
     ] as const) {
       const response = await invocationsPOST(
-        new Request("https://platform.internal/runtime/v1/invocations", {
+        new Request("https://platform.internal/runtime/invocations", {
           method: "POST",
           headers: {
             authorization: `Bearer ${token}`,
@@ -1262,7 +1262,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
     });
     const response = await invocationsPOST(
-      new Request("https://platform.internal/runtime/v1/invocations", {
+      new Request("https://platform.internal/runtime/invocations", {
         method: "POST",
         headers: {
           authorization: `Bearer ${token}`,
@@ -1324,7 +1324,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
     });
 
-    const request = new Request("https://platform.internal/runtime/v1/invocations", {
+    const request = new Request("https://platform.internal/runtime/invocations", {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
@@ -1351,7 +1351,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
     });
 
-    const request = new Request("https://platform.internal/runtime/v1/invocations", {
+    const request = new Request("https://platform.internal/runtime/invocations", {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,

@@ -1566,11 +1566,11 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
   });
 
   it("POST :cancel 成功：返回 200 + cancelled=true", async () => {
-    const { POST } = await import("@/app/runtime/v1/invocations/[invocation_id]/cancel/route");
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/cancel/route");
 
     const token = makeWorkloadToken(ctx.tenantId, running.invocationId, ctx.runtimeRevision.id);
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${running.invocationId}/cancel`,
+      `https://example.com/runtime/invocations/${running.invocationId}/cancel`,
       {
         method: "POST",
         headers: {
@@ -1597,10 +1597,10 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
   });
 
   it("POST :cancel 缺少 Authorization Token → 401 AUTHENTICATION_REQUIRED", async () => {
-    const { POST } = await import("@/app/runtime/v1/invocations/[invocation_id]/cancel/route");
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/cancel/route");
 
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${running.invocationId}/cancel`,
+      `https://example.com/runtime/invocations/${running.invocationId}/cancel`,
       {
         method: "POST",
         headers: {
@@ -1624,11 +1624,11 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
   });
 
   it("POST :cancel 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
-    const { POST } = await import("@/app/runtime/v1/invocations/[invocation_id]/cancel/route");
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/cancel/route");
 
     const token = makeWorkloadToken(ctx.tenantId, running.invocationId, ctx.runtimeRevision.id);
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${running.invocationId}/cancel`,
+      `https://example.com/runtime/invocations/${running.invocationId}/cancel`,
       {
         method: "POST",
         headers: {
@@ -1653,11 +1653,11 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
   });
 
   it("POST :resume 成功：返回 200 + resumed=true", async () => {
-    const { POST } = await import("@/app/runtime/v1/invocations/[invocation_id]/resume/route");
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/resume/route");
 
     const token = makeWorkloadToken(ctx.tenantId, running.invocationId, ctx.runtimeRevision.id);
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${running.invocationId}/resume`,
+      `https://example.com/runtime/invocations/${running.invocationId}/resume`,
       {
         method: "POST",
         headers: {
@@ -1684,11 +1684,11 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
   });
 
   it("POST :steer 成功：返回 200 + steered=true", async () => {
-    const { POST } = await import("@/app/runtime/v1/invocations/[invocation_id]/steer/route");
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/steer/route");
 
     const token = makeWorkloadToken(ctx.tenantId, running.invocationId, ctx.runtimeRevision.id);
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${running.invocationId}/steer`,
+      `https://example.com/runtime/invocations/${running.invocationId}/steer`,
       {
         method: "POST",
         headers: {
@@ -1715,7 +1715,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
   });
 
   it("Token invocationId 与 path 不匹配 → 401 AUTHENTICATION_REQUIRED", async () => {
-    const { POST } = await import("@/app/runtime/v1/invocations/[invocation_id]/steer/route");
+    const { POST } = await import("@/app/runtime/invocations/[invocationId]/steer/route");
 
     // Token 绑定不同 invocationId
     const token = makeWorkloadToken(
@@ -1724,7 +1724,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
       ctx.runtimeRevision.id,
     );
     const request = new Request(
-      `https://example.com/runtime/v1/invocations/${running.invocationId}/steer`,
+      `https://example.com/runtime/invocations/${running.invocationId}/steer`,
       {
         method: "POST",
         headers: {

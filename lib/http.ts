@@ -30,7 +30,7 @@ export type ApiAudience = "employee" | "runtime" | "gateway" | "admin";
 /** 各 audience 的路径前缀。 */
 export const AUDIENCE_PREFIX: Record<ApiAudience, string> = {
   employee: "/api/v1",
-  runtime: "/runtime/v1",
+  runtime: "/runtime",
   gateway: "/gateway/v1",
   admin: "/admin/api/v1",
 };

@@ -2840,9 +2840,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations": {
+    "/runtime/invocations": {
       "post": {
-        "operationId": "post_runtime_v1_invocations",
+        "operationId": "post_runtime_invocations",
         "summary": "启动 Invocation",
         "tags": [
           "runtime"
@@ -2873,7 +2873,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3028,9 +3028,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/events/batch": {
+    "/runtime/invocations/{invocationId}/events/batch": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_events_batch",
+        "operationId": "post_runtime_invocations_by_invocationId_events_batch",
         "summary": "回传 Runtime Event",
         "tags": [
           "runtime"
@@ -3061,7 +3061,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3200,9 +3200,9 @@
         }
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/transient-events/batch": {
+    "/runtime/invocations/{invocationId}/transient-events/batch": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_transient_events_batch",
+        "operationId": "post_runtime_invocations_by_invocationId_transient_events_batch",
         "summary": "回传 Transient Event",
         "tags": [
           "runtime"
@@ -3233,7 +3233,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3307,9 +3307,9 @@
         }
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/cancel": {
+    "/runtime/invocations/{invocationId}/cancel": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_cancel",
+        "operationId": "post_runtime_invocations_by_invocationId_cancel",
         "summary": "取消 Invocation",
         "tags": [
           "runtime"
@@ -3340,7 +3340,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3425,9 +3425,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/resume": {
+    "/runtime/invocations/{invocationId}/resume": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_resume",
+        "operationId": "post_runtime_invocations_by_invocationId_resume",
         "summary": "恢复 Invocation",
         "tags": [
           "runtime"
@@ -3458,7 +3458,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3552,9 +3552,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/steer": {
+    "/runtime/invocations/{invocationId}/steer": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_steer",
+        "operationId": "post_runtime_invocations_by_invocationId_steer",
         "summary": "引导 Invocation",
         "tags": [
           "runtime"
@@ -3585,7 +3585,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3680,9 +3680,9 @@
         ]
       }
     },
-    "/runtime/v1/capabilities": {
+    "/runtime/capabilities": {
       "get": {
-        "operationId": "get_runtime_v1_capabilities",
+        "operationId": "get_runtime_capabilities",
         "summary": "Runtime 能力发现",
         "tags": [
           "runtime"

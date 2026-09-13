@@ -693,7 +693,7 @@ describe("enforceIdempotency", () => {
       caller: workloadCaller,
       commandScope: "runtime.command:inv_01",
       idempotencyKey: "rt-key-1",
-      requestHash: computeRequestHash("POST", "/runtime/v1/invocations/inv_01/commands", {}),
+      requestHash: computeRequestHash("POST", "/runtime/invocations/inv_01/commands", {}),
     });
     expect(outcome.kind).toBe("new");
     if (outcome.kind === "new") {

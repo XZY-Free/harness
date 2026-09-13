@@ -1,5 +1,5 @@
 /**
- * GET /runtime/v1/capabilities — Hosted Runtime 能力探测（ 参考实现）。
+ * GET /runtime/capabilities — Hosted Runtime 能力探测（ 参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）

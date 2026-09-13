@@ -1,5 +1,5 @@
 /**
- * POST /runtime/v1/invocations — Hosted Runtime 启动 Invocation（ +  参考实现）。
+ * POST /runtime/invocations — Hosted Runtime 启动 Invocation（ +  参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）

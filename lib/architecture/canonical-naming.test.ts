@@ -263,7 +263,7 @@ describe("Canonical Naming Guard (Foundation basics)", () => {
   it("旧 RUNTIME_PROTOCOL_VERSION 常量不得扩散到白名单之外的新代码（F7 完成后白名单必须清空）", () => {
     // F7 (Symbol renames) 完成前的中间态白名单。这些文件在 F7 中会被 REPLACE：
     // - runtime-client.ts: RUNTIME_PROTOCOL_VERSION = "2" 旧定义（F7 删除）
-    // - app/runtime/v1/capabilities/route.ts: 旧 capabilities handler（F3-F6 MOVE + F7 更新）
+    // - app/runtime/capabilities/route.ts: 旧 capabilities handler（F3-F6 MOVE + F7 更新）
     // - lib/runtime/application/build-runtime-start-request.ts: 旧 Start request builder（F7 更新）
     // - lib/runtime/runtime-settings.ts: 本 Guard 的 FORBIDDEN_ENV_FLAG_PREFIXES 黑名单
     //   含 "RUNTIME_PROTOCOL_VERSION_OVERRIDE"，字符串包含 RUNTIME_PROTOCOL_VERSION 子串
@@ -272,7 +272,7 @@ describe("Canonical Naming Guard (Foundation basics)", () => {
     // `expect(offenders).toEqual([])` 无白名单版本。
     const WHITELIST = new Set([
       "lib/runtime/runtime-client.ts",
-      "app/runtime/v1/capabilities/route.ts",
+      "app/runtime/capabilities/route.ts",
       "lib/runtime/application/build-runtime-start-request.ts",
       "lib/runtime/runtime-settings.ts",
     ]);

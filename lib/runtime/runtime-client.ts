@@ -66,7 +66,7 @@ export interface GatewayEndpoints {
   capability_actions: string;
 }
 
-/** Runtime 能力探测响应（GET /runtime/v1/capabilities）。 */
+/** Runtime 能力探测响应（GET /runtime/capabilities）。 */
 export interface RuntimeCapabilitiesResponse {
   /** Runtime 支持的协议版本列表（@2 必须声明 ["2"]，§49）。 */
   protocol_versions: string[];
@@ -94,7 +94,7 @@ export interface RuntimeCapabilitiesResponse {
   };
 }
 
-/** startInvocation 请求体（POST /runtime/v1/invocations）。 */
+/** startInvocation 请求体（POST /runtime/invocations）。 */
 export interface StartInvocationRequestBody {
   /** 协商的 Runtime Protocol 版本（§23：固定 "2"，无 @1 fallback）。 */
   protocol_version: typeof RUNTIME_PROTOCOL_VERSION;
@@ -358,7 +358,7 @@ export function createHttpRuntimeClient(options?: {
       endpoint: string,
       auth: RuntimeTransportAuth,
     ): Promise<RuntimeCapabilitiesResponse> {
-      const url = `${endpoint}/runtime/v1/capabilities?protocol_version=${RUNTIME_PROTOCOL_VERSION}`;
+      const url = `${endpoint}/runtime/capabilities?protocol_version=${RUNTIME_PROTOCOL_VERSION}`;
       const resp = await doFetch(
         url,
         {
@@ -385,7 +385,7 @@ export function createHttpRuntimeClient(options?: {
     },
 
     async startInvocation(req: StartInvocationRequest): Promise<StartInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/v1/invocations`;
+      const url = `${req.runtimeEndpoint}/runtime/invocations`;
       const resp = await doFetch(
         url,
         {
@@ -420,7 +420,7 @@ export function createHttpRuntimeClient(options?: {
     },
 
     async cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/cancel`;
+      const url = `${req.runtimeEndpoint}/runtime/invocations/${req.invocationId}/cancel`;
       const resp = await doFetch(
         url,
         {
@@ -452,7 +452,7 @@ export function createHttpRuntimeClient(options?: {
     },
 
     async resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/resume`;
+      const url = `${req.runtimeEndpoint}/runtime/invocations/${req.invocationId}/resume`;
       const resp = await doFetch(
         url,
         {
@@ -484,7 +484,7 @@ export function createHttpRuntimeClient(options?: {
     },
 
     async steerInvocation(req: SteerInvocationRequest): Promise<SteerInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/steer`;
+      const url = `${req.runtimeEndpoint}/runtime/invocations/${req.invocationId}/steer`;
       const resp = await doFetch(
         url,
         {

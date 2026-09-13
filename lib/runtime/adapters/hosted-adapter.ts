@@ -141,15 +141,15 @@ export function createHttpEventIngressClient(params: {
  * 路由层通过此接口调用 Adapter，不直接依赖具体实现。
  */
 export interface RuntimeAdapter {
-  /** 探测能力（对应 GET /runtime/v1/capabilities）。 */
+  /** 探测能力（对应 GET /runtime/capabilities）。 */
   probeCapabilities(): Promise<RuntimeCapabilitiesResponse>;
-  /** 启动 Invocation 执行 Agent Loop（对应 POST /runtime/v1/invocations）。 */
+  /** 启动 Invocation 执行 Agent Loop（对应 POST /runtime/invocations）。 */
   startInvocation(params: StartInvocationParams): Promise<StartInvocationResult>;
-  /** 处理 cancel 命令（对应 POST /runtime/v1/invocations/{id}:cancel）。 */
+  /** 处理 cancel 命令（对应 POST /runtime/invocations/{id}:cancel）。 */
   handleCancel(params: CancelParams): Promise<CancelResult>;
-  /** 处理 resume 命令（对应 POST /runtime/v1/invocations/{id}:resume）。 */
+  /** 处理 resume 命令（对应 POST /runtime/invocations/{id}:resume）。 */
   handleResume(params: ResumeParams): Promise<ResumeResult>;
-  /** 处理 steer 命令（对应 POST /runtime/v1/invocations/{id}:steer）。 */
+  /** 处理 steer 命令（对应 POST /runtime/invocations/{id}:steer）。 */
   handleSteer(params: SteerParams): Promise<SteerResult>;
   /**
    * 获取最后一次 startInvocation 触发的 loop.run() Promise（测试用 await）。
@@ -164,7 +164,7 @@ export interface RuntimeAdapter {
  * 事件回传 Sink：把候选事件批次回传平台。
  *
  * 两种实现：
- * - HTTP：调用平台 /runtime/v1/invocations/{id}/events/batch 路由（生产默认）。
+ * - HTTP：调用平台 /runtime/invocations/{id}/events/batch 路由（生产默认）。
  * - 直接调用：调用 ingressEventBatch 仓储函数（测试用，绕过 HTTP）。
  */
 export type EventBatchSink = (params: {

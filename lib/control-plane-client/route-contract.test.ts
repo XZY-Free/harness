@@ -66,7 +66,7 @@ const CONTRACTS = [
   ],
   [
     "executions.ts",
-    "/admin/api/v1/invocations/${invocationId}/execution-binding",
+    "/admin/api/v1/invocations/${invocation_id}/execution-binding",
     "app/admin/api/v1/invocations/[invocation_id]/execution-binding/route.ts",
     "GET",
   ],
