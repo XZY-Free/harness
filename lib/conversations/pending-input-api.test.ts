@@ -1,26 +1,26 @@
 import {
   PATCH as editPendingInputPATCH,
   DELETE as removePendingInputDELETE,
-} from "@/app/api/v1/pending-inputs/[pending_input_id]/route";
-import { POST as reorderPendingInputsPOST } from "@/app/api/v1/threads/[thread_id]/pending-inputs/reorder/route";
+} from "@/app/api/pending-inputs/[pendingInputId]/route";
+import { POST as reorderPendingInputsPOST } from "@/app/api/threads/[threadId]/pending-inputs/reorder/route";
 import {
   POST as createPendingInputPOST,
   GET as listPendingInputsGET,
-} from "@/app/api/v1/threads/[thread_id]/pending-inputs/route";
+} from "@/app/api/threads/[threadId]/pending-inputs/route";
 /**
  * S04-C04：PendingInput API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 5 个 PendingInput API 路由：
- * - GET  /api/v1/threads/{thread_id}/pending-inputs — 查询队列
- * - POST /api/v1/threads/{thread_id}/pending-inputs — 创建 PendingInput
- * - POST /api/v1/threads/{thread_id}/pending-inputs:reorder — 重排队列
- * - PATCH  /api/v1/pending-inputs/{pending_input_id} — 编辑 PendingInput
- * - DELETE /api/v1/pending-inputs/{pending_input_id} — 移除 PendingInput
+ * - GET  /api/threads/{thread_id}/pending-inputs — 查询队列
+ * - POST /api/threads/{thread_id}/pending-inputs — 创建 PendingInput
+ * - POST /api/threads/{thread_id}/pending-inputs:reorder — 重排队列
+ * - PATCH  /api/pending-inputs/{pending_input_id} — 编辑 PendingInput
+ * - DELETE /api/pending-inputs/{pending_input_id} — 移除 PendingInput
  *
  * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
+import { POST as createThreadPOST } from "@/app/api/threads/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
@@ -93,7 +93,7 @@ async function createPendingInput(
     body: { input },
   });
   const resp = await createPendingInputPOST(req, {
-    params: Promise.resolve({ thread_id: threadId }),
+    params: Promise.resolve({ threadId: threadId }),
   });
   return (await resp.json()) as {
     pending_input: { id: string; etag: string; queue_position: number; input_state: string };
@@ -102,10 +102,10 @@ async function createPendingInput(
 }
 
 // ═══════════════════════════════════════════════════════════
-// 1. GET /api/v1/threads/{thread_id}/pending-inputs — 查询队列
+// 1. GET /api/threads/{thread_id}/pending-inputs — 查询队列
 // ═══════════════════════════════════════════════════════════
 
-describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
+describe("GET /api/threads/{thread_id}/pending-inputs", () => {
   it("成功查询空队列 → 200 + 空数组 + queue_etag", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-get-empty");
@@ -117,7 +117,7 @@ describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
     });
 
     const resp = await listPendingInputsGET(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
@@ -144,7 +144,7 @@ describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
     });
 
     const resp = await listPendingInputsGET(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
@@ -166,7 +166,7 @@ describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
     });
 
     const resp = await listPendingInputsGET(req, {
-      params: Promise.resolve({ thread_id: "non-existent" }),
+      params: Promise.resolve({ threadId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -175,10 +175,10 @@ describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 2. POST /api/v1/threads/{thread_id}/pending-inputs — 创建 PendingInput
+// 2. POST /api/threads/{thread_id}/pending-inputs — 创建 PendingInput
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
+describe("POST /api/threads/{thread_id}/pending-inputs", () => {
   it("成功创建 PendingInput → 201 + pending_input + queue_etag", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-create-thread");
@@ -192,7 +192,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     });
 
     const resp = await createPendingInputPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(201);
     const body = (await resp.json()) as {
@@ -237,7 +237,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     });
 
     const resp = await createPendingInputPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(400);
   });
@@ -255,7 +255,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     });
 
     const resp = await createPendingInputPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(400);
   });
@@ -274,13 +274,13 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
       });
 
     const first = await createPendingInputPOST(buildReq(), {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as { pending_input: { id: string } };
 
     const second = await createPendingInputPOST(buildReq(), {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(second.status).toBe(201);
     const secondBody = (await second.json()) as { pending_input: { id: string } };
@@ -299,7 +299,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
       body: { input: { type: "text", text: "内容一" } },
     });
     await createPendingInputPOST(firstReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
 
     const secondReq = buildApiRequest({
@@ -310,7 +310,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
       body: { input: { type: "text", text: "内容二" } },
     });
     const resp = await createPendingInputPOST(secondReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -327,17 +327,17 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     });
 
     const resp = await createPendingInputPOST(req, {
-      params: Promise.resolve({ thread_id: "non-existent" }),
+      params: Promise.resolve({ threadId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
   });
 });
 
 // ═══════════════════════════════════════════════════════════
-// 3. POST /api/v1/threads/{thread_id}/pending-inputs:reorder — 重排
+// 3. POST /api/threads/{thread_id}/pending-inputs:reorder — 重排
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
+describe("POST /api/threads/{thread_id}/pending-inputs/reorder", () => {
   it("成功重排 → 200 + queue_position 重新分配", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-reorder-ok");
@@ -356,7 +356,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
     });
 
     const resp = await reorderPendingInputsPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
@@ -385,7 +385,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
     });
 
     const resp = await reorderPendingInputsPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(400);
   });
@@ -407,7 +407,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
     });
 
     const resp = await reorderPendingInputsPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(422);
     const body = (await resp.json()) as { error: { code: string } };
@@ -430,7 +430,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
     });
 
     const resp = await reorderPendingInputsPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(422);
   });
@@ -450,7 +450,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
     });
 
     const resp = await reorderPendingInputsPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(412);
     const body = (await resp.json()) as { error: { code: string } };
@@ -459,10 +459,10 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 4. PATCH /api/v1/pending-inputs/{pending_input_id} — 编辑
+// 4. PATCH /api/pending-inputs/{pending_input_id} — 编辑
 // ═══════════════════════════════════════════════════════════
 
-describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
+describe("PATCH /api/pending-inputs/{pending_input_id}", () => {
   it("成功编辑 PendingInput → 200 + 新 etag", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-edit-ok");
@@ -481,7 +481,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await editPendingInputPATCH(req, {
-      params: Promise.resolve({ pending_input_id: created.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: created.pending_input.id }),
     });
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
@@ -515,7 +515,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await editPendingInputPATCH(req, {
-      params: Promise.resolve({ pending_input_id: created.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: created.pending_input.id }),
     });
     expect(resp.status).toBe(400);
   });
@@ -538,7 +538,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await editPendingInputPATCH(req, {
-      params: Promise.resolve({ pending_input_id: created.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: created.pending_input.id }),
     });
     expect(resp.status).toBe(400);
   });
@@ -561,7 +561,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await editPendingInputPATCH(req, {
-      params: Promise.resolve({ pending_input_id: created.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: created.pending_input.id }),
     });
     expect(resp.status).toBe(412);
   });
@@ -576,17 +576,17 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await editPendingInputPATCH(req, {
-      params: Promise.resolve({ pending_input_id: "non-existent" }),
+      params: Promise.resolve({ pendingInputId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
   });
 });
 
 // ═══════════════════════════════════════════════════════════
-// 5. DELETE /api/v1/pending-inputs/{pending_input_id} — 移除
+// 5. DELETE /api/pending-inputs/{pending_input_id} — 移除
 // ═══════════════════════════════════════════════════════════
 
-describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
+describe("DELETE /api/pending-inputs/{pending_input_id}", () => {
   it("成功移除 PendingInput → 200 + input_state=removed", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-delete-ok");
@@ -604,7 +604,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await removePendingInputDELETE(req, {
-      params: Promise.resolve({ pending_input_id: created.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: created.pending_input.id }),
     });
     expect(resp.status).toBe(200);
     const body = (await resp.json()) as {
@@ -631,7 +631,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await removePendingInputDELETE(req, {
-      params: Promise.resolve({ pending_input_id: created.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: created.pending_input.id }),
     });
     expect(resp.status).toBe(400);
   });
@@ -653,7 +653,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await removePendingInputDELETE(req, {
-      params: Promise.resolve({ pending_input_id: created.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: created.pending_input.id }),
     });
     expect(resp.status).toBe(412);
   });
@@ -667,7 +667,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     const resp = await removePendingInputDELETE(req, {
-      params: Promise.resolve({ pending_input_id: "non-existent" }),
+      params: Promise.resolve({ pendingInputId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
   });
@@ -686,7 +686,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
       ifMatch: a.pending_input.etag,
     });
     await removePendingInputDELETE(delReq, {
-      params: Promise.resolve({ pending_input_id: a.pending_input.id }),
+      params: Promise.resolve({ pendingInputId: a.pending_input.id }),
     });
 
     // 查询队列，应只剩 B
@@ -696,7 +696,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
       path: `/threads/${threadId}/pending-inputs`,
     });
     const resp = await listPendingInputsGET(getReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     const body = (await resp.json()) as {
       pending_inputs: Array<{ id: string }>;
@@ -721,7 +721,7 @@ describe("跨租户隔离", () => {
     });
 
     const resp = await listPendingInputsGET(req, {
-      params: Promise.resolve({ thread_id: "other-tenant-thread" }),
+      params: Promise.resolve({ threadId: "other-tenant-thread" }),
     });
     await assertCrossTenantHidden(resp, requestId);
   });
@@ -746,7 +746,7 @@ describe("跨租户隔离", () => {
     });
 
     const resp = await editPendingInputPATCH(req, {
-      params: Promise.resolve({ pending_input_id: "non-existent-tenant-input" }),
+      params: Promise.resolve({ pendingInputId: "non-existent-tenant-input" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -762,7 +762,7 @@ describe("跨租户隔离", () => {
     });
 
     const resp = await removePendingInputDELETE(req, {
-      params: Promise.resolve({ pending_input_id: "non-existent-tenant-input" }),
+      params: Promise.resolve({ pendingInputId: "non-existent-tenant-input" }),
     });
     expect(resp.status).toBe(404);
   });
@@ -777,7 +777,7 @@ describe("跨租户隔离", () => {
     });
 
     const resp = await reorderPendingInputsPOST(req, {
-      params: Promise.resolve({ thread_id: "other-tenant-thread" }),
+      params: Promise.resolve({ threadId: "other-tenant-thread" }),
     });
     expect(resp.status).toBe(404);
   });

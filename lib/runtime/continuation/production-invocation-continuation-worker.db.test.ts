@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type Server, createServer } from "node:http";
-import { POST as resolveUserAction } from "@/app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route";
+import { POST as resolveUserAction } from "@/app/api/threads/[threadId]/user-actions/[requestId]/resolve/route";
 import { createAgentActionExecutor } from "@/lib/agents/calls/application/agent-action-executor";
 import {
   EXECUTION_FIXTURE_CONTRACT,
@@ -76,7 +76,7 @@ async function startExternalRuntime(tenantId: string): Promise<ExternalRuntimeFi
       ],
     });
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ invocation_id: invocationId, resumed: true, attempt_no: 1 }));
+    response.end(JSON.stringify({ invocationId: invocationId, resumed: true, attempt_no: 1 }));
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -245,7 +245,7 @@ describe("生产 continuation worker durable topology", () => {
 
       const response = await resolveUserAction(
         new Request(
-          `http://snow.test/api/v1/threads/${scenario.threadId}/user-actions/${request.id}/resolve`,
+          `http://snow.test/api/threads/${scenario.threadId}/user-actions/${request.id}/resolve`,
           {
             method: "POST",
             headers: {
@@ -255,11 +255,11 @@ describe("生产 continuation worker durable topology", () => {
             body: JSON.stringify({ resolution }),
           },
         ),
-        { params: Promise.resolve({ thread_id: scenario.threadId, request_id: request.id }) },
+        { params: Promise.resolve({ threadId: scenario.threadId, requestId: request.id }) },
       );
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
-        request_id: request.id,
+        requestId: request.id,
         resume_dispatch: { mode: "agent_continuation", command_state: "acknowledged" },
       });
 

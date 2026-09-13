@@ -1,7 +1,7 @@
 /**
  * S04-C05：SSE 持久续读集成测试（真实 MySQL 8 Testcontainers）。
  *
- * 覆盖 GET /api/v1/threads/{thread_id}/events（§3.6）：
+ * 覆盖 GET /api/threads/{thread_id}/events（§3.6）：
  * - 核心场景：无 Last-Event-ID 连接、Last-Event-ID 续读、after_sequence 续读、两者同时存在。
  * - 错误场景：Thread 不存在、跨租户、Last-Event-ID 过期、after_sequence 非法。
  * - 事件格式：SSE id = 十进制 event_sequence、event = eventType、data 含必要字段。
@@ -11,9 +11,9 @@
  * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { GET as eventsGET } from "@/app/api/v1/threads/[thread_id]/events/route";
-import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
-import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
+import { GET as eventsGET } from "@/app/api/threads/[threadId]/events/route";
+import { POST as createTurnPOST } from "@/app/api/threads/[threadId]/turns/route";
+import { POST as createThreadPOST } from "@/app/api/threads/route";
 import {
   initEventStreamFloor,
   updateEventStreamFloorEarliest,
@@ -75,7 +75,7 @@ async function seedThreadWithTurn(agentId: string, key: string): Promise<string>
     body: { input: { type: "text", text: "SSE 测试" } },
   });
   await createTurnPOST(turnReq, {
-    params: Promise.resolve({ thread_id: threadId }),
+    params: Promise.resolve({ threadId: threadId }),
   });
 
   return threadId;
@@ -91,7 +91,7 @@ async function createAnotherTurn(threadId: string, key: string): Promise<void> {
     body: { input: { type: "text", text: "第二条消息" } },
   });
   const resp = await createTurnPOST(turnReq, {
-    params: Promise.resolve({ thread_id: threadId }),
+    params: Promise.resolve({ threadId: threadId }),
   });
   expect(resp.status).toBe(201);
 }
@@ -204,14 +204,14 @@ async function callEventsRoute(
     path,
     headers,
   });
-  return eventsGET(request, { params: Promise.resolve({ thread_id: threadId }) });
+  return eventsGET(request, { params: Promise.resolve({ threadId: threadId }) });
 }
 
 // ═══════════════════════════════════════════════════════════
 // 1. 核心场景
 // ═══════════════════════════════════════════════════════════
 
-describe("GET /api/v1/threads/{thread_id}/events — 核心场景", () => {
+describe("GET /api/threads/{thread_id}/events — 核心场景", () => {
   it("无 Last-Event-ID 连接 → stream.resumed + 后续 Event", async () => {
     const { agent } = await seedContext();
     const threadId = await seedThreadWithTurn(agent.id, "core-no-cursor");
@@ -315,7 +315,7 @@ describe("GET /api/v1/threads/{thread_id}/events — 核心场景", () => {
 // 2. 错误场景
 // ═══════════════════════════════════════════════════════════
 
-describe("GET /api/v1/threads/{thread_id}/events — 错误场景", () => {
+describe("GET /api/threads/{thread_id}/events — 错误场景", () => {
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
     await seedContext();
     const response = await callEventsRoute("non-existent-thread");
@@ -334,7 +334,7 @@ describe("GET /api/v1/threads/{thread_id}/events — 错误场景", () => {
       headers: { accept: "text/event-stream" },
     });
     const response = await eventsGET(request, {
-      params: Promise.resolve({ thread_id: "other-tenant-thread" }),
+      params: Promise.resolve({ threadId: "other-tenant-thread" }),
     });
     await assertCrossTenantHidden(response, requestId);
   });
@@ -414,7 +414,7 @@ describe("GET /api/v1/threads/{thread_id}/events — 错误场景", () => {
 // 3. 事件格式
 // ═══════════════════════════════════════════════════════════
 
-describe("GET /api/v1/threads/{thread_id}/events — 事件格式", () => {
+describe("GET /api/threads/{thread_id}/events — 事件格式", () => {
   it("SSE id 等于十进制 event_sequence；event 等于 eventType；data 含必要字段", async () => {
     const { agent } = await seedContext();
     const threadId = await seedThreadWithTurn(agent.id, "format");
@@ -474,7 +474,7 @@ describe("GET /api/v1/threads/{thread_id}/events — 事件格式", () => {
 // 4. 新事件推送
 // ═══════════════════════════════════════════════════════════
 
-describe("GET /api/v1/threads/{thread_id}/events — 新事件推送", () => {
+describe("GET /api/threads/{thread_id}/events — 新事件推送", () => {
   it("response.delta 通过无 id 的 transient SSE 立即推送", async () => {
     const { agent } = await seedContext();
     const createResponse = await createThreadPOST(
@@ -507,8 +507,8 @@ describe("GET /api/v1/threads/{thread_id}/events — 新事件推送", () => {
       expect(delta?.id).toBeUndefined();
       expect(delta?.data).toMatchObject({
         transient_id: "delta-route-1",
-        thread_id: threadId,
-        turn_id: "turn-transient-1",
+        threadId: threadId,
+        turnId: "turn-transient-1",
         payload: { delta: "增量正文" },
       });
     });

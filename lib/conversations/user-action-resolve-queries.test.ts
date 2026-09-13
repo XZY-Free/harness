@@ -114,7 +114,7 @@ async function seedWaitingInputRequest(): Promise<{
     itemType: "user_action",
     itemState: "pending",
     authorType: "assistant",
-    contentJson: { request_id: requestId, request_type: "input", prompt: "请提供请假事由" },
+    contentJson: { requestId: requestId, request_type: "input", prompt: "请提供请假事由" },
     contentHash: "initial",
   });
   await db.insert(userActionRequestTable).values({
@@ -303,7 +303,7 @@ describe("resolveGenericUserAction input submit（authority payload）", () => {
     if (!item) throw new Error("请求卡片未持久化");
     expect(item.itemState).toBe("completed");
     expect(item.contentJson).toEqual({
-      request_id: seeded.requestId,
+      requestId: seeded.requestId,
       request_type: "input",
       prompt: "请提供请假事由",
       state: "resolved",

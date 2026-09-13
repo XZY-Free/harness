@@ -28,7 +28,7 @@ test("首页 / 重定向到新会话页 /chat（§33.7，无 /chat/new 假路由
 test("/chat 渲染新会话页（可输入）", async ({ page }) => {
   const response = await page.goto("/chat");
   expect(response?.status()).toBeLessThan(400);
-  // 助手列表加载完成后输入框可用——证明 GET /api/v1/threads 正常返回。
+  // 助手列表加载完成后输入框可用——证明 GET /api/threads 正常返回。
   await expect(page.getByLabel("消息输入框")).toBeEnabled({ timeout: 60_000 });
 });
 

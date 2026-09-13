@@ -44,7 +44,7 @@ const SKILL_CONTENT_ETAG_PREFIX = "skill-content-";
 
 /** 路径参数上下文（与 admin skills/[skillId] 一致：严格类型）。 */
 interface RouteContext {
-  params: Promise<{ skill_id: string }>;
+  params: Promise<{ skillId: string }>;
 }
 
 /** 解析 If-None-Match 头，去掉弱验证前缀 `W/` 与引号，返回裸 ETag 值；缺失返回 null。 */
@@ -104,7 +104,7 @@ function projectSkillContent(
 
 export async function GET(request: Request, context: RouteContext): Promise<Response> {
   const requestId = getRequestId(request);
-  const { skill_id: skillId } = await context.params;
+  const { skillId } = await context.params;
 
   // 1. 解析 Gateway 身份（audience=gateway）
   let claims: GatewayPrincipal;

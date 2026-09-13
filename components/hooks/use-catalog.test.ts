@@ -3,7 +3,7 @@
  * S10-W04：useCatalog Hook 测试。
  *
  * 覆盖：
- * - 首次挂载触发 GET /api/v1/catalog/options。
+ * - 首次挂载触发 GET /api/catalog/options。
  * - 200 响应解析 items + 提取 ETag。
  * - 304 响应保留现有 items。
  * - 错误响应转化为 ClientVisibleError。

@@ -103,7 +103,7 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
 
   // Fresh DB：真实 Agent 目录必须为空数组（§24.1 count=0），不能 fallback 出任何 Agent。
   const agentsResponse = await request.get(
-    "/api/v1/catalog/options?resource_type=agent&lifecycle_state=enabled",
+    "/api/catalog/options?resource_type=agent&lifecycle_state=enabled",
   );
   expect(agentsResponse.status()).toBe(200);
   const agentsBody = (await agentsResponse.json()) as { items: readonly unknown[] };
@@ -211,7 +211,7 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   await expect(page.getByRole("tooltip")).toBeVisible();
 
   // ─── 4. 服务端确实生成了 Turn ───────────────────────────
-  const turnsResponse = await request.get(`/api/v1/threads/${threadId}/turns`);
+  const turnsResponse = await request.get(`/api/threads/${threadId}/turns`);
   expect(turnsResponse.status()).toBe(200);
   const turnsBody = (await turnsResponse.json()) as {
     turns: ReadonlyArray<{ id: string; turn_state: string; latest_invocation_id: string | null }>;

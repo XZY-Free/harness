@@ -10,7 +10,7 @@ import { useThreadInput } from "./use-thread-input";
  * - threadId=null（新建页）时 route 必须为 'none'，send 绝不拼接 API URL（fetch 0 次），
  *   返回 false 并设置明确错误。
  * - threadId 非空（既有 Thread）+ latestTurn=null 时保持既有正式路径：走
- *   POST /api/v1/threads/{threadId}/turns。
+ *   POST /api/threads/{threadId}/turns。
  */
 
 afterEach(() => {
@@ -71,7 +71,7 @@ describe("useThreadInput 既有 Thread 正式路径", () => {
     await act(async () => {
       await result.current.send("补充", "another-agent");
     });
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/threads/thread-1/pending-inputs");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/threads/thread-1/pending-inputs");
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).not.toHaveProperty("agent_use");
   });
 
@@ -111,7 +111,7 @@ describe("useThreadInput 既有 Thread 正式路径", () => {
     expect(result.current.error).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/threads/thread-1/turns",
+      "/api/threads/thread-1/turns",
       expect.objectContaining({ method: "POST" }),
     );
   });

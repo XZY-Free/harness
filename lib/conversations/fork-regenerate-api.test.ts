@@ -1,16 +1,16 @@
-import { POST as forkPOST } from "@/app/api/v1/threads/[thread_id]/forks/route";
-import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
-import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/route";
-import { POST as regeneratePOST } from "@/app/api/v1/turns/[turn_id]/regenerate/route";
-import { POST as steerPOST } from "@/app/api/v1/turns/[turn_id]/steer/route";
+import { POST as forkPOST } from "@/app/api/threads/[threadId]/forks/route";
+import { POST as createThreadPOST } from "@/app/api/threads/route";
+import { POST as interruptPOST } from "@/app/api/turns/[turnId]/interrupt/route";
+import { POST as regeneratePOST } from "@/app/api/turns/[turnId]/regenerate/route";
+import { POST as steerPOST } from "@/app/api/turns/[turnId]/steer/route";
 /**
  * S04-C06：Fork / Regenerate / Interrupt / Steer API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 4 个 API 路由：
- * - POST /api/v1/threads/{thread_id}/forks — Fork Thread
- * - POST /api/v1/turns/{turn_id}:regenerate — Regenerate Turn
- * - POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn
- * - POST /api/v1/turns/{turn_id}/steer — Steer Turn
+ * - POST /api/threads/{thread_id}/forks — Fork Thread
+ * - POST /api/turns/{turn_id}:regenerate — Regenerate Turn
+ * - POST /api/turns/{turn_id}/interrupt — Interrupt Turn
+ * - POST /api/turns/{turn_id}/steer — Steer Turn
  *
  * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
@@ -137,10 +137,10 @@ async function getTurnItems(turnId: string) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /api/v1/threads/{thread_id}/forks — Fork Thread
+// 1. POST /api/threads/{thread_id}/forks — Fork Thread
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads/{thread_id}/forks", () => {
+describe("POST /api/threads/{thread_id}/forks", () => {
   it("成功 Fork Thread → 201 + 子 Thread + 关系 + 事件", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread("fork-thread-001");
@@ -155,7 +155,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(201);
     const body = (await resp.json()) as {
@@ -196,7 +196,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -216,7 +216,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -233,7 +233,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: "non-existent" }),
+      params: Promise.resolve({ threadId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -255,7 +255,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId1 }),
+      params: Promise.resolve({ threadId: threadId1 }),
     });
     expect(resp.status).toBe(422);
     const body = (await resp.json()) as { error: { code: string } };
@@ -275,7 +275,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
       body: { from_turn_id: turnId },
     });
     const resp1 = await forkPOST(req1, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp1.status).toBe(201);
     const body1 = (await resp1.json()) as { thread: { id: string } };
@@ -289,7 +289,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
       body: { from_turn_id: turnId },
     });
     const resp2 = await forkPOST(req2, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp2.status).toBe(201);
     const body2 = (await resp2.json()) as { thread: { id: string } };
@@ -298,10 +298,10 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 2. POST /api/v1/turns/{turn_id}:regenerate — Regenerate Turn
+// 2. POST /api/turns/{turn_id}:regenerate — Regenerate Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
+describe("POST /api/turns/{turn_id}/regenerate", () => {
   it("成功 Regenerate completed Turn → 202 + regenerating 状态 + InvocationCommand", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread("regen-thread-001");
@@ -319,7 +319,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as {
@@ -364,7 +364,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent" }),
+      params: Promise.resolve({ turnId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -386,7 +386,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -408,7 +408,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -430,7 +430,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -452,7 +452,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
       body: { binding_mode: "loose" },
     });
     const resp1 = await regeneratePOST(req1, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { invocation_id: string };
@@ -466,7 +466,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
       body: { binding_mode: "loose" },
     });
     const resp2 = await regeneratePOST(req2, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp2.status).toBe(202);
     const body2 = (await resp2.json()) as { invocation_id: string };
@@ -475,10 +475,10 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 3. POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn
+// 3. POST /api/turns/{turn_id}/interrupt — Interrupt Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
+describe("POST /api/turns/{turn_id}/interrupt", () => {
   it("成功 Interrupt running Turn → 202 + 命令入队（Turn 状态未变）", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread("intr-thread-001");
@@ -494,7 +494,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as {
@@ -544,7 +544,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as { turn_state: string };
@@ -561,7 +561,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent" }),
+      params: Promise.resolve({ turnId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -582,7 +582,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -605,7 +605,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -626,7 +626,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
       body: { reason_code: "user_requested" },
     });
     const resp1 = await interruptPOST(req1, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { command: { id: string } };
@@ -639,7 +639,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
       body: { reason_code: "user_requested" },
     });
     const resp2 = await interruptPOST(req2, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp2.status).toBe(202);
     const body2 = (await resp2.json()) as { command: { id: string } };
@@ -648,10 +648,10 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 4. POST /api/v1/turns/{turn_id}/steer — Steer Turn
+// 4. POST /api/turns/{turn_id}/steer — Steer Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/turns/{turn_id}/steer", () => {
+describe("POST /api/turns/{turn_id}/steer", () => {
   it("成功 Steer running Turn → 202 + user_guidance Item + 命令入队", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread("steer-thread-001");
@@ -667,7 +667,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as {
@@ -717,7 +717,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent" }),
+      params: Promise.resolve({ turnId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -738,7 +738,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -761,7 +761,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -783,7 +783,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -804,7 +804,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
       body: { guidance_text: "引导" },
     });
     const resp1 = await steerPOST(req1, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { guidance_item_id: string };
@@ -817,7 +817,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
       body: { guidance_text: "引导" },
     });
     const resp2 = await steerPOST(req2, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp2.status).toBe(202);
     const body2 = (await resp2.json()) as { guidance_item_id: string };
@@ -848,7 +848,7 @@ describe("跨租户隔离（隐藏式 404）", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: "non-existent-tenant" }),
+      params: Promise.resolve({ threadId: "non-existent-tenant" }),
     });
     await assertCrossTenantHidden(resp, requestId);
   });
@@ -863,7 +863,7 @@ describe("跨租户隔离（隐藏式 404）", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent-tenant" }),
+      params: Promise.resolve({ turnId: "non-existent-tenant" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -891,7 +891,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { from_turn_id: turnId1 },
     });
     const resp1 = await forkPOST(req1, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp1.status).toBe(201);
 
@@ -904,7 +904,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { from_turn_id: turnId2 }, // 不同 from_turn_id
     });
     const resp2 = await forkPOST(req2, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp2.status).toBe(409);
     const body2 = (await resp2.json()) as { error: { code: string } };
@@ -926,7 +926,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { guidance_text: "第一条引导" },
     });
     const resp1 = await steerPOST(req1, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp1.status).toBe(202);
 
@@ -939,7 +939,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { guidance_text: "不同的引导" },
     });
     const resp2 = await steerPOST(req2, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp2.status).toBe(409);
     const body2 = (await resp2.json()) as { error: { code: string } };

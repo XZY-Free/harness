@@ -133,7 +133,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/operations/event-quarantines
 
 ### 3.2 请求变更执行环境
 
-`POST /api/v1/threads/{thread_id}/request-execution-environment-change`
+`POST /api/threads/{thread_id}/request-execution-environment-change`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -145,7 +145,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/operations/event-quarantines
 | reason_code | Body | string | 是 | DEVICE_OFFLINE、USER_SELECTED、RESOURCE_LOCATION_CHANGED |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J...:request-execution-environment-change' \
+curl -X POST 'https://snow.example.com/api/threads/thr_01J...:request-execution-environment-change' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: thr-01J-change-env-cloud' \
   -H 'Content-Type: application/json' \
@@ -325,7 +325,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/legal-holds/hold_01J...:rele
 
 ### 6.4 创建员工删除请求
 
-`POST /api/v1/deletion-requests`
+`POST /api/deletion-requests`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -336,7 +336,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/legal-holds/hold_01J...:rele
 | reason_code | Body | string | 是 | 固定为 USER_REQUESTED |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/deletion-requests' \
+curl -X POST 'https://snow.example.com/api/deletion-requests' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: delete-thread-01J-v1' \
   -H 'Content-Type: application/json' \
@@ -350,7 +350,7 @@ curl -X POST 'https://snow.example.com/api/v1/deletion-requests' \
   "subject_type": "thread",
   "subject_id": "thr_01J...",
   "accepted_at": "2026-07-15T02:00:00.000Z",
-  "progress_url": "/api/v1/deletion-requests/delreq_01J..."
+  "progress_url": "/api/deletion-requests/delreq_01J..."
 }
 ```
 
@@ -358,14 +358,14 @@ curl -X POST 'https://snow.example.com/api/v1/deletion-requests' \
 
 ### 6.5 查询员工删除进度
 
-`GET /api/v1/deletion-requests/{deletion_request_id}`
+`GET /api/deletion-requests/{deletion_request_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
 | deletion_request_id | Path | string | 是 | 删除请求 id |
 
 ```bash
-curl 'https://snow.example.com/api/v1/deletion-requests/delreq_01J...' \
+curl 'https://snow.example.com/api/deletion-requests/delreq_01J...' \
   -H 'Authorization: Bearer <employee-token>'
 ```
 

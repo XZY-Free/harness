@@ -2,7 +2,7 @@
  * 员工端 SSE 客户端。
  *
  * 事实源：
- * - app/api/v1/threads/[thread_id]/events/route.ts（SSE 响应格式）
+ * - app/api/threads/[threadId]/events/route.ts（SSE 响应格式）
  * - docs/architecture/api-and-events.md
  * - docs/architecture/product-surfaces-and-admin.md S10-W07
  *
@@ -153,7 +153,7 @@ export function createSSEClient(
 
     let response: Response;
     try {
-      response = await fetchImpl(apiPath(`/api/v1/threads/${config.threadId}/events`), {
+      response = await fetchImpl(apiPath(`/api/threads/${config.threadId}/events`), {
         method: "GET",
         headers,
         credentials: "include",

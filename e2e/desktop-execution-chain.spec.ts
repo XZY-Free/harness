@@ -88,7 +88,7 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     // Fresh DB：真实 Agent 目录必须为空数组；Desktop 的 Agent API 请求必须指向 E2E_ORIGIN
     //（Desktop 只把服务端当 API 提供方，UI 来自本机打包 renderer，§0.8）。
     const agentsResponse = await request.get(
-      `${E2E_ORIGIN}/api/v1/catalog/options?resource_type=agent&lifecycle_state=enabled`,
+      `${E2E_ORIGIN}/api/catalog/options?resource_type=agent&lifecycle_state=enabled`,
     );
     expect(agentsResponse.status()).toBe(200);
     const agentsBody = (await agentsResponse.json()) as { items: readonly unknown[] };
@@ -205,7 +205,7 @@ test.describe("§20.5 Desktop 正式执行链", () => {
 
     // ─── 6. Workspace / Environment 正常 ────────────────────
     const environmentResponse = await request.get(
-      `${E2E_ORIGIN}/api/v1/threads/${threadId}/environment`,
+      `${E2E_ORIGIN}/api/threads/${threadId}/environment`,
     );
     // 200（已绑定）或 404（尚未绑定环境）都属正常；5xx 不可接受。
     expect(environmentResponse.status()).toBeLessThan(500);

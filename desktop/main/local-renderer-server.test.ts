@@ -77,12 +77,12 @@ describe("startLocalRendererServer", () => {
     });
     cleanups.push(() => server.close());
 
-    const response = await fetch(`${server.origin}/api/v1/threads?limit=20`);
+    const response = await fetch(`${server.origin}/api/threads?limit=20`);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       method: "GET",
-      url: "/snowharness/api/v1/threads?limit=20",
+      url: "/snowharness/api/threads?limit=20",
     });
   });
 

@@ -32,7 +32,7 @@ describe("Hosted Adapter durable resume", () => {
 
     const result = await freshAdapter.handleResume({
       invocationId: "inv-resume-from-db",
-      resumePayload: { request_id: "uar-1" },
+      resumePayload: { requestId: "uar-1" },
     });
 
     expect(result.resume_state).toBe("accepted");
@@ -40,7 +40,7 @@ describe("Hosted Adapter durable resume", () => {
       tenantId: "tenant-1",
       invocationId: "inv-resume-from-db",
       idempotencyKey: "hosted-resume:inv-resume-from-db",
-      resumePayload: { request_id: "uar-1" },
+      resumePayload: { requestId: "uar-1" },
     });
   });
 });

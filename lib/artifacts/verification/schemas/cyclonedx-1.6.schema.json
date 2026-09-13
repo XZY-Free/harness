@@ -1764,7 +1764,7 @@
           "items": { "type": "string", "format": "iri-reference" },
           "title": "Endpoints",
           "description": "The endpoint URIs of the service. Multiple endpoints are allowed.",
-          "examples": ["https://example.com/api/v1/ticker"]
+          "examples": ["https://example.com/api/ticker"]
         },
         "authenticated": {
           "type": "boolean",

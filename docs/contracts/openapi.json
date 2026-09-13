@@ -35,9 +35,9 @@
     }
   ],
   "paths": {
-    "/api/v1/threads": {
+    "/api/threads": {
       "post": {
-        "operationId": "post_api_v1_threads",
+        "operationId": "post_api_threads",
         "summary": "创建 Thread",
         "tags": [
           "employee"
@@ -144,9 +144,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/settings": {
+    "/api/threads/{thread_id}/settings": {
       "patch": {
-        "operationId": "patch_api_v1_threads_by_thread_id_settings",
+        "operationId": "patch_api_threads_by_thread_id_settings",
         "summary": "更新 Thread 默认设置",
         "tags": [
           "employee"
@@ -293,9 +293,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/turns": {
+    "/api/threads/{thread_id}/turns": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_turns",
+        "operationId": "post_api_threads_by_thread_id_turns",
         "summary": "创建 Turn",
         "tags": [
           "employee"
@@ -578,9 +578,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/items": {
+    "/api/threads/{thread_id}/items": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_items",
+        "operationId": "get_api_threads_by_thread_id_items",
         "summary": "查询 Item",
         "tags": [
           "employee"
@@ -823,9 +823,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/events": {
+    "/api/threads/{thread_id}/events": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_events",
+        "operationId": "get_api_threads_by_thread_id_events",
         "summary": "订阅 Event",
         "tags": [
           "employee"
@@ -901,9 +901,9 @@
         "x-snowharness-event-envelope-schema": "./event-envelope.schema.json"
       }
     },
-    "/api/v1/turns/{turn_id}/steer": {
+    "/api/turns/{turn_id}/steer": {
       "post": {
-        "operationId": "post_api_v1_turns_by_turn_id_steer",
+        "operationId": "post_api_turns_by_turn_id_steer",
         "summary": "引导当前 Turn",
         "tags": [
           "employee"
@@ -1058,9 +1058,9 @@
         }
       }
     },
-    "/api/v1/turns/{turn_id}/interrupt": {
+    "/api/turns/{turn_id}/interrupt": {
       "post": {
-        "operationId": "post_api_v1_turns_by_turn_id_interrupt",
+        "operationId": "post_api_turns_by_turn_id_interrupt",
         "summary": "中断当前 Turn",
         "tags": [
           "employee"
@@ -1194,9 +1194,9 @@
         }
       }
     },
-    "/api/v1/turns/{turn_id}/regenerate": {
+    "/api/turns/{turn_id}/regenerate": {
       "post": {
-        "operationId": "post_api_v1_turns_by_turn_id_regenerate",
+        "operationId": "post_api_turns_by_turn_id_regenerate",
         "summary": "重新生成",
         "tags": [
           "employee"
@@ -1335,9 +1335,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/forks": {
+    "/api/threads/{thread_id}/forks": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_forks",
+        "operationId": "post_api_threads_by_thread_id_forks",
         "summary": "创建 Fork",
         "tags": [
           "employee"
@@ -1492,9 +1492,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/attachments": {
+    "/api/threads/{thread_id}/attachments": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_attachments",
+        "operationId": "post_api_threads_by_thread_id_attachments",
         "summary": "上传 Thread 原文件",
         "tags": [
           "employee"
@@ -1564,7 +1564,7 @@
                 "example": {
                   "kind": "attachment",
                   "attachment_id": "6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
-                  "url": "/api/v1/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
+                  "url": "/api/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
                   "filename": "病假证明.pdf",
                   "size": 48231,
                   "type": "application/pdf"
@@ -1609,9 +1609,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/attachments/{attachment_id}": {
+    "/api/threads/{thread_id}/attachments/{attachment_id}": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_attachments_by_attachment_id",
+        "operationId": "get_api_threads_by_thread_id_attachments_by_attachment_id",
         "summary": "读取 Thread 原文件",
         "tags": [
           "employee"
@@ -1668,9 +1668,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/artifacts/{artifact_id}": {
+    "/api/threads/{thread_id}/artifacts/{artifact_id}": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_artifacts_by_artifact_id",
+        "operationId": "get_api_threads_by_thread_id_artifacts_by_artifact_id",
         "summary": "读取 Thread 最终产物",
         "tags": [
           "employee"
@@ -1727,9 +1727,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/workspace-attachments": {
+    "/api/threads/{thread_id}/workspace-attachments": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_workspace_attachments",
+        "operationId": "post_api_threads_by_thread_id_workspace_attachments",
         "summary": "附加 Workspace 资源",
         "tags": [
           "employee"
@@ -1876,9 +1876,9 @@
         }
       }
     },
-    "/api/v1/workspace-attachments/{attachment_id}": {
+    "/api/workspace-attachments/{attachment_id}": {
       "delete": {
-        "operationId": "delete_api_v1_workspace_attachments_by_attachment_id",
+        "operationId": "delete_api_workspace_attachments_by_attachment_id",
         "summary": "移除 Workspace Attachment",
         "tags": [
           "employee"
@@ -1956,9 +1956,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/pending-inputs": {
+    "/api/threads/{thread_id}/pending-inputs": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_pending_inputs",
+        "operationId": "get_api_threads_by_thread_id_pending_inputs",
         "summary": "查询 PendingInput",
         "tags": [
           "employee"
@@ -2074,7 +2074,7 @@
         ]
       },
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_pending_inputs",
+        "operationId": "post_api_threads_by_thread_id_pending_inputs",
         "summary": "创建 PendingInput",
         "tags": [
           "employee"
@@ -2210,9 +2210,9 @@
         }
       }
     },
-    "/api/v1/pending-inputs/{pending_input_id}": {
+    "/api/pending-inputs/{pending_input_id}": {
       "patch": {
-        "operationId": "patch_api_v1_pending_inputs_by_pending_input_id",
+        "operationId": "patch_api_pending_inputs_by_pending_input_id",
         "summary": "编辑 PendingInput",
         "tags": [
           "employee"
@@ -2338,7 +2338,7 @@
         }
       },
       "delete": {
-        "operationId": "delete_api_v1_pending_inputs_by_pending_input_id",
+        "operationId": "delete_api_pending_inputs_by_pending_input_id",
         "summary": "删除 PendingInput",
         "tags": [
           "employee"
@@ -2421,9 +2421,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/pending-inputs/reorder": {
+    "/api/threads/{thread_id}/pending-inputs/reorder": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_pending_inputs_reorder",
+        "operationId": "post_api_threads_by_thread_id_pending_inputs_reorder",
         "summary": "重排 PendingInput",
         "tags": [
           "employee"
@@ -2563,9 +2563,9 @@
         }
       }
     },
-    "/api/v1/user-action-requests/{request_id}/resolve": {
+    "/api/user-action-requests/{request_id}/resolve": {
       "post": {
-        "operationId": "post_api_v1_user_action_requests_by_request_id_resolve",
+        "operationId": "post_api_user_action_requests_by_request_id_resolve",
         "summary": "解析用户操作请求",
         "tags": [
           "employee"
@@ -2721,9 +2721,9 @@
         }
       }
     },
-    "/api/v1/user-action-requests/{request_id}/auth/callback": {
+    "/api/user-action-requests/{request_id}/auth/callback": {
       "get": {
-        "operationId": "get_api_v1_user_action_requests_by_request_id_auth_callback",
+        "operationId": "get_api_user_action_requests_by_request_id_auth_callback",
         "summary": "完成 Auth 回调",
         "tags": [
           "employee"
@@ -2873,7 +2873,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -4479,7 +4479,6 @@
         "x-snowharness-error-codes": [
           "ACCESS_DENIED",
           "AUTHENTICATION_REQUIRED",
-          "IDEMPOTENCY_CONFLICT",
           "RATE_LIMITED",
           "REQUEST_SCHEMA_INVALID",
           "RESOURCE_NOT_FOUND"
@@ -4638,7 +4637,29 @@
                   "request_type",
                   "prompt"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "request_type": {
+                          "const": "input"
+                        }
+                      },
+                      "required": [
+                        "request_type"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "input_schema": {}
+                      },
+                      "required": [
+                        "input_schema"
+                      ]
+                    }
+                  }
+                ]
               }
             }
           }
@@ -5805,9 +5826,9 @@
         }
       }
     },
-    "/api/v1/catalog/options": {
+    "/api/catalog/options": {
       "get": {
-        "operationId": "get_api_v1_catalog_options",
+        "operationId": "get_api_catalog_options",
         "summary": "查询任务输入区选项",
         "tags": [
           "employee"
@@ -7097,7 +7118,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -8488,9 +8509,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/request-execution-environment-change": {
+    "/api/threads/{thread_id}/request-execution-environment-change": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_request_execution_environment_change",
+        "operationId": "post_api_threads_by_thread_id_request_execution_environment_change",
         "summary": "请求变更执行环境",
         "tags": [
           "employee"
@@ -9017,9 +9038,9 @@
         }
       }
     },
-    "/api/v1/deletion-requests": {
+    "/api/deletion-requests": {
       "post": {
-        "operationId": "post_api_v1_deletion_requests",
+        "operationId": "post_api_deletion_requests",
         "summary": "创建员工删除请求",
         "tags": [
           "employee"
@@ -9083,7 +9104,7 @@
                   "subject_type": "thread",
                   "subject_id": "thr_01J...",
                   "accepted_at": "2026-07-15T02:00:00.000Z",
-                  "progress_url": "/api/v1/deletion-requests/delreq_01J..."
+                  "progress_url": "/api/deletion-requests/delreq_01J..."
                 }
               }
             }
@@ -9139,9 +9160,9 @@
         }
       }
     },
-    "/api/v1/deletion-requests/{deletion_request_id}": {
+    "/api/deletion-requests/{deletion_request_id}": {
       "get": {
-        "operationId": "get_api_v1_deletion_requests_by_deletion_request_id",
+        "operationId": "get_api_deletion_requests_by_deletion_request_id",
         "summary": "查询员工删除进度",
         "tags": [
           "employee"

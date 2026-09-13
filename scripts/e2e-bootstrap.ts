@@ -4,7 +4,7 @@
  * 建出可执行的**基础 Harness Runtime Route** 正式链（§8.3 base route），
  * 使 Web / Desktop 客户端发送的首条消息能真正走通 §9.3 Employee Turn 热路径
  * Route Resolver → ExecutionBinding → Runtime，而不是在
- * `POST /api/v1/threads/{id}/turns` 因 `dispatched=false` 抛错。
+ * `POST /api/threads/{id}/turns` 因 `dispatched=false` 抛错。
  *
  * 专题01 §15：不再创建默认 Agent（Agent 空表是合法平台状态，§6.2/§33.1）；
  * 基础 Harness Runtime 初始化走正式 Runtime 控制面（§15.3/§11.4），不伪装成 Agent seed。

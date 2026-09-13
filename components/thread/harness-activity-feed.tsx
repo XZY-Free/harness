@@ -219,7 +219,7 @@ export function TurnActivitySummary({
     const controller = new AbortController();
     setLoading(true);
     setError(false);
-    void apiFetch(`/api/v1/threads/${threadId}/turns/${turn.id}/activity`, {
+    void apiFetch(`/api/threads/${threadId}/turns/${turn.id}/activity`, {
       signal: controller.signal,
     })
       .then(async (response) => {

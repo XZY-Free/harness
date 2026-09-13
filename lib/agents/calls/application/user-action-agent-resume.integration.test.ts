@@ -112,7 +112,7 @@ describe("UserAction resumes the same AgentCall", () => {
     const route = readFileSync(
       resolve(
         process.cwd(),
-        "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+        "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts",
       ),
       "utf8",
     );

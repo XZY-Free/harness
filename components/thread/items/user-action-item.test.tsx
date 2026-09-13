@@ -121,7 +121,7 @@ describe("UserActionItem input submit 主流程", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     // RED：当前实现用 item.id，真实页面 404。
-    expect(url).toBe("/api/v1/threads/thread-1/user-actions/request-1/resolve");
+    expect(url).toBe("/api/threads/thread-1/user-actions/request-1/resolve");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({
       resolution: "submit",
@@ -475,7 +475,7 @@ describe("UserActionItem external confirmation preview", () => {
     fireEvent.click(screen.getByRole("button", { name: /确认并继续/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/v1/threads/thread-1/user-actions/confirmation-request-1/resolve");
+    expect(url).toBe("/api/threads/thread-1/user-actions/confirmation-request-1/resolve");
     expect(JSON.parse(init.body as string)).toEqual({ resolution: "approve" });
   });
 });

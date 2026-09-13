@@ -49,7 +49,7 @@ describe("useThreadSettings", () => {
     expect(result.current.busy).toBe(false);
     // 校验请求
     const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe("/api/v1/threads/t1/settings");
+    expect(url).toBe("/api/threads/t1/settings");
     expect(init?.method).toBe("PATCH");
     expect((init?.headers as Record<string, string>)?.["if-match"]).toBe('"thread-settings-1"');
   });

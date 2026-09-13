@@ -315,7 +315,7 @@ describe("POST /gateway/tool-calls 事务原子性（02-6 P7 §55.7 故障注入
       POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       ),
     ).rejects.toThrow("injected UAR failure");

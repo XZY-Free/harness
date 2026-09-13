@@ -42,7 +42,7 @@ export const dynamic = "force-dynamic";
 
 /** 路径参数上下文（与 admin tools/[toolId] 一致：严格类型）。 */
 interface RouteContext {
-  params: Promise<{ tool_id: string }>;
+  params: Promise<{ toolId: string }>;
 }
 
 /** 解析 If-None-Match 头，去掉弱验证前缀 `W/` 与引号，返回裸 ETag 值；缺失返回 null。 */
@@ -85,7 +85,7 @@ function projectSchemaRevision(revision: {
 
 export async function GET(request: Request, context: RouteContext): Promise<Response> {
   const requestId = getRequestId(request);
-  const { tool_id: toolId } = await context.params;
+  const { toolId } = await context.params;
 
   // 1. 解析 Gateway 身份（audience=gateway）
   let claims: GatewayPrincipal;

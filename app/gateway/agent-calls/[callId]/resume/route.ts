@@ -118,7 +118,7 @@ export async function POST(request: Request): Promise<Response> {
       },
     });
     return apiSuccess(
-      { call_id: callId, state: updated.state },
+      { callId, state: updated.state },
       { headers: { [REQUEST_ID_HEADER]: requestId } },
     );
   } catch (err) {

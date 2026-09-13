@@ -6,7 +6,7 @@
  *   S10-W04：「员工在发送消息前选择 Agent / Model / Skill / Environment」
  *
  * 职责：
- * - 封装 PATCH /api/v1/threads/{id}/settings 调用。
+ * - 封装 PATCH /api/threads/{id}/settings 调用。
  * - 维护 busy / error 状态，供 ThreadInput 禁用控件与展示错误。
  * - 错误转化为 ClientVisibleError。
  * - 乐观锁：调用方传入 expectedVersionNo（来自 thread.version_no），hook 内构造 If-Match。
@@ -120,7 +120,7 @@ export function useThreadSettings({ threadId }: UseThreadSettingsParams): UseThr
       setBusy(true);
       setError(null);
       try {
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/settings`, {
+        const resp = await apiFetch(`/api/threads/${threadId}/settings`, {
           method: "PATCH",
           credentials: "include",
           headers: {

@@ -77,9 +77,9 @@ export type ClientItemType =
 export type ClientItemState = "pending" | "completed" | "failed" | "superseded" | "cancelled";
 
 /**
- * GET /api/v1/threads/{thread_id}/items 返回的 Item 投影（）。
+ * GET /api/threads/{thread_id}/items 返回的 Item 投影（）。
  *
- * 与服务端 app/api/v1/threads/[thread_id]/items/route.ts 的 projectItem 输出一致。
+ * 与服务端 app/api/threads/[threadId]/items/route.ts 的 projectItem 输出一致。
  */
 export interface ClientItem {
   readonly id: string;
@@ -108,7 +108,7 @@ export interface ClientItemsResponse {
 /**
  * SSE data 投影（）。
  *
- * 与服务端 app/api/v1/threads/[thread_id]/events/route.ts 的 projectEvent 输出一致。
+ * 与服务端 app/api/threads/[threadId]/events/route.ts 的 projectEvent 输出一致。
  * event_type 通过 SSE `event:` 行传递，不在 data 内重复。
  */
 import type { ActivityEntry } from "@/lib/client/activity-projection";
@@ -245,7 +245,7 @@ export interface ClientVisibleError {
 
 // ─── Thread 详情（S10-W02） ──────────────────────────────────
 
-/** GET /api/v1/threads/{thread_id} 返回的 Thread 投影。 */
+/** GET /api/threads/{thread_id} 返回的 Thread 投影。 */
 export interface ClientThread {
   readonly tool_permission_mode?: "auto" | "ask" | "full_access";
   readonly id: string;
@@ -262,7 +262,7 @@ export interface ClientThread {
   readonly created_at: string;
 }
 
-/** GET /api/v1/threads/{thread_id} 返回的 Goal 投影。 */
+/** GET /api/threads/{thread_id} 返回的 Goal 投影。 */
 export interface ClientGoal {
   readonly id: string;
   readonly thread_id: string;
@@ -315,7 +315,7 @@ export interface ClientActualAgentCalls {
   readonly calls: readonly ClientAgentCallSummary[];
 }
 
-/** GET /api/v1/threads/{thread_id}/turns 返回的 Turn 投影。 */
+/** GET /api/threads/{thread_id}/turns 返回的 Turn 投影。 */
 export interface ClientTurn {
   readonly controls: ClientTurnControls;
   readonly id: string;
@@ -338,14 +338,14 @@ export interface ClientTurn {
   readonly finished_at: string | null;
 }
 
-/** GET /api/v1/threads/{thread_id} 响应体。 */
+/** GET /api/threads/{thread_id} 响应体。 */
 export interface ClientThreadResponse {
   readonly thread: ClientThread;
   readonly active_goal: ClientGoal | null;
   readonly latest_turn: ClientTurn | null;
 }
 
-/** GET /api/v1/threads/{thread_id}/turns 响应体。 */
+/** GET /api/threads/{thread_id}/turns 响应体。 */
 export interface ClientTurnsResponse {
   readonly turns: readonly ClientTurn[];
 }
@@ -355,7 +355,7 @@ export interface ClientTurnsResponse {
 /** PendingInput 状态（与服务端 PENDING_INPUT_STATES 一致）。 */
 export type ClientPendingInputState = "pending" | "admitted" | "removed";
 
-/** GET /api/v1/threads/{thread_id}/pending-inputs 中的单条 PendingInput 投影。 */
+/** GET /api/threads/{thread_id}/pending-inputs 中的单条 PendingInput 投影。 */
 export interface ClientPendingInput {
   readonly id: string;
   readonly queue_position: number;
@@ -369,7 +369,7 @@ export interface ClientPendingInput {
   readonly etag: string;
 }
 
-/** GET /api/v1/threads/{thread_id}/pending-inputs 响应体。 */
+/** GET /api/threads/{thread_id}/pending-inputs 响应体。 */
 export interface ClientPendingInputListResponse {
   readonly thread_id: string;
   /** 队列 ETag（如 "pending-queue-5"）。 */
@@ -377,7 +377,7 @@ export interface ClientPendingInputListResponse {
   readonly pending_inputs: readonly ClientPendingInput[];
 }
 
-/** POST /api/v1/threads/{thread_id}/pending-inputs 响应体（201）。 */
+/** POST /api/threads/{thread_id}/pending-inputs 响应体（201）。 */
 export interface ClientCreatePendingInputResponse {
   readonly pending_input: {
     readonly id: string;
@@ -390,7 +390,7 @@ export interface ClientCreatePendingInputResponse {
   readonly queue_etag: string;
 }
 
-/** PATCH /api/v1/pending-inputs/{pending_input_id} 响应体（200）。 */
+/** PATCH /api/pending-inputs/{pending_input_id} 响应体（200）。 */
 export interface ClientEditPendingInputResponse {
   readonly pending_input: {
     readonly id: string;
@@ -403,7 +403,7 @@ export interface ClientEditPendingInputResponse {
   readonly queue_etag: string;
 }
 
-/** DELETE /api/v1/pending-inputs/{pending_input_id} 响应体（200）。 */
+/** DELETE /api/pending-inputs/{pending_input_id} 响应体（200）。 */
 export interface ClientDeletePendingInputResponse {
   readonly pending_input: {
     readonly id: string;
@@ -416,7 +416,7 @@ export interface ClientDeletePendingInputResponse {
 
 // ─── Steer / Interrupt（S10-W03） ──────────────────────────
 
-/** POST /api/v1/turns/{turn_id}/steer 响应体（202 Accepted，异步命令）。 */
+/** POST /api/turns/{turn_id}/steer 响应体（202 Accepted，异步命令）。 */
 export interface ClientSteerResponse {
   readonly turn_id: string;
   readonly turn_state: string;
@@ -427,7 +427,7 @@ export interface ClientSteerResponse {
   readonly event_id: string;
 }
 
-/** POST /api/v1/turns/{turn_id}/interrupt 响应体（202 Accepted，异步命令）。 */
+/** POST /api/turns/{turn_id}/interrupt 响应体（202 Accepted，异步命令）。 */
 export interface ClientInterruptResponse {
   readonly turn_id: string;
   readonly turn_state: string;
@@ -451,7 +451,7 @@ export type ClientCatalogResourceType =
   | "model"
   | "connection";
 
-/** GET /api/v1/catalog/options 返回的单条目录条目（CatalogSearchItem）。 */
+/** GET /api/catalog/options 返回的单条目录条目（CatalogSearchItem）。 */
 export interface ClientCatalogItem {
   readonly resource_type: ClientCatalogResourceType;
   readonly resource_id: string;
@@ -466,7 +466,7 @@ export interface ClientCatalogItem {
   readonly etag: string;
 }
 
-/** GET /api/v1/catalog/options 响应体。 */
+/** GET /api/catalog/options 响应体。 */
 export interface ClientCatalogListResponse {
   readonly items: readonly ClientCatalogItem[];
   readonly next_cursor: string | null;
@@ -476,7 +476,7 @@ export interface ClientCatalogListResponse {
 
 // ─── UserAction 通用解析（S10-W05） ────────────────────────
 
-/** POST /api/v1/threads/{thread_id}/user-actions/{request_id}/resolve 响应体（200）。 */
+/** POST /api/threads/{thread_id}/user-actions/{request_id}/resolve 响应体（200）。 */
 export interface ClientUserActionResolveResponse {
   readonly thread_id: string;
   readonly request_id: string;
@@ -561,7 +561,7 @@ export interface ClientExecutionOwnership {
   readonly released_at: string | null;
 }
 
-/** GET /api/v1/threads/{thread_id}/environment 响应体。 */
+/** GET /api/threads/{thread_id}/environment 响应体。 */
 export interface ClientEnvironmentStatusResponse {
   readonly thread_id: string;
   /** 当前 Thread 配置的默认 EnvironmentDefinition；null 表示未配置。 */
@@ -598,7 +598,7 @@ export interface ClientTakeoverConditions {
   readonly ownership_id: string | null;
 }
 
-/** POST /api/v1/threads/{thread_id}/environment/takeover 响应体（S10-W07）。 */
+/** POST /api/threads/{thread_id}/environment/takeover 响应体（S10-W07）。 */
 export interface ClientTakeoverResponse {
   readonly thread_id: string;
   readonly ownership_id: string;

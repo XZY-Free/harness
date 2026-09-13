@@ -370,8 +370,8 @@ export function checkAgentInvokeAuthorizationGate(
     failures.push("agent.invoke resource types 不是 tenant | agent");
   }
 
-  if (source("app/api/v1/agents/route.ts") !== undefined) {
-    failures.push("员工 /api/v1/agents 双轨入口仍存在");
+  if (source("app/api/agents/route.ts") !== undefined) {
+    failures.push("员工 /api/agents 双轨入口仍存在");
   }
 
   for (const document of documents) {
@@ -387,14 +387,14 @@ export function checkAgentInvokeAuthorizationGate(
     }
   }
 
-  const turnRoute = source("app/api/v1/threads/[thread_id]/turns/route.ts") ?? "";
+  const turnRoute = source("app/api/threads/[threadId]/turns/route.ts") ?? "";
   const authorizationIndex = turnRoute.indexOf("requireAgentInvokeScope(");
   const idempotencyIndex = turnRoute.indexOf("enforceIdempotency(");
   if (authorizationIndex < 0 || idempotencyIndex < 0 || authorizationIndex > idempotencyIndex) {
     failures.push("Turn agent selection 未在幂等/写入前经过 requireAgentInvokeScope");
   }
 
-  const catalogRoute = source("app/api/v1/catalog/options/route.ts") ?? "";
+  const catalogRoute = source("app/api/catalog/options/route.ts") ?? "";
   if (
     !catalogRoute.includes("resolveActionScopeCoverage(") ||
     !catalogRoute.includes("agentInvokeAuthorization") ||
@@ -408,7 +408,7 @@ export function checkAgentInvokeAuthorizationGate(
       continue;
     }
     if (/['"]\/api\/v1\/agents['"]/.test(stripComments(document.source))) {
-      failures.push(`客户端仍消费员工 /api/v1/agents：${document.path}`);
+      failures.push(`客户端仍消费员工 /api/agents：${document.path}`);
     }
   }
 
@@ -460,7 +460,7 @@ export function collectDeprecatedArchitectureViolations(
  *
  * 覆盖：
  * - Thread.primaryAgentId / primary_agent_id 作为身份字段（Thread 不绑主 Agent）
- * - CreateThread 正式 route app/api/v1/threads/route.ts 可执行代码出现 agent_id
+ * - CreateThread 正式 route app/api/threads/route.ts 可执行代码出现 agent_id
  *   字段即违规（不区分 required/optional）
  * - DEFAULT_AGENT_KEY / seedDefaultAgent（无默认 Agent fallback）
  * - defaultAgentId（新建不默认选中 Agent）
@@ -479,7 +479,7 @@ const ARCHITECTURE_RULE_DEFINITIONS = new Set([
 ]);
 
 /** CreateThread 正式 route：其可执行代码只要出现 agent_id 字段即违规。 */
-const CREATE_THREAD_ROUTE = "app/api/v1/threads/route.ts";
+const CREATE_THREAD_ROUTE = "app/api/threads/route.ts";
 
 /** Harness Agent 边界规则模式。 */
 const HARNESS_AGENT_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
@@ -775,8 +775,7 @@ export function collectExecutionBoundaryViolations(
 
 // ─── Resume 结果真实性 ────────────────────────────────────
 
-const RESOLVE_ROUTE_PATH =
-  "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
+const RESOLVE_ROUTE_PATH = "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts";
 const A2A_TRANSPORT_PATH = "lib/agents/calls/transport/a2a/a2a-client.ts";
 
 export interface ResumeGateResult {
@@ -889,7 +888,7 @@ export function checkDispatchRecoveryAuthorityGate(
   // Resume dispatched=false 显式 switch；Hosted local transport 必须真实 dispatch。
   const resolveRoute = docOrFail(
     documents,
-    "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+    "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts",
     failures,
   );
   if (resolveRoute) {

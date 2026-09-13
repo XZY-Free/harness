@@ -2,7 +2,7 @@
  * 员工端 Thread 客户端（高层 API）。
  *
  * 职责（S10-W01）：
- * - 加载 snapshot（GET /api/v1/threads/{id}/items），建立基线。
+ * - 加载 snapshot（GET /api/threads/{id}/items），建立基线。
  * - 启动 SSE 订阅，按 sequence 增量应用事件。
  * - EVENT_CURSOR_EXPIRED / EVENT_SEQUENCE_GAP → 自动 resnapshot。
  * - 网络中断 → SSE 客户端自动重连（用 lastAppliedEventSequence 作为 Last-Event-ID）。
@@ -79,7 +79,7 @@ export function createThreadClient(config: ThreadClientConfig): ThreadClient {
 
     let response: Response;
     try {
-      response = await fetchImpl(apiPath(`/api/v1/threads/${config.threadId}/items?limit=200`), {
+      response = await fetchImpl(apiPath(`/api/threads/${config.threadId}/items?limit=200`), {
         method: "GET",
         credentials: "include",
         cache: "no-store",

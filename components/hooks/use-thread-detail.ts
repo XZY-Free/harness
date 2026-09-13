@@ -76,11 +76,11 @@ export function useThreadDetail(threadId: string): UseThreadDetailResult {
       try {
         // 并行加载 Thread 详情 + Turn 列表
         const [threadResp, turnsResp] = await Promise.all([
-          apiFetch(`/api/v1/threads/${threadId}`, {
+          apiFetch(`/api/threads/${threadId}`, {
             credentials: "include",
             cache: "no-store",
           }),
-          apiFetch(`/api/v1/threads/${threadId}/turns?limit=200`, {
+          apiFetch(`/api/threads/${threadId}/turns?limit=200`, {
             credentials: "include",
             cache: "no-store",
           }),

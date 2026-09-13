@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
  * Gate 02 — 旧本地执行体系移除契约测试（RED 阶段）。
  *
  * 业务不变量：正式员工会话只由
- *   POST /api/v1/threads/{thread_id}/turns
+ *   POST /api/threads/{thread_id}/turns
  *     → lib/runtime/employee-turn-dispatcher.ts
  *     → 正式 Invocation / Attempt / ExecutionBinding 路径执行；
  * 正式管理排障只使用 /admin/api/v1/threads|invocations|jobs|tool-calls|effects。
@@ -78,7 +78,7 @@ function exportsSymbol(source: string, name: string): boolean {
 
 describe("Gate 02 正向保护：正式路径必须存在（不应被误删）", () => {
   it("正式员工 turn route 存在且真实调用 dispatchEmployeeTurn", () => {
-    const route = "app/api/v1/threads/[thread_id]/turns/route.ts";
+    const route = "app/api/threads/[threadId]/turns/route.ts";
     const src = readSource(route);
     expect(src, `正式 turn route 必须存在：${route}`).not.toBe("");
     expect(src, `${route} 必须导入 dispatchEmployeeTurn`).toContain("dispatchEmployeeTurn");

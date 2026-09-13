@@ -1,5 +1,5 @@
 /**
- * S10-W02：GET /api/v1/threads/{thread_id} 集成测试（真实 MySQL 8）。
+ * S10-W02：GET /api/threads/{thread_id} 集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - 返回 Thread 基础字段 + active Goal + 最新 Turn。
@@ -7,7 +7,7 @@
  * - 非 owner → 404 隐藏式（dev 模式默认用户与 thread.ownerUserId 不一致）。
  * - 跨租户 → 404 隐藏式（不存在的 thread_id）。
  */
-import { DELETE, GET } from "@/app/api/v1/threads/[thread_id]/route";
+import { DELETE, GET } from "@/app/api/threads/[threadId]/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { createGoal } from "@/lib/conversations/goal-queries";
@@ -52,7 +52,7 @@ async function seedContext() {
   return { tenantId: tenant.id, userIdentityId: identity.id, agent };
 }
 
-describe("GET /api/v1/threads/{thread_id}", () => {
+describe("GET /api/threads/{thread_id}", () => {
   it("返回 Thread + 最新 Turn（无 Goal 时 active_goal 为 null）", async () => {
     const { tenantId, userIdentityId, agent } = await seedContext();
 
@@ -78,7 +78,7 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(200);
 
@@ -116,7 +116,7 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(200);
 
@@ -149,7 +149,7 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(200);
 
@@ -178,7 +178,7 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(404);
     const body = await response.json();
@@ -195,7 +195,7 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: "non-existent-thread-id" }),
+      params: Promise.resolve({ threadId: "non-existent-thread-id" }),
     });
     expect(response.status).toBe(404);
     const body = await response.json();
@@ -203,7 +203,7 @@ describe("GET /api/v1/threads/{thread_id}", () => {
   });
 });
 
-describe("DELETE /api/v1/threads/{thread_id}", () => {
+describe("DELETE /api/threads/{thread_id}", () => {
   it("仅删除当前员工自己的会话，后续列表不再返回", async () => {
     const { tenantId, userIdentityId, agent } = await seedContext();
     const { thread } = await createThread({
@@ -219,7 +219,7 @@ describe("DELETE /api/v1/threads/{thread_id}", () => {
       path: `/threads/${thread.id}`,
     });
     const response = await DELETE(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
 
     expect(response.status).toBe(200);
@@ -235,7 +235,7 @@ describe("DELETE /api/v1/threads/{thread_id}", () => {
         method: "GET",
         path: `/threads/${thread.id}`,
       }),
-      { params: Promise.resolve({ thread_id: thread.id }) },
+      { params: Promise.resolve({ threadId: thread.id }) },
     );
     expect(getResponse.status).toBe(404);
 
@@ -244,7 +244,7 @@ describe("DELETE /api/v1/threads/{thread_id}", () => {
       method: "GET",
       path: "/threads",
     });
-    const listResponse = await import("@/app/api/v1/threads/route").then(({ GET }) =>
+    const listResponse = await import("@/app/api/threads/route").then(({ GET }) =>
       GET(listRequest),
     );
     const listBody = await listResponse.json();
@@ -265,7 +265,7 @@ describe("DELETE /api/v1/threads/{thread_id}", () => {
       path: `/threads/${thread.id}`,
     });
     const response = await DELETE(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
 
     expect(response.status).toBe(404);

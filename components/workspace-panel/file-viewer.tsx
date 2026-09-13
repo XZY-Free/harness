@@ -53,7 +53,7 @@ function kindForPath(path: string): FileKind {
 /** 二进制资源（图片 / PDF）走 raw=1 端点，按 threadId + path 拼装。 */
 export function rawUrl(threadId: string, path: string): string {
   return apiPath(
-    `/api/v1/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}?raw=1`,
+    `/api/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}?raw=1`,
   );
 }
 
@@ -234,6 +234,6 @@ export function FileViewer({ threadId, path }: { threadId: string; path: string 
 /** JSON 信封端点 URL（非 raw=1）。encodeURIComponent 已对 path 各段做处理。 */
 function rawFetchUrl(threadId: string, path: string): string {
   return apiPath(
-    `/api/v1/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
+    `/api/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
   );
 }

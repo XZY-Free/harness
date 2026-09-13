@@ -384,7 +384,7 @@ function gatewayRequest(token: string, body: unknown): Request {
 
 function toolCallBody(patch: Partial<Record<string, unknown>>): Record<string, unknown> {
   return {
-    invocation_id: "unused", // route 以 token 的 invocationId 为准校验
+    invocationId: "unused", // route 以 token 的 invocationId 为准校验
     tool_id: "unused",
     schema_hash: "unused",
     operation_id: "op-1",
@@ -483,8 +483,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
         gatewayRequest(
           gatewayToken(invocationId),
           toolCallBody({
-            invocation_id: invocationId,
-            tool_id: tool.id,
+            invocationId,
+            toolId: tool.id,
             schema_hash: revision.schemaHash,
             arguments: { command: "date" },
           }),
@@ -609,8 +609,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const invocationId = await seedInvocation({ threadId: "shell-thread", turnId: "shell-turn" });
       await seedBinding(invocationId, policy);
       const body = toolCallBody({
-        invocation_id: invocationId,
-        tool_id: tool.id,
+        invocationId,
+        toolId: tool.id,
         schema_hash: revision.schemaHash,
         arguments: { command: 'node -p "new Date().toISOString()"' },
       });
@@ -661,8 +661,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocation_id: invocationId,
-          tool_id: tool.id,
+          invocationId,
+          toolId: tool.id,
           schema_hash: revision.schemaHash,
           arguments: { url: "https://example.com" },
         }),
@@ -713,8 +713,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
         gatewayRequest(
           gatewayToken(invocationId),
           toolCallBody({
-            invocation_id: invocationId,
-            tool_id: toolId,
+            invocationId,
+            toolId,
             schema_hash: schemaHash,
             operation_id,
             arguments: { path },
@@ -738,7 +738,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(200);
@@ -780,7 +780,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(200);
@@ -804,7 +804,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     );
     expect(projected.itemType).toBe("user_action");
     expect(projected.contentJson).toMatchObject({
-      request_id: uars[0]!.id,
+      requestId: uars[0]!.id,
       request_type: "confirmation",
       state: "pending",
     });
@@ -833,7 +833,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(403);
@@ -858,7 +858,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(403);
@@ -881,8 +881,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
 
     const body = toolCallBody({
-      invocation_id: invocationId,
-      tool_id: toolId,
+      invocationId,
+      toolId,
       schema_hash: schemaHash,
     });
     const res1 = await POST(gatewayRequest(gatewayToken(invocationId), body));
@@ -906,8 +906,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
 
     const base = {
-      invocation_id: invocationId,
-      tool_id: toolId,
+      invocationId,
+      toolId,
       schema_hash: schemaHash,
     };
     const first = await POST(
@@ -939,8 +939,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocation_id: invocationId,
-          tool_id: toolId,
+          invocationId,
+          toolId,
           schema_hash: schemaHash,
           arguments: { path: "/tmp/foo.txt", token: "must-not-be-forwarded" },
         }),
@@ -978,7 +978,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1015,7 +1015,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const terminalReplay = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       );
       expect(await terminalReplay.json()).toMatchObject({
@@ -1067,7 +1067,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1123,7 +1123,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1187,7 +1187,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const response = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     const body = await response.json();
@@ -1271,7 +1271,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       );
       expect((await response.json()).call_state).toBe("queued");
@@ -1324,7 +1324,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1373,7 +1373,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1405,7 +1405,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const response = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     const body = await response.json();
@@ -1446,7 +1446,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res1 = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res1.status).toBe(200);
@@ -1455,8 +1455,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocation_id: invocationId,
-          tool_id: toolId,
+          invocationId,
+          toolId,
           schema_hash: schemaHash,
           arguments: { path: "/tmp/other.txt" },
         }),
@@ -1474,8 +1474,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
     const token = gatewayToken(invocationId);
     const body = toolCallBody({
-      invocation_id: invocationId,
-      tool_id: toolId,
+      invocationId,
+      toolId,
       schema_hash: schemaHash,
     });
 
@@ -1506,7 +1506,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(409);
@@ -1526,7 +1526,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: hash("z") }),
+        toolCallBody({ invocationId, toolId, schema_hash: hash("z") }),
       ),
     );
     expect(res.status).toBe(409);
@@ -1553,7 +1553,7 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(200);
@@ -1586,8 +1586,8 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
     await seedThread("t-1");
     await seedRunningTurn("t-1", "turn-1", invocationId);
     const body = toolCallBody({
-      invocation_id: invocationId,
-      tool_id: toolId,
+      invocationId,
+      toolId,
       schema_hash: schemaHash,
     });
 
@@ -1632,13 +1632,13 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
     const resolved = await approve(userActionRequestId);
     expect(resolved.resumeCommand.commandPayloadJson).toMatchObject({
       resume_source: "user_action_resolution",
-      resume_payload: { request_id: userActionRequestId, resolution: "approve" },
+      resume_payload: { requestId: userActionRequestId, resolution: "approve" },
     });
 
     // approve 已恢复 Invocation → running + 入队 resume；此处直接重提交验证 gateway 侧。
     const body = toolCallBody({
-      invocation_id: invocationId,
-      tool_id: toolId,
+      invocationId,
+      toolId,
       schema_hash: schemaHash,
     });
 
@@ -1711,8 +1711,8 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocation_id: invocationId,
-          tool_id: toolId,
+          invocationId,
+          toolId,
           schema_hash: schemaHash,
           arguments: { path: "/tmp/other.txt" },
         }),
@@ -1741,8 +1741,8 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocation_id: invocationId,
-          tool_id: toolId,
+          invocationId,
+          toolId,
           schema_hash: schemaHash,
         }),
       ),
@@ -1796,8 +1796,8 @@ it.each(["auto", "ask", "full_access"] as const)(
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocation_id: invocationId,
-          tool_id: tool.id,
+          invocationId,
+          toolId: tool.id,
           tool_schema_revision_id: revision.id,
           schema_hash: revision.schemaHash,
           arguments: { url: "https://example.com" },

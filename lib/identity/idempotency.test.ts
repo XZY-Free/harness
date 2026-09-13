@@ -122,60 +122,60 @@ function buildWorkloadPrincipal(tenantId: string, invocationId: string): Workloa
 
 describe("computeRequestHash", () => {
   it("相同 method/path/body → 相同 hash", () => {
-    const a = computeRequestHash("POST", "/api/v1/threads", { title: "t1" });
-    const b = computeRequestHash("POST", "/api/v1/threads", { title: "t1" });
+    const a = computeRequestHash("POST", "/api/threads", { title: "t1" });
+    const b = computeRequestHash("POST", "/api/threads", { title: "t1" });
     expect(a).toBe(b);
   });
 
   it("body 字段顺序无关 → 相同 hash", () => {
-    const a = computeRequestHash("POST", "/api/v1/x", { a: 1, b: 2 });
-    const b = computeRequestHash("POST", "/api/v1/x", { b: 2, a: 1 });
+    const a = computeRequestHash("POST", "/api/x", { a: 1, b: 2 });
+    const b = computeRequestHash("POST", "/api/x", { b: 2, a: 1 });
     expect(a).toBe(b);
   });
 
   it("嵌套 object 字段顺序无关 → 相同 hash", () => {
-    const a = computeRequestHash("POST", "/api/v1/x", { outer: { z: 1, a: 2 } });
-    const b = computeRequestHash("POST", "/api/v1/x", { outer: { a: 2, z: 1 } });
+    const a = computeRequestHash("POST", "/api/x", { outer: { z: 1, a: 2 } });
+    const b = computeRequestHash("POST", "/api/x", { outer: { a: 2, z: 1 } });
     expect(a).toBe(b);
   });
 
   it("method 不同 → 不同 hash", () => {
-    const a = computeRequestHash("POST", "/api/v1/x", { a: 1 });
-    const b = computeRequestHash("PUT", "/api/v1/x", { a: 1 });
+    const a = computeRequestHash("POST", "/api/x", { a: 1 });
+    const b = computeRequestHash("PUT", "/api/x", { a: 1 });
     expect(a).not.toBe(b);
   });
 
   it("path 不同 → 不同 hash", () => {
-    const a = computeRequestHash("POST", "/api/v1/x", { a: 1 });
-    const b = computeRequestHash("POST", "/api/v1/y", { a: 1 });
+    const a = computeRequestHash("POST", "/api/x", { a: 1 });
+    const b = computeRequestHash("POST", "/api/y", { a: 1 });
     expect(a).not.toBe(b);
   });
 
   it("body 不同 → 不同 hash", () => {
-    const a = computeRequestHash("POST", "/api/v1/x", { a: 1 });
-    const b = computeRequestHash("POST", "/api/v1/x", { a: 2 });
+    const a = computeRequestHash("POST", "/api/x", { a: 1 });
+    const b = computeRequestHash("POST", "/api/x", { a: 2 });
     expect(a).not.toBe(b);
   });
 
   it("method 大小写归一化", () => {
-    const a = computeRequestHash("post", "/api/v1/x", { a: 1 });
-    const b = computeRequestHash("POST", "/api/v1/x", { a: 1 });
+    const a = computeRequestHash("post", "/api/x", { a: 1 });
+    const b = computeRequestHash("POST", "/api/x", { a: 1 });
     expect(a).toBe(b);
   });
 
   it("hash 是 64 字符 hex（sha256）", () => {
-    const hash = computeRequestHash("POST", "/api/v1/x", { a: 1 });
+    const hash = computeRequestHash("POST", "/api/x", { a: 1 });
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("null/undefined body 可计算", () => {
-    expect(() => computeRequestHash("POST", "/api/v1/x", null)).not.toThrow();
-    expect(() => computeRequestHash("POST", "/api/v1/x", undefined)).not.toThrow();
+    expect(() => computeRequestHash("POST", "/api/x", null)).not.toThrow();
+    expect(() => computeRequestHash("POST", "/api/x", undefined)).not.toThrow();
   });
 
   it("数组顺序敏感", () => {
-    const a = computeRequestHash("POST", "/api/v1/x", [1, 2, 3]);
-    const b = computeRequestHash("POST", "/api/v1/x", [3, 2, 1]);
+    const a = computeRequestHash("POST", "/api/x", [1, 2, 3]);
+    const b = computeRequestHash("POST", "/api/x", [3, 2, 1]);
     expect(a).not.toBe(b);
   });
 });
@@ -494,7 +494,7 @@ describe("enforceIdempotency", () => {
       caller,
       commandScope: "thread.create:",
       idempotencyKey: "key-new",
-      requestHash: computeRequestHash("POST", "/api/v1/threads", { title: "t1" }),
+      requestHash: computeRequestHash("POST", "/api/threads", { title: "t1" }),
     });
     expect(outcome.kind).toBe("new");
     if (outcome.kind === "new") {
@@ -504,7 +504,7 @@ describe("enforceIdempotency", () => {
   });
 
   it("同 key 同 body completed → replay（返回原状态码与响应）", async () => {
-    const requestHash = computeRequestHash("POST", "/api/v1/threads", { title: "t1" });
+    const requestHash = computeRequestHash("POST", "/api/threads", { title: "t1" });
     const first = await enforceIdempotency({
       caller,
       commandScope: "thread.create:",
@@ -537,8 +537,8 @@ describe("enforceIdempotency", () => {
   });
 
   it("同 key 不同 body → conflict（409 IDEMPOTENCY_CONFLICT）", async () => {
-    const hash1 = computeRequestHash("POST", "/api/v1/threads", { title: "t1" });
-    const hash2 = computeRequestHash("POST", "/api/v1/threads", { title: "t2" });
+    const hash1 = computeRequestHash("POST", "/api/threads", { title: "t1" });
+    const hash2 = computeRequestHash("POST", "/api/threads", { title: "t2" });
 
     await enforceIdempotency({
       caller,
@@ -560,7 +560,7 @@ describe("enforceIdempotency", () => {
   });
 
   it("同 key 同 body processing → in_flight（不重放）", async () => {
-    const requestHash = computeRequestHash("POST", "/api/v1/threads", { title: "t1" });
+    const requestHash = computeRequestHash("POST", "/api/threads", { title: "t1" });
     await enforceIdempotency({
       caller,
       commandScope: "thread.create:",
@@ -578,7 +578,7 @@ describe("enforceIdempotency", () => {
   });
 
   it("同 key 同 body failed → retry_allowed（重置后重新执行）", async () => {
-    const requestHash = computeRequestHash("POST", "/api/v1/threads", { title: "t1" });
+    const requestHash = computeRequestHash("POST", "/api/threads", { title: "t1" });
     const first = await enforceIdempotency({
       caller,
       commandScope: "thread.create:",

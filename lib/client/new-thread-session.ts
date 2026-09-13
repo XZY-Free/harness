@@ -57,7 +57,7 @@ async function requireJson<T>(response: Response, message: string): Promise<T> {
 export async function loadThreadShell(
   fetchImpl: ThreadApiFetch = apiFetch,
 ): Promise<ClientThreadShellResponse> {
-  const response = await fetchImpl("/api/v1/threads", {
+  const response = await fetchImpl("/api/threads", {
     credentials: "include",
     cache: "no-store",
   });
@@ -90,7 +90,7 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
 
       if (!pending) {
         const title = fallbackTitleFromUserText(submission.text) || "新会话";
-        const createResponse = await fetchImpl("/api/v1/threads", {
+        const createResponse = await fetchImpl("/api/threads", {
           method: "POST",
           credentials: "include",
           headers: {
@@ -119,7 +119,7 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
         };
       }
 
-      const turnResponse = await fetchImpl(`/api/v1/threads/${pending.thread.id}/turns`, {
+      const turnResponse = await fetchImpl(`/api/threads/${pending.thread.id}/turns`, {
         method: "POST",
         credentials: "include",
         headers: {

@@ -7,7 +7,7 @@
  *   S10-W04：「Agent、模型、Skill 与位置选择」
  *
  * 职责：
- * - 调用 GET /api/v1/catalog/options 拉取目录条目（按 resource_type 过滤）。
+ * - 调用 GET /api/catalog/options 拉取目录条目（按 resource_type 过滤）。
  * - 实现 If-None-Match 客户端缓存：首次拉取后记录 ETag，后续请求带 If-None-Match；
  *   服务端返回 304 时不更新数据，仅清空 loading。
  * - 维护 loading / error 状态，供 UI 显示。
@@ -125,7 +125,7 @@ export function useCatalog({
       if (rtKey) params.set("resource_type", rtKey);
       if (lsKey) params.set("lifecycle_state", lsKey);
       const query = params.toString();
-      const url = `/api/v1/catalog/options${query ? `?${query}` : ""}`;
+      const url = `/api/catalog/options${query ? `?${query}` : ""}`;
       const headers: Record<string, string> = {};
       if (etagRef.current) {
         headers["if-none-match"] = `"${etagRef.current}"`;

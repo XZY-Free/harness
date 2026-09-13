@@ -62,7 +62,7 @@ export type CatalogResourceType = (typeof CATALOG_RESOURCE_TYPES)[number];
 
 /**
  * Catalog 受众类型。
- * - employee：员工目录（/api/v1/catalog/options）。
+ * - employee：员工目录（/api/catalog/options）。
  * - runtime：Runtime 内部目录（后续阶段接入 /runtime/catalog/*）。
  */
 export const CATALOG_AUDIENCES = ["employee", "runtime"] as const;

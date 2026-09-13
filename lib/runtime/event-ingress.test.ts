@@ -904,7 +904,7 @@ describe("RuntimeEventIngress 核心入库", () => {
       purpose: "a2a_input_required",
       prompt: "请提供请假事由",
       input_schema: inputSchema,
-      request_id: uar.id,
+      requestId: uar.id,
     };
     expect(item!.contentJson).toEqual(finalContent);
 
@@ -1486,7 +1486,7 @@ describe("Runtime Route 级测试", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: invocationId }),
+      params: Promise.resolve({ invocationId: invocationId }),
     };
 
     const response = await POST(request, context);
@@ -1531,7 +1531,7 @@ describe("Runtime Route 级测试", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: invocationId }),
+      params: Promise.resolve({ invocationId: invocationId }),
     };
 
     const response = await POST(request, context);
@@ -1575,7 +1575,7 @@ describe("Runtime Route 级测试", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: invocationId }),
+      params: Promise.resolve({ invocationId: invocationId }),
     };
 
     const response = await POST(request, context);

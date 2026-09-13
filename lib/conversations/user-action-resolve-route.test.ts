@@ -1,5 +1,5 @@
 /**
- * POST /api/v1/threads/{thread_id}/user-actions/{request_id}/resolve —
+ * POST /api/threads/{thread_id}/user-actions/{request_id}/resolve —
  * Resume 调度真值与失败语义（03 专项）HTTP 路由测试。
  *
  * 冻结不变量：
@@ -15,7 +15,7 @@
  * 真实 MySQL 8（Testcontainers）+ 真实 node:http A2A Provider，无 mock。
  */
 import { randomUUID } from "node:crypto";
-import { POST as resolvePOST } from "@/app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route";
+import { POST as resolvePOST } from "@/app/api/threads/[threadId]/user-actions/[requestId]/resolve/route";
 import {
   type A2ATestProvider,
   startA2ATestProvider,

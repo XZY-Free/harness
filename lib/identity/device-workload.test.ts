@@ -630,11 +630,11 @@ describe("device-signature", () => {
     it("buildSignaturePayload 按规范顺序拼接", () => {
       const payload = buildSignaturePayload({
         method: "post",
-        path: "/api/v1/threads/thr_1/turns",
+        path: "/api/threads/thr_1/turns",
         timestamp: 1234567890,
         bodyHash: "abc123",
       });
-      expect(payload).toBe("POST\n/api/v1/threads/thr_1/turns\n1234567890\nabc123");
+      expect(payload).toBe("POST\n/api/threads/thr_1/turns\n1234567890\nabc123");
     });
 
     it("computeBodyHash 返回 SHA-256 hex", () => {
@@ -657,7 +657,7 @@ describe("device-signature", () => {
       const publicKeyBase64 = extractRawPublicKeyBase64(publicKey);
       const payload = buildSignaturePayload({
         method: "POST",
-        path: "/api/v1/threads/thr_1/turns",
+        path: "/api/threads/thr_1/turns",
         timestamp: Date.now(),
         bodyHash: computeBodyHash('{"message":"hello"}'),
       });
@@ -674,7 +674,7 @@ describe("device-signature", () => {
       const publicKeyBase64 = extractRawPublicKeyBase64(publicKey);
       const payload = buildSignaturePayload({
         method: "POST",
-        path: "/api/v1/threads/thr_1/turns",
+        path: "/api/threads/thr_1/turns",
         timestamp: Date.now(),
         bodyHash: computeBodyHash('{"message":"hello"}'),
       });

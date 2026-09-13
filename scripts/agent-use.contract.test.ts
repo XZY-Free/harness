@@ -8,9 +8,8 @@ const errors = JSON.parse(readFileSync("docs/contracts/error-codes.json", "utf8"
 describe("Topic 01 AgentUse 机器合同", () => {
   it("Create Turn 精确约束 agent_use preferred wire", () => {
     const schema =
-      openapi.paths["/api/v1/threads/{thread_id}/turns"].post.requestBody.content[
-        "application/json"
-      ].schema.properties.agent_use;
+      openapi.paths["/api/threads/{thread_id}/turns"].post.requestBody.content["application/json"]
+        .schema.properties.agent_use;
     expect(schema.anyOf).toContainEqual({ type: "null" });
     expect(schema.anyOf).toContainEqual({
       type: "object",

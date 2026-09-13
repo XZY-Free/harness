@@ -133,7 +133,7 @@ describe("ThreadInput 暂停按钮 capability 门禁（05 §10）", () => {
       expect(
         fetchMock.mock.calls.some(
           ([url, init]) =>
-            url === "/api/v1/threads/thread-1/pending-inputs" && init?.method === "POST",
+            url === "/api/threads/thread-1/pending-inputs" && init?.method === "POST",
         ),
       ).toBe(true);
     });
@@ -169,7 +169,7 @@ describe("ThreadInput 暂停按钮 capability 门禁（05 §10）", () => {
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/v1/turns/turn-running/resume",
+        "/api/turns/turn-running/resume",
         expect.objectContaining({ method: "POST" }),
       );
     });

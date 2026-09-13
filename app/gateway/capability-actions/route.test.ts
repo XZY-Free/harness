@@ -222,7 +222,7 @@ function request(
       "idempotency-key": `${invocationId}:${(action as { actionId?: string })?.actionId ?? ""}`,
     },
     body: JSON.stringify({
-      invocation_id: invocationId,
+      invocationId,
       producer_sequence_start: producerSequenceStart,
       action,
     }),

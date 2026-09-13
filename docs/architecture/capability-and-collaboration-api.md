@@ -29,7 +29,7 @@ flowchart LR
 
 ### 2.1 查询任务输入区选项
 
-`GET /api/v1/catalog/options`
+`GET /api/catalog/options`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -42,7 +42,7 @@ flowchart LR
 | If-None-Match | Header | string | 否 | 上次 `catalog_revision` 对应 ETag |
 
 ```bash
-curl 'https://snow.example.com/api/v1/catalog/options?agent_id=agt_finance&capability_types=skill&query=报表&limit=30' \
+curl 'https://snow.example.com/api/catalog/options?agent_id=agt_finance&capability_types=skill&query=报表&limit=30' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'If-None-Match: "catalog-tenant-audience-184"'
 ```

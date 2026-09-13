@@ -66,7 +66,7 @@ export function useEnvironment(threadId: string): UseEnvironmentResult {
     setError(null);
 
     try {
-      const resp = await apiFetch(`/api/v1/threads/${threadId}/environment`, {
+      const resp = await apiFetch(`/api/threads/${threadId}/environment`, {
         credentials: "include",
         cache: "no-store",
         signal: controller.signal,

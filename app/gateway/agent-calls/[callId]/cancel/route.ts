@@ -70,7 +70,7 @@ export async function POST(request: Request): Promise<Response> {
     const result = await cancelAgentCall({ tenantId: claims.tenantId, callId });
     return apiSuccess(
       {
-        call_id: callId,
+        callId,
         state: result.call.state,
         remote_cancellation: result.remoteCancellation,
         remote_may_continue:

@@ -73,7 +73,7 @@ describe("useEnvironment", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe("/api/v1/threads/t1/environment");
+    expect(url).toBe("/api/threads/t1/environment");
     expect(init?.credentials).toBe("include");
   });
 

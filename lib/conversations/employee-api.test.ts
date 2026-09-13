@@ -1,19 +1,19 @@
-import { GET as listItemsGET } from "@/app/api/v1/threads/[thread_id]/items/route";
-import { PATCH as updateSettingsPATCH } from "@/app/api/v1/threads/[thread_id]/settings/route";
-import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
+import { GET as listItemsGET } from "@/app/api/threads/[threadId]/items/route";
+import { PATCH as updateSettingsPATCH } from "@/app/api/threads/[threadId]/settings/route";
+import { POST as createTurnPOST } from "@/app/api/threads/[threadId]/turns/route";
 /**
  * S04-C03：Employee Interaction API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 4 个 Employee API 路由：
- * - POST /api/v1/threads — 创建 Thread
- * - PATCH /api/v1/threads/{thread_id}/settings — 更新默认设置
- * - POST /api/v1/threads/{thread_id}/turns — 创建 Turn
- * - GET /api/v1/threads/{thread_id}/items — 查询 Item
+ * - POST /api/threads — 创建 Thread
+ * - PATCH /api/threads/{thread_id}/settings — 更新默认设置
+ * - POST /api/threads/{thread_id}/turns — 创建 Turn
+ * - GET /api/threads/{thread_id}/items — 查询 Item
  *
  * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
+import { POST as createThreadPOST } from "@/app/api/threads/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
@@ -78,10 +78,10 @@ async function seedOtherTenantContext() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /api/v1/threads — 创建 Thread
+// 1. POST /api/threads — 创建 Thread
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads", () => {
+describe("POST /api/threads", () => {
   it("成功创建 Thread → 201 + thread.created Event", async () => {
     await seedContext();
 
@@ -172,10 +172,10 @@ describe("POST /api/v1/threads", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 2. PATCH /api/v1/threads/{thread_id}/settings — 更新默认设置
+// 2. PATCH /api/threads/{thread_id}/settings — 更新默认设置
 // ═══════════════════════════════════════════════════════════
 
-describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
+describe("PATCH /api/threads/{thread_id}/settings", () => {
   it("成功更新 model + environment → 200 + event_ids + 新 ETag", async () => {
     const { agent } = await seedContext();
 
@@ -204,7 +204,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     });
 
     const response = await updateSettingsPATCH(patchReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -241,7 +241,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     });
 
     const response = await updateSettingsPATCH(patchReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { event_ids: string[]; etag: string };
@@ -269,7 +269,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     });
 
     const response = await updateSettingsPATCH(patchReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(400);
   });
@@ -295,7 +295,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     });
 
     const response = await updateSettingsPATCH(patchReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(412);
     const body = (await response.json()) as { error: { code: string } };
@@ -312,17 +312,17 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     });
 
     const response = await updateSettingsPATCH(patchReq, {
-      params: Promise.resolve({ thread_id: "non-existent-thread" }),
+      params: Promise.resolve({ threadId: "non-existent-thread" }),
     });
     expect(response.status).toBe(404);
   });
 });
 
 // ═══════════════════════════════════════════════════════════
-// 3. POST /api/v1/threads/{thread_id}/turns — 创建 Turn
+// 3. POST /api/threads/{thread_id}/turns — 创建 Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads/{thread_id}/turns", () => {
+describe("POST /api/threads/{thread_id}/turns", () => {
   it("成功创建 Turn → 201 + turn + input_item + event_cursor", async () => {
     await seedDispatchableTurn();
     const createReq = buildApiRequest({
@@ -346,7 +346,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await createTurnPOST(turnReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(201);
     const body = (await response.json()) as {
@@ -408,7 +408,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
           workspace_attachment_ids: [attachmentId],
         },
       }),
-      { params: Promise.resolve({ thread_id: threadId }) },
+      { params: Promise.resolve({ threadId: threadId }) },
     );
 
     expect(response.status).toBe(201);
@@ -431,7 +431,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
           },
         },
       }),
-      { params: Promise.resolve({ thread_id: threadId }) },
+      { params: Promise.resolve({ threadId: threadId }) },
     );
     expect(forged.status).toBe(400);
   });
@@ -458,13 +458,13 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
       });
 
     const first = await createTurnPOST(buildTurnReq(), {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as { turn: { id: string } };
 
     const second = await createTurnPOST(buildTurnReq(), {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(second.status).toBe(201);
     const secondBody = (await second.json()) as { turn: { id: string } };
@@ -481,7 +481,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await createTurnPOST(turnReq, {
-      params: Promise.resolve({ thread_id: "non-existent" }),
+      params: Promise.resolve({ threadId: "non-existent" }),
     });
     expect(response.status).toBe(404);
   });
@@ -506,7 +506,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await createTurnPOST(turnReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(400);
   });
@@ -532,17 +532,17 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await createTurnPOST(turnReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(400);
   });
 });
 
 // ═══════════════════════════════════════════════════════════
-// 4. GET /api/v1/threads/{thread_id}/items — 查询 Item
+// 4. GET /api/threads/{thread_id}/items — 查询 Item
 // ═══════════════════════════════════════════════════════════
 
-describe("GET /api/v1/threads/{thread_id}/items", () => {
+describe("GET /api/threads/{thread_id}/items", () => {
   it("成功查询 Item 列表 + latest_event_cursor", async () => {
     await seedDispatchableTurn();
     const createReq = buildApiRequest({
@@ -564,7 +564,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
       body: { input: { type: "text", text: "查询测试" } },
     });
     await createTurnPOST(turnReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
 
     // 查询 Item
@@ -575,7 +575,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
 
     const response = await listItemsGET(getReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -612,7 +612,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
       body: { input: { type: "text", text: "第一个 Turn" } },
     });
     const turn1Resp = await createTurnPOST(turn1Req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     const turn1Body = (await turn1Resp.json()) as { turn: { id: string } };
 
@@ -624,7 +624,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
       body: { input: { type: "text", text: "第二个 Turn" } },
     });
     await createTurnPOST(turn2Req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
 
     // 查询指定 turn_id 的 Item
@@ -635,7 +635,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
 
     const response = await listItemsGET(getReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { items: Array<{ id: string }> };
@@ -649,7 +649,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     );
     const allResponse = await listItemsGET(
       buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}/items` }),
-      { params: Promise.resolve({ thread_id: threadId }) },
+      { params: Promise.resolve({ threadId: threadId }) },
     );
     const all = (await allResponse.json()) as { items: { turn_id: string }[] };
     expect(all.items.some((item) => item.turn_id !== turn1Body.turn.id)).toBe(true);
@@ -663,7 +663,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
 
     const response = await listItemsGET(getReq, {
-      params: Promise.resolve({ thread_id: "non-existent" }),
+      params: Promise.resolve({ threadId: "non-existent" }),
     });
     expect(response.status).toBe(404);
   });
@@ -687,7 +687,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
 
     const response = await listItemsGET(getReq, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(response.status).toBe(400);
   });
@@ -708,7 +708,7 @@ describe("跨租户隔离", () => {
     });
 
     const response = await listItemsGET(otherReq, {
-      params: Promise.resolve({ thread_id: "other-tenant-thread-id" }),
+      params: Promise.resolve({ threadId: "other-tenant-thread-id" }),
     });
     await assertCrossTenantHidden(response, requestId);
   });
@@ -723,7 +723,7 @@ describe("跨租户隔离", () => {
     });
 
     const response = await updateSettingsPATCH(patchReq, {
-      params: Promise.resolve({ thread_id: "other-tenant-thread" }),
+      params: Promise.resolve({ threadId: "other-tenant-thread" }),
     });
     expect(response.status).toBe(404);
   });
@@ -741,7 +741,7 @@ it.each(["auto", "ask", "full_access"] as const)("创建和 CAS 更新会话权�
     }),
   );
   const { id } = await created.json();
-  const context = { params: Promise.resolve({ thread_id: id }) };
+  const context = { params: Promise.resolve({ threadId: id }) };
   const request = () =>
     buildApiRequest({
       audience: "employee",
