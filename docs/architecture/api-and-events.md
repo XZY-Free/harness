@@ -38,7 +38,7 @@ flowchart LR
 /api/v1/...                 员工交互接口
 /runtime/...             Runtime 协议
 /admin/api/v1/...           管理控制与观测接口
-/gateway/v1/...             Runtime 到平台的内部网关
+/gateway/...             Runtime 到平台的内部网关
 ~~~
 
 URL 中的 `v1` 表示资源和命令语义版本。Event payload 另有 `schema_version`，允许在不更换整个 API 版本时演进单个事件。
@@ -820,7 +820,7 @@ curl -X POST 'https://runtime.example.net/runtime/invocations' \
     "agent":{"revision_id":"agr_18","agent_artifact_ref":"oci://registry.example/finance@sha256:...","entrypoint":"agent:root","interface_requirements":{"required":["event_stream","dynamic_tools"],"optional":["steer"]}},
     "input_items":[{"id":"item_user_01J...","type":"user_message","content":{"text":"生成月报"}}],
     "context_handle":"ctxh_short_lived",
-    "gateway_endpoints":{"base_url":"https://snow.example.com/gateway/v1"},
+    "gateway_endpoints":{"base_url":"https://snow.example.com/gateway"},
     "workspace":{"default_binding_handle":"wbh_short_lived","attachment_handles":["wah_a_xlsx"]},
     "execution_limits":{"timeout_seconds":1800,"max_tokens":120000,"cost_limit":"20.00 CNY"},
     "trace_context":{"traceparent":"00-...-...-01"}
@@ -901,14 +901,14 @@ External Runtime 启动请求中的 `gateway_endpoints` 必须是平台公开的
 |---|---|---|
 | `events` | `POST` | 批量回传 Runtime Candidate Event，进入唯一 `RuntimeEventIngress` |
 | `user_action_requests` | `POST` | 回传单个 `user_action.requested`，创建 `UserActionRequest Authority` 与 Item Projection |
-| `tools` | `POST` | 查询工具/能力目录（`/gateway/v1/tools` 为 `/capabilities/search` 的同逻辑入口） |
+| `tools` | `POST` | 查询工具/能力目录（`/gateway/tools` 为 `/capabilities/search` 的同逻辑入口） |
 | `tool_calls` | `POST` | 提交 ToolCall 意图并执行 Gateway Policy/Permission |
 | `capability_actions` | `POST` | 提交 Harness action（含 `agent.call`） |
 
-`events` 的 URL 为 `/gateway/v1/runtime-events`，请求体包含 `invocation_id`、`producer_sequence_start` 与 `events`；`user_action_requests` 复用同一 envelope 且只接受一个 `user_action.requested` 事件。两条回调都要求 `Authorization: Bearer <gateway_access_token>`、`Idempotency-Key`，并校验 Token 中的 tenant/invocation，随后调用同一个 `ingressEventBatch` 事务，不允许 Runtime 直接写 Item、ThreadEvent 或 UserAction 表。
+`events` 的 URL 为 `/gateway/runtime-events`，请求体包含 `invocation_id`、`producer_sequence_start` 与 `events`；`user_action_requests` 复用同一 envelope 且只接受一个 `user_action.requested` 事件。两条回调都要求 `Authorization: Bearer <gateway_access_token>`、`Idempotency-Key`，并校验 Token 中的 tenant/invocation，随后调用同一个 `ingressEventBatch` 事务，不允许 Runtime 直接写 Item、ThreadEvent 或 UserAction 表。
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/runtime-events' \
+curl -X POST 'https://snow.example.com/gateway/runtime-events' \
   -H 'Authorization: Bearer <gateway-access-token>' \
   -H 'Idempotency-Key: inv_01J:runtime-events:17' \
   -H 'Content-Type: application/json' \
@@ -1072,7 +1072,7 @@ curl 'https://runtime.example.net/runtime/capabilities?protocol_version=1' \
 
 ### 5.1 执行 ToolCall
 
-`POST /gateway/v1/tool-calls`
+`POST /gateway/tool-calls`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1085,7 +1085,7 @@ curl 'https://runtime.example.net/runtime/capabilities?protocol_version=1' \
 | arguments | Body | object | 是 | 只含业务参数；无 user/tenant/credential |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/tool-calls' \
+curl -X POST 'https://snow.example.com/gateway/tool-calls' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: op-report-query-7' \
   -H 'Content-Type: application/json' \
@@ -1106,7 +1106,7 @@ Gateway 重新取得当前 Schema 并核对 hash；不一致返回 409 `TOOL_SCH
 
 ### 5.2 核对 Tool Effect
 
-`POST /gateway/v1/tool-calls/{tool_call_id}/reconcile-effect`
+`POST /gateway/tool-calls/{tool_call_id}/reconcile-effect`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1116,7 +1116,7 @@ Gateway 重新取得当前 Schema 并核对 hash；不一致返回 409 `TOOL_SCH
 | verification_mode | Body | string | 是 | 仅 provider_query |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/tool-calls/tc_01J...:reconcile-effect' \
+curl -X POST 'https://snow.example.com/gateway/tool-calls/tc_01J...:reconcile-effect' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: reconcile-op-report-send-7' \
   -H 'Content-Type: application/json' \
@@ -1136,7 +1136,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/tool-calls/tc_01J...:reconcile
 
 ### 5.3 创建 Artifact
 
-`POST /gateway/v1/artifacts`
+`POST /gateway/artifacts`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1148,7 +1148,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/tool-calls/tc_01J...:reconcile
 | file | Form | binary | 是 | Artifact 内容；大小受 Runtime/租户限制 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/artifacts' \
+curl -X POST 'https://snow.example.com/gateway/artifacts' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: artifact-monthly-report-v1' \
   -F 'invocation_id=inv_01J...' \
@@ -1171,14 +1171,14 @@ Artifact 内容进入当前部署的 `FileStorageProvider`；Turn Invocation 可
 
 ### 5.4 解析 Agent 短期附件引用
 
-`POST /gateway/v1/attachments/resolve`
+`POST /gateway/attachments/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
 | reference_id | Body | UUID | 是 | SnowHarness 为当前 AgentCall 与 Turn 附件签发的短期 capability（能力凭证） |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/attachments/resolve' \
+curl -X POST 'https://snow.example.com/gateway/attachments/resolve' \
   -H 'Content-Type: application/json' \
   -d '{"reference_id":"123e4567-e89b-12d3-a456-426614174000"}' \
   -o '授权附件.pdf'
@@ -1192,7 +1192,7 @@ HR Agent 取得原始字节后自行完成业务解析；只有请假业务需�
 
 ### 5.5 查询上下文
 
-`POST /gateway/v1/context/query`
+`POST /gateway/context/query`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1203,7 +1203,7 @@ HR Agent 取得原始字节后自行完成业务解析；只有请假业务需�
 | limits | Body | object | 是 | 每类条数、Token 和敏感级别限制 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
+curl -X POST 'https://snow.example.com/gateway/context/query' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Content-Type: application/json' \
   -d '{"context_handle":"ctxh_short_lived","sources":["knowledge","memory"],"query":"月报口径和员工币种偏好","limits":{"max_items":8,"max_tokens":4000}}'
@@ -1223,7 +1223,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
 
 ### 5.6 发起用户操作请求
 
-`POST /gateway/v1/user-action-requests`
+`POST /gateway/user-action-requests`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1236,7 +1236,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
 | expires_at | Body | string | 否 | 过期时间 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/user-action-requests' \
+curl -X POST 'https://snow.example.com/gateway/user-action-requests' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: confirm-batch-send-1' \
   -H 'Content-Type: application/json' \

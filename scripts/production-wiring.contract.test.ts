@@ -14,7 +14,7 @@ describe("Topic 01 production wiring", () => {
     expect(executor).toContain('from "@/lib/capability/application/execute-harness-tool-call"');
     expect(executor).not.toMatch(/fetch\(|providerEndpoint|endpointRef/);
     const hostedApplication = source("lib/capability/application/execute-harness-tool-call.ts");
-    const externalGateway = source("app/gateway/v1/tool-calls/route.ts");
+    const externalGateway = source("app/gateway/tool-calls/route.ts");
     expect(hostedApplication).toContain("applyToolCall");
     expect(externalGateway).toContain("applyToolCall");
     expect(externalGateway).not.toContain("createToolCall");
@@ -35,7 +35,7 @@ describe("Topic 01 production wiring", () => {
 
   it("Hosted and External paths use the same catalog-aware production factory", () => {
     const hosted = source("lib/runtime/application/production-resume-harness-invocation.ts");
-    const external = source("app/gateway/v1/capability-actions/route.ts");
+    const external = source("app/gateway/capability-actions/route.ts");
     expect(hosted).toContain("createPlatformHarnessActionExecutors");
     expect(external).toContain("createPlatformHarnessActionExecutors");
     expect(hosted).toContain("capabilityCatalog");
@@ -54,9 +54,9 @@ describe("Topic 01 production wiring", () => {
     const dispatcher = source("lib/runtime/dispatcher.ts");
     const retry = source("lib/runtime/retry/dispatch-queued-invocation-attempt.ts");
     const hostedResume = source("lib/runtime/application/resume-harness-invocation.ts");
-    const external = source("app/gateway/v1/capability-actions/route.ts");
+    const external = source("app/gateway/capability-actions/route.ts");
     const startBuilder = source("lib/runtime/application/build-runtime-start-request.ts");
-    const agentResume = source("app/gateway/v1/agent-calls/[call_id]/resume/route.ts");
+    const agentResume = source("app/gateway/agent-calls/[callId]/resume/route.ts");
 
     expect(dispatcher).toContain("freezeTrustedExecutionSubject");
     expect(retry).toContain("recoverTrustedExecutionSubject(binding");

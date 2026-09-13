@@ -205,9 +205,9 @@ export function checkAgentRevisionAuthorityGate(
       path.startsWith("lib/agents/") ||
       path.startsWith("app/admin/api/v1/agents/") ||
       path.startsWith("app/admin/api/v1/agent-revisions/") ||
-      path.startsWith("app/gateway/v1/agent-calls/") ||
+      path.startsWith("app/gateway/agent-calls/") ||
       path === "app/admin/api/v1/agents/route.ts" ||
-      path === "app/gateway/v1/agent-calls/route.ts";
+      path === "app/gateway/agent-calls/route.ts";
     if (!isAgentControlPlane || isTest || isSupport) continue;
 
     const productionSource = stripComments(document.source);
@@ -1273,7 +1273,7 @@ export function checkFinalClosureBoundaryGate(
   const harnessToolApplication = stripComments(
     source("lib/capability/application/execute-harness-tool-call.ts"),
   );
-  const gatewayToolRoute = stripComments(source("app/gateway/v1/tool-calls/route.ts"));
+  const gatewayToolRoute = stripComments(source("app/gateway/tool-calls/route.ts"));
   if (
     !harnessToolApplication.includes("applyToolCall") ||
     !gatewayToolRoute.includes("applyToolCall")
@@ -1313,7 +1313,7 @@ export function checkFinalClosureBoundaryGate(
     failures.push("Knowledge production search 仍存在 tenant-only 入口");
   }
 
-  const gateway = stripComments(source("app/gateway/v1/capability-actions/route.ts"));
+  const gateway = stripComments(source("app/gateway/capability-actions/route.ts"));
   if (!gateway.includes("recoverTrustedExecutionSubject(binding, principal.tenantId)")) {
     failures.push("External Capability Gateway 未从 Binding 恢复可信 Subject");
   }

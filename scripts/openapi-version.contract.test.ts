@@ -48,7 +48,7 @@ describe("Topic01 OpenAPI API 版本单一来源契约", () => {
       paths?: Record<string, { post?: { security?: Array<Record<string, string[]>> } }>;
     };
 
-    expect(openapi.paths?.["/gateway/v1/attachments/resolve"]?.post?.security).toEqual([]);
+    expect(openapi.paths?.["/gateway/attachments/resolve"]?.post?.security).toEqual([]);
   });
 
   it("generate_openapi.py 以 contract-manifest.json/api_version 为唯一 API 版本来源，无硬编码 11.0.0", () => {

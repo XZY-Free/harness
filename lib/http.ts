@@ -31,7 +31,7 @@ export type ApiAudience = "employee" | "runtime" | "gateway" | "admin";
 export const AUDIENCE_PREFIX: Record<ApiAudience, string> = {
   employee: "/api/v1",
   runtime: "/runtime",
-  gateway: "/gateway/v1",
+  gateway: "/gateway",
   admin: "/admin/api/v1",
 };
 

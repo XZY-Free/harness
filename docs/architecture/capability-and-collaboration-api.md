@@ -71,7 +71,7 @@ curl 'https://snow.example.com/api/v1/catalog/options?agent_id=agt_finance&capab
 
 ### 3.1 搜索可用能力
 
-`POST /gateway/v1/capabilities/search`
+`POST /gateway/capabilities/search`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -84,7 +84,7 @@ curl 'https://snow.example.com/api/v1/catalog/options?agent_id=agt_finance&capab
 | catalog_revision | Body | string | 否 | Runtime 已知目录修订，只用于差异和缓存提示 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/capabilities/search' \
+curl -X POST 'https://snow.example.com/gateway/capabilities/search' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'Idempotency-Key: inv-42-capability-search-3' \
   -H 'Content-Type: application/json' \
@@ -103,7 +103,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/capabilities/search' \
       "schema_hash": "sha256:9d...",
       "risk_summary": {"effect":"read","data_class":"internal"},
       "selection_reason_code": "SEMANTIC_MATCH",
-      "schema_url": "/gateway/v1/tools/tool_sales_query/schema"
+      "schema_url": "/gateway/tools/tool_sales_query/schema"
     },
     {
       "type": "skill",
@@ -112,7 +112,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/capabilities/search' \
       "current_revision_id": "sv_8",
       "content_hash": "sha256:31...",
       "selection_reason_code": "AGENT_DEFAULT_PLUS_QUERY",
-      "content_url": "/gateway/v1/skills/skill_anomaly_review/content"
+      "content_url": "/gateway/skills/skill_anomaly_review/content"
     }
   ]
 }
@@ -122,7 +122,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/capabilities/search' \
 
 ### 3.2 读取 Tool Schema
 
-`GET /gateway/v1/tools/{tool_id}/schema`
+`GET /gateway/tools/{tool_id}/schema`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -132,7 +132,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/capabilities/search' \
 | If-None-Match | Header | string | 否 | 已缓存 schema hash |
 
 ```bash
-curl 'https://snow.example.com/gateway/v1/tools/tool_sales_query/schema?invocation_id=inv_01J...' \
+curl 'https://snow.example.com/gateway/tools/tool_sales_query/schema?invocation_id=inv_01J...' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'If-None-Match: "sha256:old"'
 ```
@@ -162,7 +162,7 @@ curl 'https://snow.example.com/gateway/v1/tools/tool_sales_query/schema?invocati
 
 ### 3.3 读取 Skill 内容
 
-`GET /gateway/v1/skills/{skill_id}/content`
+`GET /gateway/skills/{skill_id}/content`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -172,7 +172,7 @@ curl 'https://snow.example.com/gateway/v1/tools/tool_sales_query/schema?invocati
 | If-None-Match | Header | string | 否 | 已缓存 content hash |
 
 ```bash
-curl 'https://snow.example.com/gateway/v1/skills/skill_anomaly_review/content?invocation_id=inv_01J...' \
+curl 'https://snow.example.com/gateway/skills/skill_anomaly_review/content?invocation_id=inv_01J...' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'If-None-Match: "sha256:30..."'
 ```
@@ -193,7 +193,7 @@ curl 'https://snow.example.com/gateway/v1/skills/skill_anomaly_review/content?in
 
 ### 3.4 提交 Harness 行动
 
-`POST /gateway/v1/capability-actions`
+`POST /gateway/capability-actions`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -204,7 +204,7 @@ curl 'https://snow.example.com/gateway/v1/skills/skill_anomaly_review/content?in
 | action | Body | object | 是 | 严格 `HarnessNextAction`；每次只能提交一个 action |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/capability-actions' \
+curl -X POST 'https://snow.example.com/gateway/capability-actions' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'Idempotency-Key: inv_01J...:action-knowledge-01' \
   -H 'Content-Type: application/json' \
@@ -252,7 +252,7 @@ AgentCall 完成后只返回 `observationType=agent` 的 Observation，再由 Ha
 
 ### 4.1 创建委派 Child Thread
 
-`POST /gateway/v1/child-threads`
+`POST /gateway/child-threads`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -265,7 +265,7 @@ AgentCall 完成后只返回 `observationType=agent` 的 Observation，再由 Ha
 | execution_preference | Body | object | 否 | 可请求环境类型；平台重新决策实际环境 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/child-threads' \
+curl -X POST 'https://snow.example.com/gateway/child-threads' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'Idempotency-Key: inv-42-delegate-risk-review' \
   -H 'Content-Type: application/json' \
@@ -289,7 +289,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/child-threads' \
 
 ### 4.2 查询 Child Thread 状态和结果
 
-`GET /gateway/v1/child-threads/{child_thread_id}`
+`GET /gateway/child-threads/{child_thread_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -297,7 +297,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/child-threads' \
 | parent_invocation_id | Query | string | 是 | 创建该关系的父 Invocation |
 
 ```bash
-curl 'https://snow.example.com/gateway/v1/child-threads/thr_child?parent_invocation_id=inv_01J...' \
+curl 'https://snow.example.com/gateway/child-threads/thr_child?parent_invocation_id=inv_01J...' \
   -H 'Authorization: Bearer <invocation-workload-token>'
 ```
 
@@ -321,7 +321,7 @@ curl 'https://snow.example.com/gateway/v1/child-threads/thr_child?parent_invocat
 
 ### 4.3 请求取消 Child Thread
 
-`POST /gateway/v1/child-threads/{child_thread_id}/cancel`
+`POST /gateway/child-threads/{child_thread_id}/cancel`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -331,7 +331,7 @@ curl 'https://snow.example.com/gateway/v1/child-threads/thr_child?parent_invocat
 | reason_code | Body | string | 是 | PARENT_NO_LONGER_NEEDS_RESULT、PARENT_CANCELLED、BUDGET_EXHAUSTED |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/child-threads/thr_child:cancel' \
+curl -X POST 'https://snow.example.com/gateway/child-threads/thr_child:cancel' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'Idempotency-Key: inv-42-cancel-child-risk-review' \
   -H 'Content-Type: application/json' \

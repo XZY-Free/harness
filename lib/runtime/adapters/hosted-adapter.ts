@@ -67,7 +67,7 @@ export interface GatewayEndpoints {
  * Event Ingress 客户端接口：Runtime 侧调用以回传候选事件批次。
  *
  * 两种实现：
- * - HTTP：调用平台 /gateway/v1/runtime-events 路由（createHttpEventIngressClient）。
+ * - HTTP：调用平台 /gateway/runtime-events 路由（createHttpEventIngressClient）。
  * - 包装 EventBatchSink：测试用，绕过 HTTP 直接调用 ingressEventBatch 仓储。
  */
 export interface EventIngressClient {

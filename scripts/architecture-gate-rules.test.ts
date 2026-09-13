@@ -183,7 +183,7 @@ describe("Topic 01 final closure boundary gate", () => {
       "return executeHarnessToolCall(input);",
     ),
     doc("lib/capability/application/execute-harness-tool-call.ts", "return applyToolCall(input);"),
-    doc("app/gateway/v1/tool-calls/route.ts", "return applyToolCall(input);"),
+    doc("app/gateway/tool-calls/route.ts", "return applyToolCall(input);"),
     doc(
       "lib/capability/tool-execution-worker.ts",
       "claimNextQueuedToolCall(); ProviderExecutionError; appendToolContinuation();",
@@ -193,7 +193,7 @@ describe("Topic 01 final closure boundary gate", () => {
       "export async function searchKnowledgeEvidence(params: { executionSubject: ExecutionSubject; allowedKnowledgeBaseIds: readonly string[] }): Promise<KnowledgeSearchResult> {}",
     ),
     doc(
-      "app/gateway/v1/capability-actions/route.ts",
+      "app/gateway/capability-actions/route.ts",
       "executionSubject = recoverTrustedExecutionSubject(binding, principal.tenantId);",
     ),
     doc(
@@ -243,7 +243,7 @@ describe("Topic 01 final closure boundary gate", () => {
         "db.update(agentCallTable).set({ state: 'completed' })",
       ),
     ].map((item) =>
-      item.path === "app/gateway/v1/capability-actions/route.ts"
+      item.path === "app/gateway/capability-actions/route.ts"
         ? doc(item.path, "executionSubject = { subjectId: 'fixed' }")
         : item.path === "lib/runtime/adapters/hosted-adapter.ts"
           ? doc(

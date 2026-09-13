@@ -7,10 +7,10 @@ export const IN_PROCESS_GATEWAY_ENDPOINTS: GatewayEndpoints = {
   cancel: "in-process://cancel",
   resume: "in-process://resume",
   steer: "in-process://steer",
-  tools: "in-process://gateway/v1/tools",
-  tool_calls: "in-process://gateway/v1/tool-calls",
-  user_action_requests: "in-process://gateway/v1/user-action-requests",
-  capability_actions: "in-process://gateway/v1/capability-actions",
+  tools: "in-process://gateway/tools",
+  tool_calls: "in-process://gateway/tool-calls",
+  user_action_requests: "in-process://gateway/user-action-requests",
+  capability_actions: "in-process://gateway/capability-actions",
 };
 
 /**
@@ -38,13 +38,13 @@ export function buildGatewayEndpoints(params: { external: boolean }): GatewayEnd
 function buildExternalGatewayEndpoints(baseUrl: string): GatewayEndpoints {
   const base = baseUrl.replace(/\/$/, "");
   return {
-    events: `${base}/gateway/v1/runtime-events`,
-    cancel: `${base}/gateway/v1/runtime-commands/cancel`,
-    resume: `${base}/gateway/v1/runtime-commands/resume`,
-    steer: `${base}/gateway/v1/runtime-commands/steer`,
-    tools: `${base}/gateway/v1/tools`,
-    tool_calls: `${base}/gateway/v1/tool-calls`,
-    user_action_requests: `${base}/gateway/v1/user-action-requests`,
-    capability_actions: `${base}/gateway/v1/capability-actions`,
+    events: `${base}/gateway/runtime-events`,
+    cancel: `${base}/gateway/runtime-commands/cancel`,
+    resume: `${base}/gateway/runtime-commands/resume`,
+    steer: `${base}/gateway/runtime-commands/steer`,
+    tools: `${base}/gateway/tools`,
+    tool_calls: `${base}/gateway/tool-calls`,
+    user_action_requests: `${base}/gateway/user-action-requests`,
+    capability_actions: `${base}/gateway/capability-actions`,
   };
 }

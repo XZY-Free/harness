@@ -26,7 +26,7 @@ flowchart LR
 
 ### 2.1 提交 Memory Candidate
 
-`POST /gateway/v1/memory-candidates`
+`POST /gateway/memory-candidates`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -42,7 +42,7 @@ flowchart LR
 | rationale_code | Body | string | 是 | USER_EXPLICIT、REPEATED_PREFERENCE、PROJECT_FACT、TASK_DECISION |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/memory-candidates' \
+curl -X POST 'https://snow.example.com/gateway/memory-candidates' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'Idempotency-Key: inv-42-memory-language-preference' \
   -H 'Content-Type: application/json' \
@@ -65,7 +65,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/memory-candidates' \
 
 ### 2.2 查询 Memory Candidate
 
-`GET /gateway/v1/memory-candidates/{candidate_id}`
+`GET /gateway/memory-candidates/{candidate_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -73,7 +73,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/memory-candidates' \
 | invocation_id | Query | string | 是 | 原提交 Invocation；Workload Identity 必须一致 |
 
 ```bash
-curl 'https://snow.example.com/gateway/v1/memory-candidates/memc_01J...?invocation_id=inv_01J...' \
+curl 'https://snow.example.com/gateway/memory-candidates/memc_01J...?invocation_id=inv_01J...' \
   -H 'Authorization: Bearer <invocation-workload-token>'
 ```
 
@@ -130,7 +130,7 @@ Checkpoint 用于恢复上下文组装位置，不保存每次模型调用的全
 
 ### 3.1 提交 Context Checkpoint
 
-`POST /gateway/v1/context-checkpoints`
+`POST /gateway/context-checkpoints`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -143,7 +143,7 @@ Checkpoint 用于恢复上下文组装位置，不保存每次模型调用的全
 | token_accounting | Body | object | 是 | 输入、保留、压缩 Token 数 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/context-checkpoints' \
+curl -X POST 'https://snow.example.com/gateway/context-checkpoints' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'Idempotency-Key: inv-42-compression-2' \
   -H 'Content-Type: application/json' \

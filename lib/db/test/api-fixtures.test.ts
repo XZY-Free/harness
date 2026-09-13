@@ -17,7 +17,7 @@ describe("api-fixtures: buildApiRequest", () => {
     const cases = [
       { audience: "employee" as const, prefix: "/api/v1" },
       { audience: "runtime" as const, prefix: "/runtime" },
-      { audience: "gateway" as const, prefix: "/gateway/v1" },
+      { audience: "gateway" as const, prefix: "/gateway" },
       { audience: "admin" as const, prefix: "/admin/api/v1" },
     ];
     for (const { audience, prefix } of cases) {
@@ -64,7 +64,7 @@ describe("api-fixtures: buildApiRequest", () => {
     expect(AUDIENCE_PREFIX).toEqual({
       employee: "/api/v1",
       runtime: "/runtime",
-      gateway: "/gateway/v1",
+      gateway: "/gateway",
       admin: "/admin/api/v1",
     });
   });

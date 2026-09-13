@@ -3845,9 +3845,9 @@
         ]
       }
     },
-    "/gateway/v1/tool-calls": {
+    "/gateway/tool-calls": {
       "post": {
-        "operationId": "post_gateway_v1_tool_calls",
+        "operationId": "post_gateway_tool_calls",
         "summary": "执行 ToolCall",
         "tags": [
           "gateway"
@@ -3995,9 +3995,9 @@
         }
       }
     },
-    "/gateway/v1/tool-calls/{tool_call_id}/reconcile-effect": {
+    "/gateway/tool-calls/{tool_call_id}/reconcile-effect": {
       "post": {
-        "operationId": "post_gateway_v1_tool_calls_by_tool_call_id_reconcile_effect",
+        "operationId": "post_gateway_tool_calls_by_tool_call_id_reconcile_effect",
         "summary": "核对 Tool Effect",
         "tags": [
           "gateway"
@@ -4148,9 +4148,9 @@
         }
       }
     },
-    "/gateway/v1/artifacts": {
+    "/gateway/artifacts": {
       "post": {
-        "operationId": "post_gateway_v1_artifacts",
+        "operationId": "post_gateway_artifacts",
         "summary": "创建 Artifact",
         "tags": [
           "gateway"
@@ -4282,9 +4282,9 @@
         }
       }
     },
-    "/gateway/v1/attachments/resolve": {
+    "/gateway/attachments/resolve": {
       "post": {
-        "operationId": "post_gateway_v1_attachments_resolve",
+        "operationId": "post_gateway_attachments_resolve",
         "summary": "解析 Agent 短期附件引用",
         "tags": [
           "gateway"
@@ -4339,9 +4339,9 @@
         }
       }
     },
-    "/gateway/v1/context/query": {
+    "/gateway/context/query": {
       "post": {
-        "operationId": "post_gateway_v1_context_query",
+        "operationId": "post_gateway_context_query",
         "summary": "查询上下文",
         "tags": [
           "gateway"
@@ -4479,6 +4479,7 @@
         "x-snowharness-error-codes": [
           "ACCESS_DENIED",
           "AUTHENTICATION_REQUIRED",
+          "IDEMPOTENCY_CONFLICT",
           "RATE_LIMITED",
           "REQUEST_SCHEMA_INVALID",
           "RESOURCE_NOT_FOUND"
@@ -4522,9 +4523,9 @@
         }
       }
     },
-    "/gateway/v1/user-action-requests": {
+    "/gateway/user-action-requests": {
       "post": {
-        "operationId": "post_gateway_v1_user_action_requests",
+        "operationId": "post_gateway_user_action_requests",
         "summary": "发起用户操作请求",
         "tags": [
           "gateway"
@@ -4637,29 +4638,7 @@
                   "request_type",
                   "prompt"
                 ],
-                "additionalProperties": false,
-                "allOf": [
-                  {
-                    "if": {
-                      "properties": {
-                        "request_type": {
-                          "const": "input"
-                        }
-                      },
-                      "required": [
-                        "request_type"
-                      ]
-                    },
-                    "then": {
-                      "properties": {
-                        "input_schema": {}
-                      },
-                      "required": [
-                        "input_schema"
-                      ]
-                    }
-                  }
-                ]
+                "additionalProperties": false
               }
             }
           }
@@ -6006,9 +5985,9 @@
         ]
       }
     },
-    "/gateway/v1/capabilities/search": {
+    "/gateway/capabilities/search": {
       "post": {
-        "operationId": "post_gateway_v1_capabilities_search",
+        "operationId": "post_gateway_capabilities_search",
         "summary": "搜索可用能力",
         "tags": [
           "gateway"
@@ -6157,7 +6136,7 @@
                         "data_class": "internal"
                       },
                       "selection_reason_code": "SEMANTIC_MATCH",
-                      "schema_url": "/gateway/v1/tools/tool_sales_query/schema"
+                      "schema_url": "/gateway/tools/tool_sales_query/schema"
                     },
                     {
                       "type": "skill",
@@ -6166,7 +6145,7 @@
                       "current_revision_id": "sv_8",
                       "content_hash": "sha256:31...",
                       "selection_reason_code": "AGENT_DEFAULT_PLUS_QUERY",
-                      "content_url": "/gateway/v1/skills/skill_anomaly_review/content"
+                      "content_url": "/gateway/skills/skill_anomaly_review/content"
                     }
                   ]
                 }
@@ -6236,9 +6215,9 @@
         }
       }
     },
-    "/gateway/v1/tools/{tool_id}/schema": {
+    "/gateway/tools/{tool_id}/schema": {
       "get": {
-        "operationId": "get_gateway_v1_tools_by_tool_id_schema",
+        "operationId": "get_gateway_tools_by_tool_id_schema",
         "summary": "读取 Tool Schema",
         "tags": [
           "gateway"
@@ -6467,9 +6446,9 @@
         ]
       }
     },
-    "/gateway/v1/skills/{skill_id}/content": {
+    "/gateway/skills/{skill_id}/content": {
       "get": {
-        "operationId": "get_gateway_v1_skills_by_skill_id_content",
+        "operationId": "get_gateway_skills_by_skill_id_content",
         "summary": "读取 Skill 内容",
         "tags": [
           "gateway"
@@ -6586,9 +6565,9 @@
         ]
       }
     },
-    "/gateway/v1/capability-actions": {
+    "/gateway/capability-actions": {
       "post": {
-        "operationId": "post_gateway_v1_capability_actions",
+        "operationId": "post_gateway_capability_actions",
         "summary": "提交 Harness 行动",
         "tags": [
           "gateway"
@@ -6764,9 +6743,9 @@
         }
       }
     },
-    "/gateway/v1/child-threads": {
+    "/gateway/child-threads": {
       "post": {
-        "operationId": "post_gateway_v1_child_threads",
+        "operationId": "post_gateway_child_threads",
         "summary": "创建委派 Child Thread",
         "tags": [
           "gateway"
@@ -6938,9 +6917,9 @@
         }
       }
     },
-    "/gateway/v1/child-threads/{child_thread_id}": {
+    "/gateway/child-threads/{child_thread_id}": {
       "get": {
-        "operationId": "get_gateway_v1_child_threads_by_child_thread_id",
+        "operationId": "get_gateway_child_threads_by_child_thread_id",
         "summary": "查询 Child Thread 状态和结果",
         "tags": [
           "gateway"
@@ -7085,9 +7064,9 @@
         ]
       }
     },
-    "/gateway/v1/child-threads/{child_thread_id}/cancel": {
+    "/gateway/child-threads/{child_thread_id}/cancel": {
       "post": {
-        "operationId": "post_gateway_v1_child_threads_by_child_thread_id_cancel",
+        "operationId": "post_gateway_child_threads_by_child_thread_id_cancel",
         "summary": "请求取消 Child Thread",
         "tags": [
           "gateway"
@@ -7118,7 +7097,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -7212,9 +7191,9 @@
         }
       }
     },
-    "/gateway/v1/memory-candidates": {
+    "/gateway/memory-candidates": {
       "post": {
-        "operationId": "post_gateway_v1_memory_candidates",
+        "operationId": "post_gateway_memory_candidates",
         "summary": "提交 Memory Candidate",
         "tags": [
           "gateway"
@@ -7395,9 +7374,9 @@
         }
       }
     },
-    "/gateway/v1/memory-candidates/{candidate_id}": {
+    "/gateway/memory-candidates/{candidate_id}": {
       "get": {
-        "operationId": "get_gateway_v1_memory_candidates_by_candidate_id",
+        "operationId": "get_gateway_memory_candidates_by_candidate_id",
         "summary": "查询 Memory Candidate",
         "tags": [
           "gateway"
@@ -7649,9 +7628,9 @@
         }
       }
     },
-    "/gateway/v1/context-checkpoints": {
+    "/gateway/context-checkpoints": {
       "post": {
-        "operationId": "post_gateway_v1_context_checkpoints",
+        "operationId": "post_gateway_context_checkpoints",
         "summary": "提交 Context Checkpoint",
         "tags": [
           "gateway"

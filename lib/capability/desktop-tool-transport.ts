@@ -27,7 +27,7 @@ export async function executeDesktopTool(
   });
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}/gateway/v1/desktop-tool-executions`, {
+    response = await fetch(`${baseUrl}/gateway/desktop-tool-executions`, {
       method: "POST",
       redirect: "error",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

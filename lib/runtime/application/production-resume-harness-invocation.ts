@@ -64,10 +64,10 @@ const IN_PROCESS_GATEWAYS = {
   cancel: "in-process://cancel",
   resume: "in-process://resume",
   steer: "in-process://steer",
-  tools: "in-process://gateway/v1/tools",
-  tool_calls: "in-process://gateway/v1/tool-calls",
-  user_action_requests: "in-process://gateway/v1/user-action-requests",
-  capability_actions: "in-process://gateway/v1/capability-actions",
+  tools: "in-process://gateway/tools",
+  tool_calls: "in-process://gateway/tool-calls",
+  user_action_requests: "in-process://gateway/user-action-requests",
+  capability_actions: "in-process://gateway/capability-actions",
 };
 
 interface LiveHostedRunner {

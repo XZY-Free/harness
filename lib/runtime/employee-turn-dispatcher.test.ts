@@ -653,14 +653,14 @@ describe("dispatchEmployeeTurn", () => {
     expect(server.requests[0]?.body).not.toHaveProperty("userId");
     expect(server.requests[0]?.body).not.toHaveProperty("execution_subject");
     expect(server.requests[0]?.body?.gateway_endpoints).toEqual({
-      events: "https://platform.example.test/base/gateway/v1/runtime-events",
-      cancel: "https://platform.example.test/base/gateway/v1/runtime-commands/cancel",
-      resume: "https://platform.example.test/base/gateway/v1/runtime-commands/resume",
-      steer: "https://platform.example.test/base/gateway/v1/runtime-commands/steer",
-      tools: "https://platform.example.test/base/gateway/v1/tools",
-      tool_calls: "https://platform.example.test/base/gateway/v1/tool-calls",
-      user_action_requests: "https://platform.example.test/base/gateway/v1/user-action-requests",
-      capability_actions: "https://platform.example.test/base/gateway/v1/capability-actions",
+      events: "https://platform.example.test/base/gateway/runtime-events",
+      cancel: "https://platform.example.test/base/gateway/runtime-commands/cancel",
+      resume: "https://platform.example.test/base/gateway/runtime-commands/resume",
+      steer: "https://platform.example.test/base/gateway/runtime-commands/steer",
+      tools: "https://platform.example.test/base/gateway/tools",
+      tool_calls: "https://platform.example.test/base/gateway/tool-calls",
+      user_action_requests: "https://platform.example.test/base/gateway/user-action-requests",
+      capability_actions: "https://platform.example.test/base/gateway/capability-actions",
     });
 
     const updatedTurn = await getTurnById(tenantId, turn.id);
