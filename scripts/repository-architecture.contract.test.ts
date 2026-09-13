@@ -25,6 +25,28 @@ const forbidden = new RegExp(
   ].join("|"),
 );
 
+/**
+ * 允许保留 v11/V11 等禁止字符串的历史归档与设计文档路径（前缀匹配）。
+ *
+ * 授权依据：
+ * - sections/naming-inventory.md：文档可保留改造前证据引用；生产注释改成当前
+ *   职责/不变量，不再引用"某阶段新实现""专题01完成版"等历史叙事。
+ * - §四十一：负向测试中的禁止字符串属于精确例外。工程包正文与设计文档在讨论
+ *   "v11 目录必须不存在"等清理目标时必须写出禁止字符串本身，属于负向引用。
+ *
+ * 精确白名单，不允许通配。生产代码路径（app/components/desktop/lib/scripts/
+ * tests/e2e/）不在此列，仍按 forbidden 正则严格扫描。
+ */
+const DOC_EXCEPTION_PREFIXES = [
+  "docs/V12/", // 专题工程包与历史交接叙事（工程包正文引用 v11/v12 作为清理目标）
+  "docs/topic-01/", // Topic-01 历史归档（LIVE 生产 manifest 位于 evidence/，但历史叙述允许保留旧引用）
+  "docs/implementation/topic-01-", // Topic-01 历史实施笔记
+];
+
+function isDocException(path: string): boolean {
+  return DOC_EXCEPTION_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
 function sourceFiles(path: string): string[] {
   if (!existsSync(path)) return [];
   if (!statSync(path).isDirectory()) return [path];
@@ -42,6 +64,7 @@ describe("repository architecture naming contract", () => {
       .filter((file) => !file.endsWith(".DS_Store"))
       .flatMap((file) => {
         const path = relative(ROOT, file);
+        if (isDocException(path)) return [];
         const source = readFileSync(file, "utf8");
         return forbidden.test(`/${path}`) || forbidden.test(source) ? [path] : [];
       });
