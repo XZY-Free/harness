@@ -7,7 +7,7 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 310,
+    "unit": 312,
     "db": 121,
     "integration": 10,
     "contract": 29,
@@ -15,7 +15,7 @@
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 478,
+  "total": 480,
   "tests": [
     {
       "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
@@ -657,6 +657,17 @@
     },
     {
       "file": "components/studio/agents-viewer.test.tsx",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "components/studio/appearance-setting.test.tsx",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -2835,6 +2846,17 @@
     },
     {
       "file": "lib/db/schemas/json-columns.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/db/seed-grants.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,

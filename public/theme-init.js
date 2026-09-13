@@ -3,7 +3,6 @@
     const employeeSurface = /\/(?:desktop|chat|login|setup-password)(?:\/|$)/.test(
       window.location.pathname,
     );
-    const studioSurface = /\/studio(?:\/|$)/.test(window.location.pathname);
     let storedTheme = null;
     if (!employeeSurface) {
       try {
@@ -11,12 +10,10 @@
       } catch (_) {}
     }
     const explicitTheme = storedTheme === "dark" || storedTheme === "light" ? storedTheme : null;
-    const theme = employeeSurface
-      ? "light"
-      : studioSurface
-        ? (explicitTheme ?? "light")
-        : (explicitTheme ??
-          (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+    const theme = employeeSurface ? "light" : (explicitTheme ?? systemTheme);
     document.documentElement.classList.add(theme);
   } catch (_) {}
 })();

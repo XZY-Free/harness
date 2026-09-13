@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const FILES = [
   "components/studio/nav.tsx",
-  "components/studio/theme-toggle.tsx",
+  "components/studio/appearance-setting.tsx",
   "components/studio/settings-user-role-manager.tsx",
   "components/studio/studio-page.tsx",
   "components/studio/studio-settings-section.tsx",
@@ -30,14 +30,15 @@ describe("Studio 新界面组件合同", () => {
     expect(source).not.toMatch(/rounded-\[var\(--radius/);
   });
 
-  it("导航与主题切换不再使用旧手绘图标", () => {
+  it("导航与外观设置不再使用旧手绘图标", () => {
     const nav = readFileSync(resolve(process.cwd(), "components/studio/nav.tsx"), "utf8");
-    const theme = readFileSync(
-      resolve(process.cwd(), "components/studio/theme-toggle.tsx"),
+    const appearance = readFileSync(
+      resolve(process.cwd(), "components/studio/appearance-setting.tsx"),
       "utf8",
     );
     expect(nav).not.toContain("@/components/icons");
-    expect(theme).not.toContain("<svg");
+    expect(appearance).not.toContain("<svg");
+    expect(appearance).not.toContain("@/components/icons");
   });
 
   it("角色管理使用 Button 与 Checkbox，不手写基础控件", () => {

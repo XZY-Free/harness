@@ -1,9 +1,6 @@
 "use client";
 
-import { BrandName } from "@/components/brand/brand-wordmark";
-import { ThemeToggle } from "@/components/studio/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { t } from "@/lib/i18n";
 import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
 import { cn } from "@/lib/utils";
@@ -16,7 +13,6 @@ import {
   LayoutDashboard,
   type LucideIcon,
   Menu,
-  Search,
   ServerCog,
   Settings2,
   ShieldCheck,
@@ -27,8 +23,16 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 /**
- * Studio 的一级导航。菜单权限由服务端计算，本组件只负责展示、路由归属与本地搜索。
- * 搜索始终在权限过滤之后进行，不能让服务端隐藏的菜单重新出现。
+ * Studio 一级导航（侧栏改版 v3，合同见 docs/V12/01/admin-shell-redesign-demo）。
+ *
+ * - 头部仅「返回使用端」一个动作：上下文标识由动作语义承载，不设产品标题块。
+ * - 不设嵌入搜索：再引入阈值＝一级目的地 ≥10 或设置两级化，届时做全局命令面板。
+ * - 渐进分组标签：组内可见项 ≥2 才显示标签；隐藏时保留簇间距维持分组感。
+ * - 外观设置已迁往平台设置；导航不承载主题入口。
+ * - 三档响应式（Web/Desktop 共用一套）：≥1024 全栏 240px；768–1023 图标 rail 56px；
+ *   <768 汉堡＋抽屉。
+ *
+ * 菜单权限由服务端计算（S11-W01），本组件只负责展示与路由归属。
  */
 
 type NavItem = {
@@ -38,7 +42,6 @@ type NavItem = {
   readonly icon: LucideIcon;
   readonly aliases: readonly string[];
   readonly navId?: keyof StudioNavVisibility;
-  readonly keywords?: readonly string[];
 };
 
 type NavGroup = {
@@ -58,7 +61,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
         labelKey: "studio.nav.overview",
         icon: LayoutDashboard,
         aliases: ["/studio"],
-        keywords: ["首页", "概览"],
       },
     ],
   },
@@ -73,7 +75,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
         icon: Bot,
         aliases: ["/studio/agents", "/studio/resources"],
         navId: "agents",
-        keywords: ["资源", "发布", "路由"],
       },
       {
         id: "capabilities",
@@ -82,7 +83,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
         icon: Blocks,
         aliases: ["/studio/capabilities", "/studio/skills", "/studio/artifacts"],
         navId: "capabilities",
-        keywords: ["技能", "工具", "知识", "产物"],
       },
     ],
   },
@@ -97,7 +97,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
         icon: ServerCog,
         aliases: ["/studio/runtime"],
         navId: "runtime",
-        keywords: ["环境", "桌面"],
       },
       {
         id: "observability",
@@ -106,7 +105,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
         icon: Activity,
         aliases: ["/studio/observability"],
         navId: "observability",
-        keywords: ["追踪", "评测", "告警"],
       },
       {
         id: "operations",
@@ -115,7 +113,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
         icon: ChartNoAxesCombined,
         aliases: ["/studio/operations", "/studio/analytics"],
         navId: "operations",
-        keywords: ["用量", "成本", "容量", "配额"],
       },
     ],
   },
@@ -135,7 +132,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
           "/studio/permission-rules",
         ],
         navId: "security",
-        keywords: ["策略", "权限", "凭证", "审计"],
       },
       {
         id: "settings",
@@ -144,7 +140,6 @@ const NAV_GROUPS: readonly NavGroup[] = [
         icon: Settings2,
         aliases: ["/studio/settings"],
         navId: "settings",
-        keywords: ["用户", "角色", "组织", "配置"],
       },
     ],
   },
@@ -159,108 +154,157 @@ function isActive(pathname: string, item: NavItem): boolean {
   return item.aliases.some((alias) => routeMatches(pathname, alias));
 }
 
+/** 渐进分组标签：组内可见项 ≥2 才显示；＝1 隐藏但保留簇间距。 */
+export function shouldShowGroupLabel(visibleItemCount: number): boolean {
+  return visibleItemCount >= 2;
+}
+
 interface StudioNavProps {
   /** 一级菜单可见性，由 server 端计算。 */
   readonly visibleItems: StudioNavVisibility;
 }
 
-interface NavPanelProps {
-  readonly variant: "desktop" | "mobile";
+interface NavClustersProps {
   readonly pathname: string;
   readonly groups: readonly NavGroup[];
-  readonly query: string;
-  readonly onQueryChange: (query: string) => void;
 }
 
-function NavPanel({ variant, pathname, groups, query, onQueryChange }: NavPanelProps) {
-  const mobile = variant === "mobile";
+/** 全栏/抽屉共用的簇列表：簇内 2px、簇间 12px，标签按渐进规则显示。 */
+export function NavClusters({ pathname, groups }: NavClustersProps) {
+  if (groups.length === 0) {
+    return <p className="px-2 py-8 text-center text-sm text-muted-foreground">没有可见菜单</p>;
+  }
 
   return (
-    <nav
-      aria-label={mobile ? "移动后台菜单" : "管理后台"}
-      className={cn(
-        "w-68 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
-        mobile
-          ? "fixed inset-y-0 left-0 z-40 flex animate-in slide-in-from-left shadow-sm duration-200 motion-reduce:animate-none md:hidden"
-          : "hidden h-full md:flex",
-      )}
-    >
-      <div className={cn("px-3", mobile ? "pt-14" : "pt-3")}>
-        <Link
-          href="/chat"
-          className="flex h-8 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-3 focus-visible:ring-sidebar-ring/50"
-        >
-          <ArrowLeft className="size-4" aria-hidden="true" />
-          <span>返回使用端</span>
-        </Link>
-      </div>
+    <div className="space-y-3">
+      {groups.map((group) => (
+        <section key={group.id} aria-label={group.label}>
+          {shouldShowGroupLabel(group.items.length) ? (
+            <h2 className="px-2 pb-1.5 text-xs font-medium text-muted-foreground">{group.label}</h2>
+          ) : null}
+          <div className="space-y-0.5">
+            {group.items.map((item) => {
+              const active = isActive(pathname, item);
+              const ItemIcon = item.icon;
 
-      <div className="px-5 pt-5 pb-3">
-        <div className="text-sm font-semibold tracking-tight">管理后台</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          <BrandName />
-        </p>
-      </div>
-
-      <div className="relative px-3 pb-3">
-        <Search
-          className="pointer-events-none absolute top-2 left-5 size-4 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <Input
-          type="search"
-          aria-label="搜索后台菜单"
-          value={query}
-          onChange={(event) => onQueryChange(event.currentTarget.value)}
-          placeholder="搜索设置与功能"
-          className="border-sidebar-border bg-background/70 pl-8 shadow-none"
-        />
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-        {groups.length > 0 ? (
-          <div className="space-y-4">
-            {groups.map((group) => (
-              <section key={group.id} aria-labelledby={`studio-nav-${variant}-${group.id}`}>
-                <h2
-                  id={`studio-nav-${variant}-${group.id}`}
-                  className="px-2 pb-1.5 text-xs font-medium text-muted-foreground"
+              return (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex h-8 items-center gap-2.5 rounded-lg px-2 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-sidebar-ring/50",
+                    active
+                      ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                  )}
                 >
-                  {group.label}
-                </h2>
-                <div className="space-y-0.5">
-                  {group.items.map((item) => {
-                    const active = isActive(pathname, item);
-                    const ItemIcon = item.icon;
-
-                    return (
-                      <Link
-                        key={item.id}
-                        href={item.href}
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                          "flex h-8 items-center gap-2.5 rounded-lg px-2 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-sidebar-ring/50",
-                          active
-                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                            : "text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
-                        )}
-                      >
-                        <ItemIcon className="size-4" aria-hidden="true" />
-                        <span className="truncate">{t(item.labelKey)}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                  <ItemIcon className="size-4" aria-hidden="true" />
+                  <span className="truncate">{t(item.labelKey)}</span>
+                </Link>
+              );
+            })}
           </div>
-        ) : (
-          <p className="px-2 py-8 text-center text-sm text-muted-foreground">没有匹配的菜单</p>
-        )}
-      </div>
+        </section>
+      ))}
+    </div>
+  );
+}
 
-      <div className="border-t border-sidebar-border p-3">
-        <ThemeToggle />
+const BACK_LINK_CLASS =
+  "flex h-9 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-3 focus-visible:ring-sidebar-ring/50";
+
+function BackLink() {
+  return (
+    <Link href="/chat" className={BACK_LINK_CLASS}>
+      <ArrowLeft className="size-4" aria-hidden="true" />
+      <span>返回使用端</span>
+    </Link>
+  );
+}
+
+interface NavPanelProps {
+  readonly pathname: string;
+  readonly groups: readonly NavGroup[];
+}
+
+/** ≥1024 全栏：240px，返回即头部。 */
+function DesktopPanel({ pathname, groups }: NavPanelProps) {
+  return (
+    <nav
+      aria-label="管理后台"
+      className="hidden w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex"
+    >
+      <div className="px-3 pt-3 pb-1">
+        <BackLink />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-4">
+        <NavClusters pathname={pathname} groups={groups} />
+      </div>
+    </nav>
+  );
+}
+
+/** 768–1023 图标 rail：56px，原生 title 提示，零自定义延迟。 */
+function RailPanel({ pathname, groups }: NavPanelProps) {
+  return (
+    <nav
+      aria-label="管理后台"
+      className="hidden w-14 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar py-2.5 text-sidebar-foreground md:flex lg:hidden"
+    >
+      <Link
+        href="/chat"
+        title="返回使用端"
+        aria-label="返回使用端"
+        className="flex size-9 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-3 focus-visible:ring-sidebar-ring/50"
+      >
+        <ArrowLeft className="size-4" aria-hidden="true" />
+      </Link>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto py-2">
+        {groups.map((group) => (
+          <div key={group.id} className="flex flex-col gap-1">
+            {group.items.map((item) => {
+              const active = isActive(pathname, item);
+              const ItemIcon = item.icon;
+              const label = t(item.labelKey);
+
+              return (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  title={label}
+                  aria-label={label}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex size-9 items-center justify-center rounded-lg outline-none transition-colors focus-visible:ring-3 focus-visible:ring-sidebar-ring/50",
+                    active
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                  )}
+                >
+                  <ItemIcon className="size-4" aria-hidden="true" />
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+/** <768 抽屉：288px，内容与全栏一致。 */
+function MobilePanel({ pathname, groups }: NavPanelProps) {
+  return (
+    <nav
+      aria-label="移动后台菜单"
+      className="fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 animate-in slide-in-from-left flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-sm duration-200 motion-reduce:animate-none md:hidden"
+    >
+      <div className="px-3 pt-14 pb-1">
+        <BackLink />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-4">
+        <NavClusters pathname={pathname} groups={groups} />
       </div>
     </nav>
   );
@@ -269,32 +313,20 @@ function NavPanel({ variant, pathname, groups, query, onQueryChange }: NavPanelP
 export function StudioNav({ visibleItems }: StudioNavProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [query, setQuery] = useState("");
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathname 变化是关闭移动抽屉的触发信号
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  const visibleGroups = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-
-    return NAV_GROUPS.map((group) => {
-      const permittedItems = group.items.filter(
-        (item) => item.navId === undefined || visibleItems[item.navId],
-      );
-      const items = normalizedQuery
-        ? permittedItems.filter((item) => {
-            const searchableText = [t(item.labelKey), group.label, ...(item.keywords ?? [])]
-              .join(" ")
-              .toLocaleLowerCase("zh-CN");
-            return searchableText.includes(normalizedQuery);
-          })
-        : permittedItems;
-
-      return { ...group, items };
-    }).filter((group) => group.items.length > 0);
-  }, [query, visibleItems]);
+  const visibleGroups = useMemo(
+    () =>
+      NAV_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.navId === undefined || visibleItems[item.navId]),
+      })).filter((group) => group.items.length > 0),
+    [visibleItems],
+  );
 
   return (
     <>
@@ -320,23 +352,9 @@ export function StudioNav({ visibleItems }: StudioNavProps) {
         />
       )}
 
-      <NavPanel
-        variant="desktop"
-        pathname={pathname}
-        groups={visibleGroups}
-        query={query}
-        onQueryChange={setQuery}
-      />
-
-      {mobileOpen && (
-        <NavPanel
-          variant="mobile"
-          pathname={pathname}
-          groups={visibleGroups}
-          query={query}
-          onQueryChange={setQuery}
-        />
-      )}
+      <DesktopPanel pathname={pathname} groups={visibleGroups} />
+      <RailPanel pathname={pathname} groups={visibleGroups} />
+      {mobileOpen && <MobilePanel pathname={pathname} groups={visibleGroups} />}
     </>
   );
 }
