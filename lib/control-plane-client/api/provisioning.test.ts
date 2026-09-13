@@ -44,7 +44,7 @@ describe("provisioning api client（runtime-only 合同）", () => {
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [input, init] = fetcher.mock.calls[0] ?? [];
-    expect(String(input)).toBe("/admin/api/v1/hosted-provisioning");
+    expect(String(input)).toBe("/admin/api/hosted-provisioning");
     expect(init?.method).toBe("POST");
     // 严格 body：恰好一个 key（runtime-only 请求形状）。
     expect(JSON.parse(String(init?.body))).toEqual({ route_scope_key: "prod" });
@@ -97,7 +97,7 @@ describe("provisioning api client（runtime-only 合同）", () => {
 
     const [input] = fetcher.mock.calls[0] ?? [];
     // getter 路径保持精确（GET 由 fetch 默认，不显式传 method）。
-    expect(String(input)).toBe("/admin/api/v1/hosted-provisioning/request-1");
+    expect(String(input)).toBe("/admin/api/hosted-provisioning/request-1");
     expect(result.state).toBe("ready");
     expect(result.last_completed_step).toBe("verify_route");
   });

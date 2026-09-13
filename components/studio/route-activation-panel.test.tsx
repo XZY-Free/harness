@@ -97,21 +97,21 @@ function stubBackend(fixture: BackendFixture) {
     const url = String(input);
     const method = init?.method ?? "GET";
     calls.push({ method, url, init });
-    if (url === "/admin/api/v1/agents") {
+    if (url === "/admin/api/agents") {
       return Response.json({ items: fixture.agents, total: fixture.agents.length });
     }
     for (const [agentId, revisions] of Object.entries(fixture.agentRevisions)) {
-      if (url === `/admin/api/v1/agents/${agentId}/revisions`) {
+      if (url === `/admin/api/agents/${agentId}/revisions`) {
         return Response.json({ items: revisions, total: revisions.length });
       }
     }
-    if (url === "/admin/api/v1/credential-refs") {
+    if (url === "/admin/api/credential-refs") {
       return Response.json({
         items: fixture.credentials ?? [],
         total: fixture.credentials?.length ?? 0,
       });
     }
-    if (method === "POST" && url === "/admin/api/v1/deployment-route-sets") {
+    if (method === "POST" && url === "/admin/api/deployment-route-sets") {
       if (fixture.ensureFail) {
         return errorEnvelopeResponse(
           "OPERATION_PAYLOAD_CONFLICT",
@@ -121,7 +121,7 @@ function stubBackend(fixture: BackendFixture) {
       }
       return Response.json(routeSetEnsureResponse(), { status: 201 });
     }
-    if (method === "PUT" && url === "/admin/api/v1/deployment-route-sets/route-set-1/activation") {
+    if (method === "PUT" && url === "/admin/api/deployment-route-sets/route-set-1/activation") {
       if (fixture.activateFail) {
         return errorEnvelopeResponse("BUSINESS_CONSTRAINT_VIOLATION", "端点事实不合法", 400);
       }
@@ -143,9 +143,8 @@ function selectText(labelText: string): string {
 }
 
 function runtimeGets(): number {
-  return calls.filter(
-    (call) => call.method === "GET" && call.url.startsWith("/admin/api/v1/runtimes"),
-  ).length;
+  return calls.filter((call) => call.method === "GET" && call.url.startsWith("/admin/api/runtimes"))
+    .length;
 }
 
 async function chooseSelectOption(labelText: string, optionName: RegExp | string) {
@@ -243,8 +242,8 @@ describe("RouteActivationPanel「发布给员工」— identity none（happy pat
 
     const writeCalls = calls.filter((call) => call.method !== "GET");
     expect(writeCalls.map((call) => `${call.method} ${call.url}`)).toEqual([
-      "POST /admin/api/v1/deployment-route-sets",
-      "PUT /admin/api/v1/deployment-route-sets/route-set-1/activation",
+      "POST /admin/api/deployment-route-sets",
+      "PUT /admin/api/deployment-route-sets/route-set-1/activation",
     ]);
 
     // ensure：严格 nested body + Idempotency-Key。
@@ -440,7 +439,7 @@ describe("RouteActivationPanel「发布给员工」— 下游失败与刷新 fai
     const view = render(<RouteActivationPanel canManage refreshToken={0} />);
     await waitFor(() =>
       expect(
-        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/v1/agents").length,
+        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/agents").length,
       ).toBeGreaterThanOrEqual(1),
     );
     await waitFor(() => expect(screen.queryByText(/正在加载/)).toBeNull());
@@ -456,7 +455,7 @@ describe("RouteActivationPanel「发布给员工」— 下游失败与刷新 fai
     );
     await waitFor(() =>
       expect(
-        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/v1/agents").length,
+        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/agents").length,
       ).toBeGreaterThanOrEqual(2),
     );
     expect(selectText("智能体版本")).toContain("选择智能体版本");
@@ -519,7 +518,7 @@ describe("RouteActivationPanel「发布给员工」— 下游失败与刷新 fai
     );
     await waitFor(() =>
       expect(
-        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/v1/agents").length,
+        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/agents").length,
       ).toBeGreaterThanOrEqual(3),
     );
 

@@ -53,17 +53,17 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
   const request = createControlPlaneRequest(config);
 
   return {
-    list: () => request<RuntimeListResponse>("/admin/api/v1/runtimes"),
-    get: (runtimeId) => request<RuntimeDTO>(`/admin/api/v1/runtimes/${runtimeId}`),
+    list: () => request<RuntimeListResponse>("/admin/api/runtimes"),
+    get: (runtimeId) => request<RuntimeDTO>(`/admin/api/runtimes/${runtimeId}`),
     listRevisions: (runtimeId) =>
       request<{ items: RuntimeRevisionDTO[]; total: number }>(
-        `/admin/api/v1/runtimes/${runtimeId}/revisions`,
+        `/admin/api/runtimes/${runtimeId}/revisions`,
       ),
     getRevision: (revisionId) =>
-      request<RuntimeRevisionDTO>(`/admin/api/v1/runtime-revisions/${revisionId}`),
+      request<RuntimeRevisionDTO>(`/admin/api/runtime-revisions/${revisionId}`),
     publishRevision: (revisionId, body, opts) =>
       request<PublishRuntimeRevisionResponse>(
-        `/admin/api/v1/runtime-revisions/${revisionId}/publish`,
+        `/admin/api/runtime-revisions/${revisionId}/publish`,
         {
           method: "POST",
           body: JSON.stringify(body),
@@ -75,7 +75,7 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
       ),
     withdrawRevision: (revisionId, body, opts) =>
       request<WithdrawRuntimeRevisionResponse>(
-        `/admin/api/v1/runtime-revisions/${revisionId}/withdraw`,
+        `/admin/api/runtime-revisions/${revisionId}/withdraw`,
         {
           method: "POST",
           body: JSON.stringify(body),
@@ -87,7 +87,7 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
       ),
     recordConformanceRun: (revisionId, body, opts) =>
       request<RuntimeConformanceSubmissionDTO>(
-        `/admin/api/v1/runtime-revisions/${revisionId}/conformance`,
+        `/admin/api/runtime-revisions/${revisionId}/conformance`,
         {
           method: "POST",
           body: JSON.stringify(body),
@@ -95,6 +95,6 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
         },
       ),
     getConformanceRun: (runId) =>
-      request<RuntimeConformanceRunDTO>(`/admin/api/v1/conformance-runs/${runId}`),
+      request<RuntimeConformanceRunDTO>(`/admin/api/conformance-runs/${runId}`),
   };
 }

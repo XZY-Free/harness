@@ -459,7 +459,7 @@ export async function getThreadIdByTurn(tenantId: string, turnId: string): Promi
 /**
  * 列出 Thread 下所有 Invocation（按 invocationSequence 升序，跨租户隔离）。
  *
- * 事实源： 管理面排障端点 /admin/api/v1/threads/[thread_id]/invocations 使用本函数。
+ * 事实源： 管理面排障端点 /admin/api/threads/[threadId]/invocations 使用本函数。
  *
  * Invocation 表存在 threadId 直接字段（schema/runtime.ts L249），无需通过 turn 关联子查询。
  *

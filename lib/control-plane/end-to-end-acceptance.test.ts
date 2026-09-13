@@ -12,7 +12,7 @@
  * 场景11（Hosted Worker 完整 Saga）使用真实 MySQL Gateway 执行 Saga 步骤。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
+import { POST as createRevisionPOST } from "@/app/admin/api/agents/[agentId]/revisions/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
 import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
@@ -1882,7 +1882,7 @@ describe("场景20：跨租户访问全部 Fail-closed", () => {
 
     const randomAgentId = "99999999-9999-4999-8999-999999999999";
     const response = await createRevisionPOST(request, {
-      params: Promise.resolve({ agent_id: randomAgentId }),
+      params: Promise.resolve({ agentId: randomAgentId }),
     });
     await assertCrossTenantHidden(response, crossTenantRequestId);
   });

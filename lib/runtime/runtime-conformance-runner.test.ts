@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   GET as conformanceGET,
   POST as conformancePOST,
-} from "@/app/admin/api/v1/runtime-revisions/[revision_id]/conformance/route";
+} from "@/app/admin/api/runtime-revisions/[revisionId]/conformance/route";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
@@ -685,7 +685,7 @@ describe("publishRuntimeRevision 集成（conformance 持久化）", () => {
 // 4. Admin API 路由（GET + POST /conformance）
 // ═══════════════════════════════════════════════════════════
 
-describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", () => {
+describe("Admin API /admin/api/runtime-revisions/{revisionId}/conformance", () => {
   let tenantId: string;
   let ownerId: string;
   let revisionId: string;
@@ -709,7 +709,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformanceGET(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
@@ -729,7 +729,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
@@ -783,7 +783,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
@@ -815,7 +815,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
         ifMatch: etag,
         body: signedBody,
       }),
-      { params: Promise.resolve({ revision_id: revisionId }) },
+      { params: Promise.resolve({ revisionId: revisionId }) },
     );
     expect(replayResponse.status).toBe(200);
     expect(await replayResponse.json()).toEqual(body);
@@ -860,7 +860,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(422);
     const body = (await response.json()) as { error: { code: string } };
@@ -905,7 +905,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
@@ -926,7 +926,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
@@ -951,7 +951,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
@@ -966,7 +966,7 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     });
 
     const response = await conformanceGET(request, {
-      params: Promise.resolve({ revision_id: "nonexistent-revision-id" }),
+      params: Promise.resolve({ revisionId: "nonexistent-revision-id" }),
     });
     expect(response.status).toBe(404);
     const body = (await response.json()) as { error: { code: string } };
@@ -1081,7 +1081,7 @@ describe("Admin API /conformance external_endpoint 拒绝调用方上传验收�
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(422);
     const body = (await response.json()) as { error: { code: string; message?: string } };
@@ -1102,7 +1102,7 @@ describe("Admin API /conformance external_endpoint 拒绝调用方上传验收�
     });
 
     const response = await conformancePOST(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
+      params: Promise.resolve({ revisionId: revisionId }),
     });
     expect(response.status).toBe(422);
 

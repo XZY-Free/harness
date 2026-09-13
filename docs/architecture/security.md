@@ -47,7 +47,7 @@ flowchart LR
 
 ### 2.3 查询投影交付健康
 
-`GET /admin/api/v1/operations/event-delivery`
+`GET /admin/api/operations/event-delivery`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -58,7 +58,7 @@ flowchart LR
 | limit | Query | integer | 否 | 1—100，默认 50 |
 
 ```bash
-curl 'https://snow.example.com/admin/api/v1/operations/event-delivery?state=quarantined&limit=50' \
+curl 'https://snow.example.com/admin/api/operations/event-delivery?state=quarantined&limit=50' \
   -H 'Authorization: Bearer <operations-token>'
 ```
 
@@ -86,7 +86,7 @@ curl 'https://snow.example.com/admin/api/v1/operations/event-delivery?state=quar
 
 ### 2.4 解析隔离事件
 
-`POST /admin/api/v1/event-quarantines/{failure_id}/resolve`
+`POST /admin/api/event-quarantines/{failureId}/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -98,7 +98,7 @@ curl 'https://snow.example.com/admin/api/v1/operations/event-delivery?state=quar
 | comment | Body | string | 否 | 脱敏说明 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/operations/event-quarantines/edf_01J...:resolve' \
+curl -X POST 'https://snow.example.com/admin/api/operations/event-quarantines/edf_01J...:resolve' \
   -H 'Authorization: Bearer <operations-token>' \
   -H 'Idempotency-Key: resolve-edf-01J-v1' \
   -H 'Content-Type: application/json' \
@@ -183,7 +183,7 @@ AgentRevision、RuntimeRevision、Skill 可执行包、Tool Provider Adapter 和
 
 ### 4.2 验证制品证明
 
-`POST /admin/api/v1/artifact-attestations/verify`
+`POST /admin/api/artifact-attestations/verify`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -196,7 +196,7 @@ AgentRevision、RuntimeRevision、Skill 可执行包、Tool Provider Adapter 和
 | provenance_ref | Body | string | 是 | 受管 provenance 引用 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/artifact-attestations/verify' \
+curl -X POST 'https://snow.example.com/admin/api/artifact-attestations/verify' \
   -H 'Authorization: Bearer <cicd-service-token>' \
   -H 'Idempotency-Key: verify-runtime-rev-7-sha256-ab' \
   -H 'Content-Type: application/json' \
@@ -260,7 +260,7 @@ RetentionPolicy 按 `tenant + data_class + scope` 版本化，不在代码写死
 
 ### 6.2 创建 Legal Hold
 
-`POST /admin/api/v1/legal-holds`
+`POST /admin/api/legal-holds`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -272,7 +272,7 @@ RetentionPolicy 按 `tenant + data_class + scope` 版本化，不在代码写死
 | expires_at | Body | string/null | 否 | null 表示需显式释放 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/legal-holds' \
+curl -X POST 'https://snow.example.com/admin/api/legal-holds' \
   -H 'Authorization: Bearer <compliance-token>' \
   -H 'Idempotency-Key: hold-case-2026-017-v1' \
   -H 'Content-Type: application/json' \
@@ -294,7 +294,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/legal-holds' \
 
 ### 6.3 释放 Legal Hold
 
-`POST /admin/api/v1/legal-holds/release`
+`POST /admin/api/legal-holds/release`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -304,7 +304,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/legal-holds' \
 | reason_ref | Body | string | 是 | 受控案件系统释放依据引用 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/legal-holds/hold_01J...:release' \
+curl -X POST 'https://snow.example.com/admin/api/legal-holds/hold_01J...:release' \
   -H 'Authorization: Bearer <compliance-token>' \
   -H 'Idempotency-Key: release-hold-01J-v1' \
   -H 'Content-Type: application/json' \
@@ -391,7 +391,7 @@ curl 'https://snow.example.com/api/deletion-requests/delreq_01J...' \
 
 ### 6.6 创建管理员删除请求
 
-`POST /admin/api/v1/deletion-requests`
+`POST /admin/api/deletion-requests`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -403,7 +403,7 @@ curl 'https://snow.example.com/api/deletion-requests/delreq_01J...' \
 | policy_revision_id | Body | string | 是 | 本次请求依据的不可变 Policy revision |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/deletion-requests' \
+curl -X POST 'https://snow.example.com/admin/api/deletion-requests' \
   -H 'Authorization: Bearer <data-admin-token>' \
   -H 'Idempotency-Key: retention-delete-trace-2026-07-15' \
   -H 'Content-Type: application/json' \
@@ -426,7 +426,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/deletion-requests' \
 
 ### 6.7 查询管理员删除进度
 
-`GET /admin/api/v1/deletion-requests/{deletion_request_id}`
+`GET /admin/api/deletion-requests/{deletionRequestId}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -434,7 +434,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/deletion-requests' \
 | include_steps | Query | boolean | 否 | true 时返回不含 Secret 的逐存储步骤 |
 
 ```bash
-curl 'https://snow.example.com/admin/api/v1/deletion-requests/delreq_admin_01J...?include_steps=true' \
+curl 'https://snow.example.com/admin/api/deletion-requests/delreq_admin_01J...?include_steps=true' \
   -H 'Authorization: Bearer <data-admin-token>'
 ```
 
@@ -457,14 +457,14 @@ curl 'https://snow.example.com/admin/api/v1/deletion-requests/delreq_admin_01J..
 
 ### 7.1 查询系统就绪状态
 
-`GET /admin/api/v1/operations/readiness`
+`GET /admin/api/operations/readiness`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
 | scope | Query | string | 否 | employee_api、runtime_dispatch、gateway、event_projection、job_scheduler、deletion；默认全部 |
 
 ```bash
-curl 'https://snow.example.com/admin/api/v1/operations/readiness?scope=event_projection' \
+curl 'https://snow.example.com/admin/api/operations/readiness?scope=event_projection' \
   -H 'Authorization: Bearer <operations-token>'
 ```
 

@@ -40,7 +40,7 @@ describe("AgentsViewer", () => {
     expect(screen.getByText("已关联版本")).toBeTruthy();
     expect(screen.queryByText("revision-1")).toBeNull();
     expect(screen.queryByText("support")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith("/admin/api/v1/agents", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/admin/api/agents", expect.any(Object));
   });
 
   it("刷新成功后清除旧加载错误并显示最新档案", async () => {

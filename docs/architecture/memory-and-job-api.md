@@ -92,7 +92,7 @@ Runtime 只能查看自己 Invocation 提交的 Candidate，且响应只返回�
 
 ### 2.3 复核 Memory Candidate
 
-`POST /admin/api/v1/memory-candidates/{candidate_id}/resolve`
+`POST /admin/api/memory-candidates/{candidateId}/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -104,7 +104,7 @@ Runtime 只能查看自己 Invocation 提交的 Candidate，且响应只返回�
 | reason_code | Body | string | 是 | 稳定复核原因码 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/memory-candidates/memc_01J...:resolve' \
+curl -X POST 'https://snow.example.com/admin/api/memory-candidates/memc_01J...:resolve' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: review-memc-01J-v1' \
   -H 'Content-Type: application/json' \
@@ -168,7 +168,7 @@ Job 的创建属于具体领域接口：评测接口创建 evaluation Job、知�
 
 ### 4.1 查询 Job
 
-`GET /admin/api/v1/jobs/{job_id}`
+`GET /admin/api/jobs/{jobId}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -176,7 +176,7 @@ Job 的创建属于具体领域接口：评测接口创建 evaluation Job、知�
 | include | Query | string[] | 否 | invocations、commands、result_summary；默认只返回摘要 |
 
 ```bash
-curl 'https://snow.example.com/admin/api/v1/jobs/job_01J...?include=invocations&include=commands' \
+curl 'https://snow.example.com/admin/api/jobs/job_01J...?include=invocations&include=commands' \
   -H 'Authorization: Bearer <admin-token>'
 ```
 
@@ -198,7 +198,7 @@ curl 'https://snow.example.com/admin/api/v1/jobs/job_01J...?include=invocations&
 
 ### 4.2 请求取消 Job
 
-`POST /admin/api/v1/jobs/{job_id}/cancel`
+`POST /admin/api/jobs/{jobId}/cancel`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -209,7 +209,7 @@ curl 'https://snow.example.com/admin/api/v1/jobs/job_01J...?include=invocations&
 | comment | Body | string | 否 | 脱敏说明，最大 500 字符 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_01J...:cancel' \
+curl -X POST 'https://snow.example.com/admin/api/jobs/job_01J...:cancel' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: cancel-job-01J-v1' \
   -H 'If-Match: "job-12"' \
@@ -232,7 +232,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_01J...:cancel' \
 
 ### 4.3 重新运行终态 Job
 
-`POST /admin/api/v1/jobs/{job_id}/retry`
+`POST /admin/api/jobs/{jobId}/retry`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -243,7 +243,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_01J...:cancel' \
 | reason_code | Body | string | 是 | TRANSIENT_FAILURE_FIXED、INPUT_CORRECTED、ADMIN_RERUN |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_old:retry' \
+curl -X POST 'https://snow.example.com/admin/api/jobs/job_old:retry' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: retry-job-old-v1' \
   -H 'Content-Type: application/json' \
@@ -271,8 +271,8 @@ curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_old:retry' \
 
 JobEvent 订阅和结果投影沿用 [api-and-events.md](./api-and-events.md)：
 
-- `GET /admin/api/v1/jobs/{job_id}/events` 使用 Job 内 sequence 续读。
-- `POST /admin/api/v1/jobs/{job_id}/publish-to-thread` 只允许发布到 Job 创建时预先关联的 Thread。
+- `GET /admin/api/jobs/{jobId}/events` 使用 Job 内 sequence 续读。
+- `POST /admin/api/jobs/{jobId}/publish-to-thread` 只允许发布到 Job 创建时预先关联的 Thread。
 - Job cancel/retry 命令事件进入 JobEvent，不进入员工 Thread；只有显式 job_result projection 才进入 ThreadEvent。
 
 ## 5. 稳定错误码

@@ -50,15 +50,14 @@ export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
 
   return {
     getRouteSet: (routeSetId) =>
-      request<DeploymentRouteSetDTO>(`/admin/api/v1/deployment-route-sets/${routeSetId}`),
+      request<DeploymentRouteSetDTO>(`/admin/api/deployment-route-sets/${routeSetId}`),
     listRoutes: (routeSetId) =>
       request<{ items: DeploymentRouteDTO[]; total: number }>(
-        `/admin/api/v1/deployment-route-sets/${routeSetId}/routes`,
+        `/admin/api/deployment-route-sets/${routeSetId}/routes`,
       ),
-    getRoute: (routeId) =>
-      request<DeploymentRouteDTO>(`/admin/api/v1/deployment-routes/${routeId}`),
+    getRoute: (routeId) => request<DeploymentRouteDTO>(`/admin/api/deployment-routes/${routeId}`),
     ensureRouteSet: (body, opts) =>
-      request<EnsureRouteSetResponse>("/admin/api/v1/deployment-route-sets", {
+      request<EnsureRouteSetResponse>("/admin/api/deployment-route-sets", {
         method: "POST",
         body: JSON.stringify(body),
         headers: {
@@ -67,7 +66,7 @@ export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
       }),
     activateRouteSet: (routeSetId, body, opts) =>
       request<ActivateRouteSetResponse>(
-        `/admin/api/v1/deployment-route-sets/${routeSetId}/activation`,
+        `/admin/api/deployment-route-sets/${routeSetId}/activation`,
         {
           method: "PUT",
           body: JSON.stringify(body),
@@ -78,7 +77,7 @@ export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
         },
       ),
     disableRoute: (routeId, body, opts) =>
-      request<DisableRouteResponse>(`/admin/api/v1/deployment-routes/${routeId}/disable`, {
+      request<DisableRouteResponse>(`/admin/api/deployment-routes/${routeId}/disable`, {
         method: "POST",
         body: JSON.stringify(body),
         headers: {

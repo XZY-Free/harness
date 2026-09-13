@@ -18,7 +18,7 @@ describe("api-fixtures: buildApiRequest", () => {
       { audience: "employee" as const, prefix: "/api" },
       { audience: "runtime" as const, prefix: "/runtime" },
       { audience: "gateway" as const, prefix: "/gateway" },
-      { audience: "admin" as const, prefix: "/admin/api/v1" },
+      { audience: "admin" as const, prefix: "/admin/api" },
     ];
     for (const { audience, prefix } of cases) {
       const req = buildApiRequest({ audience, method: "GET", path: "/threads" });
@@ -65,7 +65,7 @@ describe("api-fixtures: buildApiRequest", () => {
       employee: "/api",
       runtime: "/runtime",
       gateway: "/gateway",
-      admin: "/admin/api/v1",
+      admin: "/admin/api",
     });
   });
 });

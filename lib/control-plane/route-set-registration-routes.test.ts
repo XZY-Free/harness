@@ -1,5 +1,5 @@
 /**
- * POST /admin/api/v1/deployment-route-sets — RouteSet 登记（create-or-reuse）RED 测试。
+ * POST /admin/api/deployment-route-sets — RouteSet 登记（create-or-reuse）RED 测试。
  *
  * 目标行为：授权管理员给出判别 target + route_scope_key + route_scope，即可
  * 创建或复用对应 Target+Scope 的正式 RouteSet，无需知道/粘贴 RouteSet id。
@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  * 本文件用例上。
  */
 async function loadCreateRouteSetRoute() {
-  return await import("@/app/admin/api/v1/deployment-route-sets/route");
+  return await import("@/app/admin/api/deployment-route-sets/route");
 }
 
 const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
@@ -110,7 +110,7 @@ interface RouteSetProjection {
   created: boolean;
 }
 
-describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-reuse）", () => {
+describe("POST /admin/api/deployment-route-sets（RouteSet 登记 create-or-reuse）", () => {
   it("Happy：具体 Agent + route.update + 严格 body → 201 精确投影，仅一行 RouteSet，零 Route", async () => {
     const { POST } = await loadCreateRouteSetRoute();
     const { tenantId, userIdentityId } = await seedAdmin();

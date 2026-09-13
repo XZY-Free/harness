@@ -21,7 +21,7 @@ function agent(id: string, name: string) {
 
 function stubAgents(items: ReturnType<typeof agent>[]) {
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-    if (String(input) === "/admin/api/v1/agents") {
+    if (String(input) === "/admin/api/agents") {
       return Response.json({ items, total: items.length });
     }
     return Response.json({ items: [], total: 0 });
@@ -49,7 +49,7 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
   it("刷新成功后清除旧列表错误并恢复版本选择", async () => {
     let fail = true;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      if (String(input) === "/admin/api/v1/agents") {
+      if (String(input) === "/admin/api/agents") {
         if (fail) throw new Error("temporary failure");
         return Response.json({ items: [agent("agent-1", "HR 智能体")], total: 1 });
       }
@@ -102,13 +102,13 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
   it("透传 onPublished：版本真实发布成功后回调携带返回 id", async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/admin/api/v1/agents") {
+      if (url === "/admin/api/agents") {
         return Response.json({ items: [agent("agent-1", "HR 智能体")], total: 1 });
       }
-      if (url === "/admin/api/v1/agents/agent-1/contracts") {
+      if (url === "/admin/api/agents/agent-1/contracts") {
         return Response.json({ items: [], total: 0 });
       }
-      if (url === "/admin/api/v1/agents/agent-1/revisions" && init?.method === "POST") {
+      if (url === "/admin/api/agents/agent-1/revisions" && init?.method === "POST") {
         return Response.json({
           id: "arev-1",
           agent_id: "agent-1",
@@ -118,7 +118,7 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
           etag: "agent-revision-1",
         });
       }
-      if (url === "/admin/api/v1/agents/agent-1/revisions") {
+      if (url === "/admin/api/agents/agent-1/revisions") {
         return Response.json({
           items: [
             {
@@ -133,7 +133,7 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
           total: 1,
         });
       }
-      if (url === "/admin/api/v1/agent-revisions/arev-1/publish") {
+      if (url === "/admin/api/agent-revisions/arev-1/publish") {
         return Response.json({
           id: "arev-1",
           revision_state: "published",

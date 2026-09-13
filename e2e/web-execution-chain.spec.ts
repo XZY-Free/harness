@@ -23,7 +23,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-const ADMIN_BASE = "/admin/api/v1";
+const ADMIN_BASE = "/admin/api";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 /** §18.6 明确禁止出现在正式链上的占位摘要。 */

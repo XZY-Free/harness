@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
  *   POST /api/threads/{thread_id}/turns
  *     → lib/runtime/employee-turn-dispatcher.ts
  *     → 正式 Invocation / Attempt / ExecutionBinding 路径执行；
- * 正式管理排障只使用 /admin/api/v1/threads|invocations|jobs|tool-calls|effects。
+ * 正式管理排障只使用 /admin/api/threads|invocations|jobs|tool-calls|effects。
  *
  * 已经失去 POST chat 入口的旧本地执行体系（ThreadRun / BackgroundTask /
  * SubagentRun / buildTools / 启动清扫器 / 旧 run/message/stream/cancel 路由）
@@ -98,13 +98,13 @@ describe("Gate 02 正向保护：正式路径必须存在（不应被误删）",
 
   it("正式 admin 排障入口 threads/invocations/jobs/tool-calls/effects 存在", () => {
     const required = [
-      "app/admin/api/v1/threads/route.ts",
-      "app/admin/api/v1/threads/[thread_id]/route.ts",
-      "app/admin/api/v1/invocations/[invocation_id]/route.ts",
-      "app/admin/api/v1/jobs/route.ts",
-      "app/admin/api/v1/jobs/[job_id]/route.ts",
-      "app/admin/api/v1/tool-calls/[tool_call_id]/route.ts",
-      "app/admin/api/v1/effects/[effect_id]/route.ts",
+      "app/admin/api/threads/route.ts",
+      "app/admin/api/threads/[threadId]/route.ts",
+      "app/admin/api/invocations/[invocationId]/route.ts",
+      "app/admin/api/jobs/route.ts",
+      "app/admin/api/jobs/[jobId]/route.ts",
+      "app/admin/api/tool-calls/[toolCallId]/route.ts",
+      "app/admin/api/effects/[effectId]/route.ts",
     ];
     for (const rel of required) {
       expect(existsSync(rooted(rel)), `正式 admin 排障入口必须存在：${rel}`).toBe(true);

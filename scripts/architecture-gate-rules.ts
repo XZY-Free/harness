@@ -203,10 +203,10 @@ export function checkAgentRevisionAuthorityGate(
       path === "lib/persistence/schema/agents.ts" ||
       path === "lib/control-plane-client/contracts/agent.ts" ||
       path.startsWith("lib/agents/") ||
-      path.startsWith("app/admin/api/v1/agents/") ||
-      path.startsWith("app/admin/api/v1/agent-revisions/") ||
+      path.startsWith("app/admin/api/agents/") ||
+      path.startsWith("app/admin/api/agent-revisions/") ||
       path.startsWith("app/gateway/agent-calls/") ||
-      path === "app/admin/api/v1/agents/route.ts" ||
+      path === "app/admin/api/agents/route.ts" ||
       path === "app/gateway/agent-calls/route.ts";
     if (!isAgentControlPlane || isTest || isSupport) continue;
 

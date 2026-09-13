@@ -54,16 +54,16 @@ function stubBackend(contracts: AgentContractSnapshotDTO[]) {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    if (url === "/admin/api/v1/agents/agent-1/contracts") {
+    if (url === "/admin/api/agents/agent-1/contracts") {
       return Response.json({ items: contracts, total: contracts.length });
     }
-    if (url === "/admin/api/v1/agents/agent-1/revisions" && method === "POST") {
+    if (url === "/admin/api/agents/agent-1/revisions" && method === "POST") {
       return Response.json(draftRevision());
     }
-    if (url === "/admin/api/v1/agents/agent-1/revisions") {
+    if (url === "/admin/api/agents/agent-1/revisions") {
       return Response.json({ items: [draftRevision()], total: 1 });
     }
-    if (url === "/admin/api/v1/agent-revisions/arev-1/publish" && method === "POST") {
+    if (url === "/admin/api/agent-revisions/arev-1/publish" && method === "POST") {
       return Response.json({
         id: "arev-1",
         revision_state: "published",
@@ -144,8 +144,7 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
       expect(
         fetchMock.mock.calls.some(
           ([url, init]) =>
-            String(url) === "/admin/api/v1/agent-revisions/arev-1/publish" &&
-            init?.method === "POST",
+            String(url) === "/admin/api/agent-revisions/arev-1/publish" && init?.method === "POST",
         ),
       ).toBe(true),
     );
@@ -166,7 +165,7 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("版本 1 已发布"));
     const call = fetchMock.mock.calls.find(
       ([url, init]) =>
-        String(url) === "/admin/api/v1/agent-revisions/arev-1/publish" && init?.method === "POST",
+        String(url) === "/admin/api/agent-revisions/arev-1/publish" && init?.method === "POST",
     );
     expect(call).toBeTruthy();
     const headers = new Headers(call?.[1]?.headers);
@@ -190,7 +189,7 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url) === "/admin/api/v1/agents/agent-1/revisions" && init?.method === "POST",
+          String(url) === "/admin/api/agents/agent-1/revisions" && init?.method === "POST",
       ),
     ).toBe(false);
   });
@@ -217,7 +216,7 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
       expect(
         fetchMock.mock.calls.some(
           ([url, init]) =>
-            String(url) === "/admin/api/v1/agents/agent-1/revisions" && init?.method === "POST",
+            String(url) === "/admin/api/agents/agent-1/revisions" && init?.method === "POST",
         ),
       ).toBe(true),
     );
@@ -227,7 +226,7 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
   it("publish 失败时不调用 onPublished", async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/admin/api/v1/agent-revisions/arev-1/publish") {
+      if (url === "/admin/api/agent-revisions/arev-1/publish") {
         return Response.json(
           {
             error: {
@@ -240,10 +239,10 @@ describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
           { status: 400 },
         );
       }
-      if (url === "/admin/api/v1/agents/agent-1/contracts") {
+      if (url === "/admin/api/agents/agent-1/contracts") {
         return Response.json({ items: [snapshot("snap-0001")], total: 1 });
       }
-      if (url === "/admin/api/v1/agents/agent-1/revisions") {
+      if (url === "/admin/api/agents/agent-1/revisions") {
         return Response.json({ items: [draftRevision()], total: 1 });
       }
       return Response.json({ items: [], total: 0 });

@@ -34,7 +34,7 @@ export const AUDIENCE_PREFIX: Record<ApiAudience, string> = {
   employee: "/api",
   runtime: "/runtime",
   gateway: "/gateway",
-  admin: "/admin/api/v1",
+  admin: "/admin/api",
 };
 
 /**

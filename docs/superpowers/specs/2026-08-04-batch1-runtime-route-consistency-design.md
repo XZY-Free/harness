@@ -109,7 +109,7 @@ interface RuntimePublicationEvidenceSnapshot {
 ## 四、任务 1.2 — 修改 Runtime 发布 API
 
 ### 修改文件
-- `app/admin/api/v1/runtime-revisions/[revision_id]/conformance/route.ts`
+- `app/admin/api/runtime-revisions/[revisionId]/conformance/route.ts`
 - `lib/control-plane/admin-routes.test.ts`
 - `e2e/admin-conformance.spec.ts`
 
@@ -276,7 +276,7 @@ desiredRoutes 表示目标 RouteSet 的完整 Active 状态（非增量 Patch）
 
 ### 新增
 
-`PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation`
+`PUT /admin/api/deployment-route-sets/{routeSetId}/activation`
 
 必填：`Idempotency-Key` header、`If-Match` header
 

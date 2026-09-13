@@ -37,7 +37,7 @@ flowchart LR
 ~~~text
 /api/...                 员工交互接口
 /runtime/...             Runtime 协议
-/admin/api/v1/...           管理控制与观测接口
+/admin/api/...           管理控制与观测接口
 /gateway/...             Runtime 到平台的内部网关
 ~~~
 
@@ -1260,23 +1260,23 @@ Runtime 收到 pending 后暂停相关行动，不能在本地自造确认结果
 
 | 管理资源族 | API 根路径 | 写入边界 |
 |---|---|---|
-| Agent | `/admin/api/v1/agents`、`/agent-revisions` | 稳定身份与不可变修订分开；发布后修订只读 |
-| Runtime | `/admin/api/v1/runtimes`、`/runtime-revisions` | 能力探测结果写 RuntimeRevision；Endpoint 只引用 Connection |
-| 路由 | `/admin/api/v1/deployment-routes` | 只影响新 Invocation，更新使用 ETag |
-| Skill | `/admin/api/v1/skills`、`/skill-versions` | 稳定身份与内容版本分开，不触发 AgentRevision |
-| Tool | `/admin/api/v1/tool-providers`、`/tools`、`/tool-schema-revisions` | Schema 和风险差异单独审核 |
-| Knowledge | `/admin/api/v1/knowledge-bases`、`/knowledge-documents` | 文档修订与索引状态分开 |
-| Connection/Credential | `/admin/api/v1/connections`、`/credential-refs` | Credential API 只接收 Vault 写入会话，读响应不返回原值 |
-| Policy | `/admin/api/v1/policy-sets`、`/policy-revisions` | 规则发布后不可改，绑定切换写 AuditEvent |
-| Evaluation | `/admin/api/v1/evaluation-runs`、`/evaluation-results` | 使用测试环境，不修改线上 Invocation |
-| Job | `/admin/api/v1/jobs`、`/jobs/{id}/events` | 后台任务和 JobEvent；结果进入会话必须显式发布 |
-| Observability | `/admin/api/v1/threads`、`/turns`、`/invocations`、`/traces` | 只读投影；内容级别受 RBAC 和采集策略限制 |
+| Agent | `/admin/api/agents`、`/agent-revisions` | 稳定身份与不可变修订分开；发布后修订只读 |
+| Runtime | `/admin/api/runtimes`、`/runtime-revisions` | 能力探测结果写 RuntimeRevision；Endpoint 只引用 Connection |
+| 路由 | `/admin/api/deployment-routes` | 只影响新 Invocation，更新使用 ETag |
+| Skill | `/admin/api/skills`、`/skill-versions` | 稳定身份与内容版本分开，不触发 AgentRevision |
+| Tool | `/admin/api/tool-providers`、`/tools`、`/tool-schema-revisions` | Schema 和风险差异单独审核 |
+| Knowledge | `/admin/api/knowledge-bases`、`/knowledge-documents` | 文档修订与索引状态分开 |
+| Connection/Credential | `/admin/api/connections`、`/credential-refs` | Credential API 只接收 Vault 写入会话，读响应不返回原值 |
+| Policy | `/admin/api/policy-sets`、`/policy-revisions` | 规则发布后不可改，绑定切换写 AuditEvent |
+| Evaluation | `/admin/api/evaluation-runs`、`/evaluation-results` | 使用测试环境，不修改线上 Invocation |
+| Job | `/admin/api/jobs`、`/jobs/{id}/events` | 后台任务和 JobEvent；结果进入会话必须显式发布 |
+| Observability | `/admin/api/threads`、`/turns`、`/invocations`、`/traces` | 只读投影；内容级别受 RBAC 和采集策略限制 |
 
-统一目录使用 `/admin/api/v1/catalog` 查询上述资源，但没有通用 Catalog 写接口；修改动作必须回到对应资源族。
+统一目录使用 `/admin/api/catalog` 查询上述资源，但没有通用 Catalog 写接口；修改动作必须回到对应资源族。
 
 ### 6.1 创建 AgentRevision
 
-`POST /admin/api/v1/agents/{agent_id}/revisions`
+`POST /admin/api/agents/{agentId}/revisions`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1292,7 +1292,7 @@ Runtime 收到 pending 后暂停相关行动，不能在本地自造确认结果
 | agent_contract_snapshot_id | Body | string | 是 | 绑定的不可变 AgentContractSnapshot id（发布权威外部合同；必须属于同租户同 Agent） |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/agents/agt_finance/revisions' \
+curl -X POST 'https://snow.example.com/admin/api/agents/agt_finance/revisions' \
   -H 'Authorization: Bearer <cicd-service-token>' \
   -H 'Idempotency-Key: build-7f3a9c2' \
   -H 'Content-Type: application/json' \
@@ -1323,7 +1323,7 @@ Skill、Tool 和 Knowledge 不作为 AgentRevision 的固定内容清单提交�
 
 ### 6.2 发布 AgentRevision
 
-`POST /admin/api/v1/agent-revisions/{revision_id}/publish`
+`POST /admin/api/agent-revisions/{revisionId}/publish`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1335,7 +1335,7 @@ Skill、Tool 和 Knowledge 不作为 AgentRevision 的固定内容清单提交�
 | artifact_attestation_id | Body | string | 否 | 可选供应链证明；发布权威是绑定的 AgentContractSnapshot |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/agent-revisions/agr_19:publish' \
+curl -X POST 'https://snow.example.com/admin/api/agent-revisions/agr_19:publish' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: publish-agr-19' \
   -H 'If-Match: "agent-revision-19"' \
@@ -1356,7 +1356,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/agent-revisions/agr_19:publi
 
 ### 6.3 更新 DeploymentRoute
 
-`PUT /admin/api/v1/deployment-routes/{route_id}`
+`PUT /admin/api/deployment-routes/{routeId}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1370,7 +1370,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/agent-revisions/agr_19:publi
 | route_state | Body | string | 是 | enabled、disabled |
 
 ```bash
-curl -X PUT 'https://snow.example.com/admin/api/v1/deployment-routes/route_finance_default' \
+curl -X PUT 'https://snow.example.com/admin/api/deployment-routes/route_finance_default' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'If-Match: "route-set-12"' \
   -H 'Content-Type: application/json' \
@@ -1394,7 +1394,7 @@ Scope 只由 RouteSet 管理，单条 Route 不能覆盖。服务端锁定 Route
 
 ### 6.4 查询实际执行记录
 
-`GET /admin/api/v1/invocations/{invocation_id}/actual-execution-record`
+`GET /admin/api/invocations/{invocationId}/actual-execution-record`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1402,7 +1402,7 @@ Scope 只由 RouteSet 管理，单条 Route 不能覆盖。服务端锁定 Route
 | include | Query | string[] | 否 | capabilities、tools、permissions、trace_summary；受 RBAC 限制 |
 
 ```bash
-curl 'https://snow.example.com/admin/api/v1/invocations/inv_01J.../actual-execution-record?include=capabilities,tools,permissions,trace_summary' \
+curl 'https://snow.example.com/admin/api/invocations/inv_01J.../actual-execution-record?include=capabilities,tools,permissions,trace_summary' \
   -H 'Authorization: Bearer <admin-token>'
 ```
 
@@ -1443,7 +1443,7 @@ curl 'https://snow.example.com/admin/api/v1/invocations/inv_01J.../actual-execut
 
 ### 6.5 管理核对长期未知副作用
 
-`POST /admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect`
+`POST /admin/api/tool-calls/{toolCallId}/reconcile-effect`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1454,7 +1454,7 @@ curl 'https://snow.example.com/admin/api/v1/invocations/inv_01J.../actual-execut
 | reason | Body | string | 是 | 审计原因 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/tool-calls/tc_01J...:reconcile-effect' \
+curl -X POST 'https://snow.example.com/admin/api/tool-calls/tc_01J...:reconcile-effect' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: admin-reconcile-op-7' \
   -H 'Content-Type: application/json' \
@@ -1475,7 +1475,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/tool-calls/tc_01J...:reconci
 
 ### 6.6 订阅 JobEvent
 
-`GET /admin/api/v1/jobs/{job_id}/events`
+`GET /admin/api/jobs/{jobId}/events`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1484,7 +1484,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/tool-calls/tc_01J...:reconci
 | after_sequence | Query | integer | 否 | 无 Last-Event-ID 时的备用游标 |
 
 ```bash
-curl -N 'https://snow.example.com/admin/api/v1/jobs/job_eval_01J.../events' \
+curl -N 'https://snow.example.com/admin/api/jobs/job_eval_01J.../events' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Accept: text/event-stream' \
   -H 'Last-Event-ID: 17'
@@ -1500,7 +1500,7 @@ JobEvent 与 ThreadEvent 使用相同 envelope 规则，但根 id 是 job_id、�
 
 ### 6.7 把 Job 结果发布到会话
 
-`POST /admin/api/v1/jobs/{job_id}/publish-to-thread`
+`POST /admin/api/jobs/{jobId}/publish-to-thread`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1512,7 +1512,7 @@ JobEvent 与 ThreadEvent 使用相同 envelope 规则，但根 id 是 job_id、�
 | display_summary | Body | string | 是 | 员工可见的脱敏摘要 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_eval_01J...:publish-to-thread' \
+curl -X POST 'https://snow.example.com/admin/api/jobs/job_eval_01J...:publish-to-thread' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: publish-job-eval-88' \
   -H 'Content-Type: application/json' \
@@ -1666,7 +1666,7 @@ Adapter 必须使用同一组规范能力名声明 `event_stream、cancel、resu
 | `/api/threads/{id}/runs/{runId}` | Turn/Invocation 详情；员工端和管理端使用不同响应视图 |
 | `/api/threads/{id}/cancel` | `POST /api/turns/{turnId}/interrupt` |
 | `/studio/api/threads/{id}/approvals/*` | Employee UserAction resolve + Admin 风险查询；审批不只属于 Studio |
-| `/studio/api/agents` | `/admin/api/v1/agents` 与 Revision 发布接口 |
+| `/studio/api/agents` | `/admin/api/agents` 与 Revision 发布接口 |
 | `/studio/api/skills`、custom-tools、mcp-servers | Admin 能力 API；MCP 配置降为 ToolProvider/Connection 协议类型 |
 | `/studio/api/threads/{id}/context` | Admin 受控诊断视图；Runtime 按需读取走 Gateway Context API |
 | `/api/threads/{id}/workspace/*` | Employee Workspace/Attachment/Artifact API；Desktop 本地操作增加设备签名 |

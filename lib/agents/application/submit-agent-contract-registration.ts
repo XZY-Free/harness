@@ -1,5 +1,5 @@
 /**
- * submitAgentContractRegistration 应用命令：POST /admin/api/v1/agent-registrations 的登记事务。
+ * submitAgentContractRegistration 应用命令：POST /admin/api/agent-registrations 的登记事务。
  *
  * 与 registerAgentContract（Agent 先在、按 agentId 登记）不同，本命令以合同 agent.id 为身份，
  * 单事务 find-or-create：

@@ -171,7 +171,7 @@ export interface AgentContractListResponse {
   total: number;
 }
 
-// ─── Agent Contract 登记（POST /admin/api/v1/agent-registrations） ────
+// ─── Agent Contract 登记（POST /admin/api/agent-registrations） ────
 
 /** 登记请求：顶层恰为 protocol + contract（禁止 URL/Git/源码路径/endpoint/凭证字段）。 */
 export interface RegisterAgentContractRequest {

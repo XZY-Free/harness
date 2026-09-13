@@ -21,7 +21,7 @@ describe("agent api client（07 §4/§7）", () => {
     );
 
     const [input, init] = fetcher.mock.calls[0] ?? [];
-    expect(String(input)).toBe("/admin/api/v1/agent-registrations");
+    expect(String(input)).toBe("/admin/api/agent-registrations");
     expect(new Headers(init?.headers).get("idempotency-key")).toBe("idem-contract");
     expect(JSON.parse(String(init?.body))).toEqual({
       protocol: { type: "a2a", contract_revision: "a2a@1" },

@@ -32,7 +32,7 @@ import {
   launchDesktopApp,
 } from "./support/launch-desktop";
 
-const ADMIN_BASE = "/admin/api/v1";
+const ADMIN_BASE = "/admin/api";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const PLACEHOLDER_DIGEST = `sha256:${"0".repeat(64)}`;

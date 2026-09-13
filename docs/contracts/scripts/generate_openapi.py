@@ -278,18 +278,18 @@ def success_status(method: str, path: str, section: list[str]) -> str:
         "/runtime/invocations/{invocation_id}/steer": "202",
         "/gateway/tool-calls/{tool_call_id}/reconcile-effect": "200",
         "/gateway/context/query": "200",
-        "/admin/api/v1/agent-revisions/{revision_id}/publish": "200",
-        "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": "200",
-        "/admin/api/v1/jobs/{job_id}/publish-to-thread": "201",
+        "/admin/api/agent-revisions/{revisionId}/publish": "200",
+        "/admin/api/tool-calls/{toolCallId}/reconcile-effect": "200",
+        "/admin/api/jobs/{jobId}/publish-to-thread": "201",
         "/gateway/capabilities/search": "200",
         "/gateway/child-threads/{child_thread_id}/cancel": "202",
-        "/admin/api/v1/memory-candidates/{candidate_id}/resolve": "200",
-        "/admin/api/v1/jobs/{job_id}/cancel": "202",
-        "/admin/api/v1/jobs/{job_id}/retry": "201",
-        "/admin/api/v1/event-quarantines/{failure_id}/resolve": "202",
+        "/admin/api/memory-candidates/{candidateId}/resolve": "200",
+        "/admin/api/jobs/{jobId}/cancel": "202",
+        "/admin/api/jobs/{jobId}/retry": "201",
+        "/admin/api/event-quarantines/{failureId}/resolve": "202",
         "/api/threads/{thread_id}/request-execution-environment-change": "202",
-        "/admin/api/v1/artifact-attestations/verify": "200",
-        "/admin/api/v1/legal-holds/release": "200",
+        "/admin/api/artifact-attestations/verify": "200",
+        "/admin/api/legal-holds/release": "200",
     }
     if path in status_overrides:
         return status_overrides[path]
@@ -333,7 +333,7 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
                 "then": {"properties": {"input_schema": {}}, "required": ["input_schema"]},
             }
         ],
-        "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": [
+        "/admin/api/tool-calls/{toolCallId}/reconcile-effect": [
             {
                 "if": {
                     "properties": {
@@ -344,7 +344,7 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
                 "then": {"properties": {"evidence_ref": {}}, "required": ["evidence_ref"]},
             }
         ],
-        "/admin/api/v1/jobs/{job_id}/publish-to-thread": [
+        "/admin/api/jobs/{jobId}/publish-to-thread": [
             {
                 "if": {
                     "properties": {"publish_mode": {"const": "existing_source_turn"}},

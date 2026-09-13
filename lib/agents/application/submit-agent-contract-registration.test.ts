@@ -2,7 +2,7 @@
  * submitAgentContractRegistration 应用命令测试 — 真实 MySQL（生产同构，禁止 fake-db）。
  *
  * 与 registerAgentContract（已存在的"Agent 先在、按 agentId 登记"命令）不同，本命令是
- * POST /admin/api/v1/agent-registrations 的应用事务：
+ * POST /admin/api/agent-registrations 的应用事务：
  * - 身份是合同 agent.id（agentKey），调用方不得另行指定 agentId/agentKey/displayName；
  * - 单事务 find-or-create：Agent 缺失则创建 draft Agent（displayName=合同 name zh-CN、
  *   ownerUserId=登记的 user 主体），随后写入不可变快照 header + 子记录；

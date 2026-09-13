@@ -676,7 +676,7 @@ describe("enforceIdempotency", () => {
       caller: serviceCaller,
       commandScope: "agent.revision.draft:",
       idempotencyKey: "cicd-key-1",
-      requestHash: computeRequestHash("POST", "/admin/api/v1/agents/agt_1/revisions", {}),
+      requestHash: computeRequestHash("POST", "/admin/api/agents/agt_1/revisions", {}),
     });
     expect(outcome.kind).toBe("new");
     if (outcome.kind === "new") {

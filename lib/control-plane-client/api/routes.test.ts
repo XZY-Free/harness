@@ -33,7 +33,7 @@ describe("route api client", () => {
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [input, init] = fetcher.mock.calls[0] ?? [];
-    expect(String(input)).toBe("/admin/api/v1/deployment-route-sets");
+    expect(String(input)).toBe("/admin/api/deployment-route-sets");
     expect(init?.method).toBe("POST");
     // 严格 body：{target, route_scope_key, route_scope}，target 为判别 agent 目标。
     expect(JSON.parse(String(init?.body))).toEqual({
@@ -86,7 +86,7 @@ describe("route api client", () => {
     );
 
     const [input, init] = fetcher.mock.calls[0] ?? [];
-    expect(String(input)).toBe("/admin/api/v1/deployment-route-sets/route-set-1/activation");
+    expect(String(input)).toBe("/admin/api/deployment-route-sets/route-set-1/activation");
     expect(init?.method).toBe("PUT");
     expect(new Headers(init?.headers).get("if-match")).toBe("route-set-7");
     expect(new Headers(init?.headers).get("idempotency-key")).toBe("idem-activate-1");

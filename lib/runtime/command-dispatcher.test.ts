@@ -1584,7 +1584,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: running.invocationId }),
+      params: Promise.resolve({ invocationId: running.invocationId }),
     };
 
     const response = await POST(request, context);
@@ -1613,7 +1613,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: running.invocationId }),
+      params: Promise.resolve({ invocationId: running.invocationId }),
     };
 
     const response = await POST(request, context);
@@ -1642,7 +1642,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: running.invocationId }),
+      params: Promise.resolve({ invocationId: running.invocationId }),
     };
 
     const response = await POST(request, context);
@@ -1671,7 +1671,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: running.invocationId }),
+      params: Promise.resolve({ invocationId: running.invocationId }),
     };
 
     const response = await POST(request, context);
@@ -1702,7 +1702,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: running.invocationId }),
+      params: Promise.resolve({ invocationId: running.invocationId }),
     };
 
     const response = await POST(request, context);
@@ -1738,7 +1738,7 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
     );
 
     const context = {
-      params: Promise.resolve({ invocation_id: running.invocationId }),
+      params: Promise.resolve({ invocationId: running.invocationId }),
     };
 
     const response = await POST(request, context);

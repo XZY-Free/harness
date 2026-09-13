@@ -4666,9 +4666,9 @@
         }
       }
     },
-    "/admin/api/v1/agents/{agent_id}/revisions": {
+    "/admin/api/agents/{agentId}/revisions": {
       "post": {
-        "operationId": "post_admin_api_v1_agents_by_agent_id_revisions",
+        "operationId": "post_admin_api_agents_by_agentId_revisions",
         "summary": "创建 AgentRevision",
         "tags": [
           "admin"
@@ -4822,9 +4822,9 @@
         }
       }
     },
-    "/admin/api/v1/agent-revisions/{revision_id}/publish": {
+    "/admin/api/agent-revisions/{revisionId}/publish": {
       "post": {
-        "operationId": "post_admin_api_v1_agent_revisions_by_revision_id_publish",
+        "operationId": "post_admin_api_agent_revisions_by_revisionId_publish",
         "summary": "发布 AgentRevision",
         "tags": [
           "admin"
@@ -4947,9 +4947,9 @@
         }
       }
     },
-    "/admin/api/v1/deployment-routes/{route_id}": {
+    "/admin/api/deployment-routes/{routeId}": {
       "put": {
-        "operationId": "put_admin_api_v1_deployment_routes_by_route_id",
+        "operationId": "put_admin_api_deployment_routes_by_routeId",
         "summary": "更新 DeploymentRoute",
         "tags": [
           "admin"
@@ -5099,9 +5099,9 @@
         }
       }
     },
-    "/admin/api/v1/invocations/{invocation_id}/actual-execution-record": {
+    "/admin/api/invocations/{invocationId}/actual-execution-record": {
       "get": {
-        "operationId": "get_admin_api_v1_invocations_by_invocation_id_actual_execution_record",
+        "operationId": "get_admin_api_invocations_by_invocationId_actual_execution_record",
         "summary": "查询实际执行记录",
         "tags": [
           "admin"
@@ -5436,9 +5436,9 @@
         ]
       }
     },
-    "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": {
+    "/admin/api/tool-calls/{toolCallId}/reconcile-effect": {
       "post": {
-        "operationId": "post_admin_api_v1_tool_calls_by_tool_call_id_reconcile_effect",
+        "operationId": "post_admin_api_tool_calls_by_toolCallId_reconcile_effect",
         "summary": "管理核对长期未知副作用",
         "tags": [
           "admin"
@@ -5597,9 +5597,9 @@
         }
       }
     },
-    "/admin/api/v1/jobs/{job_id}/events": {
+    "/admin/api/jobs/{jobId}/events": {
       "get": {
-        "operationId": "get_admin_api_v1_jobs_by_job_id_events",
+        "operationId": "get_admin_api_jobs_by_jobId_events",
         "summary": "订阅 JobEvent",
         "tags": [
           "admin"
@@ -5665,9 +5665,9 @@
         "x-snowharness-event-envelope-schema": "./event-envelope.schema.json"
       }
     },
-    "/admin/api/v1/jobs/{job_id}/publish-to-thread": {
+    "/admin/api/jobs/{jobId}/publish-to-thread": {
       "post": {
-        "operationId": "post_admin_api_v1_jobs_by_job_id_publish_to_thread",
+        "operationId": "post_admin_api_jobs_by_jobId_publish_to_thread",
         "summary": "把 Job 结果发布到会话",
         "tags": [
           "admin"
@@ -7495,9 +7495,9 @@
         ]
       }
     },
-    "/admin/api/v1/memory-candidates/{candidate_id}/resolve": {
+    "/admin/api/memory-candidates/{candidateId}/resolve": {
       "post": {
-        "operationId": "post_admin_api_v1_memory_candidates_by_candidate_id_resolve",
+        "operationId": "post_admin_api_memory_candidates_by_candidateId_resolve",
         "summary": "复核 Memory Candidate",
         "tags": [
           "admin"
@@ -7782,9 +7782,9 @@
         }
       }
     },
-    "/admin/api/v1/jobs/{job_id}": {
+    "/admin/api/jobs/{jobId}": {
       "get": {
-        "operationId": "get_admin_api_v1_jobs_by_job_id",
+        "operationId": "get_admin_api_jobs_by_jobId",
         "summary": "查询 Job",
         "tags": [
           "admin"
@@ -7938,9 +7938,9 @@
         ]
       }
     },
-    "/admin/api/v1/jobs/{job_id}/cancel": {
+    "/admin/api/jobs/{jobId}/cancel": {
       "post": {
-        "operationId": "post_admin_api_v1_jobs_by_job_id_cancel",
+        "operationId": "post_admin_api_jobs_by_jobId_cancel",
         "summary": "请求取消 Job",
         "tags": [
           "admin"
@@ -8068,9 +8068,9 @@
         }
       }
     },
-    "/admin/api/v1/jobs/{job_id}/retry": {
+    "/admin/api/jobs/{jobId}/retry": {
       "post": {
-        "operationId": "post_admin_api_v1_jobs_by_job_id_retry",
+        "operationId": "post_admin_api_jobs_by_jobId_retry",
         "summary": "重新运行终态 Job",
         "tags": [
           "admin"
@@ -8215,9 +8215,9 @@
         }
       }
     },
-    "/admin/api/v1/operations/event-delivery": {
+    "/admin/api/operations/event-delivery": {
       "get": {
-        "operationId": "get_admin_api_v1_operations_event_delivery",
+        "operationId": "get_admin_api_operations_event_delivery",
         "summary": "查询投影交付健康",
         "tags": [
           "admin"
@@ -8379,9 +8379,9 @@
         ]
       }
     },
-    "/admin/api/v1/event-quarantines/{failure_id}/resolve": {
+    "/admin/api/event-quarantines/{failureId}/resolve": {
       "post": {
-        "operationId": "post_admin_api_v1_event_quarantines_by_failure_id_resolve",
+        "operationId": "post_admin_api_event_quarantines_by_failureId_resolve",
         "summary": "解析隔离事件",
         "tags": [
           "admin"
@@ -8651,9 +8651,9 @@
         }
       }
     },
-    "/admin/api/v1/artifact-attestations/verify": {
+    "/admin/api/artifact-attestations/verify": {
       "post": {
-        "operationId": "post_admin_api_v1_artifact_attestations_verify",
+        "operationId": "post_admin_api_artifact_attestations_verify",
         "summary": "验证制品证明",
         "tags": [
           "admin"
@@ -8788,9 +8788,9 @@
         }
       }
     },
-    "/admin/api/v1/legal-holds": {
+    "/admin/api/legal-holds": {
       "post": {
-        "operationId": "post_admin_api_v1_legal_holds",
+        "operationId": "post_admin_api_legal_holds",
         "summary": "创建 Legal Hold",
         "tags": [
           "admin"
@@ -8922,9 +8922,9 @@
         }
       }
     },
-    "/admin/api/v1/legal-holds/release": {
+    "/admin/api/legal-holds/release": {
       "post": {
-        "operationId": "post_admin_api_v1_legal_holds_release",
+        "operationId": "post_admin_api_legal_holds_release",
         "summary": "释放 Legal Hold",
         "tags": [
           "admin"
@@ -9288,9 +9288,9 @@
         ]
       }
     },
-    "/admin/api/v1/deletion-requests": {
+    "/admin/api/deletion-requests": {
       "post": {
-        "operationId": "post_admin_api_v1_deletion_requests",
+        "operationId": "post_admin_api_deletion_requests",
         "summary": "创建管理员删除请求",
         "tags": [
           "admin"
@@ -9420,9 +9420,9 @@
         }
       }
     },
-    "/admin/api/v1/deletion-requests/{deletion_request_id}": {
+    "/admin/api/deletion-requests/{deletionRequestId}": {
       "get": {
-        "operationId": "get_admin_api_v1_deletion_requests_by_deletion_request_id",
+        "operationId": "get_admin_api_deletion_requests_by_deletionRequestId",
         "summary": "查询管理员删除进度",
         "tags": [
           "admin"
@@ -9591,9 +9591,9 @@
         ]
       }
     },
-    "/admin/api/v1/operations/readiness": {
+    "/admin/api/operations/readiness": {
       "get": {
-        "operationId": "get_admin_api_v1_operations_readiness",
+        "operationId": "get_admin_api_operations_readiness",
         "summary": "查询系统就绪状态",
         "tags": [
           "admin"

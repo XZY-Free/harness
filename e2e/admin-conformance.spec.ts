@@ -24,7 +24,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-const ADMIN_BASE = "/admin/api/v1";
+const ADMIN_BASE = "/admin/api";
 const REQUEST_ID_HEADER = "x-request-id";
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 const IF_MATCH_HEADER = "if-match";

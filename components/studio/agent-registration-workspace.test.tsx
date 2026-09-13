@@ -157,11 +157,11 @@ function stubBackend() {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    if (url === "/admin/api/v1/agent-registrations" && method === "POST") {
+    if (url === "/admin/api/agent-registrations" && method === "POST") {
       registered = true;
       return Response.json(registerResponse);
     }
-    if (url === "/admin/api/v1/agents") {
+    if (url === "/admin/api/agents") {
       return Response.json({
         items: registered
           ? [{ ...hrAgent, current_revision_id: agentRevisionPublished ? "arev-1" : null }]
@@ -169,20 +169,20 @@ function stubBackend() {
         total: registered ? 1 : 0,
       });
     }
-    if (url === "/admin/api/v1/credential-refs") {
+    if (url === "/admin/api/credential-refs") {
       return Response.json({ items: [], total: 0 });
     }
-    if (url === "/admin/api/v1/agents/agent-1/contracts") {
+    if (url === "/admin/api/agents/agent-1/contracts") {
       return Response.json({
         items: registered ? [hrSnapshot] : [],
         total: registered ? 1 : 0,
       });
     }
-    if (url === "/admin/api/v1/agents/agent-1/revisions" && method === "POST") {
+    if (url === "/admin/api/agents/agent-1/revisions" && method === "POST") {
       agentRevisionCreated = true;
       return Response.json(agentRevisionDraft);
     }
-    if (url === "/admin/api/v1/agents/agent-1/revisions") {
+    if (url === "/admin/api/agents/agent-1/revisions") {
       if (agentRevisionPublished) {
         return Response.json({
           items: [{ ...agentRevisionDraft, revision_state: "published" }],
@@ -194,14 +194,14 @@ function stubBackend() {
         total: agentRevisionCreated ? 1 : 0,
       });
     }
-    if (url === "/admin/api/v1/agent-revisions/arev-1/publish" && method === "POST") {
+    if (url === "/admin/api/agent-revisions/arev-1/publish" && method === "POST") {
       agentRevisionPublished = true;
       return Response.json(agentPublishResponse);
     }
-    if (url === "/admin/api/v1/deployment-route-sets" && method === "POST") {
+    if (url === "/admin/api/deployment-route-sets" && method === "POST") {
       return Response.json(routeSetEnsureResponse, { status: 201 });
     }
-    if (url === "/admin/api/v1/deployment-route-sets/route-set-1/activation" && method === "PUT") {
+    if (url === "/admin/api/deployment-route-sets/route-set-1/activation" && method === "PUT") {
       return Response.json(routeActivationResponse);
     }
     return Response.json({ items: [], total: 0 });
@@ -210,7 +210,7 @@ function stubBackend() {
 
 function routeWriteCalls(): Array<{ method: string; url: string; init?: RequestInit }> {
   return fetchMock.mock.calls
-    .filter(([url, init]) => String(url).includes("/admin/api/v1/deployment-route-sets"))
+    .filter(([url, init]) => String(url).includes("/admin/api/deployment-route-sets"))
     .map(([url, init]) => ({
       method: init?.method ?? "GET",
       url: String(url),

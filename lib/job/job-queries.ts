@@ -398,7 +398,7 @@ export type {
 /**
  * 跨 agent 列出租户所有 Job（按 createdAt 降序，跨租户隔离）。
  *
- * 事实源：S11-W04 管理面排障端点 /admin/api/v1/jobs 使用本函数。
+ * 事实源：S11-W04 管理面排障端点 /admin/api/jobs 使用本函数。
  *
  * 选项：
  * - jobState：过滤 Job 状态。
