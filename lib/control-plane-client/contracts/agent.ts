@@ -2,7 +2,7 @@
  * Agent 控制面合同 — 稳定 DTO。
  *
  * Web 端和桌面端共用此合同消费服务端 API。
- * 合同字段与 /admin/api/v1 wire format (snake_case) 对齐。
+ * 合同字段与 /admin/api wire format (snake_case) 对齐。
  *
  * 禁止：
  * - 页面直接引用数据库 Record；

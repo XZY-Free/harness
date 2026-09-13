@@ -7,7 +7,7 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 312,
+    "unit": 313,
     "db": 121,
     "integration": 10,
     "contract": 30,
@@ -15,10 +15,10 @@
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 481,
+  "total": 482,
   "tests": [
     {
-      "file": "app/admin/api/v1/agent-calls/[call_id]/diagnostic/route.test.ts",
+      "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -29,7 +29,7 @@
       ]
     },
     {
-      "file": "app/admin/api/v1/deployment-route-sets/route.test.ts",
+      "file": "app/admin/api/deployment-route-sets/route.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -40,7 +40,7 @@
       ]
     },
     {
-      "file": "app/admin/api/v1/hosted-provisioning/route.test.ts",
+      "file": "app/admin/api/hosted-provisioning/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -139,7 +139,7 @@
       ]
     },
     {
-      "file": "app/api/v1/threads/[thread_id]/artifacts/[artifact_id]/route.test.ts",
+      "file": "app/api/threads/[threadId]/artifacts/[artifactId]/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -150,7 +150,7 @@
       ]
     },
     {
-      "file": "app/api/v1/threads/[thread_id]/attachments/[attachment_id]/route.test.ts",
+      "file": "app/api/threads/[threadId]/attachments/[attachmentId]/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -161,7 +161,7 @@
       ]
     },
     {
-      "file": "app/api/v1/threads/[thread_id]/attachments/route.test.ts",
+      "file": "app/api/threads/[threadId]/attachments/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -172,7 +172,7 @@
       ]
     },
     {
-      "file": "app/api/v1/threads/[thread_id]/turns/route.test.ts",
+      "file": "app/api/threads/[threadId]/turns/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -183,7 +183,7 @@
       ]
     },
     {
-      "file": "app/api/v1/threads/route.test.ts",
+      "file": "app/api/threads/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -194,7 +194,7 @@
       ]
     },
     {
-      "file": "app/api/v1/user/current/route.test.ts",
+      "file": "app/api/user/current/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -205,7 +205,7 @@
       ]
     },
     {
-      "file": "app/gateway/v1/attachments/resolve/route.test.ts",
+      "file": "app/gateway/attachments/resolve/route.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
@@ -216,7 +216,7 @@
       ]
     },
     {
-      "file": "app/gateway/v1/capability-actions/external-runtime-subject.integration.test.ts",
+      "file": "app/gateway/capability-actions/external-runtime-subject.integration.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -227,7 +227,7 @@
       ]
     },
     {
-      "file": "app/gateway/v1/capability-actions/route.test.ts",
+      "file": "app/gateway/capability-actions/route.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -238,7 +238,7 @@
       ]
     },
     {
-      "file": "app/gateway/v1/tool-calls/route-rollback.test.ts",
+      "file": "app/gateway/tool-calls/route-rollback.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -249,7 +249,7 @@
       ]
     },
     {
-      "file": "app/gateway/v1/tool-calls/route.test.ts",
+      "file": "app/gateway/tool-calls/route.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -2087,6 +2087,17 @@
     },
     {
       "file": "lib/architecture/canonical-naming.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/architecture/canonical-routes.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,

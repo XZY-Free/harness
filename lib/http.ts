@@ -1,9 +1,8 @@
 /**
  * HTTP 公共协议基线。
  *
- * 适用于 /api、/runtime、/gateway、/admin/api/v1 四类 audience。
- * （专题02 Foundation Batch F4-F6 已把 api/gateway/runtime 三类 v1 前缀
- *   去除；admin/api/v1 前缀待 F3 处理。）
+ * 适用于 /api、/runtime、/gateway、/admin/api 四类 audience。
+ * （专题02 Foundation Batch F3-F6 已把 4 棵 v1 前缀全部去除。）
  * - 错误 Envelope 统一为 `{ error: { code, message, request_id, retryable, details? } }`。
  * - 成功响应直接返回资源（异步命令返回状态 + 可跟踪 id），不再包裹 `ok` 字段。
  * - X-Request-ID 透传或平台生成；RFC 3339 UTC 时间；不透明 cursor；资源隐藏式 404。
@@ -25,7 +24,7 @@ export const ETAG_HEADER = "etag";
  * - employee：员工前端，前缀 /api。
  * - runtime：Run 编排内部，前缀 /runtime。
  * - gateway：CI/CD 与外部系统接入网关，前缀 /gateway。
- * - admin：管理面，前缀 /admin/api/v1（F3 待迁至 /admin/api）。
+ * - admin：管理面，前缀 /admin/api。
  */
 export type ApiAudience = "employee" | "runtime" | "gateway" | "admin";
 
