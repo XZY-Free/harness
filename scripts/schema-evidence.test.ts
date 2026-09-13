@@ -6,12 +6,12 @@ import {
   discoverSchemaDeclarations,
   isProductionSourcePath,
   scanCurrentProductionReferences,
-} from "./topic-01-schema-evidence-core.mjs";
+} from "./schema-evidence-core.mjs";
 
 const roots: string[] = [];
 
 function fixtureRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "topic01-schema-evidence-"));
+  const root = mkdtempSync(join(tmpdir(), "schema-evidence-"));
   roots.push(root);
   for (const path of [
     "lib/persistence/schema",

@@ -10,7 +10,7 @@ import {
   loadCanonicalContracts,
   selectVerificationStages,
   validateAcceptanceResult,
-} from "./topic-01-acceptance-contract.mjs";
+} from "./acceptance-contract.mjs";
 
 const ROOT = process.cwd();
 const args = process.argv.slice(2);
@@ -52,8 +52,8 @@ const worktreeStatus = commandOutput("git", ["status", "--short"]);
 if (worktreeStatus) throw new Error(`完整验收开始前工作区不干净：\n${worktreeStatus}`);
 const localAcceptanceSha = commandOutput("git", ["rev-parse", "HEAD"]);
 commandOutput("git", ["cat-file", "-e", `${plan.baselineSha}^{commit}`]);
-const githubCi = process.env.TOPIC01_GITHUB_CI ?? "pending";
-const remoteHeadSha = process.env.TOPIC01_REMOTE_HEAD_SHA ?? process.env.GITHUB_SHA ?? null;
+const githubCi = process.env.ACCEPTANCE_GITHUB_CI ?? "pending";
+const remoteHeadSha = process.env.ACCEPTANCE_REMOTE_HEAD_SHA ?? process.env.GITHUB_SHA ?? null;
 const testCollection = readJson("docs/topic-01/evidence/test-collection.json");
 const schemaManifest = readJson("docs/topic-01/evidence/schema-manifest.json");
 const startedAt = new Date().toISOString();
@@ -117,7 +117,7 @@ for (const stage of stages) {
   };
   result.stages.push(stageResult);
   persist();
-  console.log(`\n[topic01] ${stage.name}`);
+  console.log(`\n[acceptance] ${stage.name}`);
   for (const command of stage.commands) {
     const [executable, ...commandArgs] = command;
     const commandStarted = Date.now();
@@ -175,4 +175,4 @@ result.status =
 result.finishedAt = new Date().toISOString();
 result.durationMs = Date.now() - Date.parse(startedAt);
 persist();
-console.log(`\n[topic01] ${stages.length} 个阶段通过，状态：${result.status}`);
+console.log(`\n[acceptance] ${stages.length} 个阶段通过，状态：${result.status}`);

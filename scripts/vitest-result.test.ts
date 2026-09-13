@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectSkippedTests } from "./topic-01-vitest-result.mjs";
+import { collectSkippedTests } from "./vitest-result.mjs";
 
 describe("Topic01 skipped test evidence", () => {
   it("把 Vitest pending case 映射为带原因与验收影响的证据", () => {

@@ -9,7 +9,7 @@ import {
   RESULT_PATH,
   loadCanonicalContracts,
   validateAcceptanceResult,
-} from "./topic-01-acceptance-contract.mjs";
+} from "./acceptance-contract.mjs";
 
 const REQUIRED_ARTIFACTS = [
   MATRIX_PATH,

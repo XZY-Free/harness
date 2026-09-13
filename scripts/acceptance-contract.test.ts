@@ -8,7 +8,7 @@ import {
   validateAcceptanceMatrix,
   validateAcceptanceResult,
   validateVerificationPlan,
-} from "./topic-01-acceptance-contract.mjs";
+} from "./acceptance-contract.mjs";
 
 function json(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));

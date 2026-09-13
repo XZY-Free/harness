@@ -4,7 +4,7 @@
 
 Schema 与验证的机器 Authority：Canonical Root 是 `lib/persistence/schema/index.ts`，最终 120 表清单是
 `docs/implementation/topic-01-final-closure/71-final-schema-manifest.json`；完整本地验收统一由
-`pnpm topic01:acceptance` 读取 `73-verification-plan.json` 执行。旧 123 表文档仅作历史基线。
+`pnpm acceptance` 读取 `73-verification-plan.json` 执行。旧 123 表文档仅作历史基线。
 
 ## 1. 方案结论
 

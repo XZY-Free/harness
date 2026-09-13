@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { collectSkippedTests } from "./topic-01-vitest-result.mjs";
+import { collectSkippedTests } from "./vitest-result.mjs";
 
 const allowed = new Set(["unit", "db", "integration", "contract"]);
 const groups = process.argv.slice(2);
@@ -9,7 +9,7 @@ if (groups.length === 0 || groups.some((group) => !allowed.has(group))) {
   throw new Error(`Vitest 分组非法：${groups.join(", ") || "<empty>"}`);
 }
 
-const rawResults = groups.map((group) => `.topic01-vitest-result.${group}.json`);
+const rawResults = groups.map((group) => `.vitest-result.${group}.json`);
 const output = "docs/topic-01/evidence/vitest-skipped-tests.json";
 const reports = [];
 let exitCode = 0;

@@ -90,7 +90,7 @@ function build() {
   );
   return {
     schemaVersion: 2,
-    authority: "scripts/topic-01-test-collection-audit.mjs",
+    authority: "scripts/test-collection-audit.mjs",
     policy: {
       vitest: "每个 .test.ts/.test.tsx 只进入 unit/db/integration/contract 一个 project",
       playwright: "每个 e2e/*.spec.ts 只进入 Web/Desktop/Cross-client 一个阶段",

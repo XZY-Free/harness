@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  topic-01-acceptance:
+  acceptance:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ripgrep xvfb gnome-keyring dbus-x11
       - name: Run the shared verification plan
-        run: pnpm topic01:acceptance
+        run: pnpm acceptance
         env:
-          TOPIC01_REMOTE_HEAD_SHA: ${{ github.sha }}
-          TOPIC01_GITHUB_CI: passed
+          ACCEPTANCE_REMOTE_HEAD_SHA: ${{ github.sha }}
+          ACCEPTANCE_GITHUB_CI: passed

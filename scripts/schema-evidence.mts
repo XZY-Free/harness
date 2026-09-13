@@ -9,7 +9,7 @@ import {
   assertCurrentProductionReference,
   discoverSchemaDeclarations,
   scanCurrentProductionReferences,
-} from "./topic-01-schema-evidence-core.mjs";
+} from "./schema-evidence-core.mjs";
 
 const ROOT = process.cwd();
 const EVIDENCE_DIR = resolve(ROOT, "docs/topic-01/evidence");
