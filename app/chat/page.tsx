@@ -3,9 +3,10 @@ import { requireAuthenticatedPage } from "@/lib/identity/page-session";
 
 export const dynamic = "force-dynamic";
 
-// 专题01 §33.7：Web 产品入口 /chat = 新建空态（无 threadId）。
-// 假 new 路由 /chat/new 已移除；新建入口统一走 /chat。
-export default async function ChatNewPage() {
+// /chat 是 Web 产品的空 Thread 输入态入口：无 threadId，
+// 由 WebThreadShell 承载首次输入并在提交后创建 Thread 资源。
+// 不存在 /chat/new 路由；新建 Thread 由 POST /api/threads 表达。
+export default async function ChatComposerPage() {
   await requireAuthenticatedPage("/chat");
   return <WebThreadShell threadId={null} />;
 }
