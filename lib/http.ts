@@ -1,14 +1,16 @@
 /**
  * HTTP 公共协议基线。
  *
- * 适用于 /api/v1、/runtime/v1、/gateway/v1、/admin/api/v1 四类 audience。
+ * 适用于 /api、/runtime、/gateway、/admin/api/v1 四类 audience。
+ * （专题02 Foundation Batch F4-F6 已把 api/gateway/runtime 三类 v1 前缀
+ *   去除；admin/api/v1 前缀待 F3 处理。）
  * - 错误 Envelope 统一为 `{ error: { code, message, request_id, retryable, details? } }`。
  * - 成功响应直接返回资源（异步命令返回状态 + 可跟踪 id），不再包裹 `ok` 字段。
  * - X-Request-ID 透传或平台生成；RFC 3339 UTC 时间；不透明 cursor；资源隐藏式 404。
  * - 可编辑资源 PUT/PATCH 用 ETag/If-Match，冲突 412。
  *
  * 下方 `jsonOk`/`jsonError`/`omitThreadSecrets` 供尚未迁移到 v1 envelope 的旧路由使用，
- * 新 v1 路由必须使用 `apiSuccess`/`apiError` 出口。
+ * 新路由必须使用 `apiSuccess`/`apiError` 出口。
  */
 import { type ApiErrorCode, errorDefinition } from "@/lib/error-codes";
 
@@ -20,10 +22,10 @@ export const ETAG_HEADER = "etag";
 
 /**
  * 四类 API audience（与 11-api-and-event-boundaries.md 一致）。
- * - employee：员工前端，前缀 /api/v1。
- * - runtime：Run 编排内部，前缀 /runtime/v1。
- * - gateway：CI/CD 与外部系统接入网关，前缀 /gateway/v1。
- * - admin：管理面，前缀 /admin/api/v1。
+ * - employee：员工前端，前缀 /api。
+ * - runtime：Run 编排内部，前缀 /runtime。
+ * - gateway：CI/CD 与外部系统接入网关，前缀 /gateway。
+ * - admin：管理面，前缀 /admin/api/v1（F3 待迁至 /admin/api）。
  */
 export type ApiAudience = "employee" | "runtime" | "gateway" | "admin";
 
