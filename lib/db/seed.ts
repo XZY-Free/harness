@@ -20,7 +20,11 @@
  * 测试和迁移工具可显式调用下方身份/授权 helper；这些 helper 同样保持幂等。
  */
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
-import type { ActionCode } from "@/lib/identity/action-codes";
+import {
+  ACTION_RESOURCE_TYPES,
+  type ActionCode,
+  type ResourceScopeType,
+} from "@/lib/identity/action-codes";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import {
   grantActionBinding,
@@ -29,6 +33,7 @@ import {
 } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { NAV_ACTION_MAPPING } from "@/lib/studio/nav-visibility";
 
 /** 默认用户授予的 Studio 动作码（admin 等值：全部 Studio 长期业务动作，tenant-wildcard）。 */
 export const DEFAULT_GRANT_ACTION_CODES: ActionCode[] = [
@@ -72,6 +77,31 @@ export const ONBOARDING_GRANT_ACTION_SCOPES: ReadonlyArray<{
 ];
 
 /**
+ * 引导管理员的 Studio 全量动作集合（S11-W01：菜单可见性与 Action Scope 同源）。
+ *
+ * 实时派生自 NAV_ACTION_MAPPING：导航未来新增菜单时，其 action 自动进入管理员
+ * 授权集，避免 seed 滞后于导航导致「管理员看不到/配不了某个菜单」。去重保序。
+ * 仅用于显式管理员引导（bootstrapLocalAdmin / db:seed 默认用户），不用于普通成员。
+ */
+export const STUDIO_ADMIN_FULL_ACTION_CODES: readonly ActionCode[] = Array.from(
+  new Set<ActionCode>(Object.values(NAV_ACTION_MAPPING).flat()),
+);
+
+/**
+ * 为管理员全量授权推导 wildcard scope type：优先 tenant，否则取目录允许的首个 type。
+ * grantActionBinding 会校验 type 与 ACTION_RESOURCE_TYPES 匹配，此处保证推导合法。
+ */
+export function adminWildcardScopeType(actionCode: ActionCode): ResourceScopeType {
+  const allowed = ACTION_RESOURCE_TYPES[actionCode];
+  if (allowed.includes("tenant")) return "tenant";
+  const first = allowed[0];
+  if (!first) {
+    throw new Error(`adminWildcardScopeType: action ${actionCode} 没有允许的 resource scope type`);
+  }
+  return first;
+}
+
+/**
  * 幂等引导默认租户 + 默认用户身份 + 主体绑定。
  *
  * 与 `lib/identity/resolver.ts` 的 `resolvePrincipal` 每请求引导链同源，
@@ -103,8 +133,9 @@ export async function seedDefaultIdentity(): Promise<{
 }
 
 /**
- * 为默认用户授予全部 Studio 动作码（tenant-wildcard scope，admin 等值），
- * 以及外部 Agent onboarding 六动作（显式 agent / runtime wildcard scope）。
+ * 为默认用户授予全部 Studio 动作码（tenant-wildcard scope，admin 等值）、
+ * 外部 Agent onboarding 六动作（显式 agent / runtime wildcard scope），
+ * 以及 NAV_ACTION_MAPPING 派生的 Studio 全量管理动作（管理员等价：全部菜单可见可配）。
  *
  * thread 类动作额外授予 self-wildcard scope：正式授权模型里 ".self" 解码为
  * (self 资源)，tenant-wildcard grant 不覆盖 self 类型请求资源（scopeCovers 要求
@@ -130,6 +161,10 @@ export async function seedDefaultGrants(
     ...ONBOARDING_GRANT_ACTION_SCOPES.map(({ actionCode, resourceScopeType }) => ({
       actionCode,
       resourceScope: { type: resourceScopeType, wildcard: true as const },
+    })),
+    ...STUDIO_ADMIN_FULL_ACTION_CODES.map((actionCode) => ({
+      actionCode,
+      resourceScope: { type: adminWildcardScopeType(actionCode), wildcard: true as const },
     })),
   ];
   const existing = await listActionBindingsByPrincipal(tenantId, principalBindingId);
