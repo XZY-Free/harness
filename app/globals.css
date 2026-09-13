@@ -1035,7 +1035,7 @@ body {
 }
 .ha-code-block > pre {
   margin: 0;
-  max-height: 216px;
+  max-height: 192px;
   scrollbar-width: thin;
   overflow: auto;
   padding: 12px 36px 12px 10px;

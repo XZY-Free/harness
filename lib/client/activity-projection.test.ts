@@ -251,9 +251,12 @@ it("网页工具使用读取图标和正文，不展示缓存路径或 hash", ()
 });
 
 it("用户拒绝的工具显示未执行，不误报执行失败", () => {
-  const entry = projectActivityEvent(actionEvent("harness.action.completed", {
-    action_type: "tool.call", observation: { data: { state: "cancelled", errorCode: "USER_DENIED" } },
-  }));
+  const entry = projectActivityEvent(
+    actionEvent("harness.action.completed", {
+      action_type: "tool.call",
+      observation: { data: { state: "cancelled", errorCode: "USER_DENIED" } },
+    }),
+  );
   expect(entry?.phase).toBe("cancelled");
   expect(entry?.label).toContain("未执行");
 });
