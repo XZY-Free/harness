@@ -493,6 +493,7 @@ CREATE TABLE `Thread` (
 	`activeGoalId` varchar(36),
 	`title` text,
 	`defaultModelRef` varchar(256),
+	`toolPermissionMode` enum('auto','ask','full_access') DEFAULT 'auto' NOT NULL,
 	`defaultEnvironmentDefinitionId` varchar(36),
 	`lifecycleState` enum('active','archived','deleted') NOT NULL DEFAULT 'active',
 	`lastActivityAt` datetime(3) NOT NULL,

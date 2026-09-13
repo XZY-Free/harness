@@ -218,8 +218,9 @@ describe("S05-C05 HostedAdapter 基本能力", () => {
     const result = await adapter.getLastLoopPromise?.();
     expect(result?.completed).toBe(false);
     expect(result?.failureReason).toContain("未配置 HarnessDecisionPort");
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: "progress.snapshot" });
+    expect(events[1]).toMatchObject({
       type: "execution.failed",
       payload: { error_code: "MODEL_EXECUTOR_UNAVAILABLE" },
     });
@@ -327,7 +328,7 @@ describe("S05-C05 HostedAdapter 基本能力", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
-  it("不再用 progress.snapshot 制造用户引导 Item", async () => {
+  it("过程透明：progress.snapshot 回传思考与组织阶段（含 think 摘要）", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -343,10 +344,17 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
     const loopPromise = adapter.getLastLoopPromise?.();
     await loopPromise;
 
-    expect(mock.events.some((event) => event.type === "progress.snapshot")).toBe(false);
+    const progress = mock.events.filter((event) => event.type === "progress.snapshot");
+    expect(progress.length).toBeGreaterThanOrEqual(3);
+    const messages = progress.map((event) => (event.payload as { message?: string }).message);
+    expect(messages).toContain("正在思考下一步…");
+    expect(messages).toContain("正在组织回答…");
+    expect(progress.some((event) => Boolean((event.payload as { think?: string }).think))).toBe(
+      true,
+    );
   });
 
-  it("response.completed 事件在 respond commitment 后形成（seq=3）", async () => {
+  it("response.completed 事件在 respond commitment 后形成（seq=6）", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -364,13 +372,13 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
 
     const responseEvent = mock.events.find((e) => e.type === "response.completed");
     expect(responseEvent).toBeDefined();
-    expect(responseEvent?.producer_sequence).toBe(3);
+    expect(responseEvent?.producer_sequence).toBe(6);
     expect(responseEvent?.payload.text).toBe(loopResult?.responseText);
     expect(responseEvent?.payload.model_ref).toBe("test-model");
     expect(responseEvent?.payload.finish_reason).toBe("stop");
   });
 
-  it("execution.completed 事件在 action.completed 后形成（seq=5，终态）", async () => {
+  it("execution.completed 事件在 action.completed 后形成（seq=8，终态）", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -388,11 +396,11 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
 
     const execEvent = mock.events.find((e) => e.type === "execution.completed");
     expect(execEvent).toBeDefined();
-    expect(execEvent?.producer_sequence).toBe(5);
+    expect(execEvent?.producer_sequence).toBe(8);
     expect(execEvent?.payload.finish_reason).toBe("execution.completed");
   });
 
-  it("producer_sequence 覆盖 action 与终态事件并连续递增（1→5）", async () => {
+  it("producer_sequence 覆盖过程与行动事件并连续递增（1→8）", async () => {
     const mock = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(mock.sink));
 
@@ -408,11 +416,14 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
     const loopPromise = adapter.getLastLoopPromise?.();
     await loopPromise;
 
-    expect(mock.events).toHaveLength(5);
-    expect(mock.events.map((event) => event.producer_sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(mock.events).toHaveLength(8);
+    expect(mock.events.map((event) => event.producer_sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(mock.events.map((event) => event.type)).toEqual([
+      "progress.snapshot",
+      "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
+      "progress.snapshot",
       "response.completed",
       "harness.action.completed",
       "execution.completed",
@@ -438,7 +449,7 @@ describe("S05-C05 HostedAdapter Agent Loop 事件回传", () => {
     expect(result?.completed).toBe(true);
     expect(result?.failureReason).toBeUndefined();
     expect(result?.responseText).toContain("完成测试");
-    expect(result?.sentEvents).toHaveLength(5);
+    expect(result?.sentEvents).toHaveLength(8);
   });
 
   it("response.completed payload.text 包含用户消息内容（Item 内容）", async () => {

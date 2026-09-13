@@ -1,6 +1,7 @@
 import { validAgentRouteResolution } from "@/lib/agents/calls/test/agent-call-test-fixtures";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
+import { createThread } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
@@ -55,6 +56,12 @@ describe("ExecutionBinding capability catalog persistence", () => {
       ownerUserId: owner.id,
       lifecycleState: "enabled",
     });
+    const { thread } = await createThread({
+      tenantId: tenant.id,
+      ownerUserId: owner.id,
+      actorId: owner.id,
+      title: "Catalog Scenario Thread",
+    });
     const snapshot = await seedAgentContractSnapshot({
       tenantId: tenant.id,
       agentId: agent.id,
@@ -83,7 +90,7 @@ describe("ExecutionBinding capability catalog persistence", () => {
     const result = await buildProductionCapabilityCatalog({
       tenantId: tenant.id,
       invocationId: "invocation-scenario",
-      threadId: "thread-scenario",
+      threadId: thread.id,
       preferredAgentId: agent.id,
       runtimeRevisionId: "runtime-revision-scenario",
       policyRevisionId: governance.policyRevisionId,

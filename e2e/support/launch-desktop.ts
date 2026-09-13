@@ -34,9 +34,20 @@ export interface LaunchedDesktop {
   dispose(): Promise<void>;
 }
 
+/** 品牌名按分支配置（main 默认 / 私有 pin），e2e 断言实时读取，避免硬编码。 */
+export async function readBrandName(window: Page): Promise<string> {
+  const name = await window.evaluate(async () => {
+    const response = await fetch("/api/brand");
+    const payload = (await response.json()) as { brand?: { name?: string }; name?: string };
+    return payload.brand?.name ?? payload.name ?? "";
+  });
+  return name || "SnowHarness";
+}
+
 /** Desktop 使用独立 Electron Session，因此必须通过与 Web 相同的正式登录接口。 */
 export async function authenticateDesktopWindow(window: Page): Promise<void> {
-  await expect(window.getByLabel("SnowHarness 登录")).toBeVisible({
+  const brandName = await readBrandName(window);
+  await expect(window.getByLabel(`${brandName} 登录`)).toBeVisible({
     timeout: 90_000,
   });
   await window.getByLabel("账号").fill(E2E_ADMIN_EMAIL);
