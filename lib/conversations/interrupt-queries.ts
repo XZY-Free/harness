@@ -26,11 +26,8 @@ import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regener
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import type { ThreadEventActorType, TurnState } from "@/lib/persistence/schema/conversation";
-import {
-  invocationCommandTable,
-  threadTable,
-  turnTable,
-} from "@/lib/persistence/schema/conversation";
+import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */

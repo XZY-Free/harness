@@ -2,9 +2,17 @@
  * 稳定 Executions Schema — 正式控制面职责命名。
  *
  * 本文件是 Invocation / ExecutionBinding / InvocationAttempt / ExecutionOwnership /
- * RuntimeSessionBinding / RuntimeEventIngress 的单一物理 Schema 权威。
+ * RuntimeSessionBinding / RuntimeEventIngress / InvocationCommand 的单一物理
+ * Schema 权威。
+ *
+ * InvocationCommand 从 conversation.ts 迁入（专题02 Foundation Batch F12）：
+ * Thread/Turn/ThreadItem/Goal/ThreadRelation/ThreadEvent/PendingInput 是会话域
+ * 产品事实；InvocationCommand 是执行控制命令，与 Invocation 生命周期强绑定，
+ * 归 Executions 域唯一 Schema 出口。跨域 FK 保持 executions→conversation 单向，
+ * 无循环依赖。
  */
 import { randomUUID } from "node:crypto";
+import { threadTable } from "@/lib/persistence/schema/conversation";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { sql } from "drizzle-orm";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
@@ -582,3 +590,130 @@ export type ExecutionBindingRow = ExecutionBinding;
 export type NewExecutionBindingRow = NewExecutionBinding;
 export type InvocationRow = Invocation;
 export type NewInvocationRow = NewInvocation;
+
+// ─── InvocationCommand ─────────────────────────────────────
+
+/**
+ * InvocationCommand 命令状态。
+ * - queued：已入队，等待 Runtime 拉取（本阶段 Runtime 未接入，命令停留在 queued）。
+ * - dispatched：已派发给 Runtime。
+ * - acknowledged：Runtime 已 ack（开始执行）。
+ * - failed：Runtime 拒绝或执行失败（不能伪装成执行完成）。
+ * - cancelled：在 Runtime ack 前被显式取消。
+ */
+export const INVOCATION_COMMAND_STATES = [
+  "queued",
+  "dispatched",
+  "acknowledged",
+  "failed",
+  "cancelled",
+] as const;
+export type InvocationCommandState = (typeof INVOCATION_COMMAND_STATES)[number];
+
+/**
+ * InvocationCommand 命令类型。
+ * - steer：员工引导（steer），将 user_guidance Item 加入当前 Turn。
+ * - interrupt：请求中断 Turn（Runtime ack 后才进入终态）。
+ * - regenerate：请求 Regenerate（生成新 Invocation 替代当前 final_item）。
+ * - resume：请求 Runtime 恢复 waiting_user Invocation（携带用户响应 resume_payload）。
+ * - cancel：请求取消一条 delegate Child Thread 关系（携带 relation_id 与 reason）。
+ * - checkpoint：请求安全点（专题02 §7.10 由 Runtime 配合 WorkspaceHost 收口 Writer）。
+ * - execution_terminal：Invocation 终态桥（专题02 §三十四 Job Terminal 同事务写入）。
+ *
+ * 取消请求 ≠ 已取消：relation_state 由 active → cancel_requested → cancelled，
+ * 终态由 Runtime/应用服务在执行确认后落库。
+ */
+export const INVOCATION_COMMAND_TYPES = [
+  "steer",
+  "interrupt",
+  "regenerate",
+  "resume",
+  "cancel",
+] as const;
+export type InvocationCommandType = (typeof INVOCATION_COMMAND_TYPES)[number];
+
+/**
+ * InvocationCommand 表：员工/系统命令入队（Steer/Interrupt/Regenerate/Resume/Cancel）。
+ *
+ * 事实源：
+ * - docs/architecture/persistence.md 行 504（InvocationCommand 表）
+ * - docs/architecture/agent-control-plane.md（Steer / Stop/Interrupt / Regenerate）
+ * - 专题02 工程包 sections/context-and-job.md §8：Job/Thread 共用 InvocationCommand
+ *   持久交付；纯 Job 不依赖 Thread 即可 dispatch/retry/redispatch/resume/complete
+ *
+ * 关键约束：
+ * - command_state=queued 时 invocation_id 可空（Runtime 拉取后才绑定）。
+ * - UNIQUE(thread_id, idempotency_key) 防止同 Thread 内重发同 Idempotency-Key。
+ * - Runtime 拒绝时不能伪造成功（command 标记 failed）。
+ * - 本阶段 Runtime 未接入：所有命令停留在 queued，不模拟 Runtime ack。
+ */
+export const invocationCommandTable = mysqlTable(
+  "InvocationCommand",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    /** 命令目标 Invocation；queued 状态时可能为空。 */
+    invocationId: varchar("invocationId", { length: 36 }),
+    threadId: varchar("threadId", { length: 36 })
+      .notNull()
+      .references(() => threadTable.id),
+    /** 命令目标 Turn。 */
+    turnId: varchar("turnId", { length: 36 }),
+    commandType: mysqlEnum("commandType", INVOCATION_COMMAND_TYPES).notNull(),
+    /** 命令参数（按 command_type 验证）。 */
+    commandPayloadJson: json("commandPayloadJson").notNull(),
+    commandPayloadHash: varchar("commandPayloadHash", { length: 128 }).notNull(),
+    commandState: mysqlEnum("commandState", INVOCATION_COMMAND_STATES).notNull().default("queued"),
+    /** Runtime 执行引用（dispatched 后由 Runtime 写入）。 */
+    runtimeExecutionRef: varchar("runtimeExecutionRef", { length: 256 }),
+    idempotencyKey: varchar("idempotencyKey", { length: 128 }),
+    /** 失败时填入稳定错误码。 */
+    errorCode: varchar("errorCode", { length: 128 }),
+    errorMessage: text("errorMessage"),
+    /**
+     * 基础设施 dispatch retry（Durable Dispatch / Retry Authority）。
+     * 状态机保持 queued → dispatched → acknowledged/failed（不新增 retry_wait 状态）；
+     * transient retry 通过 nextDispatchAt + lease 字段表达。
+     */
+    dispatchAttemptCount: int("dispatchAttemptCount").notNull().default(0),
+    /** 下一次允许 Retry Worker 领取的时间（dispatched + 非空 = 正式 retry work）。 */
+    nextDispatchAt: datetime("nextDispatchAt", { mode: "date", fsp: 3 }),
+    /** 当前持有 dispatch lease 的调度者身份（API dispatcher / Retry Worker）。 */
+    dispatchLeaseOwner: varchar("dispatchLeaseOwner", { length: 128 }),
+    /** dispatch lease 过期时间；过期后 Retry Worker 可接管。 */
+    dispatchLeaseExpiresAt: datetime("dispatchLeaseExpiresAt", { mode: "date", fsp: 3 }),
+    /** 最近一次 dispatch HTTP 发起时间。 */
+    lastDispatchAttemptAt: datetime("lastDispatchAttemptAt", { mode: "date", fsp: 3 }),
+    /** 最近一次 transient 错误的安全错误码（不存 endpoint/stack/token）。 */
+    lastTransientErrorCode: varchar("lastTransientErrorCode", { length: 128 }),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    dispatchedAt: datetime("dispatchedAt", { mode: "date", fsp: 3 }),
+    acknowledgedAt: datetime("acknowledgedAt", { mode: "date", fsp: 3 }),
+    failedAt: datetime("failedAt", { mode: "date", fsp: 3 }),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    threadTurnIdx: index("InvocationCommand_thread_turn_idx").on(t.threadId, t.turnId),
+    invocationIdx: index("InvocationCommand_invocation_idx").on(t.invocationId),
+    commandDispatchRetryIdx: index("InvocationCommand_dispatch_retry_idx").on(
+      t.commandState,
+      t.nextDispatchAt,
+    ),
+    commandDispatchLeaseIdx: index("InvocationCommand_dispatch_lease_idx").on(
+      t.dispatchLeaseExpiresAt,
+    ),
+    threadIdempotencyUq: uniqueIndex("InvocationCommand_thread_idempotency_uq").on(
+      t.threadId,
+      t.idempotencyKey,
+    ),
+  }),
+);
+
+export type InvocationCommand = InferSelectModel<typeof invocationCommandTable>;
+export type NewInvocationCommand = InferInsertModel<typeof invocationCommandTable>;

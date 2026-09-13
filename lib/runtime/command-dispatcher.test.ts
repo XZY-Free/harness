@@ -55,17 +55,14 @@ import {
   agentContractSnapshotTable,
   agentTable,
 } from "@/lib/persistence/schema/agents";
-import type {
-  InvocationCommand,
-  ThreadEvent,
-  TurnState,
-} from "@/lib/persistence/schema/conversation";
+import type { ThreadEvent, TurnState } from "@/lib/persistence/schema/conversation";
 import {
-  invocationCommandTable,
   threadEventTable,
   threadItemTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
+import type { InvocationCommand } from "@/lib/persistence/schema/executions";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import {
   type ExecutionBinding,
   invocationAttemptTable,

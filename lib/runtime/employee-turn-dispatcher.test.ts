@@ -28,11 +28,8 @@ import type { AuditActor } from "@/lib/identity/audit";
 import { registerDevice, revokeDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import {
-  invocationCommandTable,
-  threadTable,
-  turnTable,
-} from "@/lib/persistence/schema/conversation";
+import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {

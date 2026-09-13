@@ -20,8 +20,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { logger } from "@/lib/logger";
-import type { InvocationCommand } from "@/lib/persistence/schema/conversation";
 import { threadTable } from "@/lib/persistence/schema/conversation";
+import type { InvocationCommand } from "@/lib/persistence/schema/executions";
 import type { InvocationAttempt } from "@/lib/persistence/schema/executions";
 import { retryDispatchedCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchPersistedQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-persisted-queued-invocation-attempt";

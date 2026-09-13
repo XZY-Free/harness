@@ -18,8 +18,8 @@
  * - 历史行（迁移前）nextDispatchAt=null / count=0 不会被 claim（只对迁移后新 transient 激活）。
  */
 import { db } from "@/lib/db/client";
-import type { InvocationCommand } from "@/lib/persistence/schema/conversation";
-import { invocationCommandTable } from "@/lib/persistence/schema/conversation";
+import type { InvocationCommand } from "@/lib/persistence/schema/executions";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import type { InvocationAttempt } from "@/lib/persistence/schema/executions";
 import { invocationAttemptTable } from "@/lib/persistence/schema/executions";
 import {

@@ -17,12 +17,12 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { UserActionValidationError } from "@/lib/permission/user-action-queries";
 import {
-  invocationCommandTable,
   threadEventTable,
   threadItemTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { and, eq } from "drizzle-orm";

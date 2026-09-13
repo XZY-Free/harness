@@ -8,7 +8,7 @@ import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/ro
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { invocationCommandTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";

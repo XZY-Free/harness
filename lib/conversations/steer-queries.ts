@@ -40,12 +40,8 @@ import type {
   ThreadItemAuthorType,
   TurnState,
 } from "@/lib/persistence/schema/conversation";
-import {
-  invocationCommandTable,
-  threadItemTable,
-  threadTable,
-  turnTable,
-} from "@/lib/persistence/schema/conversation";
+import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */

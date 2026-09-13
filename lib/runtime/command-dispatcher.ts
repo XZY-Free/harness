@@ -36,17 +36,10 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  */
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import type {
-  InvocationCommand,
-  ThreadEvent,
-  ThreadEventActorType,
-} from "@/lib/persistence/schema/conversation";
-import {
-  invocationCommandTable,
-  threadItemTable,
-  threadTable,
-  turnTable,
-} from "@/lib/persistence/schema/conversation";
+import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
+import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import type { InvocationCommand } from "@/lib/persistence/schema/executions";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";

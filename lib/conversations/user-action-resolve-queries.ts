@@ -52,15 +52,17 @@ import {
 } from "@/lib/permission/user-action-queries";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import {
-  type InvocationCommand,
   type Thread,
   type ThreadEvent,
   type ThreadEventActorType,
-  invocationCommandTable,
   threadItemTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
+import {
+  type InvocationCommand,
+  invocationCommandTable,
+} from "@/lib/persistence/schema/executions";
 import { type Invocation, invocationTable } from "@/lib/persistence/schema/executions";
 import {
   ALLOWED_RESOLUTIONS_BY_TYPE,

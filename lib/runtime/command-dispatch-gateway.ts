@@ -2,7 +2,7 @@ import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
-import { invocationCommandTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { hostedRuntimeApplicationService } from "@/lib/runtime/application/production-resume-harness-invocation";

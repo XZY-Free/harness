@@ -3,11 +3,8 @@ import { TurnNotFoundError, TurnStateConflictError } from "@/lib/conversations/e
 import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regenerate-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
-import {
-  invocationCommandTable,
-  threadTable,
-  turnTable,
-} from "@/lib/persistence/schema/conversation";
+import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { eq } from "drizzle-orm";
 
 export const USER_PAUSED_ERROR_CODE = "USER_PAUSED";

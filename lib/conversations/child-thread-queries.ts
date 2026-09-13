@@ -42,19 +42,19 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import type {
-  InvocationCommand,
   ThreadEvent,
   ThreadEventActorType,
   ThreadItem,
   ThreadRelation,
 } from "@/lib/persistence/schema/conversation";
 import {
-  invocationCommandTable,
   threadEventTable,
   threadItemTable,
   threadRelationTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
+import type { InvocationCommand } from "@/lib/persistence/schema/executions";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { INVOCATION_TERMINAL_STATES, invocationTable } from "@/lib/persistence/schema/executions";
 import { and, asc, desc, eq } from "drizzle-orm";
 

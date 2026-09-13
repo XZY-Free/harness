@@ -21,12 +21,12 @@ import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixt
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { TurnState } from "@/lib/persistence/schema/conversation";
 import {
-  invocationCommandTable,
   threadEventTable,
   threadItemTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
