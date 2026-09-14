@@ -43,6 +43,17 @@ describe("logoutClientSession", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("Desktop 清理后保持本地登录入口，不导航到企业站点", async () => {
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ loggedOut: true, redirectTo: "https://id.example.com/logout" }),
+      ),
+    );
+    const navigate = vi.fn();
+    await logoutClientSession({ cleanupDesktop: vi.fn(), loginPath: "/desktop", navigate });
+    expect(navigate).toHaveBeenCalledWith("/desktop");
+  });
+
   it("Desktop 退出后回到本地渲染入口，由同一登录页接管", async () => {
     apiFetch.mockResolvedValue(new Response(JSON.stringify({ loggedOut: true })));
     const navigate = vi.fn();

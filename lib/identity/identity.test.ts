@@ -927,6 +927,7 @@ it("SSO 回调在建立会话时接纳可信企业资料", async () => {
   const identity = await getUserIdentityBySubject(DEFAULT_TENANT_ID, "callback-employee");
   expect(identity).not.toBeNull();
   const facts = await getEnterpriseUserProfileFacts(DEFAULT_TENANT_ID, identity!.id);
+  if (!facts) throw new Error("回调未接纳企业资料");
   expect(facts.syncState?.sourceSystem).toBe("directory");
   expect(facts.attributes).toEqual(
     expect.arrayContaining([
