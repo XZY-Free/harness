@@ -17,7 +17,9 @@ export function TurnFailureNotice({
         >
           <p className="font-medium text-[13px] text-foreground">本次回复失败</p>
           <p className="mt-0.5 text-muted-foreground text-xs">
-            模型或执行服务未能完成请求。可以调整模型后重新发送，不会覆盖已有消息。
+            {errorCode === "AGENT_CONTEXT_REQUIREMENT_UNSATISFIED"
+              ? "当前身份或资料不满足助手的使用要求。请重新登录后再试；若仍失败，请联系管理员检查资料来源与助手配置。已有消息已保留。"
+              : "本次请求未能完成。请查看上方失败原因，处理后重新发送；已有消息已保留。"}
           </p>
         </div>
       </div>
