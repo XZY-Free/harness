@@ -144,7 +144,7 @@ describe("Harness frozen capability authorization", () => {
 });
 
 import { createUserInputResult } from "./user-input-result";
-it("可信身份字段不能产生用户输入请求，业务年份仍可补充", () => {
+it("不支持的表单不产生输入请求，整数年份可补充", () => {
   const action = {
     actionId: "input-1",
     stepNo: 2,
@@ -153,33 +153,19 @@ it("可信身份字段不能产生用户输入请求，业务年份仍可补充"
     shortPurpose: "补充信息",
     payload: {
       purpose: "query",
-      prompt: "请提供员工编号",
-      inputSchema: {
-        type: "object",
-        properties: { employeeId: { type: "string" }, year: { type: "integer" } },
-        required: ["employeeId"],
-      },
+      prompt: "查询哪一年？",
+      inputSchema: { type: "object", properties: {} },
     },
   };
-  const blocked = createUserInputResult(action, built.snapshot);
+  const blocked = createUserInputResult(action);
   expect(blocked.waitingForUser).toBeUndefined();
-  expect(blocked.observation?.data).toMatchObject({
-    errorCode: "TRUSTED_IDENTITY_INPUT_FORBIDDEN",
-  });
-  const allowed = createUserInputResult(
-    {
-      ...action,
-      payload: {
-        ...action.payload,
-        prompt: "查询哪一年？",
-        inputSchema: {
-          type: "object",
-          properties: { year: { type: "integer" } },
-          required: ["year"],
-        },
-      },
+  expect(blocked.observation?.data).toMatchObject({ errorCode: "USER_INPUT_SCHEMA_UNSUPPORTED" });
+  const allowed = createUserInputResult({
+    ...action,
+    payload: {
+      ...action.payload,
+      inputSchema: { type: "object", properties: { year: { type: "integer" } } },
     },
-    built.snapshot,
-  );
+  });
   expect(allowed.waitingForUser).toBeDefined();
 });

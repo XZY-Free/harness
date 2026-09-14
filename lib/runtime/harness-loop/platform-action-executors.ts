@@ -72,6 +72,6 @@ export function createPlatformHarnessActionExecutors(params: {
         },
       };
     },
-    request_user_input: async (action) => createUserInputResult(action, params.capabilityCatalog),
+    request_user_input: async (action) => createUserInputResult(action),
   };
 }
