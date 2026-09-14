@@ -170,7 +170,11 @@ export async function seedDefaultGrants(
   const existing = await listActionBindingsByPrincipal(tenantId, principalBindingId);
   const now = new Date();
 
+  const seen = new Set<string>();
   for (const grant of desired) {
+    const key = `${grant.actionCode}:${grant.resourceScope.type}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const alreadyActive = existing.some((binding) => {
       if (binding.actionCode !== grant.actionCode) return false;
       if (binding.validFrom > now || (binding.validUntil !== null && binding.validUntil <= now)) {

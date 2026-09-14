@@ -130,6 +130,14 @@ describe("seedDefaultGrants：Agent 管理与调用授权", () => {
     expect(decision).toEqual({ allowed: false, reason: "unknown_action" });
   });
 
+  it("首次授权不重复写入导航派生与既有授权重叠的绑定", async () => {
+    const identity = await seedDefaultIdentity();
+    await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
+    const rows = await db.select().from(roleActionBinding);
+    const keys = rows.map((row) => `${row.actionCode}:${row.resourceScopeJson}`);
+    expect(new Set(keys).size).toBe(rows.length);
+  });
+
   it("重复授权不会累积相同的有效绑定", async () => {
     const identity = await seedDefaultIdentity();
     await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
