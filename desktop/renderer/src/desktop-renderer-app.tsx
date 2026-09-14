@@ -1,5 +1,6 @@
 import { LoginScreen } from "@/components/auth/login-screen";
 import { BrandName } from "@/components/brand/brand-wordmark";
+import { BrandProvider } from "@/components/brand/brand-provider";
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
 import { NewThreadPage } from "@/components/thread/new-thread-page";
 import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
@@ -220,11 +221,15 @@ function DesktopShell() {
 }
 
 export function DesktopRendererApp() {
-  return getDesktopCapabilities() ? (
-    <DesktopShell />
-  ) : (
-    <DesktopError>
-      需要 <BrandName /> Desktop。
-    </DesktopError>
+  return (
+    <BrandProvider>
+      {getDesktopCapabilities() ? (
+        <DesktopShell />
+      ) : (
+        <DesktopError>
+          需要 <BrandName /> Desktop。
+        </DesktopError>
+      )}
+    </BrandProvider>
   );
 }

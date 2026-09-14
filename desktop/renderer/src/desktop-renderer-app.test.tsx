@@ -13,6 +13,13 @@ vi.mock("@/lib/desktop/capabilities", () => ({
   getDesktopCapabilities: () => true,
   getDesktopBridge,
 }));
+vi.mock("@/components/brand/brand-provider", () => ({
+  BrandProvider: ({ children }: { readonly children: React.ReactNode }) => children,
+  useBrand: () => ({
+    ...DEFAULT_BRAND,
+    name: DEFAULT_BRAND.name,
+  }),
+}));
 vi.mock("@/components/thread/thread-page", () => ({
   ThreadPage: ({
     threadId,
