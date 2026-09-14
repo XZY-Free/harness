@@ -430,11 +430,17 @@ export class HarnessLoop {
     await this.params.eventWriter.write("progress.snapshot", {
       message: "正在组织回答…",
     });
-    const responseText = await this.params.finalResponsePort.generateFinalResponse(
-      this.buildView(),
-      this.params.emitTextDelta,
-      this.params.abortSignal,
-    );
+    const agentFailure = this.terminalPreferredAgentFailure();
+    const responseText = agentFailure
+      ? `所选智能体未能完成本次请求：${
+          agentFailure.summary.trim().slice(0, 2_000) || "智能体执行失败"
+        }`
+      : await this.params.finalResponsePort.generateFinalResponse(
+          this.buildView(),
+          this.params.emitTextDelta,
+          this.params.abortSignal,
+        );
+    if (agentFailure) await this.params.emitTextDelta?.(responseText);
     this.throwIfCancelled();
     if (!responseText.trim()) {
       throw new HarnessLoopError("MODEL_EXECUTION_FAILED", "最终正文为空");
@@ -473,7 +479,7 @@ export class HarnessLoop {
         `actionId 已存在：${action.actionId}`,
       );
     }
-    if (action.actionType !== "respond" && this.hasTerminalPreferredAgentFailure()) {
+    if (action.actionType !== "respond" && this.terminalPreferredAgentFailure()) {
       throw new HarnessLoopError(
         "AGENT_FAILURE_FALLBACK_FORBIDDEN",
         "用户选择的智能体已返回终态失败，只能基于该失败事实向用户说明结果",
@@ -569,7 +575,7 @@ export class HarnessLoop {
         (entry) => entry.actionType === "knowledge.search",
       ).length,
     };
-    const terminalPreferredAgentFailure = this.hasTerminalPreferredAgentFailure();
+    const terminalPreferredAgentFailure = this.terminalPreferredAgentFailure();
     return {
       invocation: {
         invocationId: this.params.invocationId,
@@ -626,10 +632,10 @@ export class HarnessLoop {
     );
   }
 
-  private hasTerminalPreferredAgentFailure(): boolean {
+  private terminalPreferredAgentFailure(): HarnessObservation | null {
     const preferredAgentId = this.preferredAgentId();
-    if (!preferredAgentId) return false;
-    return this.actionHistory.some((entry) => {
+    if (!preferredAgentId) return null;
+    const failed = this.actionHistory.findLast((entry) => {
       if (
         entry.action.actionType !== "agent.call" ||
         entry.state !== "completed" ||
@@ -643,6 +649,7 @@ export class HarnessLoop {
       const state = (data as Record<string, unknown>).state;
       return state === "failed" || state === "cancelled" || state === "lost";
     });
+    return failed?.observation ?? null;
   }
 
   private async writeActionEvent(

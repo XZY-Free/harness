@@ -755,6 +755,7 @@ describe("HarnessLoop", () => {
       capabilities: { supportedActionTypes: string[] };
     }> = [];
     const tool = vi.fn();
+    const generateFinalResponse = vi.fn(async () => "已生成草稿");
     const loop = new HarnessLoop(
       baseParams({
         capabilityDirectives: [
@@ -798,14 +799,19 @@ describe("HarnessLoop", () => {
           }),
           "tool.call": tool,
         },
+        finalResponsePort: { generateFinalResponse },
       }),
     );
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({ completed: true, responseText: "最终回答" });
+    expect(result).toMatchObject({
+      completed: true,
+      responseText: "所选智能体未能完成本次请求：暂时无法取得排班数据，请稍后再试。",
+    });
     expect(views[1]?.capabilities.supportedActionTypes).toEqual(["respond"]);
     expect(tool).not.toHaveBeenCalled();
+    expect(generateFinalResponse).not.toHaveBeenCalled();
   });
 
   it("preferred Agent 失败后即使模型提议工具兜底也 fail closed", async () => {
