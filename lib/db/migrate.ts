@@ -1,3 +1,4 @@
+import { migrateLegacyPermissions } from "@/lib/identity/migrate-legacy-permissions";
 import { logger } from "@/lib/logger";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/mysql2/migrator";
@@ -31,7 +32,8 @@ export async function runMigrations(): Promise<void> {
   }
   try {
     await migrate(db, { migrationsFolder: "./drizzle" });
-    logger.info("db migrations applied");
+    const permissions = await migrateLegacyPermissions();
+    logger.info("db migrations applied", { convertedPermissions: permissions.converted });
   } finally {
     await db.execute(sql`SELECT RELEASE_LOCK('snow_migrate')`).catch(() => {});
   }

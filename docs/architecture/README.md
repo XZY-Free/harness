@@ -447,6 +447,8 @@ Agent 默认全员可用，也可按部门、用户组、岗位角色或用户�
 | [conversations.md](./conversations.md) | Thread、Turn、Event 与跨端连续性 |
 | [api-and-events.md](./api-and-events.md) | HTTP API、Event 与幂等边界 |
 | [security.md](./security.md) | 身份、授权、凭证与审计 |
+| [authorization-review-2026-09-14.md](./authorization-review-2026-09-14.md) | 权限现状梳理与建设建议（尚未实现） |
+| [authorization-redesign.md](./authorization-redesign.md) | 开发阶段权限重塑目标、产品调研与交付安排（尚未实现） |
 | [persistence.md](./persistence.md) | MySQL 数据模型与约束 |
 | [contracts-and-conformance.md](./contracts-and-conformance.md) | 机器合同与一致性验证 |
 | [decision-ledger.md](./decision-ledger.md) | 已确认决定与待确认边界 |

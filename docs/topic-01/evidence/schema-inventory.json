@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "authority": "lib/persistence/schema/index.ts",
   "counts": {
-    "canonical": 129,
-    "runtimeLoaded": 129,
-    "migration": 129,
-    "freshDbPlanned": 129
+    "canonical": 134,
+    "runtimeLoaded": 134,
+    "migration": 134,
+    "freshDbPlanned": 134
   },
   "freshDbVerification": {
     "status": "planned-for-batch-07",
@@ -44,12 +44,16 @@
       "domainOwner": "agents",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/persistence/agent-contract-store.ts",
         "lib/agents/persistence/agent-queries.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts"
       ],
       "productionReaders": [
+        "app/admin/api/v1/deployment-route-sets/route.ts",
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/calls/application/agent-call-projection.ts",
         "lib/agents/calls/application/host-control-policy.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
@@ -62,6 +66,9 @@
         "lib/catalog/projector.ts",
         "lib/control-plane/persistence/mysql-revision-execution-evidence-reader.ts",
         "lib/identity/enterprise-user-access-policy.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/runtime/harness-loop/build-production-capability-catalog.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
@@ -91,10 +98,14 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/agents.ts#agentTable",
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/persistence/agent-contract-store.ts",
         "lib/agents/persistence/agent-queries.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
+        "app/admin/api/v1/deployment-route-sets/route.ts",
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/calls/application/agent-call-projection.ts",
         "lib/agents/calls/application/host-control-policy.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
@@ -107,11 +118,15 @@
         "lib/catalog/projector.ts",
         "lib/control-plane/persistence/mysql-revision-execution-evidence-reader.ts",
         "lib/identity/enterprise-user-access-policy.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/runtime/harness-loop/build-production-capability-catalog.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
         "scripts/verify-fresh-db.mts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -180,7 +195,8 @@
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/event-ingress-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -233,7 +249,8 @@
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/runtime/event-ingress-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -299,7 +316,8 @@
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/observability/harness-execution-trace.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -354,7 +372,8 @@
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -402,7 +421,8 @@
         "lib/agents/persistence/agent-contract-store.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/runtime/harness-loop/build-production-capability-catalog.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -450,7 +470,8 @@
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/runtime/conformance/build-external-conformance-probe-context.ts",
         "lib/runtime/harness-loop/build-production-capability-catalog.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -520,7 +541,8 @@
         "lib/agents/persistence/agent-revision-queries.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/runtime/harness-loop/build-production-capability-catalog.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -586,7 +608,8 @@
         "lib/identity/enterprise-user-access-policy.ts",
         "lib/routes/persistence/mysql-route-set-activation-store.ts",
         "lib/routes/projection/build-route-eligibility.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -642,7 +665,8 @@
         "lib/agents/calls/persistence/mysql-agent-session-binding-store.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/runtime/event-ingress-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -679,6 +703,8 @@
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/i18n.ts",
         "lib/identity/action-codes.ts",
+        "lib/identity/permission-directory.ts",
+        "lib/identity/role-templates.ts",
         "lib/identity/workload-token.ts",
         "lib/routes/projection/projection-event-handlers.ts",
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
@@ -726,12 +752,15 @@
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/i18n.ts",
         "lib/identity/action-codes.ts",
+        "lib/identity/permission-directory.ts",
+        "lib/identity/role-templates.ts",
         "lib/identity/workload-token.ts",
         "lib/routes/projection/projection-event-handlers.ts",
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
         "lib/skill/sync/sync-service.ts",
         "lib/studio/nav-visibility.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -788,7 +817,8 @@
         "lib/artifacts/persistence/mysql-artifact-attestation-store.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -839,7 +869,8 @@
         "lib/artifacts/persistence/mysql-artifact-attestation-store.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -912,7 +943,8 @@
         "lib/identity/recovery-drill-queries.ts",
         "lib/identity/security-incident-queries.ts",
         "lib/runtime/continuation/production-invocation-continuation-worker.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -955,7 +987,8 @@
         "lib/persistence/schema/identity.ts#authSession",
         "lib/identity/local-authentication.ts",
         "lib/identity/local-authentication.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -993,7 +1026,8 @@
         "lib/persistence/schema/branding.ts#brandChangeAudit",
         "lib/branding/brand-queries.ts",
         "lib/branding/brand-audit-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1029,7 +1063,8 @@
         "lib/persistence/schema/branding.ts#brandSettings",
         "lib/branding/brand-queries.ts",
         "lib/branding/brand-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1076,7 +1111,8 @@
         "lib/persistence/schema/tool-call.ts#capabilityReviewTable",
         "lib/capability/risk-review-queries.ts",
         "lib/capability/risk-review-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1122,7 +1158,8 @@
         "lib/capability/capability-use-queries.ts",
         "lib/capability/capability-use-queries.ts",
         "lib/observability/harness-execution-trace.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1170,7 +1207,8 @@
         "lib/catalog/projector.ts",
         "lib/catalog/catalog-queries.ts",
         "lib/catalog/projector.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1209,7 +1247,8 @@
         "lib/persistence/schema/catalog.ts#catalogRevisionTable",
         "lib/catalog/projector.ts",
         "lib/catalog/projector.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1256,7 +1295,8 @@
         "lib/capability/tool-queries.ts",
         "lib/capability/application/apply-tool-call.ts",
         "lib/capability/tool-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1304,7 +1344,8 @@
         "lib/persistence/schema/context-checkpoint.ts#contextCheckpoint",
         "lib/context/checkpoint-queries.ts",
         "lib/context/checkpoint-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1356,7 +1397,8 @@
         "lib/capability/tool-execution-worker.ts",
         "lib/control-plane/events/outbox-relay-worker.ts",
         "scripts/verify-fresh-db.mts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1369,6 +1411,7 @@
       "domainOwner": "control-plane",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
@@ -1409,6 +1452,7 @@
       "decision": "keep",
       "evidence": [
         "lib/control-plane/events/control-plane-outbox.ts#controlPlaneOutboxEvent",
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/agents/persistence/mysql-agent-publication-store.ts",
         "lib/agents/persistence/mysql-agent-withdrawal-store.ts",
@@ -1422,7 +1466,8 @@
         "lib/capability/tool-execution-worker.ts",
         "lib/control-plane/events/outbox-relay-worker.ts",
         "scripts/verify-fresh-db.mts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1474,7 +1519,8 @@
         "lib/capability/tool-queries.ts",
         "lib/identity/resolve-outbound-credential.ts",
         "lib/runtime/credentials/resolve-outbound-runtime-auth.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1521,7 +1567,8 @@
         "lib/persistence/schema/deletion-request.ts#deletionRequestTable",
         "lib/identity/deletion-request-queries.ts",
         "lib/identity/deletion-request-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1569,7 +1616,8 @@
         "lib/identity/deletion-request-queries.ts",
         "lib/identity/deletion-request-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1630,7 +1678,8 @@
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/routes/projection/mysql-route-eligibility-source-reader.ts",
         "scripts/routes-rebuild-eligibility.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1647,6 +1696,7 @@
         "lib/routes/persistence/mysql-route-set-activation-store.ts"
       ],
       "productionReaders": [
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/routes/application/deployment-route-service.ts",
@@ -1685,6 +1735,7 @@
         "lib/persistence/schema/deployment-route.ts#deploymentRouteSetTable",
         "lib/routes/application/deployment-route-service.ts",
         "lib/routes/persistence/mysql-route-set-activation-store.ts",
+        "lib/agents/application/delete-agent-registration.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/routes/application/deployment-route-service.ts",
@@ -1693,7 +1744,8 @@
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/routes/projection/mysql-route-eligibility-source-reader.ts",
         "scripts/routes-rebuild-eligibility.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1717,6 +1769,7 @@
         "lib/desktop-bridge/bridge-server.ts",
         "lib/identity/device-queries.ts",
         "lib/identity/device-signature.ts",
+        "lib/runtime/resolve-tool-execution-target.ts",
         "lib/workspace/desktop-workspace-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -1755,8 +1808,10 @@
         "lib/desktop-bridge/bridge-server.ts",
         "lib/identity/device-queries.ts",
         "lib/identity/device-signature.ts",
+        "lib/runtime/resolve-tool-execution-target.ts",
         "lib/workspace/desktop-workspace-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1809,7 +1864,8 @@
         "lib/capability/effect-queries.ts",
         "lib/capability/tool-execution-queries.ts",
         "lib/capability/tool-execution-worker.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1854,7 +1910,8 @@
         "lib/persistence/schema/effect.ts#effectTargetTable",
         "lib/capability/effect-queries.ts",
         "lib/capability/effect-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1896,7 +1953,8 @@
         "lib/persistence/schema/identity.ts#enterpriseProfileSyncState",
         "lib/identity/enterprise-user-profile-queries.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1944,7 +2002,8 @@
         "lib/persistence/schema/environment.ts#environmentChangeRequestTable",
         "lib/environment/environment-queries.ts",
         "lib/environment/environment-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -1993,7 +2052,8 @@
         "lib/persistence/schema/environment.ts#environmentDefinitionTable",
         "lib/environment/environment-queries.ts",
         "lib/environment/environment-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2045,7 +2105,8 @@
         "lib/environment/environment-queries.ts",
         "lib/conversations/environment-takeover-queries.ts",
         "lib/environment/environment-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2095,7 +2156,8 @@
         "lib/conversations/projection-operations.ts",
         "lib/conversations/projection-checkpoint-queries.ts",
         "lib/conversations/projection-operations.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2136,7 +2198,8 @@
         "lib/conversations/projection-checkpoint-queries.ts",
         "lib/conversations/projection-checkpoint-queries.ts",
         "lib/conversations/projection-operations.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2214,7 +2277,8 @@
         "lib/executions/persistence/execution-binding-queries.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/runtime/capabilities/turn-controls.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2261,7 +2325,8 @@
         "lib/conversations/environment-takeover-queries.ts",
         "lib/environment/environment-queries.ts",
         "lib/runtime/persistence/invocation-execution-lease.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2305,7 +2370,8 @@
         "lib/persistence/schema/file-change.ts#fileChangeTable",
         "lib/capability/artifact-queries.ts",
         "lib/capability/artifact-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2350,7 +2416,8 @@
         "lib/persistence/schema/filesystem-checkpoint.ts#filesystemCheckpointTable",
         "lib/capability/artifact-queries.ts",
         "lib/capability/artifact-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2392,7 +2459,8 @@
         "lib/persistence/schema/conversation.ts#goalTable",
         "lib/conversations/goal-queries.ts",
         "lib/conversations/goal-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2443,7 +2511,8 @@
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/governance/governance-repository.ts",
         "lib/governance/publish-governance-config.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2493,7 +2562,8 @@
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/governance/governance-repository.ts",
         "lib/governance/publish-governance-config.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2542,7 +2612,8 @@
         "lib/persistence/schema/permission.ts#grantTable",
         "lib/permission/permission-queries.ts",
         "lib/permission/permission-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2587,7 +2658,8 @@
         "lib/runtime/persistence/hosted-provisioning-request-record.ts#hostedProvisioningRequestTable",
         "lib/runtime/persistence/mysql-hosted-provisioning-request-store.ts",
         "lib/runtime/persistence/mysql-hosted-provisioning-request-store.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2661,7 +2733,8 @@
         "lib/runtime/persistence/mysql-runtime-conformance-run-store.ts",
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
         "lib/runtime/persistence/mysql-runtime-withdrawal-store.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2705,7 +2778,8 @@
         "lib/persistence/schema/security-incident.ts#incidentContainmentTable",
         "lib/identity/security-incident-queries.ts",
         "lib/identity/security-incident-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2804,7 +2878,8 @@
         "lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/workspace/workspace-write-lock-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2852,7 +2927,8 @@
         "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/runtime/invocation-attempt-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2921,7 +2997,8 @@
         "lib/runtime/command-dispatch-gateway.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -2988,7 +3065,8 @@
         "lib/job/job-event-queries.ts",
         "lib/job/job-queries.ts",
         "lib/job/job-result-projection-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3034,7 +3112,8 @@
         "lib/job/job-control-queries.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-control-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3084,7 +3163,8 @@
         "lib/job/job-event-queries.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-event-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3129,7 +3209,8 @@
         "lib/persistence/schema/job.ts#jobResultProjectionTable",
         "lib/job/job-result-projection-queries.ts",
         "lib/job/job-result-projection-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3174,7 +3255,8 @@
         "lib/persistence/schema/knowledge.ts#knowledgeBase",
         "lib/context/knowledge-queries.ts",
         "lib/context/knowledge-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3216,7 +3298,8 @@
         "lib/persistence/schema/knowledge.ts#knowledgeChunk",
         "lib/context/knowledge-queries.ts",
         "lib/context/knowledge-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3263,7 +3346,8 @@
         "lib/persistence/schema/knowledge.ts#knowledgeDocument",
         "lib/context/knowledge-queries.ts",
         "lib/context/knowledge-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3309,7 +3393,8 @@
         "lib/persistence/schema/knowledge.ts#knowledgeDocumentRevision",
         "lib/context/knowledge-queries.ts",
         "lib/context/knowledge-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3352,7 +3437,8 @@
         "lib/persistence/schema/knowledge.ts#knowledgeIndex",
         "lib/context/knowledge-queries.ts",
         "lib/context/knowledge-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3400,7 +3486,8 @@
         "lib/identity/legal-hold-queries.ts",
         "lib/identity/legal-hold-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3445,7 +3532,8 @@
         "lib/persistence/schema/identity.ts#localCredential",
         "lib/identity/local-authentication.ts",
         "lib/identity/local-authentication.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3499,7 +3587,8 @@
         "lib/persistence/schema/memory.ts#memoryCandidate",
         "lib/context/memory-queries.ts",
         "lib/context/memory-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3549,7 +3638,8 @@
         "lib/context/memory-queries.ts",
         "lib/context/memory-queries.ts",
         "lib/db/schemas/json-columns.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3590,7 +3680,8 @@
         "lib/persistence/schema/memory.ts#memorySource",
         "lib/context/memory-queries.ts",
         "lib/context/memory-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3634,7 +3725,8 @@
         "lib/persistence/schema/conversation.ts#pendingInputTable",
         "lib/conversations/pending-input-queries.ts",
         "lib/conversations/pending-input-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3680,7 +3772,190 @@
         "lib/persistence/schema/permission.ts#permissionDecisionTable",
         "lib/permission/permission-queries.ts",
         "lib/permission/permission-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "PermissionGroup",
+      "schemaDeclaration": "lib/persistence/schema/authorization.ts#permissionGroup",
+      "migrationSource": [
+        "drizzle/0001_permissions.sql"
+      ],
+      "domainOwner": "authorization",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "productionReaders": [
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/authorization.ts#permissionGroup 是 PermissionGroup 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`principalId` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`source` varchar(160) NOT NULL DEFAULT 'local'",
+        "`version` int NOT NULL DEFAULT 1",
+        "CONSTRAINT `PermissionGroup_principalId` PRIMARY KEY(`principalId`)",
+        "ALTER TABLE `PermissionGroup` ADD CONSTRAINT `PermissionGroup_principalId_PrincipalBinding_id_fk` FOREIGN KEY (`principalId`) REFERENCES `PrincipalBinding`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `PermissionGroup` ADD CONSTRAINT `PermissionGroup_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/authorization.ts#permissionGroup",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts",
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts",
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "PermissionGroupMember",
+      "schemaDeclaration": "lib/persistence/schema/authorization.ts#permissionGroupMember",
+      "migrationSource": [
+        "drizzle/0001_permissions.sql"
+      ],
+      "domainOwner": "authorization",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "productionReaders": [
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/authorization.ts#permissionGroupMember 是 PermissionGroupMember 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`groupId` varchar(36) NOT NULL",
+        "`userId` varchar(36) NOT NULL",
+        "CONSTRAINT `PermissionGroupMember_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `PermissionGroupMember_uq` UNIQUE(`tenantId`,`groupId`,`userId`)",
+        "ALTER TABLE `PermissionGroupMember` ADD CONSTRAINT `PermissionGroupMember_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `PermissionGroupMember` ADD CONSTRAINT `PermissionGroupMember_groupId_PermissionGroup_principalId_fk` FOREIGN KEY (`groupId`) REFERENCES `PermissionGroup`(`principalId`) ON DELETE no action ON UPDATE no action"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/authorization.ts#permissionGroupMember",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "PermissionRole",
+      "schemaDeclaration": "lib/persistence/schema/authorization.ts#permissionRole",
+      "migrationSource": [
+        "drizzle/0001_permissions.sql"
+      ],
+      "domainOwner": "authorization",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "productionReaders": [
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/authorization.ts#permissionRole 是 PermissionRole 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`name` varchar(128) NOT NULL",
+        "`permissions` json NOT NULL",
+        "`version` int NOT NULL DEFAULT 1",
+        "CONSTRAINT `PermissionRole_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `PermissionRole_tenant_name_uq` UNIQUE(`tenantId`,`name`)",
+        "ALTER TABLE `PermissionRole` ADD CONSTRAINT `PermissionRole_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/authorization.ts#permissionRole",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-management.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "PermissionRoleAssignment",
+      "schemaDeclaration": "lib/persistence/schema/authorization.ts#permissionRoleAssignment",
+      "migrationSource": [
+        "drizzle/0001_permissions.sql"
+      ],
+      "domainOwner": "authorization",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/db/seed.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "productionReaders": [
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "canonical-entity",
+      "authorityStatement": "lib/persistence/schema/authorization.ts#permissionRoleAssignment 是 PermissionRoleAssignment 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`principalId` varchar(36) NOT NULL",
+        "`roleKey` varchar(96) NOT NULL",
+        "`source` varchar(128) NOT NULL DEFAULT 'local'",
+        "CONSTRAINT `PermissionRoleAssignment_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `PermissionRoleAssignment_uq` UNIQUE(`tenantId`,`principalId`,`roleKey`,`source`)",
+        "ALTER TABLE `PermissionRoleAssignment` ADD CONSTRAINT `PermissionRoleAssignment_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `PermissionRoleAssignment` ADD CONSTRAINT `PermissionRoleAssignment_principalId_PrincipalBinding_id_fk` FOREIGN KEY (`principalId`) REFERENCES `PrincipalBinding`(`id`) ON DELETE no action ON UPDATE no action"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/authorization.ts#permissionRoleAssignment",
+        "lib/db/seed.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-management.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3729,7 +4004,8 @@
         "lib/permission/policy-queries.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/permission/policy-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3782,7 +4058,8 @@
         "lib/executions/application/resolve-binding-governance.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/permission/policy-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3834,7 +4111,8 @@
         "lib/executions/application/resolve-binding-governance.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/permission/policy-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3847,12 +4125,19 @@
       "domainOwner": "identity",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts",
         "lib/identity/principal-binding-queries.ts"
       ],
       "productionReaders": [
-        "lib/identity/principal-binding-queries.ts",
-        "lib/identity/role-action-queries.ts",
-        "lib/identity/settings-queries.ts"
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "app/studio/api/settings/users/[id]/roles/route.ts",
+        "lib/db/seed.ts",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
+        "lib/identity/principal-binding-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "binding",
@@ -3876,11 +4161,19 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/identity.ts#principalBinding",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/permission-management.ts",
         "lib/identity/principal-binding-queries.ts",
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "app/studio/api/settings/users/[id]/roles/route.ts",
+        "lib/db/seed.ts",
+        "lib/identity/enterprise-permission-groups.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
         "lib/identity/principal-binding-queries.ts",
-        "lib/identity/role-action-queries.ts",
-        "lib/identity/settings-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3926,7 +4219,8 @@
         "lib/conversations/projection-checkpoint-queries.ts",
         "lib/conversations/projection-operations.ts",
         "lib/conversations/projector.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -3988,7 +4282,8 @@
         "lib/publications/persistence/publication-record-queries.ts",
         "lib/routes/projection/mysql-route-eligibility-source-reader.ts",
         "lib/runtime/persistence/mysql-runtime-withdrawal-store.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4036,7 +4331,8 @@
         "lib/persistence/schema/recovery-drill.ts#recoveryDrillTable",
         "lib/identity/recovery-drill-queries.ts",
         "lib/identity/recovery-drill-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4080,7 +4376,63 @@
         "lib/persistence/schema/recovery-drill.ts#recoveryDrillCheckTable",
         "lib/identity/recovery-drill-queries.ts",
         "lib/identity/recovery-drill-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
+      ],
+      "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
+    },
+    {
+      "physicalTableName": "ResourceAccessPolicy",
+      "schemaDeclaration": "lib/persistence/schema/authorization.ts#resourceAccessPolicy",
+      "migrationSource": [
+        "drizzle/0001_permissions.sql"
+      ],
+      "domainOwner": "authorization",
+      "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
+      "productionWriters": [
+        "lib/agents/persistence/agent-contract-store.ts",
+        "lib/agents/persistence/agent-queries.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "productionReaders": [
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts"
+      ],
+      "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
+      "authorityKind": "binding",
+      "authorityStatement": "lib/persistence/schema/authorization.ts#resourceAccessPolicy 是 ResourceAccessPolicy 的唯一物理 Schema Authority",
+      "accessException": null,
+      "duplicateCandidates": [],
+      "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
+      "constraints": [
+        "`id` varchar(36) NOT NULL",
+        "`tenantId` varchar(36) NOT NULL",
+        "`resourceType` varchar(64) NOT NULL",
+        "`resourceId` varchar(36) NOT NULL",
+        "`mode` varchar(16) NOT NULL DEFAULT 'inherit'",
+        "`principals` json NOT NULL",
+        "`collaborators` json NOT NULL",
+        "`version` int NOT NULL DEFAULT 1",
+        "CONSTRAINT `ResourceAccessPolicy_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `ResourceAccessPolicy_resource_uq` UNIQUE(`tenantId`,`resourceType`,`resourceId`)",
+        "ALTER TABLE `ResourceAccessPolicy` ADD CONSTRAINT `ResourceAccessPolicy_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;"
+      ],
+      "decision": "keep",
+      "evidence": [
+        "lib/persistence/schema/authorization.ts#resourceAccessPolicy",
+        "lib/agents/persistence/agent-contract-store.ts",
+        "lib/agents/persistence/agent-queries.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-management.ts",
+        "app/studio/api/agents/[agent_id]/access/route.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4126,7 +4478,8 @@
         "lib/persistence/schema/retention-policy.ts#retentionPolicyTable",
         "lib/identity/retention-policy-queries.ts",
         "lib/identity/retention-policy-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4139,12 +4492,10 @@
       "domainOwner": "authorization",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
-        "lib/identity/role-action-queries.ts",
-        "lib/identity/settings-queries.ts"
+        "lib/identity/migrate-legacy-permissions.ts"
       ],
       "productionReaders": [
-        "lib/identity/role-action-queries.ts",
-        "lib/identity/settings-queries.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
         "scripts/verify-fresh-db.mts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -4170,12 +4521,11 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/authorization.ts#roleActionBinding",
-        "lib/identity/role-action-queries.ts",
-        "lib/identity/settings-queries.ts",
-        "lib/identity/role-action-queries.ts",
-        "lib/identity/settings-queries.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
+        "lib/identity/migrate-legacy-permissions.ts",
         "scripts/verify-fresh-db.mts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4239,7 +4589,8 @@
         "lib/routes/persistence/route-admin-reader.ts",
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/routes/projection/mysql-route-eligibility-source-reader.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4317,7 +4668,8 @@
         "lib/routes/persistence/mysql-route-eligibility-resolution-store.ts",
         "lib/routes/persistence/route-admin-reader.ts",
         "lib/routes/projection/mysql-route-eligibility-store.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4389,7 +4741,8 @@
         "lib/routes/persistence/route-admin-reader.ts",
         "lib/routes/projection/build-route-eligibility.ts",
         "lib/routes/projection/mysql-route-eligibility-source-reader.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4456,7 +4809,8 @@
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
         "lib/runtime/persistence/mysql-runtime-withdrawal-store.ts",
         "lib/runtime/persistence/runtime-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4509,7 +4863,8 @@
         "lib/capability/artifact-queries.ts",
         "lib/capability/artifact-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4556,7 +4911,8 @@
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
         "lib/runtime/persistence/runtime-conformance-evidence-reader.ts",
         "lib/runtime/provisioning/runtime-conformance-runs.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4625,7 +4981,8 @@
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
         "lib/runtime/persistence/runtime-conformance-evidence-reader.ts",
         "lib/runtime/provisioning/runtime-conformance-runs.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4674,7 +5031,8 @@
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/recovery-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4753,7 +5111,8 @@
         "lib/runtime/persistence/mysql-runtime-publication-store.ts",
         "lib/runtime/persistence/mysql-runtime-withdrawal-store.ts",
         "lib/runtime/persistence/runtime-revision-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4797,7 +5156,8 @@
         "lib/persistence/schema/executions.ts#runtimeSessionBindingTable",
         "lib/runtime/session-binding-queries.ts",
         "lib/runtime/session-binding-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4846,7 +5206,8 @@
         "lib/persistence/schema/security-incident.ts#securityIncidentTable",
         "lib/identity/security-incident-queries.ts",
         "lib/identity/security-incident-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4898,7 +5259,8 @@
         "lib/capability/skill-queries.ts",
         "lib/capability/skill-studio-queries.ts",
         "lib/catalog/projector.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4948,7 +5310,8 @@
         "lib/capability/skill-sync-queries.ts",
         "lib/capability/skill-studio-queries.ts",
         "lib/capability/skill-sync-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -4994,7 +5357,8 @@
         "lib/capability/skill-queries.ts",
         "lib/capability/skill-queries.ts",
         "lib/capability/skill-studio-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5014,6 +5378,8 @@
         "app/admin/api/v1/operations/gateway-protection/route.ts",
         "lib/db/seed.ts",
         "lib/identity/local-authentication.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
         "lib/identity/prepare-enterprise-user-context.ts",
         "lib/identity/resolver.ts",
         "lib/identity/tenant-bootstrap.ts",
@@ -5045,13 +5411,16 @@
         "app/admin/api/v1/operations/gateway-protection/route.ts",
         "lib/db/seed.ts",
         "lib/identity/local-authentication.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
         "lib/identity/prepare-enterprise-user-context.ts",
         "lib/identity/resolver.ts",
         "lib/identity/tenant-bootstrap.ts",
         "lib/identity/tenant-queries.ts",
         "scripts/e2e-bootstrap.ts",
         "scripts/verify-fresh-db.mts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5115,6 +5484,7 @@
         "`id` varchar(36) NOT NULL",
         "`tenantId` varchar(36) NOT NULL",
         "`ownerUserId` varchar(36) NOT NULL",
+        "`toolPermissionMode` enum('auto','ask','full_access') DEFAULT 'auto' NOT NULL",
         "`lifecycleState` enum('active','archived','deleted') NOT NULL DEFAULT 'active'",
         "`lastActivityAt` datetime(3) NOT NULL",
         "`lastTurnSequence` bigint NOT NULL DEFAULT 0",
@@ -5169,7 +5539,8 @@
         "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/runtime/retry/runtime-dispatch-retry-worker.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5188,6 +5559,7 @@
         "lib/runtime/dispatcher.ts"
       ],
       "productionReaders": [
+        "app/api/v1/threads/[thread_id]/turns/[turn_id]/activity/route.ts",
         "lib/agents/calls/application/project-host-actions.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/regenerate-queries.ts",
@@ -5230,6 +5602,7 @@
         "lib/conversations/thread-queries.ts",
         "lib/conversations/turn-queries.ts",
         "lib/runtime/dispatcher.ts",
+        "app/api/v1/threads/[thread_id]/turns/[turn_id]/activity/route.ts",
         "lib/agents/calls/application/project-host-actions.ts",
         "lib/conversations/fork-queries.ts",
         "lib/conversations/regenerate-queries.ts",
@@ -5240,7 +5613,8 @@
         "lib/observability/harness-execution-trace.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5266,6 +5640,7 @@
         "lib/runtime/event-ingress-queries.ts"
       ],
       "productionReaders": [
+        "app/api/v1/threads/[thread_id]/turns/[turn_id]/activity/route.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/thread-item-queries.ts",
         "lib/conversations/turn-queries.ts",
@@ -5318,6 +5693,7 @@
         "lib/runtime/application/production-resume-harness-invocation.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
+        "app/api/v1/threads/[thread_id]/turns/[turn_id]/activity/route.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/thread-item-queries.ts",
         "lib/conversations/turn-queries.ts",
@@ -5330,7 +5706,8 @@
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/harness-loop/mysql-recovery-port.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5376,7 +5753,8 @@
         "lib/conversations/projector.ts",
         "lib/conversations/projector.ts",
         "lib/conversations/read-model-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5429,7 +5807,8 @@
         "lib/conversations/fork-queries.ts",
         "lib/conversations/shared-budget-queries.ts",
         "lib/conversations/thread-relation-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5481,7 +5860,8 @@
         "lib/capability/application/apply-tool-call.ts",
         "lib/capability/tool-queries.ts",
         "lib/catalog/projector.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5549,7 +5929,8 @@
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/permission-queries.ts",
         "lib/permission/user-action-expiry-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5562,9 +5943,11 @@
       "domainOwner": "tool-execution",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
+        "lib/capability/desktop-tool-dispatch.ts",
         "lib/capability/tool-execution-queries.ts"
       ],
       "productionReaders": [
+        "lib/capability/desktop-tool-dispatch.ts",
         "lib/capability/tool-execution-queries.ts"
       ],
       "lifecycle": "由生产写入者创建不可变事实，并按领域保留策略归档或清理",
@@ -5594,9 +5977,12 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/tool-execution.ts#toolExecutionAttemptTable",
+        "lib/capability/desktop-tool-dispatch.ts",
         "lib/capability/tool-execution-queries.ts",
+        "lib/capability/desktop-tool-dispatch.ts",
         "lib/capability/tool-execution-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5612,6 +5998,7 @@
         "lib/capability/tool-execution-queries.ts"
       ],
       "productionReaders": [
+        "lib/capability/desktop-tool-dispatch.ts",
         "lib/capability/tool-execution-queries.ts",
         "lib/capability/tool-execution-worker.ts"
       ],
@@ -5644,9 +6031,11 @@
       "evidence": [
         "lib/persistence/schema/tool-execution.ts#toolExecutionBindingTable",
         "lib/capability/tool-execution-queries.ts",
+        "lib/capability/desktop-tool-dispatch.ts",
         "lib/capability/tool-execution-queries.ts",
         "lib/capability/tool-execution-worker.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5697,7 +6086,8 @@
         "lib/capability/application/apply-tool-call.ts",
         "lib/capability/tool-queries.ts",
         "lib/catalog/projector.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5746,7 +6136,8 @@
         "lib/capability/application/apply-tool-call.ts",
         "lib/capability/tool-execution-worker.ts",
         "lib/capability/tool-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5771,6 +6162,7 @@
         "lib/runtime/dispatcher.ts",
         "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
+        "lib/runtime/invocation-queries.ts",
         "lib/runtime/recovery-queries.ts"
       ],
       "productionReaders": [
@@ -5830,6 +6222,7 @@
         "lib/runtime/dispatcher.ts",
         "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/event-ingress-queries.ts",
+        "lib/runtime/invocation-queries.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/capability/application/apply-tool-call.ts",
@@ -5850,7 +6243,8 @@
         "lib/runtime/event-ingress-queries.ts",
         "lib/runtime/invocation-queries.ts",
         "lib/runtime/recovery-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5900,7 +6294,8 @@
         "lib/conversations/projector.ts",
         "lib/conversations/projector.ts",
         "lib/conversations/read-model-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -5914,12 +6309,14 @@
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts"
       ],
       "productionReaders": [
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/permission/user-action-expiry-queries.ts",
@@ -5959,17 +6356,20 @@
       "evidence": [
         "lib/persistence/schema/user-action-request.ts#userActionRequestTable",
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts",
         "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+        "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts",
         "lib/runtime/continuation/production-invocation-continuation-worker.ts",
         "lib/runtime/event-ingress-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6015,7 +6415,8 @@
         "lib/persistence/schema/identity.ts#userExtensionAttribute",
         "lib/identity/enterprise-user-profile-queries.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6033,12 +6434,15 @@
       "productionReaders": [
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/identity/accept-enterprise-profile-observation.ts",
+        "lib/identity/enterprise-permission-groups.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
         "lib/identity/local-authentication.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
         "lib/identity/resolver.ts",
-        "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",
         "lib/studio/admin-audit.ts",
+        "scripts/register-builtin-tools.ts",
         "scripts/verify-fresh-db.mts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -6067,14 +6471,18 @@
         "lib/identity/user-identity-queries.ts",
         "lib/agents/calls/persistence/mysql-agent-call-store.ts",
         "lib/identity/accept-enterprise-profile-observation.ts",
+        "lib/identity/enterprise-permission-groups.ts",
         "lib/identity/enterprise-user-profile-queries.ts",
         "lib/identity/local-authentication.ts",
+        "lib/identity/permission-context.ts",
+        "lib/identity/permission-management.ts",
         "lib/identity/resolver.ts",
-        "lib/identity/settings-queries.ts",
         "lib/identity/user-identity-queries.ts",
         "lib/studio/admin-audit.ts",
+        "scripts/register-builtin-tools.ts",
         "scripts/verify-fresh-db.mts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6132,7 +6540,8 @@
         "lib/publications/persistence/publication-evidence-reader.ts",
         "lib/publications/persistence/publication-record-queries.ts",
         "lib/runtime/persistence/mysql-runtime-withdrawal-store.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6178,7 +6587,8 @@
         "lib/identity/workload-token-revocation-queries.ts",
         "app/admin/api/v1/workload-tokens/revoked/route.ts",
         "lib/identity/workload-token-revocation-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6197,13 +6607,15 @@
       "productionReaders": [
         "app/api/v1/threads/[thread_id]/workspace/[...path]/route.ts",
         "components/studio/audit-log-table.tsx",
-        "components/studio/settings-user-role-manager.tsx",
         "components/thread/thread-header.tsx",
+        "desktop/bridge/bridge-client.ts",
         "desktop/renderer/src/desktop-renderer-app.tsx",
-        "lib/db/seed.ts",
+        "lib/capability/desktop-tool-dispatch.ts",
+        "lib/desktop/commands.ts",
         "lib/identity/action-codes.ts",
         "lib/identity/role-templates.ts",
         "lib/runtime/preview-runtime.ts",
+        "lib/runtime/resolve-tool-execution-target.ts",
         "lib/runtime/scoped-workspace-store.ts",
         "lib/skill/repo.ts",
         "lib/studio/admin-audit.ts",
@@ -6240,20 +6652,23 @@
         "lib/workspace/workspace-queries.ts",
         "app/api/v1/threads/[thread_id]/workspace/[...path]/route.ts",
         "components/studio/audit-log-table.tsx",
-        "components/studio/settings-user-role-manager.tsx",
         "components/thread/thread-header.tsx",
+        "desktop/bridge/bridge-client.ts",
         "desktop/renderer/src/desktop-renderer-app.tsx",
-        "lib/db/seed.ts",
+        "lib/capability/desktop-tool-dispatch.ts",
+        "lib/desktop/commands.ts",
         "lib/identity/action-codes.ts",
         "lib/identity/role-templates.ts",
         "lib/runtime/preview-runtime.ts",
+        "lib/runtime/resolve-tool-execution-target.ts",
         "lib/runtime/scoped-workspace-store.ts",
         "lib/skill/repo.ts",
         "lib/studio/admin-audit.ts",
         "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
         "scripts/architecture-gate.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6308,7 +6723,8 @@
         "lib/conversations/turn-queries.ts",
         "lib/files/agent-attachment-access.ts",
         "lib/workspace/workspace-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6353,7 +6769,8 @@
         "lib/persistence/schema/workspace.ts#workspaceAttachmentAccessGrant",
         "lib/files/agent-attachment-access.ts",
         "lib/files/agent-attachment-access.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6399,7 +6816,8 @@
         "lib/workspace/workspace-queries.ts",
         "lib/files/agent-attachment-access.ts",
         "lib/workspace/workspace-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6450,7 +6868,8 @@
         "lib/workspace/workspace-queries.ts",
         "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6504,7 +6923,8 @@
         "lib/workspace/workspace-write-lock-queries.ts",
         "lib/conversations/environment-takeover-queries.ts",
         "lib/workspace/workspace-write-lock-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6551,7 +6971,8 @@
         "lib/persistence/schema/admin-export.ts#adminExportTable",
         "lib/admin/export-queries.ts",
         "lib/admin/export-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6594,7 +7015,8 @@
         "lib/persistence/schema/usage.ts#capacitySnapshotTable",
         "lib/operations/usage-queries.ts",
         "lib/operations/usage-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6641,7 +7063,8 @@
         "lib/persistence/schema/usage.ts#costAggregateTable",
         "lib/operations/usage-queries.ts",
         "lib/operations/usage-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6684,7 +7107,8 @@
         "lib/persistence/schema/evaluation.ts#evaluationCaseTable",
         "lib/evaluation/evaluation-queries.ts",
         "lib/evaluation/evaluation-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6730,7 +7154,8 @@
         "lib/persistence/schema/evaluation.ts#evaluationResultTable",
         "lib/evaluation/evaluation-queries.ts",
         "lib/evaluation/evaluation-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6776,7 +7201,8 @@
         "lib/persistence/schema/evaluation.ts#evaluationRunTable",
         "lib/evaluation/evaluation-queries.ts",
         "lib/evaluation/evaluation-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6821,7 +7247,8 @@
         "lib/persistence/schema/trace.ts#observationTable",
         "lib/observability/observation-queries.ts",
         "lib/observability/observation-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6865,7 +7292,8 @@
         "lib/persistence/schema/usage.ts#serviceLevelIndicatorTable",
         "lib/operations/usage-queries.ts",
         "lib/operations/usage-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6912,7 +7340,8 @@
         "lib/persistence/schema/trace.ts#spanTable",
         "lib/observability/trace-queries.ts",
         "lib/observability/trace-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -6960,7 +7389,8 @@
         "lib/persistence/schema/trace.ts#traceTable",
         "lib/observability/trace-queries.ts",
         "lib/observability/trace-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     },
@@ -7005,7 +7435,8 @@
         "lib/persistence/schema/usage.ts#usageRecordTable",
         "lib/operations/usage-queries.ts",
         "lib/operations/usage-queries.ts",
-        "drizzle/0000_initial_schema.sql"
+        "drizzle/0000_initial_schema.sql",
+        "drizzle/0001_permissions.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
     }

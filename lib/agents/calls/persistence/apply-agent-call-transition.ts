@@ -133,7 +133,15 @@ export async function applyAgentCallTransition(
   // 远端尚未正式 started 时，Call 与当前 Attempt 必须一起进入 failed，避免留下
   // “Call=queued + Attempt=failed” 的无主孤儿。运行中的流丢失仍只结束当前 Attempt，
   // 由后续恢复路径决定是否创建新 Attempt。
-  if (command.authority === "local_failure" && authority.call.state === "queued") {
+  const authorizationRevoked =
+    command.authority === "local_failure" &&
+    command.input === "call.failed" &&
+    command.errorCode === "ACTION_SCOPE_DENIED" &&
+    authority.call.state === "waiting_user";
+  if (
+    command.authority === "local_failure" &&
+    (authority.call.state === "queued" || authorizationRevoked)
+  ) {
     const mapping = await resolveMapping(tx, authority, command, now);
     if (mapping.outcome !== "ok" || !mapping.attempt) {
       return finish(tx, command, authority, now, {
@@ -161,13 +169,22 @@ export async function applyAgentCallTransition(
         and(
           eq(agentCallTable.id, command.callId),
           eq(agentCallTable.tenantId, command.tenantId),
-          eq(agentCallTable.state, "queued"),
+          eq(agentCallTable.state, authority.call.state),
           eq(agentCallTable.versionNo, beforeVersionNo),
         ),
       );
     if (updateResult[0].affectedRows !== 1) {
       throw new Error("AgentCall 本地失败 CAS 冲突，可靠接入必须重试");
     }
+    if (authorizationRevoked)
+      await appendContinuation(
+        tx,
+        authority.call,
+        command.tenantId,
+        afterVersionNo,
+        "resume_parent",
+        now,
+      );
     return finish(tx, command, authority, now, {
       outcome: "applied",
       reasonCode: "call_failure_recorded",

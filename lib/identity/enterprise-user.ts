@@ -8,12 +8,18 @@ import { computeCanonicalDigest, rfc8785Canonicalize } from "@/lib/crypto/rfc-87
 
 export const ENTERPRISE_ATTRIBUTE_KEYS = [
   "employeeNo",
+  "departmentName",
+  "buName",
+  "jobName",
+  "sourceSetId",
+
   "departmentCode",
   "buCode",
   "factoryCode",
   "jobLevel",
   "enterprisePermissions",
   "dataScopes",
+  "authorizationGroups",
 ] as const;
 
 export type EnterpriseAttributeKey = (typeof ENTERPRISE_ATTRIBUTE_KEYS)[number];
@@ -41,6 +47,41 @@ export interface EnterpriseAttributeDescriptor {
 export const ENTERPRISE_ATTRIBUTE_CATALOG: Readonly<
   Record<EnterpriseAttributeKey, EnterpriseAttributeDescriptor>
 > = {
+  departmentName: {
+    key: "departmentName",
+    valueType: "string",
+    sensitive: false,
+    agentProjectionAllowed: true,
+    includedInFingerprint: true,
+  },
+  buName: {
+    key: "buName",
+    valueType: "string",
+    sensitive: false,
+    agentProjectionAllowed: true,
+    includedInFingerprint: true,
+  },
+  jobName: {
+    key: "jobName",
+    valueType: "string",
+    sensitive: false,
+    agentProjectionAllowed: true,
+    includedInFingerprint: true,
+  },
+  sourceSetId: {
+    key: "sourceSetId",
+    valueType: "string",
+    sensitive: false,
+    agentProjectionAllowed: false,
+    includedInFingerprint: true,
+  },
+  authorizationGroups: {
+    key: "authorizationGroups",
+    valueType: "json",
+    sensitive: true,
+    agentProjectionAllowed: false,
+    includedInFingerprint: true,
+  },
   employeeNo: {
     key: "employeeNo",
     valueType: "string",

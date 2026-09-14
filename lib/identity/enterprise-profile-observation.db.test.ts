@@ -11,6 +11,9 @@ import type {
 import { getEnterpriseUserProfileFacts } from "@/lib/identity/enterprise-user-profile-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { getUserIdentityById, upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { permissionGroup, permissionGroupMember } from "@/lib/persistence/schema/authorization";
+import { principalBinding } from "@/lib/persistence/schema/identity";
+import { eq } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -128,6 +131,149 @@ describe("acceptEnterpriseProfileObservation", () => {
       freshUntil: observation.freshUntil,
       staleUntil: observation.staleUntil,
     });
+  });
+
+  it("组织业务资料持久化到扩展字段，完整快照移除旧资料且不跨租户读取", async () => {
+    const tenant = await ensureDefaultTenant();
+    const identity = await upsertUserIdentity({
+      tenantId: tenant.id,
+      externalSubject: "org-profile",
+      email: "org@example.test",
+      displayName: "组织成员",
+    });
+    const expectedSubject = {
+      tenantId: tenant.id,
+      userIdentityId: identity.id,
+      externalSubject: identity.externalSubject,
+    };
+    const attributes = {
+      employeeNo: "E-3",
+      departmentCode: "D-1",
+      departmentName: "部门一",
+      buCode: "B-1",
+      buName: "业务单元一",
+      jobName: "岗位一",
+      sourceSetId: "S-1",
+    };
+    const observation: EnterpriseProfileObservation = {
+      tenantId: tenant.id,
+      externalSubject: identity.externalSubject,
+      sourceSystem: source.sourceSystem,
+      attributes,
+      verifiedAt: new Date("2026-09-14T00:00:00Z"),
+      freshUntil: new Date("2026-09-14T00:30:00Z"),
+      staleUntil: new Date("2026-09-14T01:30:00Z"),
+    };
+    await acceptEnterpriseProfileObservation({
+      observation,
+      source,
+      expectedSubject,
+      now: observation.verifiedAt,
+    });
+    const facts = await getEnterpriseUserProfileFacts(tenant.id, identity.id);
+    expect(
+      Object.fromEntries(facts?.attributes.map((row) => [row.attributeKey, row.stringValue]) ?? []),
+    ).toEqual(attributes);
+    expect(facts?.attributes.every((row) => row.sourceSystem === source.sourceSystem)).toBe(true);
+    expect(await getEnterpriseUserProfileFacts("other-tenant", identity.id)).toBeNull();
+    const updated = {
+      ...observation,
+      attributes: { employeeNo: "E-3", departmentCode: "D-2", departmentName: "部门二" },
+      verifiedAt: new Date("2026-09-14T00:01:00Z"),
+    };
+    await acceptEnterpriseProfileObservation({
+      observation: updated,
+      source,
+      expectedSubject,
+      now: updated.verifiedAt,
+    });
+    const changed = await getEnterpriseUserProfileFacts(tenant.id, identity.id);
+    expect(
+      Object.fromEntries(
+        changed?.attributes.map((row) => [row.attributeKey, row.stringValue]) ?? [],
+      ),
+    ).toEqual(updated.attributes);
+  });
+
+  it("组织关系与资料原子同步，换源、归属变化和过期不保留旧授权关系", async () => {
+    const tenant = await ensureDefaultTenant();
+    const identity = await upsertUserIdentity({
+      tenantId: tenant.id,
+      externalSubject: "org-membership",
+      email: "member@example.test",
+      displayName: "组织成员",
+    });
+    const now = new Date();
+    const expectedSubject = {
+      tenantId: tenant.id,
+      userIdentityId: identity.id,
+      externalSubject: identity.externalSubject,
+    };
+    const observation: EnterpriseProfileObservation = {
+      tenantId: tenant.id,
+      externalSubject: identity.externalSubject,
+      sourceSystem: source.sourceSystem,
+      attributes: {
+        departmentCode: "D-1",
+        authorizationGroups: [{ kind: "department", externalId: "D-1", displayName: "部门一" }],
+      },
+      verifiedAt: now,
+      freshUntil: new Date(now.getTime() + 60000),
+      staleUntil: new Date(now.getTime() + 120000),
+    };
+    await acceptEnterpriseProfileObservation({ observation, source, expectedSubject, now });
+    const first = await db.select().from(permissionGroupMember);
+    expect(first).toHaveLength(1);
+    expect(first[0]?.validUntil).toEqual(observation.freshUntil);
+    expect(
+      (await getEnterpriseUserProfileFacts(tenant.id, identity.id))?.attributes.map(
+        (a) => a.attributeKey,
+      ),
+    ).toContain("departmentCode");
+    await acceptEnterpriseProfileObservation({ observation, source, expectedSubject, now });
+    expect(await db.select().from(permissionGroupMember)).toEqual(first);
+    const nextSource = { ...source, sourceSystem: "new-directory" };
+    const next = {
+      ...observation,
+      sourceSystem: nextSource.sourceSystem,
+      attributes: {
+        departmentCode: "D-2",
+        authorizationGroups: [{ kind: "department", externalId: "D-2", displayName: "部门二" }],
+      },
+      verifiedAt: new Date(now.getTime() + 1),
+    };
+    await acceptEnterpriseProfileObservation({
+      observation: next,
+      source: nextSource,
+      expectedSubject,
+      now: next.verifiedAt,
+    });
+    const second = await db.select().from(permissionGroupMember);
+    expect(second).toHaveLength(1);
+    expect(second[0]?.groupId).not.toBe(first[0]?.groupId);
+    const [group] = await db
+      .select()
+      .from(permissionGroup)
+      .where(eq(permissionGroup.principalId, second[0]?.groupId ?? ""));
+    expect(group?.source).toBe(`enterprise:${nextSource.sourceSystem}`);
+    const [principal] = await db
+      .select()
+      .from(principalBinding)
+      .where(eq(principalBinding.id, second[0]?.groupId ?? ""));
+    expect(principal?.displayName).toBe("部门二");
+    const stale = {
+      ...next,
+      verifiedAt: new Date(now.getTime() - 10000),
+      freshUntil: new Date(now.getTime() - 5000),
+      staleUntil: new Date(now.getTime() + 60000),
+    };
+    await acceptEnterpriseProfileObservation({
+      observation: stale,
+      source: nextSource,
+      expectedSubject,
+      now,
+    });
+    expect(await db.select().from(permissionGroupMember)).toHaveLength(0);
   });
 
   it("相同观察不得用更晚期限滑动续期", async () => {

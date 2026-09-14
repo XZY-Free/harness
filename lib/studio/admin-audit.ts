@@ -24,6 +24,7 @@ import { and, eq, inArray } from "drizzle-orm";
 
 export const STUDIO_AUDIT_ACTIONS = [
   "settings.user_roles.updated",
+  "permissions.updated",
   "policies.updated",
   "skills.published",
   "skills.rolled_back",

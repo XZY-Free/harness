@@ -38,6 +38,10 @@ import type {
 } from "@/lib/agents/domain/public-agent-contract";
 import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
 import type { PlatformContextEnvironment } from "@/lib/context/enrichment/build-invocation-context-bundle";
+import {
+  AgentCallPermissionError,
+  assertAgentInvocationPermission,
+} from "@/lib/identity/agent-call-permission";
 import { loadEnterpriseUserAccessPolicy } from "@/lib/identity/enterprise-user-access-policy";
 import { resolveOutboundCredential } from "@/lib/identity/resolve-outbound-credential";
 
@@ -262,6 +266,18 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     agentContextDigest: binding.agentContextDigest,
   });
 
+  try {
+    await assertAgentInvocationPermission(
+      tenantId,
+      call.parentInvocationId,
+      call.agentId,
+      command.contextEnvironment?.executionSubject,
+    );
+  } catch (error) {
+    if (error instanceof AgentCallPermissionError)
+      await synthesizeTerminalEvent(callId, tenantId, "call.failed", error.code, error.message);
+    throw error;
+  }
   const enterprisePolicy = await loadEnterpriseUserAccessPolicy(tenantId, binding.agentRevisionId);
   const hostControlPolicy = await loadHostControlCapabilityPolicy(
     tenantId,

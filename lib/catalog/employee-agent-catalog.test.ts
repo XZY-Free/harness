@@ -40,9 +40,9 @@ import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding, revokeActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { resourceAccessPolicy } from "@/lib/persistence/schema/authorization";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { createRouteSet } from "@/lib/routes/application/deployment-route-service";
@@ -54,6 +54,10 @@ import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
+import {
+  revokeSeededActionPermission,
+  seedActionPermission,
+} from "@/lib/test-support/seed-action-permission";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -127,7 +131,7 @@ async function seedEmployeeTenant(options: { grantInvoke?: boolean } = {}) {
   });
   let invokeBindingId: string | null = null;
   if (options.grantInvoke !== false) {
-    const invokeBinding = await grantActionBinding({
+    const invokeBinding = await seedActionPermission({
       tenantId: tenant.id,
       principalBindingId: principalBinding.id,
       actionCode: "agent.invoke",
@@ -152,6 +156,10 @@ async function seedDraftAgent(tenantId: string, ownerId: string, agentKey: strin
     ownerUserId: ownerId,
     lifecycleState: "draft",
   });
+  await db
+    .update(resourceAccessPolicy)
+    .set({ mode: "roles" })
+    .where(eq(resourceAccessPolicy.resourceId, agent.id));
   const revision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
@@ -319,7 +327,7 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     });
     const first = await seedEligibleAgent({ tenantId, ownerId, agentKey: "exact-agent-a" });
     const second = await seedEligibleAgent({ tenantId, ownerId, agentKey: "exact-agent-b" });
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.invoke",
@@ -355,7 +363,7 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     expect(firstBody.items.map((item) => item.resource_id)).toContain(agent.id);
     const firstEtag = rawEtagFrom(first);
 
-    expect(await revokeActionBinding(tenantId, invokeBindingId)).toBe(true);
+    expect(await revokeSeededActionPermission(tenantId, invokeBindingId)).toBe(true);
     const second = await callEmployeeAgentCatalog({ "if-none-match": `"${firstEtag}"` });
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as CatalogApiResponse;

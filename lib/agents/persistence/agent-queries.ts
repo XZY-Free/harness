@@ -25,6 +25,7 @@ import {
   type AgentRow,
   agentTable,
 } from "@/lib/persistence/schema/agents";
+import { resourceAccessPolicy } from "@/lib/persistence/schema/authorization";
 import { and, eq, isNull } from "drizzle-orm";
 
 /** 创建稳定 Agent 身份。 */
@@ -37,14 +38,24 @@ export async function createAgent(params: {
   lifecycleState?: AgentLifecycleState;
 }): Promise<AgentRow> {
   const id = randomUUID();
-  await db.insert(agentTable).values({
-    id,
-    tenantId: params.tenantId,
-    agentKey: params.agentKey,
-    displayName: params.displayName,
-    description: params.description ?? null,
-    ownerUserId: params.ownerUserId,
-    lifecycleState: params.lifecycleState ?? "draft",
+  await db.transaction(async (tx) => {
+    await tx.insert(agentTable).values({
+      id,
+      tenantId: params.tenantId,
+      agentKey: params.agentKey,
+      displayName: params.displayName,
+      description: params.description ?? null,
+      ownerUserId: params.ownerUserId,
+      lifecycleState: params.lifecycleState ?? "draft",
+    });
+    await tx.insert(resourceAccessPolicy).values({
+      tenantId: params.tenantId,
+      resourceType: "agent",
+      resourceId: id,
+      mode: "inherit",
+      principals: [],
+      collaborators: [],
+    });
   });
   const [row] = await db.select().from(agentTable).where(eq(agentTable.id, id)).limit(1);
   if (!row) {

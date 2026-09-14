@@ -81,6 +81,7 @@ export const AUDIT_ACTION_TYPES = [
   "security.incident",
   // Studio 管理动作同样进入 Canonical AuditEvent，不再使用第二审计账本。
   "settings.user_roles.updated",
+  "permissions.updated",
   "policies.updated",
   "skills.published",
   "skills.rolled_back",

@@ -22,11 +22,11 @@ import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { tenant } from "@/lib/persistence/schema/identity";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -58,7 +58,7 @@ async function seedRevisionCreator() {
     displayName: DEFAULT_USER_NAME,
     userIdentityId: identity.id,
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "agent.revision.create",

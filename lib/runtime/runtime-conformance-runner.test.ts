@@ -27,7 +27,6 @@ import {
   getIdempotencyRecordById,
 } from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
@@ -85,6 +84,7 @@ import {
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { createConformanceHostedApplicationService } from "@/lib/runtime/test-support/conformance-hosted-application-service";
 import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 admin-api.test.ts 一致）。
@@ -370,7 +370,7 @@ async function seedAdminWithRuntimePublish() {
     displayName: DEFAULT_USER_NAME,
     userIdentityId: identity.id,
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "runtime.publish",

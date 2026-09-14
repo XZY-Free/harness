@@ -33,6 +33,7 @@ import {
   agentCallTable,
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
+import { resourceAccessPolicy } from "@/lib/persistence/schema/authorization";
 import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
 import { credentialRefTable } from "@/lib/persistence/schema/tool";
 import {
@@ -42,6 +43,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import mysql from "mysql2/promise";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resumeAgentCall } from "./resume-agent-call";
 
 const NOW = new Date("2026-08-29T00:00:00.000Z");
 
@@ -53,7 +55,7 @@ function subjectFor(
   scenario: ExecutionScenario,
   overrides?: Partial<ExecutionSubject>,
 ): ExecutionSubject {
-  const subject = executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`);
+  const subject = executionSubjectFromUserIdentity(scenario.tenantId, scenario.userIdentityId);
   return overrides ? { ...subject, ...overrides } : subject;
 }
 
@@ -130,6 +132,75 @@ afterEach(async () => {
 });
 
 describe("startAgentCall 执行域启动", () => {
+  it("出站上下文不能替换父执行冻结的身份", async () => {
+    const scenario = await seedAgentCallExecutionScenario();
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    try {
+      await expect(
+        startAgentCall(
+          startParams(scenario, {
+            executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, "different-user"),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ACTION_SCOPE_DENIED" });
+      expect(scenario.provider.captured).toHaveLength(0);
+    } finally {
+      await scenario.provider.close();
+    }
+  });
+
+  it("调用前撤销范围时零出站并收口为失败，不遗留排队执行", async () => {
+    const scenario = await seedAgentCallExecutionScenario();
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    try {
+      await db
+        .update(resourceAccessPolicy)
+        .set({ mode: "restricted", principals: [] })
+        .where(eq(resourceAccessPolicy.resourceId, scenario.agentId));
+      await expect(startAgentCall(startParams(scenario))).rejects.toMatchObject({
+        code: "ACTION_SCOPE_DENIED",
+      });
+      expect(scenario.provider.captured).toHaveLength(0);
+      expect((await mysqlCall(scenario)).state).toBe("failed");
+    } finally {
+      await scenario.provider.close();
+    }
+  });
+  it("等待用户期间撤销范围，恢复时重新鉴权且不发送第二次请求", async () => {
+    const scenario = await seedAgentCallExecutionScenario({
+      providerScenario: "input_required",
+      contract: {
+        ...EXECUTION_FIXTURE_CONTRACT,
+        interaction: {
+          ...EXECUTION_FIXTURE_CONTRACT.interaction,
+          input_required: true,
+          resume: true,
+        },
+      },
+    });
+    trackedEnvVars.add(scenario.credentialEnvVar);
+    try {
+      await startAgentCall(startParams(scenario));
+      await vi.waitFor(async () => expect((await mysqlCall(scenario)).state).toBe("waiting_user"));
+      await db
+        .update(resourceAccessPolicy)
+        .set({ mode: "restricted", principals: [] })
+        .where(eq(resourceAccessPolicy.resourceId, scenario.agentId));
+      await expect(
+        resumeAgentCall({
+          tenantId: scenario.tenantId,
+          callId: scenario.callId,
+          text: "补充资料",
+          contextEnvironment: startParams(scenario).contextEnvironment,
+        }),
+      ).rejects.toMatchObject({ code: "ACTION_SCOPE_DENIED" });
+      expect(scenario.provider.captured).toHaveLength(1);
+      expect((await mysqlCall(scenario)).state).toBe("failed");
+    } finally {
+      await scenario.provider.close();
+    }
+  });
+
   it("用 exact binding 完成一次真实 A2A 调用：completed，父不变，无 RuntimeEventIngress 写，Attempt outbound=1/终态", async () => {
     const scenario = await seedAgentCallExecutionScenario();
     trackedEnvVars.add(scenario.credentialEnvVar);

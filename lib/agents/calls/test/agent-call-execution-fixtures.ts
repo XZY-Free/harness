@@ -41,6 +41,12 @@ import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-que
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { db } from "@/lib/db/client";
 import {
+  TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
+  createExecutionBinding,
+} from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { getUserIdentityById, upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import {
   agentCallAttemptTable,
   agentCallBindingTable,
   agentCallTable,
@@ -57,6 +63,7 @@ import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { and, eq } from "drizzle-orm";
@@ -164,6 +171,7 @@ export const NEW_LATEST_CONTRACT = {
 };
 
 export interface ExecutionScenario {
+  userIdentityId: string;
   tenantId: string;
   parentInvocationId: string;
   callId: string;
@@ -234,14 +242,40 @@ export async function seedAgentCallExecutionScenario(options?: {
 }): Promise<ExecutionScenario> {
   const now = options?.now ?? new Date("2026-08-29T00:00:00.000Z");
   const tenantId = options?.tenantId ?? (await seedTenant());
+  const identity = options?.threadOwnerUserId
+    ? await getUserIdentityById(options.threadOwnerUserId)
+    : await upsertUserIdentity({
+        tenantId,
+        externalSubject: `call-user:${randomUUID()}`,
+        email: "call-user@example.test",
+        displayName: "调用测试用户",
+      });
+  if (!identity || identity.tenantId !== tenantId) throw new Error("调用夹具需要同租户真实身份");
+  await upsertPrincipalBinding({
+    tenantId,
+    subjectType: "user",
+    externalId: identity.externalSubject,
+    userIdentityId: identity.id,
+    displayName: identity.displayName,
+  });
   const parentInvocationId = await seedInvocation(tenantId);
+  await createExecutionBinding({
+    ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
+    invocationId: parentInvocationId,
+    tenantId,
+    runtimeRevisionId: randomUUID(),
+    deploymentRouteId: randomUUID(),
+    modelProvider: "test",
+    modelId: "test",
+    executionSubject: executionSubjectFromUserIdentity(tenantId, identity.id),
+  });
   const threadId = randomUUID();
   const turnId = randomUUID();
 
   await db.insert(threadTable).values({
     id: threadId,
     tenantId,
-    ownerUserId: options?.threadOwnerUserId ?? randomUUID(),
+    ownerUserId: identity.id,
     lifecycleState: "active",
     lastActivityAt: now,
     lastTurnSequence: 1,
@@ -432,6 +466,7 @@ export async function seedAgentCallExecutionScenario(options?: {
   }
 
   return {
+    userIdentityId: identity.id,
     tenantId,
     parentInvocationId,
     callId: call.id,

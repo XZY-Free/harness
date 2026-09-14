@@ -13,11 +13,11 @@ import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { tenant as tenantTable } from "@/lib/persistence/schema/identity";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -58,7 +58,7 @@ async function seedAdmin(options?: { withRouteUpdate?: boolean }) {
     userIdentityId: identity.id,
   });
   if (options?.withRouteUpdate !== false) {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId: tenant.id,
       principalBindingId: binding.id,
       actionCode: "route.update",

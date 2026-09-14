@@ -25,6 +25,7 @@ import {
   AgentAttachmentAccessError,
   createAgentAttachmentReferences,
 } from "@/lib/files/agent-attachment-access";
+import { assertAgentSubjectPermission } from "@/lib/identity/agent-call-permission";
 import {
   EnterpriseUserContextRequirementError,
   loadEnterpriseUserAccessPolicy,
@@ -72,6 +73,11 @@ export function createAgentActionExecutor(
     await throwIfAgentActionCancelled(context.abortSignal);
 
     try {
+      await assertAgentSubjectPermission(
+        params.tenantId,
+        action.payload.agentId,
+        params.executionSubject,
+      );
       const logicalCallKey = buildAgentCallLogicalKey(action.actionId, action.payload.agentId);
       const existing = await mysqlAgentCallStore.getByLogicalCallKey({
         tenantId: params.tenantId,
@@ -304,6 +310,7 @@ function normalizeTerminalCode(code: string): string {
 }
 
 function normalizeStartCode(code: string): string {
+  if (code === "ACTION_SCOPE_DENIED") return code;
   if (
     code.includes("CLAIM_CONFLICT") ||
     code.includes("INPUT_CONFLICT") ||

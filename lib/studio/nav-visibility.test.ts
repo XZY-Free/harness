@@ -9,8 +9,9 @@
  * - NAV_ACTION_MAPPING 完整性：8 个 navId 全部覆盖
  */
 import { DEFAULT_USER_ID } from "@/lib/constants";
+import type { ActionCode } from "@/lib/identity/action-codes";
+import type { PermissionContext } from "@/lib/identity/permission-context";
 import type { Principal } from "@/lib/identity/resolver";
-import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
 import {
   NAV_ACTION_MAPPING,
   STUDIO_NAV_IDS,
@@ -18,13 +19,25 @@ import {
 } from "@/lib/studio/nav-visibility";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock listActiveActionBindingsForUser（避免触发 DB）
-vi.mock("@/lib/identity/role-action-queries", () => ({
-  listActiveActionBindingsForUser: vi.fn(),
+// 仅隔离数据加载；导航仍使用真实权限求值器，DB 行为由权限集成测试覆盖。
+vi.mock("@/lib/identity/permission-context", async (original) => ({
+  ...(await original<typeof import("@/lib/identity/permission-context")>()),
+  loadPermissionContext: vi.fn(),
 }));
-
-const { listActiveActionBindingsForUser } = await import("@/lib/identity/role-action-queries");
-
+const { loadPermissionContext } = await import("@/lib/identity/permission-context");
+function resolveBindings(grants: PermissionContext["grants"]) {
+  vi.mocked(loadPermissionContext).mockResolvedValue({
+    tenantId: "tenant-test",
+    userId: "identity-test",
+    active: true,
+    principalIds: new Set(["pb-test"]),
+    grants,
+    policies: [],
+    agents: [],
+    enterprise: null,
+    digest: "test",
+  });
+}
 function makePrincipal(externalSubject = DEFAULT_USER_ID): Principal {
   return {
     tenantId: "tenant-test",
@@ -37,35 +50,25 @@ function makePrincipal(externalSubject = DEFAULT_USER_ID): Principal {
   };
 }
 
-function makeBinding(actionCode: string): RoleActionBinding {
-  return {
-    id: `binding-${actionCode}`,
-    tenantId: "tenant-test",
-    principalBindingId: "pb-test",
-    actionCode,
-    resourceScopeJson: JSON.stringify({ type: "tenant", ids: ["*"] }),
-    validFrom: new Date(),
-    validUntil: null,
-    createdAt: new Date(),
-  } as unknown as RoleActionBinding;
+function makeBinding(actionCode: ActionCode): PermissionContext["grants"][number] {
+  return { actionCode, resourceScope: { type: "tenant", wildcard: true }, source: "测试角色" };
 }
-
 describe("computeStudioNavVisibility", () => {
   beforeEach(() => {
-    vi.mocked(listActiveActionBindingsForUser).mockReset();
+    vi.mocked(loadPermissionContext).mockReset();
   });
 
   it("旧默认用户标识也不能绕过真实权限绑定", async () => {
-    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([]);
+    resolveBindings([]);
 
     const visibility = await computeStudioNavVisibility(makePrincipal());
 
     expect(Object.values(visibility).every((visible) => visible === false)).toBe(true);
-    expect(listActiveActionBindingsForUser).toHaveBeenCalledWith("tenant-test", "identity-test");
+    expect(loadPermissionContext).toHaveBeenCalledWith("tenant-test", "identity-test");
   });
 
   it("无 binding → 全部隐藏", async () => {
-    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([]);
+    resolveBindings([]);
 
     const visibility = await computeStudioNavVisibility(makePrincipal("non-default-user"));
 
@@ -80,7 +83,7 @@ describe("computeStudioNavVisibility", () => {
   });
 
   it("agent.publish 绑定 → agents 菜单可见", async () => {
-    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([makeBinding("agent.publish")]);
+    resolveBindings([makeBinding("studio.access"), makeBinding("agent.publish")]);
 
     const visibility = await computeStudioNavVisibility(makePrincipal("non-default-user"));
 
@@ -95,7 +98,8 @@ describe("computeStudioNavVisibility", () => {
   });
 
   it("多 action 绑定 → 任意匹配的菜单可见", async () => {
-    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([
+    resolveBindings([
+      makeBinding("studio.access"),
       makeBinding("skill.create"),
       makeBinding("tool.create"),
       makeBinding("audit.export"),
@@ -120,19 +124,19 @@ describe("computeStudioNavVisibility", () => {
   });
 
   it("平台设置只随 user.manage 显示，不因 policy.publish 误显示", async () => {
-    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([makeBinding("policy.publish")]);
+    resolveBindings([makeBinding("studio.access"), makeBinding("policy.publish")]);
     expect((await computeStudioNavVisibility(makePrincipal("non-default-user"))).settings).toBe(
       false,
     );
 
-    vi.mocked(listActiveActionBindingsForUser).mockResolvedValue([makeBinding("user.manage")]);
+    resolveBindings([makeBinding("studio.access"), makeBinding("user.manage")]);
     expect((await computeStudioNavVisibility(makePrincipal("non-default-user"))).settings).toBe(
       true,
     );
   });
 
   it("查询异常 → 全部隐藏（fail-closed）", async () => {
-    vi.mocked(listActiveActionBindingsForUser).mockRejectedValue(new Error("DB down"));
+    vi.mocked(loadPermissionContext).mockRejectedValue(new Error("DB down"));
 
     const visibility = await computeStudioNavVisibility(makePrincipal("non-default-user"));
 

@@ -118,20 +118,21 @@ describe("Schema 单一 Authority", () => {
     expect(session).toContain("externalContextRef:");
   });
 
-  it("clean initial migration 只有一条，不含开发期 drop/rename 兼容链", () => {
+  it("初始基线保持不变，增量迁移连续且不引入 drop/rename 兼容链", () => {
     const migrationFiles = readdirSync(join(ROOT, "drizzle"))
       .filter((file) => /^\d{4}_.+\.sql$/.test(file))
       .sort();
-    expect(migrationFiles).toEqual(["0000_initial_schema.sql"]);
+    expect(migrationFiles[0]).toBe("0000_initial_schema.sql");
     const migration = readFileSync(join(ROOT, "drizzle", migrationFiles[0] as string), "utf8");
     expect(migration).not.toMatch(/\b(?:DROP TABLE|DROP COLUMN|RENAME TABLE|RENAME COLUMN)\b/i);
 
     const journal = JSON.parse(readFileSync(join(ROOT, "drizzle/meta/_journal.json"), "utf8")) as {
       entries: Array<{ idx: number; tag: string }>;
     };
-    expect(journal.entries).toEqual([
-      expect.objectContaining({ idx: 0, tag: "0000_initial_schema" }),
-    ]);
+    expect(journal.entries.map((entry) => `${entry.tag}.sql`)).toEqual(migrationFiles);
+    expect(journal.entries.map((entry) => entry.idx)).toEqual(
+      migrationFiles.map((_, index) => index),
+    );
   });
 
   it("Canonical Root、Runtime、Migration 与最终 manifest 完全一致", () => {
@@ -141,10 +142,14 @@ describe("Schema 单一 Authority", () => {
       counts: { canonical: number };
       tables: string[];
     };
-    const migration = readFileSync(join(ROOT, "drizzle/0000_initial_schema.sql"), "utf8");
+    const migration = readdirSync(join(ROOT, "drizzle"))
+      .filter((file) => /^\d{4}_.+\.sql$/.test(file))
+      .sort()
+      .map((file) => readFileSync(join(ROOT, "drizzle", file), "utf8"))
+      .join("\n");
     const canonical = canonicalTableNames();
 
-    expect(canonical).toHaveLength(129);
+    expect(canonical).toHaveLength(134);
     expect(runtimeTableNames()).toEqual(canonical);
     expect(migrationTableNames(migration)).toEqual(canonical);
     expect(manifest.counts.canonical).toBe(canonical.length);

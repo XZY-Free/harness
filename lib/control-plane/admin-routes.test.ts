@@ -52,7 +52,6 @@ import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixt
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { findIdempotencyRecord } from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { auditEvent, idempotencyRecord } from "@/lib/persistence/schema/control-plane";
@@ -66,6 +65,7 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -161,31 +161,31 @@ async function seedAdminWithActionBindings() {
     displayName: DEFAULT_USER_NAME,
     userIdentityId: identity.id,
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "agent.revision.create",
     resourceScope: { type: "agent", wildcard: true },
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "agent.retract",
     resourceScope: { type: "agent", wildcard: true },
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "agent.publish",
     resourceScope: { type: "agent", wildcard: true },
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "artifact.attestation.verify",
     resourceScope: { type: "artifact_type", wildcard: true },
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "route.update",
@@ -1557,7 +1557,7 @@ async function seedContractRegistrationAdmin() {
     displayName: DEFAULT_USER_NAME,
     userIdentityId: identity.id,
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: AGENT_CONTRACT_REGISTER_ACTION,

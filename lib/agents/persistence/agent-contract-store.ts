@@ -24,6 +24,7 @@ import {
   agentContractSnapshotTable,
   agentTable,
 } from "@/lib/persistence/schema/agents";
+import { resourceAccessPolicy } from "@/lib/persistence/schema/authorization";
 import { and, asc, desc, eq } from "drizzle-orm";
 
 export interface AgentContractStoreSession {
@@ -112,7 +113,16 @@ export const mysqlAgentContractStore: AgentContractStore = {
           return agent ?? null;
         },
         async insertAgent(row) {
+          if (!row.id) throw new Error("Agent 登记必须携带稳定 ID");
           await tx.insert(agentTable).values(row);
+          await tx.insert(resourceAccessPolicy).values({
+            tenantId: row.tenantId,
+            resourceType: "agent",
+            resourceId: row.id,
+            mode: "inherit",
+            principals: [],
+            collaborators: [],
+          });
         },
         async insertContractSnapshot(header, capabilities, contexts) {
           await tx.insert(agentContractSnapshotTable).values(header);

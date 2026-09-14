@@ -9,9 +9,12 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { checkActionScope } from "@/lib/identity/authorization";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import type { Principal } from "@/lib/identity/resolver";
-import { grantActionBinding, revokeActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import {
+  revokeSeededActionPermission,
+  seedActionPermission,
+} from "@/lib/test-support/seed-action-permission";
 import { Children, type ReactNode, isValidElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -71,7 +74,7 @@ describe("Studio 控制面页面的资源范围权限", () => {
       ["runtime.publish", "runtime"],
       ["route.update", "agent"],
     ] as const) {
-      await grantActionBinding({
+      await seedActionPermission({
         tenantId: principal.tenantId,
         principalBindingId: binding.id,
         actionCode,
@@ -94,13 +97,13 @@ describe("Studio 控制面页面的资源范围权限", () => {
     const reader = await seedUser("reader");
     const admin = await seedUser("other-admin");
     context.principal = reader.principal;
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId: reader.principal.tenantId,
       principalBindingId: reader.binding.id,
       actionCode: "agent.read",
       resourceScope: { type: "tenant", wildcard: true },
     });
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId: admin.principal.tenantId,
       principalBindingId: admin.binding.id,
       actionCode: "agent.contract.register",
@@ -121,7 +124,7 @@ describe("Studio 控制面页面的资源范围权限", () => {
   it("指定资源的授权允许进入操作区，但不允许写其他资源；撤销后入口关闭", async () => {
     const { principal, binding } = await seedUser("scoped-admin");
     context.principal = principal;
-    const grant = await grantActionBinding({
+    const grant = await seedActionPermission({
       tenantId: principal.tenantId,
       principalBindingId: binding.id,
       actionCode: "route.update",
@@ -136,7 +139,7 @@ describe("Studio 控制面页面的资源范围权限", () => {
         resource: { type: "agent", id: "other-agent" },
       }),
     ).toMatchObject({ allowed: false });
-    await revokeActionBinding(principal.tenantId, grant.id);
+    await revokeSeededActionPermission(principal.tenantId, grant.id);
     expect(propsFor(await OperationsPage(), RouteActivationPanel)).toMatchObject({
       canManage: false,
     });

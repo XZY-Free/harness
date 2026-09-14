@@ -15,7 +15,6 @@
  *
  * 安全边界：
  * - 菜单可见性只是 UX 层，不能代替服务端 Action Scope 校验（每个写 API 仍走 requireActionScope）。
- * - dev/test 模式下 devOpen + DEFAULT_USER_ID 直接给全部权限，菜单全部可见（与 lib/rbac 一致）。
  * - 解析失败 fail-closed：异常时所有菜单隐藏（避免误暴露）。
  *
  * 使用：
@@ -25,8 +24,8 @@
  * ```
  */
 import { ACTION_CODES, type ActionCode } from "@/lib/identity/action-codes";
+import { evaluatePermission, loadPermissionContext } from "@/lib/identity/permission-context";
 import type { Principal } from "@/lib/identity/resolver";
-import { listActiveActionBindingsForUser } from "@/lib/identity/role-action-queries";
 
 /** 8 个一级菜单 ID（与 nav.tsx ITEMS 顺序一致）。 */
 export const STUDIO_NAV_IDS = [
@@ -45,7 +44,13 @@ export type StudioNavId = (typeof STUDIO_NAV_IDS)[number];
 /** 8 个一级菜单 → 关联的 ActionCode（任意匹配即可见）。 */
 export const NAV_ACTION_MAPPING: Record<StudioNavId, readonly ActionCode[]> = {
   // 智能体：Agent / Revision / Route / 发布
-  agents: ["agent.revision.create", "agent.publish", "route.update"],
+  agents: [
+    "agent.read",
+    "agent.contract.register",
+    "agent.revision.create",
+    "agent.publish",
+    "route.update",
+  ],
   // 能力与知识：Skill / Tool / Knowledge / Connection / 风险变化
   capabilities: [
     "skill.create",
@@ -65,6 +70,7 @@ export const NAV_ACTION_MAPPING: Record<StudioNavId, readonly ActionCode[]> = {
   observability: ["artifact.attestation.verify", "event.quarantine.resolve"],
   // 安全与审计：Policy / Credential / Legal Hold / Deletion / Audit 导出
   security: [
+    "audit.read",
     "policy.publish",
     "credential.bind",
     "credential.revoke",
@@ -73,7 +79,7 @@ export const NAV_ACTION_MAPPING: Record<StudioNavId, readonly ActionCode[]> = {
     "audit.export",
   ],
   // 运营：成本 / 容量 / 配额（暂未定义专门 action code，归并到 audit.export）
-  operations: ["audit.export"],
+  operations: ["admin.operations.read", "audit.export"],
   // 平台设置：用户 / 角色 / 组织配置，与设置页 user.manage 门禁保持一致
   settings: ["user.manage"],
 };
@@ -116,20 +122,21 @@ const ALL_HIDDEN: StudioNavVisibility = {
  * 计算 8 个一级菜单的可见性。
  *
  * 流程：
- * 1. dev/test + DEFAULT_USER_ID → 全部可见（与 lib/rbac devOpen 一致）。
- * 2. 否则查 listActiveActionBindingsForUser → 收集允许的 actionCode 集合。
- * 3. 对每个菜单，NAV_ACTION_MAPPING[id] 与允许集合有交集 → 可见。
- * 4. 任何异常 → 全部隐藏（fail-closed）。
+ * 先检查真实 studio.access，再按有效角色/范围计算菜单；任何异常全部隐藏。
  */
 export async function computeStudioNavVisibility(
   principal: Principal,
 ): Promise<StudioNavVisibility> {
   try {
-    const bindings = await listActiveActionBindingsForUser(
-      principal.tenantId,
-      principal.userIdentityId,
-    );
-    const allowedActions: ReadonlySet<string> = new Set(bindings.map((b) => b.actionCode));
+    const context = await loadPermissionContext(principal.tenantId, principal.userIdentityId);
+    if (
+      !evaluatePermission(context, {
+        actionCode: "studio.access",
+        resource: { type: "tenant", id: principal.tenantId },
+      }).allowed
+    )
+      return ALL_HIDDEN;
+    const allowedActions: ReadonlySet<string> = new Set(context.grants.map((g) => g.actionCode));
 
     // 没有任何 action 绑定 → 全部隐藏（fail-closed）
     if (allowedActions.size === 0) {

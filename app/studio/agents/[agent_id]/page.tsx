@@ -1,3 +1,4 @@
+import { AgentAccessManager } from "@/components/studio/agent-access-manager";
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
@@ -53,6 +54,9 @@ export default async function AgentDetailsPage({
     factoryCode: "工厂编号",
     jobLevel: "职级",
   };
+  const canManageAccess =
+    agent.ownerUserId === gate.principal.userIdentityId ||
+    (await hasStudioAction(gate.principal, "user.manage"));
   const fields = requirements?.enterprise_user_context?.allowed_fields ?? [];
   return (
     <StudioPage
@@ -102,6 +106,7 @@ export default async function AgentDetailsPage({
           </p>
         </div>
       </section>
+      {canManageAccess && <AgentAccessManager agentId={id} />}
       <section aria-labelledby="capabilities-title">
         <h2 id="capabilities-title" className="text-lg font-semibold">
           能为员工做什么

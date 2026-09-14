@@ -1,9 +1,11 @@
 import type { UserAuthenticationProvider } from "@/lib/identity/authentication-provider";
 import type { EnterpriseProfileSource } from "@/lib/identity/enterprise-profile-source";
+import type { EnterpriseAuthorizationProvider } from "./enterprise-authorization";
 
 export interface IdentityExtension {
   readonly authenticationProvider: UserAuthenticationProvider;
   readonly profileSource?: EnterpriseProfileSource;
+  readonly authorizationProvider?: EnterpriseAuthorizationProvider;
 }
 
 export type IdentityExtensionFactory = () => IdentityExtension | Promise<IdentityExtension>;
@@ -60,6 +62,21 @@ function validateExtension(extension: IdentityExtension): void {
     throw new IdentityExtensionConfigurationError(
       "identity_extension_invalid",
       "身份扩展必须是对象",
+    );
+  }
+  const authorization = extension.authorizationProvider;
+  if (
+    authorization &&
+    (!authorization.name?.trim() ||
+      typeof authorization.evaluate !== "function" ||
+      (authorization.agentIds !== "all" &&
+        (!Array.isArray(authorization.agentIds) ||
+          !authorization.agentIds.length ||
+          authorization.agentIds.some((id) => typeof id !== "string" || !id.trim()))))
+  ) {
+    throw new IdentityExtensionConfigurationError(
+      "identity_extension_invalid",
+      "企业授权提供器必须声明明确的智能体接管范围",
     );
   }
   const provider = extension.authenticationProvider;

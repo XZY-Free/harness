@@ -20,11 +20,12 @@ import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-suppo
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
+import { db } from "@/lib/db/client";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
+import { resourceAccessPolicy } from "@/lib/persistence/schema/authorization";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
@@ -36,7 +37,9 @@ import {
   createVerifiedAttestation,
 } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
+import { eq } from "drizzle-orm";
 
 export const DEFAULT_ROUTE_SCOPE_KEY = "default";
 
@@ -77,6 +80,10 @@ async function seedPublishedAgentRevision(
     lifecycleState: "enabled",
   });
 
+  await db
+    .update(resourceAccessPolicy)
+    .set({ mode: "roles" })
+    .where(eq(resourceAccessPolicy.resourceId, agent.id));
   const revision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
@@ -144,7 +151,7 @@ export async function seedDispatchableTurn(
   const invokeBinding =
     overrides.grantAgentInvoke === false
       ? null
-      : await grantActionBinding({
+      : await seedActionPermission({
           tenantId,
           principalBindingId,
           actionCode: "agent.invoke",

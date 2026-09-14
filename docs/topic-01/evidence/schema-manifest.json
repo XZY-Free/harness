@@ -5,10 +5,10 @@
   "cleanMigration": "drizzle/0000_initial_schema.sql",
   "inventory": "docs/topic-01/evidence/schema-inventory.json",
   "counts": {
-    "canonical": 129,
-    "runtimeLoaded": 129,
-    "migration": 129,
-    "freshDbPlanned": 129
+    "canonical": 134,
+    "runtimeLoaded": 134,
+    "migration": 134,
+    "freshDbPlanned": 134
   },
   "tables": [
     "Agent",
@@ -80,6 +80,10 @@
     "MemorySource",
     "PendingInput",
     "PermissionDecision",
+    "PermissionGroup",
+    "PermissionGroupMember",
+    "PermissionRole",
+    "PermissionRoleAssignment",
     "Policy",
     "PolicyRevision",
     "PolicySet",
@@ -88,6 +92,7 @@
     "PublicationRecord",
     "RecoveryDrill",
     "RecoveryDrillCheck",
+    "ResourceAccessPolicy",
     "RetentionPolicy",
     "RoleActionBinding",
     "RouteActivation",

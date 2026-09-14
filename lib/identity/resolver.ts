@@ -35,6 +35,7 @@ import {
   decodeWorkloadToken,
   extractBearerToken,
 } from "@/lib/identity/workload-token";
+import { synchronizeEnterprisePermissionGroups } from "./enterprise-permission-groups";
 
 /** 可信主体：四类 API 共用的身份信息。 */
 export interface Principal {
@@ -197,6 +198,8 @@ export async function acceptAuthenticatedEvidence(
     displayName: synced.userIdentity.displayName,
     userIdentityId: synced.userIdentity.id,
   });
+
+  await synchronizeEnterprisePermissionGroups(tenant.id, synced.userIdentity.id);
 
   return {
     tenantId: tenant.id,

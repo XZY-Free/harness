@@ -1,24 +1,7 @@
-/**
- * 角色模板（grant 化的角色语义）。
- *
- * 关口02 02-2c：把旧 RBAC 的 MEMBER_PERMISSIONS / ADMIN_PERMISSIONS（lib/rbac.ts）
- * 映射为「角色模板 = 动作码集」的常量。正式身份模型没有「角色表」——用户权限 =
- * 直接挂在 principalBinding 上的 roleActionBinding（grant）。写入时把所选模板的
- * grant 集并集物化为 roleActionBinding；读回时按「模板 grant 全集是否被用户 grant
- * 覆盖」推导用户所属模板（见 lib/identity/settings-queries.ts 的 deriveTemplateKeys）。
- *
- * 旧权限字符串 → 正式 Action Code + Resource Scope 解码：
- * - `.all`（thread.read.all / analytics.read.global 等）→ (tenant, wildcard)。
- * - `.self`（thread.write.self / analytics.read.self）→ (self, wildcard)。
- * - ADMIN = Studio 动作码全量；其中 thread.read/thread.write 给 tenant + self
- *   双态（默认用户要能过 requireStudioAction(…, {type:"self"}) 门禁，而 tenant grant
- *   不覆盖 self 请求资源——scopeCovers 要求 type 相同）。
- * - MEMBER 仅基础动作，thread.read/thread.write 仅 self 态（member 只能操作自己的 thread）。
- */
-import type { ActionCode } from "@/lib/identity/action-codes";
+import { ACTION_RESOURCE_TYPES, type ActionCode } from "@/lib/identity/action-codes";
 import { type ResourceScope, serializeResourceScope } from "@/lib/identity/resource-scope";
 
-export type RoleTemplateKey = "admin" | "member";
+export type RoleTemplateKey = "admin" | "member" | "builder" | "auditor";
 
 /** 模板内单条 grant：action_code + 类型化 resource_scope。 */
 export interface RoleTemplateGrant {
@@ -37,43 +20,91 @@ export interface RoleTemplate {
 const tenant = (): ResourceScope => ({ type: "tenant", wildcard: true });
 const self = (): ResourceScope => ({ type: "self", wildcard: true });
 
-/** ADMIN：Studio 动作码全量；thread 双态（tenant + self）。 */
-const ADMIN_GRANTS: RoleTemplateGrant[] = [
-  { actionCode: "studio.access", resourceScope: tenant() },
-  { actionCode: "skill.read", resourceScope: tenant() },
-  { actionCode: "skill.write", resourceScope: tenant() },
-  { actionCode: "thread.read", resourceScope: tenant() },
+/** 内置角色与初始化管理员共用这一份定义。业务数据访问不随管理员身份放开。 */
+// 新动作需显式评审后加入，不能因为动作目录或导航扩充而自动获得权限。
+const ADMIN_ACTIONS: readonly ActionCode[] = [
+  "agent.contract.register",
+  "agent.revision.create",
+  "agent.publish",
+  "agent.retract",
+  "route.update",
+  "runtime.publish",
+  "runtime.retract",
+  "tool.schema.publish",
+  "policy.publish",
+  "governance.config.publish",
+  "credential.bind",
+  "credential.revoke",
+  "memory.review",
+  "job.cancel",
+  "job.retry",
+  "event.quarantine.resolve",
+  "artifact.attestation.verify",
+  "artifact.attestation.revoke",
+  "legal_hold.manage",
+  "deletion.request",
+  "skill.create",
+  "skill.update",
+  "skill.publish",
+  "skill.version.create",
+  "tool.provider.create",
+  "tool.provider.update",
+  "tool.create",
+  "tool.update",
+  "connection.create",
+  "connection.update",
+  "capability.review",
+  "knowledge.base.create",
+  "knowledge.base.update",
+  "knowledge.base.archive",
+  "knowledge.document.create",
+  "knowledge.document.publish",
+  "knowledge.document.retract",
+  "admin.export.read",
+  "admin.operations.read",
+  "workload.token.revoke",
+  "recovery.drill",
+  "security.incident.create",
+  "security.incident.isolate",
+  "security.incident.resolve",
+  "studio.access",
+  "skill.read",
+  "skill.write",
+  "policy.read",
+  "policy.write",
+  "user.manage",
+  "agent.read",
+  "workspace.read",
+  "workspace.write",
+  "analytics.read",
+  "audit.read",
+  "brand.manage",
+];
+const ADMIN_GRANTS: RoleTemplateGrant[] = ADMIN_ACTIONS.flatMap((actionCode) =>
+  ACTION_RESOURCE_TYPES[actionCode].map((type) => ({
+    actionCode,
+    resourceScope: { type, wildcard: true },
+  })),
+);
+const MEMBER_GRANTS: RoleTemplateGrant[] = [
   { actionCode: "thread.read", resourceScope: self() },
-  { actionCode: "thread.write", resourceScope: tenant() },
   { actionCode: "thread.write", resourceScope: self() },
-  { actionCode: "policy.read", resourceScope: tenant() },
-  { actionCode: "policy.write", resourceScope: tenant() },
-  { actionCode: "user.manage", resourceScope: tenant() },
+];
+const BUILDER_GRANTS: RoleTemplateGrant[] = [
+  { actionCode: "studio.access", resourceScope: tenant() },
   { actionCode: "agent.read", resourceScope: tenant() },
-  { actionCode: "agent.invoke", resourceScope: tenant() },
-  { actionCode: "workspace.read", resourceScope: tenant() },
-  { actionCode: "workspace.write", resourceScope: tenant() },
-  { actionCode: "analytics.read", resourceScope: tenant() },
+  { actionCode: "agent.contract.register", resourceScope: { type: "agent", wildcard: true } },
+  { actionCode: "skill.create", resourceScope: tenant() },
+];
+const AUDITOR_GRANTS: RoleTemplateGrant[] = [
+  { actionCode: "studio.access", resourceScope: tenant() },
   { actionCode: "audit.read", resourceScope: tenant() },
 ];
-
-/** MEMBER：基础动作；thread 仅 self 态。 */
-const MEMBER_GRANTS: RoleTemplateGrant[] = [
-  { actionCode: "studio.access", resourceScope: tenant() },
-  { actionCode: "skill.read", resourceScope: tenant() },
-  { actionCode: "thread.read", resourceScope: self() },
-  { actionCode: "thread.write", resourceScope: self() },
-  { actionCode: "policy.read", resourceScope: tenant() },
-  { actionCode: "agent.read", resourceScope: tenant() },
-  { actionCode: "agent.invoke", resourceScope: tenant() },
-  { actionCode: "workspace.read", resourceScope: tenant() },
-  { actionCode: "analytics.read", resourceScope: tenant() },
-];
-
-/** 系统角色模板集合（顺序即展示顺序）。 */
 export const ROLE_TEMPLATES: RoleTemplate[] = [
-  { key: "admin", name: "Admin", isSystem: true, grants: ADMIN_GRANTS },
-  { key: "member", name: "Member", isSystem: true, grants: MEMBER_GRANTS },
+  { key: "admin", name: "平台管理员", isSystem: true, grants: ADMIN_GRANTS },
+  { key: "member", name: "普通员工", isSystem: true, grants: MEMBER_GRANTS },
+  { key: "builder", name: "资产维护者", isSystem: true, grants: BUILDER_GRANTS },
+  { key: "auditor", name: "审计查看者", isSystem: true, grants: AUDITOR_GRANTS },
 ];
 
 const TEMPLATE_KEYS: ReadonlySet<string> = new Set(ROLE_TEMPLATES.map((t) => t.key));

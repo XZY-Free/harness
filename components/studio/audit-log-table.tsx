@@ -39,6 +39,7 @@ const ACTION_LABEL: Record<AuditActionType, string> = {
   "workload.token.revoked": "运行凭证撤销",
   "recovery.drill": "恢复演练",
   "security.incident": "安全事件处理",
+  "permissions.updated": "权限配置变更",
   "settings.user_roles.updated": "用户角色更新",
   "policies.updated": "策略更新",
   "skills.published": "技能发布",

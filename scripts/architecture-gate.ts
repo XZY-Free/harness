@@ -102,12 +102,14 @@ function checkSchemaAuthority(): void {
   const migrationFiles = readdirSync(resolve(ROOT, "drizzle"))
     .filter((file) => /^\d{4}_.+\.sql$/.test(file))
     .sort();
-  if (migrationFiles.length !== 1 || migrationFiles[0] !== "0000_initial_schema.sql") {
-    fail(`clean initial migration 不唯一：${migrationFiles.join(", ")}`);
+  if (migrationFiles[0] !== "0000_initial_schema.sql") {
+    fail(`缺少正式 initial migration：${migrationFiles.join(", ")}`);
     return;
   }
 
-  const migration = readFileSync(resolve(ROOT, "drizzle/0000_initial_schema.sql"), "utf8");
+  const migration = migrationFiles
+    .map((file) => readFileSync(resolve(ROOT, "drizzle", file), "utf8"))
+    .join("\n");
   if (/\b(?:DROP TABLE|DROP COLUMN|RENAME TABLE|RENAME COLUMN)\b/i.test(migration)) {
     fail("clean initial migration 仍含 drop/rename 兼容链");
     return;

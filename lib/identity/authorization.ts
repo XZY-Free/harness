@@ -15,23 +15,16 @@
  * - WorkloadPrincipal callerType=service → 查 CICD_SERVICE_ALLOWED_ACTIONS（无 resource_scope 绑定）。
  * - WorkloadPrincipal callerType=workload（runtime/gateway）→ 不走 action scope（由 ExecutionBinding 约束）→ 拒绝。
  */
-import { createHash } from "node:crypto";
 import type { ApiErrorCode } from "@/lib/error-codes";
 import { apiError, generateRequestId } from "@/lib/http";
 import {
-  ACTION_RESOURCE_TYPES,
   type ActionCode,
   type ResourceScopeType,
   isKnownActionCode,
 } from "@/lib/identity/action-codes";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
-import type { ResourceScope } from "@/lib/identity/resource-scope";
-import { scopeCovers, serializeResourceScope } from "@/lib/identity/resource-scope";
-import {
-  listActiveActionBindingsForUser,
-  parseBindingScope,
-} from "@/lib/identity/role-action-queries";
 import { isServiceActionAllowed } from "@/lib/identity/workload-token";
+import { evaluatePermission, loadPermissionContext } from "./permission-context";
 
 /** 授权检查请求：action_code + 目标资源。 */
 export interface ActionScopeRequest {
@@ -49,77 +42,57 @@ export interface ActionScopeCoverage {
   authorizationDigest: string;
 }
 
-function actionScopeCovers(
-  actionCode: ActionCode,
-  tenantId: string,
-  binding: ResourceScope,
-  requested: { type: ResourceScopeType; id: string | null },
-): boolean {
-  if (scopeCovers(binding, requested)) return true;
-  return (
-    actionCode === "agent.invoke" &&
-    requested.type === "agent" &&
-    binding.type === "tenant" &&
-    (binding.wildcard === true || binding.ids?.includes(tenantId) === true) &&
-    ACTION_RESOURCE_TYPES[actionCode].includes("tenant")
-  );
-}
-
-/**
- * 读取当前主体对一个 action/resource type 的覆盖集合。
- * RoleActionBinding 仍是唯一事实源；非法 scope 被忽略，空集合即全拒绝。
- */
+/** 列表与单资源检查共用 evaluatePermission。 */
 export async function resolveActionScopeCoverage(
   tenantId: string,
   userIdentityId: string,
   request: { actionCode: ActionCode; resourceType: ResourceScopeType },
 ): Promise<ActionScopeCoverage> {
-  const bindings = isKnownActionCode(request.actionCode)
-    ? (await listActiveActionBindingsForUser(tenantId, userIdentityId)).filter(
-        (binding) => binding.actionCode === request.actionCode,
-      )
-    : [];
+  const context = await loadPermissionContext(
+    tenantId,
+    userIdentityId,
+    undefined,
+    request.actionCode === "agent.invoke" ? "agent_catalog" : [],
+  );
   const resourceIds = new Set<string>();
   let wildcard = false;
-  const digestFacts: string[] = [];
-
-  for (const binding of bindings) {
-    const scope = parseBindingScope(binding);
-    if (scope === null) continue;
-    const coversRequestedType =
-      scope.type === request.resourceType ||
-      (request.actionCode === "agent.invoke" &&
+  if (context.active) {
+    for (const grant of context.grants) {
+      if (grant.actionCode !== request.actionCode) continue;
+      if (grant.resourceScope.type === request.resourceType) {
+        wildcard ||= grant.resourceScope.wildcard === true;
+        for (const id of grant.resourceScope.ids ?? []) resourceIds.add(id);
+      }
+      if (
+        request.actionCode === "agent.invoke" &&
         request.resourceType === "agent" &&
-        scope.type === "tenant" &&
-        (scope.wildcard === true || scope.ids?.includes(tenantId) === true) &&
-        ACTION_RESOURCE_TYPES[request.actionCode].includes("tenant"));
-    if (!coversRequestedType) continue;
-
-    if (scope.wildcard || (scope.type === "tenant" && scope.ids?.includes(tenantId) === true)) {
-      wildcard = true;
+        grant.resourceScope.type === "tenant"
+      )
+        wildcard ||=
+          grant.resourceScope.wildcard === true ||
+          grant.resourceScope.ids?.includes(tenantId) === true;
     }
-    if (scope.type === request.resourceType) {
-      for (const id of scope.ids ?? []) resourceIds.add(id);
+    if (request.resourceType === "agent" && request.actionCode === "agent.invoke") {
+      // 有明确策略的资源总是按策略检查，旧 wildcard 不得覆盖限制。
+      for (const agent of context.agents) {
+        if (
+          evaluatePermission(context, {
+            actionCode: request.actionCode,
+            resource: { type: "agent", id: agent.id },
+          }).allowed
+        )
+          resourceIds.add(agent.id);
+        else resourceIds.delete(agent.id);
+      }
+      wildcard = false;
     }
-    digestFacts.push(
-      JSON.stringify({
-        id: binding.id,
-        principalBindingId: binding.principalBindingId,
-        actionCode: binding.actionCode,
-        resourceScope: serializeResourceScope(scope),
-        validFrom: binding.validFrom.toISOString(),
-        validUntil: binding.validUntil?.toISOString() ?? null,
-      }),
-    );
   }
-
-  digestFacts.sort();
   return {
     actionCode: request.actionCode,
     resourceType: request.resourceType,
     wildcard,
     resourceIds: [...resourceIds].sort(),
-    authorizationDigest: createHash("sha256").update(JSON.stringify(digestFacts)).digest("hex"),
+    authorizationDigest: context.digest,
   };
 }
 
@@ -151,24 +124,16 @@ export async function checkActionScope(
     return { allowed: false, reason: "unknown_action" };
   }
 
-  const bindings = await listActiveActionBindingsForUser(tenantId, userIdentityId);
-
-  // 仅过滤 actionCode 匹配的绑定（listActiveActionBindingsForUser 返回全部 action 的绑定）。
-  const matching = bindings.filter((b) => b.actionCode === request.actionCode);
-  if (matching.length === 0) {
-    return { allowed: false, reason: "empty_allowlist" };
-  }
-
-  for (const binding of matching) {
-    const scope = parseBindingScope(binding);
-    // DB 中存了非法 scope（不应发生）→ 跳过该绑定（fail-closed）。
-    if (scope === null) continue;
-    if (actionScopeCovers(request.actionCode, tenantId, scope, request.resource)) {
-      return { allowed: true };
-    }
-  }
-
-  return { allowed: false, reason: "action_scope_denied" };
+  const context = await loadPermissionContext(tenantId, userIdentityId, undefined, [request]);
+  const result = evaluatePermission(context, request);
+  return result.allowed
+    ? { allowed: true }
+    : {
+        allowed: false,
+        reason: context.grants.some((g) => g.actionCode === request.actionCode)
+          ? "action_scope_denied"
+          : "empty_allowlist",
+      };
 }
 
 /** Turn 选择 Agent 的正式服务端授权入口。 */

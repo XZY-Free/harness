@@ -1,8 +1,8 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "4d6ff699-c7f4-4e93-a3cc-07b045fe1342",
-  "prevId": "ce9c6e9f-a741-4683-967d-971e107a18f3",
+  "id": "0970ff8f-2121-467e-b817-00c49d36d2d8",
+  "prevId": "4d6ff699-c7f4-4e93-a3cc-07b045fe1342",
   "tables": {
     "RuntimeArtifact": {
       "name": "RuntimeArtifact",
@@ -2299,6 +2299,435 @@
       "compositePrimaryKeys": {
         "AuditEvent_id": {
           "name": "AuditEvent_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "PermissionGroup": {
+      "name": "PermissionGroup",
+      "columns": {
+        "principalId": {
+          "name": "principalId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'local'"
+        },
+        "version": {
+          "name": "version",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "PermissionGroup_principalId_PrincipalBinding_id_fk": {
+          "name": "PermissionGroup_principalId_PrincipalBinding_id_fk",
+          "tableFrom": "PermissionGroup",
+          "tableTo": "PrincipalBinding",
+          "columnsFrom": [
+            "principalId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "PermissionGroup_tenantId_Tenant_id_fk": {
+          "name": "PermissionGroup_tenantId_Tenant_id_fk",
+          "tableFrom": "PermissionGroup",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "PermissionGroup_principalId": {
+          "name": "PermissionGroup_principalId",
+          "columns": [
+            "principalId"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "PermissionGroupMember": {
+      "name": "PermissionGroupMember",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "groupId": {
+          "name": "groupId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "validUntil": {
+          "name": "validUntil",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "PermissionGroupMember_uq": {
+          "name": "PermissionGroupMember_uq",
+          "columns": [
+            "tenantId",
+            "groupId",
+            "userId"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "PermissionGroupMember_tenantId_Tenant_id_fk": {
+          "name": "PermissionGroupMember_tenantId_Tenant_id_fk",
+          "tableFrom": "PermissionGroupMember",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "PermissionGroupMember_groupId_PermissionGroup_principalId_fk": {
+          "name": "PermissionGroupMember_groupId_PermissionGroup_principalId_fk",
+          "tableFrom": "PermissionGroupMember",
+          "tableTo": "PermissionGroup",
+          "columnsFrom": [
+            "groupId"
+          ],
+          "columnsTo": [
+            "principalId"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "PermissionGroupMember_id": {
+          "name": "PermissionGroupMember_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "PermissionRole": {
+      "name": "PermissionRole",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "permissions": {
+          "name": "permissions",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "PermissionRole_tenant_name_uq": {
+          "name": "PermissionRole_tenant_name_uq",
+          "columns": [
+            "tenantId",
+            "name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "PermissionRole_tenantId_Tenant_id_fk": {
+          "name": "PermissionRole_tenantId_Tenant_id_fk",
+          "tableFrom": "PermissionRole",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "PermissionRole_id": {
+          "name": "PermissionRole_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "PermissionRoleAssignment": {
+      "name": "PermissionRoleAssignment",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "principalId": {
+          "name": "principalId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "roleKey": {
+          "name": "roleKey",
+          "type": "varchar(96)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'local'"
+        }
+      },
+      "indexes": {
+        "PermissionRoleAssignment_uq": {
+          "name": "PermissionRoleAssignment_uq",
+          "columns": [
+            "tenantId",
+            "principalId",
+            "roleKey",
+            "source"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "PermissionRoleAssignment_tenantId_Tenant_id_fk": {
+          "name": "PermissionRoleAssignment_tenantId_Tenant_id_fk",
+          "tableFrom": "PermissionRoleAssignment",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "PermissionRoleAssignment_principalId_PrincipalBinding_id_fk": {
+          "name": "PermissionRoleAssignment_principalId_PrincipalBinding_id_fk",
+          "tableFrom": "PermissionRoleAssignment",
+          "tableTo": "PrincipalBinding",
+          "columnsFrom": [
+            "principalId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "PermissionRoleAssignment_id": {
+          "name": "PermissionRoleAssignment_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "ResourceAccessPolicy": {
+      "name": "ResourceAccessPolicy",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resourceType": {
+          "name": "resourceType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resourceId": {
+          "name": "resourceId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'inherit'"
+        },
+        "principals": {
+          "name": "principals",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "collaborators": {
+          "name": "collaborators",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "ResourceAccessPolicy_resource_uq": {
+          "name": "ResourceAccessPolicy_resource_uq",
+          "columns": [
+            "tenantId",
+            "resourceType",
+            "resourceId"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "ResourceAccessPolicy_tenantId_Tenant_id_fk": {
+          "name": "ResourceAccessPolicy_tenantId_Tenant_id_fk",
+          "tableFrom": "ResourceAccessPolicy",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "ResourceAccessPolicy_id": {
+          "name": "ResourceAccessPolicy_id",
           "columns": [
             "id"
           ]

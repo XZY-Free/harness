@@ -2,6 +2,10 @@ import {
   AgentRevisionContractRequirementsError,
   assertAgentRevisionContractRequirements,
 } from "@/lib/agents/application/agent-revision-contract-requirements";
+import {
+  AgentCallPermissionError,
+  assertAgentInvocationPermission,
+} from "@/lib/identity/agent-call-permission";
 
 /**
  * resumeAgentCall — 恢复既有 AgentCall 子执行。
@@ -188,6 +192,25 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
       );
     }
     if (!env) throw new AgentCallResumeError("resume 缺少平台上下文", "context_missing");
+  }
+  try {
+    await assertAgentInvocationPermission(
+      tenantId,
+      call.parentInvocationId,
+      call.agentId,
+      command.contextEnvironment?.executionSubject,
+    );
+  } catch (error) {
+    if (error instanceof AgentCallPermissionError)
+      await transitionAgentCall({
+        tenantId,
+        callId,
+        input: "call.failed",
+        authority: "local_failure",
+        errorCode: error.code,
+        errorSummary: error.message,
+      });
+    throw error;
   }
   const auth = await resolveAgentCallOutboundAuth(tenantId, binding);
 

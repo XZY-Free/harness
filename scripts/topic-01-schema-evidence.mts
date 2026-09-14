@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { db } from "@/lib/db/client";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -17,7 +17,10 @@ const INVENTORY_PATH = resolve(EVIDENCE_DIR, "schema-inventory.json");
 const INVENTORY_MD_PATH = resolve(EVIDENCE_DIR, "schema-inventory.md");
 const INVENTORY_SCHEMA_PATH = resolve(EVIDENCE_DIR, "schema-inventory.schema.json");
 const MANIFEST_PATH = resolve(EVIDENCE_DIR, "schema-manifest.json");
-const MIGRATION_PATH = resolve(ROOT, "drizzle/0000_initial_schema.sql");
+const MIGRATION_PATHS = readdirSync(resolve(ROOT, "drizzle"))
+  .filter((file) => /^\d{4}_.+\.sql$/.test(file))
+  .sort()
+  .map((file) => `drizzle/${file}`);
 const REMOVED_EMPTY_TABLES = ["MemoryIndex", "WorkspaceMergeConflict", "WorkspaceOverlay"];
 
 type AccessException = { exceptionReason: string; projectionOwner: string };
@@ -230,7 +233,7 @@ function domainOwnerFor(declaration: SchemaDeclaration): string {
 }
 
 function build() {
-  const sql = readFileSync(MIGRATION_PATH, "utf8");
+  const sql = MIGRATION_PATHS.map((path) => readFileSync(resolve(ROOT, path), "utf8")).join("\n");
   const canonical = canonicalNames();
   const runtime = runtimeNames();
   const migration = migrationNames(sql);
@@ -248,7 +251,9 @@ function build() {
     return {
       physicalTableName: name,
       schemaDeclaration,
-      migrationSource: ["drizzle/0000_initial_schema.sql"],
+      migrationSource: MIGRATION_PATHS.filter((path) =>
+        readFileSync(resolve(ROOT, path), "utf8").includes(`CREATE TABLE \`${name}\``),
+      ),
       domainOwner: domainOwnerFor(declaration),
       tenantBoundary: tenantBoundaryFor(name, sql),
       productionWriters: writers,
@@ -266,7 +271,7 @@ function build() {
       retentionOrGc: "由 domain owner 的生产保留、删除或投影重建流程负责",
       constraints: constraintsFor(name, sql),
       decision: "keep",
-      evidence: [schemaDeclaration, ...writers, ...readers, "drizzle/0000_initial_schema.sql"],
+      evidence: [schemaDeclaration, ...writers, ...readers, ...MIGRATION_PATHS],
       notes: "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory",
     };
   });

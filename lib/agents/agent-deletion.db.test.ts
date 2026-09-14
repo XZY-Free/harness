@@ -9,11 +9,11 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import type { Principal } from "@/lib/identity/resolver";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { auditEvent } from "@/lib/persistence/schema/audit";
 import { createRouteSet } from "@/lib/routes/application/deployment-route-service";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { beforeEach, expect, it, vi } from "vitest";
 const context = vi.hoisted(() => ({ principal: null as Principal | null }));
 vi.mock("@/lib/admin/route-helpers", async (original) => ({
@@ -55,7 +55,7 @@ async function seed(authorized = true) {
   });
   if (authorized)
     for (const actionCode of ["agent.retract", "agent.contract.register", "route.update"] as const)
-      await grantActionBinding({
+      await seedActionPermission({
         tenantId: tenant.id,
         principalBindingId: binding.id,
         actionCode,

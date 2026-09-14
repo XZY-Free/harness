@@ -1,12 +1,12 @@
 import { AppearanceSetting } from "@/components/studio/appearance-setting";
 import { StudioGatePage } from "@/components/studio/gate-page";
-import { SettingsUserRoleManager } from "@/components/studio/settings-user-role-manager";
+import { PermissionManager } from "@/components/studio/permission-manager";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { listSettingsUserRolesView } from "@/lib/identity/settings-queries";
+import { listPermissionManagement } from "@/lib/identity/permission-management";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
@@ -23,12 +23,12 @@ export default async function SettingsPage() {
   const gate = await requireStudioPagePermission("user.manage");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
-  const view = await listSettingsUserRolesView(gate.principal.tenantId);
+  const view = await listPermissionManagement(gate.principal.tenantId);
 
   return (
     <StudioPage
       title="平台设置"
-      description="管理现有成员的后台角色。角色本身及其权限范围由平台统一维护。"
+      description="管理成员、用户组和后台角色。资产使用范围在各资产详情中配置。"
     >
       <div className="space-y-8">
         <StudioSettingsSection
@@ -39,12 +39,11 @@ export default async function SettingsPage() {
             <AppearanceSetting />
           </StudioSettingsRow>
         </StudioSettingsSection>
-        <StudioSettingsSection title="成员与角色" description="选择成员后查看或调整其角色模板。">
-          <SettingsUserRoleManager
-            currentUserId={gate.principal.userIdentityId}
-            users={view.users}
-            roles={view.roles}
-          />
+        <StudioSettingsSection
+          title="成员与权限"
+          description="默认员工能力与后台管理职责分别配置。"
+        >
+          <PermissionManager initial={view} currentUserId={gate.principal.userIdentityId} />
         </StudioSettingsSection>
       </div>
     </StudioPage>

@@ -65,7 +65,6 @@ import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/ex
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { invocationTable } from "@/lib/persistence/schema/executions";
@@ -127,6 +126,7 @@ import {
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import {
   installTrustedHostedControlPlaneEvidenceForTest,
   trustedHostedRunnerSigningIdentityForTest,
@@ -236,25 +236,25 @@ async function seedAdminWithActionBindings() {
     displayName: DEFAULT_USER_NAME,
     userIdentityId: identity.id,
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "agent.revision.create",
     resourceScope: { type: "agent", wildcard: true },
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "agent.publish",
     resourceScope: { type: "agent", wildcard: true },
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "artifact.attestation.verify",
     resourceScope: { type: "artifact_type", wildcard: true },
   });
-  await grantActionBinding({
+  await seedActionPermission({
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "route.update",

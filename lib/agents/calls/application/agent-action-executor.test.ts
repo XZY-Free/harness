@@ -94,7 +94,10 @@ describe("AgentActionExecutor", () => {
     const scenario = await seed("long_running");
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
-      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      executionSubject: executionSubjectFromUserIdentity(
+        scenario.tenantId,
+        scenario.userIdentityId,
+      ),
       resolveRoute,
       transportChannel: "hosted",
     });
@@ -240,7 +243,10 @@ describe("AgentActionExecutor", () => {
     const scenario = await seed("long_running");
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
-      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      executionSubject: executionSubjectFromUserIdentity(
+        scenario.tenantId,
+        scenario.userIdentityId,
+      ),
       resolveRoute,
       transportChannel: "hosted",
     });
@@ -280,7 +286,10 @@ describe("AgentActionExecutor", () => {
     const scenario = await seed("long_running");
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
-      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      executionSubject: executionSubjectFromUserIdentity(
+        scenario.tenantId,
+        scenario.userIdentityId,
+      ),
       resolveRoute,
       transportChannel: "hosted",
     });
@@ -335,7 +344,10 @@ describe("AgentActionExecutor", () => {
     const scenario = await seed("completed");
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
-      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      executionSubject: executionSubjectFromUserIdentity(
+        scenario.tenantId,
+        scenario.userIdentityId,
+      ),
       resolveRoute,
       transportChannel: "hosted",
     });
@@ -377,7 +389,10 @@ describe("AgentActionExecutor", () => {
     const scenario = await seed("long_running");
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
-      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      executionSubject: executionSubjectFromUserIdentity(
+        scenario.tenantId,
+        scenario.userIdentityId,
+      ),
       resolveRoute,
       transportChannel: "hosted",
     });
@@ -411,7 +426,10 @@ describe("AgentActionExecutor", () => {
     const scenario = await seed("input_required");
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
-      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      executionSubject: executionSubjectFromUserIdentity(
+        scenario.tenantId,
+        scenario.userIdentityId,
+      ),
       resolveRoute,
       transportChannel: "hosted",
     });
@@ -528,7 +546,10 @@ describe("AgentActionExecutor", () => {
       tenantId: scenario.tenantId,
       request: resolved.request,
       responseRedactedJson: { text: "2026-09-01" },
-      executionSubject: executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`),
+      executionSubject: executionSubjectFromUserIdentity(
+        scenario.tenantId,
+        scenario.userIdentityId,
+      ),
     });
     expect(resumed).toMatchObject({ resumed: true, callId, state: "completed" });
     expect(scenario.provider.captured).toHaveLength(2);
@@ -544,7 +565,10 @@ describe("AgentActionExecutor", () => {
 
   it("同一 AgentCall 可连续产生两次 confirmation，分别落为 UAR 并两次复用同一 task/context", async () => {
     const scenario = await seed("confirmation_chain");
-    const executionSubject = executionSubjectFromUserIdentity(scenario.tenantId, randomUUID());
+    const executionSubject = executionSubjectFromUserIdentity(
+      scenario.tenantId,
+      scenario.userIdentityId,
+    );
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
       executionSubject,

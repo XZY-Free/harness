@@ -1,3 +1,4 @@
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 /**
  * S02-C03：动作资源授权集成测试（真实 MySQL 8）。
  *
@@ -22,6 +23,7 @@ import {
   requireActionScope,
   resolveActionScopeCoverage,
 } from "@/lib/identity/authorization";
+import { changePermissionManagement } from "@/lib/identity/permission-management";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
 import {
@@ -32,22 +34,39 @@ import {
   serializeResourceScope,
   validateResourceScope,
 } from "@/lib/identity/resource-scope";
-import {
-  getActionBindingById,
-  grantActionBinding,
-  listActionBindingsByPrincipal,
-  listActionBindingsByUser,
-  listActiveActionBindingsForUser,
-  parseBindingScope,
-  revokeActionBinding,
-} from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
+import { agentTable } from "@/lib/persistence/schema/agents";
+import { permissionRoleAssignment } from "@/lib/persistence/schema/authorization";
+import { userIdentity as userIdentityTable } from "@/lib/persistence/schema/identity";
+import {
+  revokeSeededActionPermission,
+  seedActionPermission,
+} from "@/lib/test-support/seed-action-permission";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
   await resetDatabase(db);
+});
+
+describe("平台默认员工权限", () => {
+  it("有效新员工拥有自己的会话权限，但没有后台访问权", async () => {
+    const tenant = await ensureDefaultTenant();
+    const { identity } = await seedUser(tenant.id, "new-employee", "employee@example.test");
+    expect(
+      await checkActionScope(tenant.id, identity.id, {
+        actionCode: "thread.write",
+        resource: { type: "self", id: identity.id },
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      await checkActionScope(tenant.id, identity.id, {
+        actionCode: "studio.access",
+        resource: { type: "tenant", id: tenant.id },
+      }),
+    ).toMatchObject({ allowed: false });
+  });
 });
 
 afterEach(() => {
@@ -201,215 +220,6 @@ describe("action-codes", () => {
   });
 });
 
-// ─── role-action-queries（DB）─────────────────────────────
-
-describe("role-action-queries", () => {
-  let tenantId: string;
-  let principalBindingId: string;
-  let userIdentityId: string;
-
-  beforeEach(async () => {
-    const tenant = await ensureDefaultTenant();
-    tenantId = tenant.id;
-    const { identity, binding } = await seedUser(tenantId, "user-001", "user001@example.com");
-    userIdentityId = identity.id;
-    principalBindingId = binding.id;
-  });
-
-  it("grantActionBinding 创建绑定（wildcard scope）", async () => {
-    const binding = await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    expect(binding.id).toBeDefined();
-    expect(binding.actionCode).toBe("agent.publish");
-    expect(binding.validUntil).toBeNull();
-    expect(binding.resourceScopeJson).toContain('"wildcard":true');
-  });
-
-  it("grantActionBinding 创建绑定（ids scope）", async () => {
-    const binding = await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.revision.create",
-      resourceScope: { type: "agent", ids: ["agt_1", "agt_2"] },
-    });
-    expect(binding.resourceScopeJson).toContain('"ids":["agt_1","agt_2"]');
-  });
-
-  it("grantActionBinding scope type 不匹配抛 ResourceScopeError", async () => {
-    await expect(
-      grantActionBinding({
-        tenantId,
-        principalBindingId,
-        actionCode: "agent.publish",
-        resourceScope: { type: "tool", wildcard: true },
-      }),
-    ).rejects.toThrow(ResourceScopeError);
-  });
-
-  it("grantActionBinding 空 allowlist scope 抛 ResourceScopeError", async () => {
-    await expect(
-      grantActionBinding({
-        tenantId,
-        principalBindingId,
-        actionCode: "agent.publish",
-        resourceScope: { type: "agent" },
-      }),
-    ).rejects.toThrow(ResourceScopeError);
-  });
-
-  it("revokeActionBinding 软撤销（回填 validUntil）", async () => {
-    const binding = await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    const revoked = await revokeActionBinding(tenantId, binding.id);
-    expect(revoked).toBe(true);
-
-    const after = await getActionBindingById(tenantId, binding.id);
-    expect(after).not.toBeNull();
-    expect(after?.validUntil).not.toBeNull();
-  });
-
-  it("revokeActionBinding 重复撤销返回 false", async () => {
-    const binding = await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    await revokeActionBinding(tenantId, binding.id);
-    const second = await revokeActionBinding(tenantId, binding.id);
-    expect(second).toBe(false);
-  });
-
-  it("revokeActionBinding 不存在的 id 返回 false", async () => {
-    const result = await revokeActionBinding(tenantId, "nonexistent-id");
-    expect(result).toBe(false);
-  });
-
-  it("listActionBindingsByPrincipal 返回指定主体的绑定", async () => {
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "policy.publish",
-      resourceScope: { type: "tenant", wildcard: true },
-    });
-    const list = await listActionBindingsByPrincipal(tenantId, principalBindingId);
-    expect(list).toHaveLength(2);
-  });
-
-  it("listActionBindingsByUser 经 principal_binding 展开返回绑定", async () => {
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    const list = await listActionBindingsByUser(tenantId, userIdentityId);
-    expect(list).toHaveLength(1);
-    expect(list[0]?.actionCode).toBe("agent.publish");
-  });
-
-  it("listActionBindingsByUser 跨租户隔离（不返回其他租户绑定）", async () => {
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    // 用不存在的 userIdentity 查询
-    const list = await listActionBindingsByUser(tenantId, "nonexistent-user-id");
-    expect(list).toHaveLength(0);
-  });
-
-  it("listActiveActionBindingsForUser 过滤已撤销绑定", async () => {
-    const active = await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "policy.publish",
-      resourceScope: { type: "tenant", wildcard: true },
-    });
-    await revokeActionBinding(tenantId, active.id);
-
-    const list = await listActiveActionBindingsForUser(tenantId, userIdentityId);
-    expect(list).toHaveLength(1);
-    expect(list[0]?.actionCode).toBe("policy.publish");
-  });
-
-  it("listActiveActionBindingsForUser 过滤尚未生效的绑定", async () => {
-    await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.invoke",
-      resourceScope: { type: "agent", wildcard: true },
-      validFrom: new Date(Date.now() + 60_000),
-    });
-    expect(await listActiveActionBindingsForUser(tenantId, userIdentityId)).toHaveLength(0);
-  });
-
-  it("getActionBindingById 存在时返回绑定", async () => {
-    const binding = await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    const found = await getActionBindingById(tenantId, binding.id);
-    expect(found).not.toBeNull();
-    expect(found?.id).toBe(binding.id);
-  });
-
-  it("getActionBindingById 不存在返回 null", async () => {
-    const found = await getActionBindingById(tenantId, "nonexistent-id");
-    expect(found).toBeNull();
-  });
-
-  it("parseBindingScope 合法 scope 返回 ResourceScope", async () => {
-    const binding = await grantActionBinding({
-      tenantId,
-      principalBindingId,
-      actionCode: "agent.publish",
-      resourceScope: { type: "agent", wildcard: true },
-    });
-    const scope = parseBindingScope(binding);
-    expect(scope).not.toBeNull();
-    expect(scope?.type).toBe("agent");
-    expect(scope?.wildcard).toBe(true);
-  });
-
-  it("parseBindingScope 非法 scope 返回 null", () => {
-    const fakeBinding: RoleActionBinding = {
-      id: "fake",
-      tenantId: "fake",
-      principalBindingId: "fake",
-      actionCode: "agent.publish",
-      resourceScopeJson: "not json",
-      validFrom: new Date(),
-      validUntil: null,
-      createdAt: new Date(),
-    };
-    expect(parseBindingScope(fakeBinding)).toBeNull();
-  });
-});
-
 // ─── authorization（DB + 纯逻辑）─────────────────────────
 
 describe("authorization", () => {
@@ -423,6 +233,24 @@ describe("authorization", () => {
     const { identity, binding } = await seedUser(tenantId, "admin-001", "admin001@example.com");
     userIdentityId = identity.id;
     principalBindingId = binding.id;
+    const resourceOwner = await upsertUserIdentity({
+      tenantId,
+      externalSubject: "resource-owner",
+      email: "owner@example.test",
+      displayName: "资产负责人",
+    });
+    for (const id of ["agt_1", "agt_2", "agt_any"])
+      await db
+        .insert(agentTable)
+        .values({
+          id,
+          tenantId,
+          agentKey: id,
+          displayName: id,
+          ownerUserId: resourceOwner.id,
+          lifecycleState: "enabled",
+          currentRevisionId: "published",
+        });
   });
 
   // ── checkActionScope ──
@@ -446,7 +274,7 @@ describe("authorization", () => {
   });
 
   it("checkActionScope wildcard 绑定 → allow", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.publish",
@@ -460,7 +288,7 @@ describe("authorization", () => {
   });
 
   it("checkActionScope agent.invoke tenant wildcard 覆盖租户内 exact Agent", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.invoke",
@@ -474,7 +302,7 @@ describe("authorization", () => {
   });
 
   it("checkActionScope agent.invoke tenant exact 只接受当前 tenant id", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.invoke",
@@ -487,7 +315,7 @@ describe("authorization", () => {
       }),
     ).toMatchObject({ allowed: false });
 
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.invoke",
@@ -502,7 +330,7 @@ describe("authorization", () => {
   });
 
   it("resolveActionScopeCoverage 汇总 exact ids，授权撤销后 digest 改变并 fail-closed", async () => {
-    const binding = await grantActionBinding({
+    const binding = await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.invoke",
@@ -515,7 +343,7 @@ describe("authorization", () => {
     expect(before.wildcard).toBe(false);
     expect(before.resourceIds).toEqual(["agt_1", "agt_2"]);
 
-    await revokeActionBinding(tenantId, binding.id);
+    await revokeSeededActionPermission(tenantId, binding.id);
     const after = await resolveActionScopeCoverage(tenantId, userIdentityId, {
       actionCode: "agent.invoke",
       resourceType: "agent",
@@ -525,14 +353,14 @@ describe("authorization", () => {
   });
 
   it("resolveActionScopeCoverage 忽略 wrong resource 与 future binding", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.invoke",
       resourceScope: { type: "agent", ids: ["future-agent"] },
       validFrom: new Date(Date.now() + 60_000),
     });
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.read",
@@ -547,7 +375,7 @@ describe("authorization", () => {
   });
 
   it("checkActionScope ids 绑定包含目标 → allow", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.publish",
@@ -561,7 +389,7 @@ describe("authorization", () => {
   });
 
   it("checkActionScope ids 绑定不包含目标 → deny (action_scope_denied)", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.publish",
@@ -576,13 +404,13 @@ describe("authorization", () => {
   });
 
   it("checkActionScope 已撤销绑定不生效 → deny (empty_allowlist)", async () => {
-    const binding = await grantActionBinding({
+    const binding = await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.publish",
       resourceScope: { type: "agent", wildcard: true },
     });
-    await revokeActionBinding(tenantId, binding.id);
+    await revokeSeededActionPermission(tenantId, binding.id);
     const result = await checkActionScope(tenantId, userIdentityId, {
       actionCode: "agent.publish",
       resource: { type: "agent", id: "agt_1" },
@@ -592,7 +420,7 @@ describe("authorization", () => {
   });
 
   it("checkActionScope 不同 actionCode 的绑定不匹配 → deny (empty_allowlist)", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.publish",
@@ -607,7 +435,7 @@ describe("authorization", () => {
   });
 
   it("checkActionScope 跨租户用户 → deny (empty_allowlist)", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.publish",
@@ -661,7 +489,7 @@ describe("authorization", () => {
   // ── requireActionScope ──
 
   it("requireActionScope Principal 有权 → ok", async () => {
-    await grantActionBinding({
+    await seedActionPermission({
       tenantId,
       principalBindingId,
       actionCode: "agent.publish",
@@ -810,5 +638,360 @@ describe("authorization", () => {
     if (!result.ok) {
       expect(result.response.headers.get("X-Request-ID")).toBe("req_test_123");
     }
+  });
+});
+
+describe("正式角色、用户组与资产范围", () => {
+  async function setup() {
+    const tenant = await ensureDefaultTenant();
+    const admin = await seedUser(tenant.id, "permission-admin", "admin@example.test");
+    const employee = await seedUser(tenant.id, "permission-employee", "staff@example.test");
+    await db
+      .insert(permissionRoleAssignment)
+      .values({ tenantId: tenant.id, principalId: admin.binding.id, roleKey: "admin" });
+    return { tenant, admin, employee };
+  }
+  it("非法权限输入返回可修正的客户端错误", async () => {
+    const { tenant, admin } = await setup();
+    await expect(
+      changePermissionManagement(tenant.id, admin.identity.id, {
+        operation: "save_role",
+        name: "非法角色",
+        grants: [{ actionCode: "not.a.permission" }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input", status: 400 });
+  });
+  it("角色保存只修改角色分配，保留资产专项授权", async () => {
+    const { tenant, admin, employee } = await setup();
+    await db
+      .insert(agentTable)
+      .values({
+        id: "special-agent",
+        tenantId: tenant.id,
+        agentKey: "special-agent",
+        displayName: "专项智能体",
+        ownerUserId: admin.identity.id,
+        lifecycleState: "enabled",
+        currentRevisionId: "published",
+      });
+    const specific = await seedActionPermission({
+      tenantId: tenant.id,
+      principalBindingId: employee.binding.id,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "agent", ids: ["special-agent"] },
+    });
+    await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "set_roles",
+      principalId: employee.binding.id,
+      roleKeys: [specific.id, "auditor"],
+      expectedRoleKeys: [specific.id],
+    });
+    expect(
+      (
+        await checkActionScope(tenant.id, employee.identity.id, {
+          actionCode: "audit.read",
+          resource: { type: "tenant", id: tenant.id },
+        })
+      ).allowed,
+    ).toBe(true);
+    await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "set_roles",
+      principalId: employee.binding.id,
+      roleKeys: [specific.id],
+      expectedRoleKeys: [specific.id, "auditor"],
+    });
+    expect(
+      (
+        await checkActionScope(tenant.id, employee.identity.id, {
+          actionCode: "audit.read",
+          resource: { type: "tenant", id: tenant.id },
+        })
+      ).allowed,
+    ).toBe(false);
+    expect(
+      (
+        await checkActionScope(tenant.id, employee.identity.id, {
+          actionCode: "agent.invoke",
+          resource: { type: "agent", id: "special-agent" },
+        })
+      ).allowed,
+    ).toBe(true);
+  });
+  it("受限资产不被 tenant wildcard 绕过；加组和移组同时影响调用与目录范围", async () => {
+    const { tenant, admin, employee } = await setup();
+    const agent = await createAgent({
+      tenantId: tenant.id,
+      agentKey: "hr",
+      displayName: "HR",
+      ownerUserId: admin.identity.id,
+      lifecycleState: "enabled",
+    });
+    await db
+      .update(agentTable)
+      .set({ currentRevisionId: "published" })
+      .where(eq(agentTable.id, agent.id));
+    const group = await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "save_group",
+      name: "HR",
+      memberIds: [],
+    });
+    await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "save_access",
+      resourceType: "agent",
+      resourceId: agent.id,
+      version: 1,
+      mode: "restricted",
+      principals: [group.id],
+      collaborators: [],
+    });
+    await seedActionPermission({
+      tenantId: tenant.id,
+      principalBindingId: employee.binding.id,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "tenant", wildcard: true },
+    });
+    const check = () =>
+      checkActionScope(tenant.id, employee.identity.id, {
+        actionCode: "agent.invoke",
+        resource: { type: "agent", id: agent.id },
+      });
+    expect((await check()).allowed).toBe(false);
+    await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "save_group",
+      id: group.id,
+      version: 1,
+      name: "HR",
+      memberIds: [employee.identity.id],
+    });
+    expect((await check()).allowed).toBe(true);
+    expect(
+      (
+        await resolveActionScopeCoverage(tenant.id, employee.identity.id, {
+          actionCode: "agent.invoke",
+          resourceType: "agent",
+        })
+      ).resourceIds,
+    ).toContain(agent.id);
+    await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "save_group",
+      id: group.id,
+      version: 2,
+      name: "HR",
+      memberIds: [],
+    });
+    expect((await check()).allowed).toBe(false);
+    expect(
+      (
+        await resolveActionScopeCoverage(tenant.id, employee.identity.id, {
+          actionCode: "agent.invoke",
+          resourceType: "agent",
+        })
+      ).resourceIds,
+    ).not.toContain(agent.id);
+  });
+  it("新员工默认可用面向全员的已发布资产；停用立即失效", async () => {
+    const { tenant, admin, employee } = await setup();
+    const agent = await createAgent({
+      tenantId: tenant.id,
+      agentKey: "general",
+      displayName: "General",
+      ownerUserId: admin.identity.id,
+      lifecycleState: "enabled",
+    });
+    await db
+      .update(agentTable)
+      .set({ currentRevisionId: "published" })
+      .where(eq(agentTable.id, agent.id));
+    expect(
+      (
+        await checkActionScope(tenant.id, employee.identity.id, {
+          actionCode: "agent.invoke",
+          resource: { type: "agent", id: agent.id },
+        })
+      ).allowed,
+    ).toBe(true);
+    await db
+      .update(userIdentityTable)
+      .set({ status: "disabled" })
+      .where(eq(userIdentityTable.id, employee.identity.id));
+    expect(
+      (
+        await checkActionScope(tenant.id, employee.identity.id, {
+          actionCode: "agent.invoke",
+          resource: { type: "agent", id: agent.id },
+        })
+      ).allowed,
+    ).toBe(false);
+  });
+  it("平台默认范围只影响继承的资产，显式全员范围不被默认变更覆盖", async () => {
+    const { tenant, admin, employee } = await setup();
+    const inherited = await createAgent({
+      tenantId: tenant.id,
+      agentKey: "inherited-default",
+      displayName: "继承默认",
+      ownerUserId: admin.identity.id,
+      lifecycleState: "enabled",
+    });
+    const explicit = await createAgent({
+      tenantId: tenant.id,
+      agentKey: "explicit-default",
+      displayName: "显式全员",
+      ownerUserId: admin.identity.id,
+      lifecycleState: "enabled",
+    });
+    for (const agent of [inherited, explicit])
+      await db
+        .update(agentTable)
+        .set({ currentRevisionId: "published" })
+        .where(eq(agentTable.id, agent.id));
+    await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "save_access",
+      resourceType: "agent",
+      resourceId: explicit.id,
+      mode: "all",
+      principals: [],
+      collaborators: [],
+      version: 1,
+    });
+    await changePermissionManagement(tenant.id, admin.identity.id, {
+      operation: "save_defaults",
+      mode: "restricted",
+      version: 0,
+    });
+    for (const agent of [inherited, explicit])
+      expect(
+        (
+          await checkActionScope(tenant.id, employee.identity.id, {
+            actionCode: "agent.invoke",
+            resource: { type: "agent", id: agent.id },
+          })
+        ).allowed,
+      ).toBe(agent.id === explicit.id);
+    await expect(
+      changePermissionManagement(tenant.id, admin.identity.id, {
+        operation: "save_defaults",
+        mode: "all",
+        version: 0,
+      }),
+    ).rejects.toMatchObject({ code: "version_conflict" });
+  });
+  it("租户级使用授权也不能调用不存在或其他租户的智能体", async () => {
+    const { tenant, employee } = await setup();
+    await seedActionPermission({
+      tenantId: tenant.id,
+      principalBindingId: employee.binding.id,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "tenant", wildcard: true },
+    });
+    expect(
+      (
+        await checkActionScope(tenant.id, employee.identity.id, {
+          actionCode: "agent.invoke",
+          resource: { type: "agent", id: "outside-agent" },
+        })
+      ).allowed,
+    ).toBe(false);
+  });
+  it("并发互相撤销管理员时只允许一方成功，不能无人可管理", async () => {
+    const { tenant, admin, employee } = await setup();
+    await db
+      .insert(permissionRoleAssignment)
+      .values({ tenantId: tenant.id, principalId: employee.binding.id, roleKey: "admin" });
+    const results = await Promise.allSettled([
+      changePermissionManagement(tenant.id, admin.identity.id, {
+        operation: "set_roles",
+        principalId: employee.binding.id,
+        roleKeys: [],
+        expectedRoleKeys: ["admin"],
+      }),
+      changePermissionManagement(tenant.id, employee.identity.id, {
+        operation: "set_roles",
+        principalId: admin.binding.id,
+        roleKeys: [],
+        expectedRoleKeys: ["admin"],
+      }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const remaining = await Promise.all(
+      [admin, employee].map((u) =>
+        checkActionScope(tenant.id, u.identity.id, {
+          actionCode: "user.manage",
+          resource: { type: "tenant", id: tenant.id },
+        }),
+      ),
+    );
+    expect(remaining.filter((r) => r.allowed)).toHaveLength(1);
+  });
+  it("审计写入失败时角色变更也回滚", async () => {
+    const { tenant, admin, employee } = await setup();
+    await db.execute(
+      sql.raw(
+        "CREATE TRIGGER permission_audit_failure BEFORE INSERT ON AuditEvent FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test audit unavailable'",
+      ),
+    );
+    try {
+      await expect(
+        changePermissionManagement(tenant.id, admin.identity.id, {
+          operation: "set_roles",
+          principalId: employee.binding.id,
+          roleKeys: ["auditor"],
+          expectedRoleKeys: [],
+        }),
+      ).rejects.toThrow();
+      expect(
+        (
+          await checkActionScope(tenant.id, employee.identity.id, {
+            actionCode: "audit.read",
+            resource: { type: "tenant", id: tenant.id },
+          })
+        ).allowed,
+      ).toBe(false);
+    } finally {
+      await db.execute(sql.raw("DROP TRIGGER permission_audit_failure"));
+    }
+  });
+  it("拒绝超出自身权限的角色及跨租户组成员", async () => {
+    const { tenant, admin } = await setup();
+    await expect(
+      changePermissionManagement(tenant.id, admin.identity.id, {
+        operation: "save_role",
+        name: "越权导出",
+        grants: [{ actionCode: "audit.export", resourceScope: { type: "tenant", wildcard: true } }],
+      }),
+    ).rejects.toMatchObject({ code: "delegation_denied" });
+    await expect(
+      changePermissionManagement(tenant.id, admin.identity.id, {
+        operation: "save_group",
+        name: "跨租户组",
+        memberIds: ["outside-user"],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_members" });
+  });
+  it("过时保存与自锁拒绝且角色分配不变", async () => {
+    const { tenant, admin, employee } = await setup();
+    await expect(
+      changePermissionManagement(tenant.id, admin.identity.id, {
+        operation: "set_roles",
+        principalId: employee.binding.id,
+        roleKeys: ["auditor"],
+        expectedRoleKeys: ["builder"],
+      }),
+    ).rejects.toMatchObject({ code: "version_conflict" });
+    await expect(
+      changePermissionManagement(tenant.id, admin.identity.id, {
+        operation: "set_roles",
+        principalId: admin.binding.id,
+        roleKeys: [],
+        expectedRoleKeys: ["admin"],
+      }),
+    ).rejects.toMatchObject({ code: "self_lockout" });
+    expect(
+      (
+        await checkActionScope(tenant.id, admin.identity.id, {
+          actionCode: "user.manage",
+          resource: { type: "tenant", id: tenant.id },
+        })
+      ).allowed,
+    ).toBe(true);
   });
 });

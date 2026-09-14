@@ -19,6 +19,7 @@ import {
 } from "@/lib/identity/enterprise-user-profile-queries";
 import { userIdentity } from "@/lib/persistence/schema/identity";
 import { and, eq } from "drizzle-orm";
+import { synchronizeEnterprisePermissionGroups } from "./enterprise-permission-groups";
 
 export class EnterpriseProfileAcceptanceError extends Error {
   constructor(
@@ -137,6 +138,12 @@ export async function acceptEnterpriseProfileObservation(params: {
         observation.freshUntil.getTime() === previous.freshUntil.getTime() &&
         observation.staleUntil.getTime() === previous.staleUntil.getTime()
       ) {
+        await synchronizeEnterprisePermissionGroups(
+          observation.tenantId,
+          identity.id,
+          tx,
+          params.now,
+        );
         return {
           profileFingerprint: previous.profileFingerprint,
           freshUntil: previous.freshUntil,
@@ -188,6 +195,7 @@ export async function acceptEnterpriseProfileObservation(params: {
       },
       tx,
     );
+    await synchronizeEnterprisePermissionGroups(observation.tenantId, identity.id, tx, params.now);
     if (!previous || changedKeys.length > 0 || previous.profileFingerprint !== fingerprint) {
       await recordAuditEvent({
         actor: { tenantId: observation.tenantId, actorType: "user", actorId: identity.id },

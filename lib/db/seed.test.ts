@@ -21,7 +21,10 @@ import { getPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { getTenantByKey } from "@/lib/identity/tenant-queries";
 import { getUserIdentityBySubject } from "@/lib/identity/user-identity-queries";
 import { agentTable } from "@/lib/persistence/schema/agents";
-import { roleActionBinding } from "@/lib/persistence/schema/authorization";
+import {
+  permissionRoleAssignment,
+  roleActionBinding,
+} from "@/lib/persistence/schema/authorization";
 import { principalBinding, tenant, userIdentity } from "@/lib/persistence/schema/identity";
 
 beforeEach(async () => {
@@ -87,7 +90,7 @@ describe("seedDefaultIdentity", () => {
  * 未知 action 仍 fail-closed；Agent 空表断言保持不变。
  */
 describe("seedDefaultGrants：Agent 管理与调用授权", () => {
-  it("seed 后 checkActionScope 对 Agent 管理与调用的六个组合全部 allowed", async () => {
+  it("管理员引导开放管理能力，但不绕过智能体使用范围", async () => {
     const identity = await seedDefaultIdentity();
     await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
 
@@ -106,8 +109,6 @@ describe("seedDefaultGrants：Agent 管理与调用授权", () => {
       { actionCode: "runtime.publish", resource: { type: "runtime", id: runtimeId } },
       // 5. 发布员工路由（route: deployment-route-sets / hosted-provisioning）
       { actionCode: "route.update", resource: { type: "agent", id: agentId } },
-      // 6. 员工调用租户内 Agent（tenant scope 覆盖 exact Agent）。
-      { actionCode: "agent.invoke", resource: { type: "agent", id: agentId } },
     ] as const;
 
     for (const request of authorizedRequests) {
@@ -115,6 +116,14 @@ describe("seedDefaultGrants：Agent 管理与调用授权", () => {
       expect(decision, `${request.actionCode} 应被默认授权`).toEqual({ allowed: true });
     }
 
+    expect(
+      (
+        await checkActionScope(identity.tenantId, identity.userIdentityId, {
+          actionCode: "agent.invoke",
+          resource: { type: "agent", id: agentId },
+        })
+      ).allowed,
+    ).toBe(false);
     // 既有安全语义不放松：Agent 空表仍是合法平台状态（§15）。
     expect(await db.select().from(agentTable)).toHaveLength(0);
   });
@@ -130,22 +139,19 @@ describe("seedDefaultGrants：Agent 管理与调用授权", () => {
     expect(decision).toEqual({ allowed: false, reason: "unknown_action" });
   });
 
-  it("首次授权不重复写入导航派生与既有授权重叠的绑定", async () => {
+  it("首次与重复引导都只有一份正式管理员角色，不生成散落动作授权", async () => {
     const identity = await seedDefaultIdentity();
     await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
-    const rows = await db.select().from(roleActionBinding);
-    const keys = rows.map((row) => `${row.actionCode}:${row.resourceScopeJson}`);
-    expect(new Set(keys).size).toBe(rows.length);
-  });
-
-  it("重复授权不会累积相同的有效绑定", async () => {
-    const identity = await seedDefaultIdentity();
     await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
-    const firstCount = (await db.select().from(roleActionBinding)).length;
-
-    await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
-
-    expect((await db.select().from(roleActionBinding)).length).toBe(firstCount);
+    const roles = await db.select().from(permissionRoleAssignment);
+    expect(roles).toHaveLength(1);
+    expect(roles[0]).toMatchObject({
+      tenantId: identity.tenantId,
+      principalId: identity.principalBindingId,
+      roleKey: "admin",
+      source: "local",
+    });
+    expect(await db.select().from(roleActionBinding)).toHaveLength(0);
   });
 });
 

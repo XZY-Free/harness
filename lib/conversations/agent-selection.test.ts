@@ -20,11 +20,11 @@ import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { revokeActionBinding } from "@/lib/identity/role-action-queries";
 import { loadHarnessExecutionTraceForAgentCall } from "@/lib/observability/harness-execution-trace";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import { idempotencyRecord } from "@/lib/persistence/schema/idempotency";
+import { revokeSeededActionPermission } from "@/lib/test-support/seed-action-permission";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -93,7 +93,7 @@ describe("Turn-scoped AgentUseDirective", () => {
     const ctx = await seedDispatchableTurn({ agentKey: "sel-revoked-agent" });
     if (!ctx.agentInvokeBindingId) throw new Error("撤销用例缺少 agent.invoke binding");
     const threadId = await createThreadForOwner("sel-revoked");
-    expect(await revokeActionBinding(ctx.tenantId, ctx.agentInvokeBindingId)).toBe(true);
+    expect(await revokeSeededActionPermission(ctx.tenantId, ctx.agentInvokeBindingId)).toBe(true);
 
     const response = await postTurn(threadId, "sel-revoked", {
       input: { type: "text", text: "撤销后继续选择" },
