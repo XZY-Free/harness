@@ -46,6 +46,43 @@ describe("configured Harness model ports", () => {
     expect(prompt).toContain('"actionType"');
   });
 
+  it("所选智能体的领域流程不得被通用补填与宿主正文替代", async () => {
+    process.env.LLM_API_KEY = "test-key";
+
+    await configuredDecisionPort("test-model").decideNextAction({
+      objective: "帮我准备请假草稿",
+      capabilities: {
+        preferredAgentCandidate: { agentId: "hr-agent" },
+        catalog: {
+          agents: [{ applicableScenarios: ["请假草稿"] }],
+        },
+      },
+    } as never);
+
+    const prompt = mocks.generateObject.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("领域事实、校验、业务草稿或流程结果");
+    expect(prompt).toContain("不得用 request_user_input 绕过该 Agent");
+  });
+
+  it("最终正文不把用户补填内容当作业务执行证据", async () => {
+    process.env.LLM_API_KEY = "test-key";
+    mocks.streamText.mockReturnValueOnce({
+      fullStream: parts([
+        { type: "text-delta", text: "无法确认草稿结果" },
+        { type: "finish", finishReason: "stop" },
+      ]),
+    });
+
+    await configuredFinalResponsePort("test-model").generateFinalResponse({
+      objective: "帮我准备请假草稿",
+      observations: [{ observationType: "user_input", summary: "已收集日期" }],
+    } as never);
+
+    const prompt = mocks.streamText.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("user_input 只证明用户提供了字段");
+    expect(prompt).toContain("不得生成或声称业务草稿、校验、查询或处理结果");
+  });
+
   it("决策与正文共享系统当前时间，基础聊天无需工具观测", async () => {
     process.env.LLM_API_KEY = "test-key";
     vi.useFakeTimers();
