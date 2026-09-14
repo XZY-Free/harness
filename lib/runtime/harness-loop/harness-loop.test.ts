@@ -771,14 +771,6 @@ describe("HarnessLoop", () => {
               shortPurpose: "准备请假草稿",
               payload: { agentId: "agent-allowed", task: "准备请假草稿" },
             },
-            {
-              actionId: "respond-agent-failed",
-              stepNo: 2,
-              actionType: "respond",
-              purposeCode: "explain_agent_failure",
-              shortPurpose: "说明智能体暂时无法处理",
-              payload: { evidenceRefs: ["agent-call:call-1"] },
-            },
           ],
           views,
         ),
@@ -809,12 +801,12 @@ describe("HarnessLoop", () => {
       completed: true,
       responseText: "所选智能体未能完成本次请求：暂时无法取得排班数据，请稍后再试。",
     });
-    expect(views[1]?.capabilities.supportedActionTypes).toEqual(["respond"]);
+    expect(views).toHaveLength(1);
     expect(tool).not.toHaveBeenCalled();
     expect(generateFinalResponse).not.toHaveBeenCalled();
   });
 
-  it("preferred Agent 失败后即使模型提议工具兜底也 fail closed", async () => {
+  it("preferred Agent 失败后直接结束，不给模型机会提议工具兜底", async () => {
     const tool = vi.fn();
     const loop = new HarnessLoop(
       baseParams({
@@ -856,10 +848,7 @@ describe("HarnessLoop", () => {
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({
-      completed: false,
-      errorCode: "AGENT_FAILURE_FALLBACK_FORBIDDEN",
-    });
+    expect(result).toMatchObject({ completed: true });
     expect(tool).not.toHaveBeenCalled();
   });
 

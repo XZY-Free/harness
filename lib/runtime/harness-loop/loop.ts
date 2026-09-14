@@ -414,7 +414,39 @@ export class HarnessLoop {
         actionHistory: [...this.actionHistory],
       };
     }
+    const agentFailure =
+      action.actionType === "agent.call" ? this.terminalPreferredAgentFailure() : null;
+    if (agentFailure) return await this.completeAgentFailureResponse(agentFailure);
     return null;
+  }
+
+  private async completeAgentFailureResponse(
+    observation: HarnessObservation,
+  ): Promise<HarnessLoopResult> {
+    await this.params.eventWriter.write("progress.snapshot", {
+      message: "正在整理智能体返回的失败原因…",
+    });
+    const responseText = `所选智能体未能完成本次请求：${
+      observation.summary.trim().slice(0, 2_000) || "智能体执行失败"
+    }`;
+    await this.params.emitTextDelta?.(responseText);
+    this.throwIfCancelled();
+    await this.params.eventWriter.write("response.completed", {
+      text: responseText,
+      item_type: "assistant_message",
+      model_ref: this.params.modelRef,
+      finish_reason: "stop",
+      evidence_refs: observation.sourceRefs,
+    });
+    await this.params.eventWriter.write("execution.completed", {
+      finish_reason: "execution.completed",
+    });
+    return {
+      completed: true,
+      responseText,
+      observations: [...this.observations],
+      actionHistory: [...this.actionHistory],
+    };
   }
 
   private async respond(
