@@ -115,9 +115,14 @@ describe("生产 continuation worker durable topology", () => {
     runtimes.length = 0;
   });
 
-  it.each(["approve", "deny"] as const)(
+  it.each([
+    ["approve", false],
+    ["deny", false],
+    ["cancel", true],
+    ["cancel", false],
+  ] as const)(
     "%s 通过真实 Employee API、持久 Delivery 和生产 Worker 恢复同一 AgentCall",
-    async (resolution) => {
+    async (resolution, cancelSupported) => {
       const defaultUserIdentity = await upsertUserIdentity({
         tenantId: DEFAULT_TENANT_ID,
         externalSubject: DEFAULT_USER_ID,
@@ -127,12 +132,13 @@ describe("生产 continuation worker durable topology", () => {
       const scenario = await seedAgentCallExecutionScenario({
         tenantId: DEFAULT_TENANT_ID,
         threadOwnerUserId: defaultUserIdentity.id,
-        providerScenario: "confirmation_resolution",
+        providerScenario: resolution === "cancel" ? "input_required" : "confirmation_resolution",
         contract: {
           ...EXECUTION_FIXTURE_CONTRACT,
           interaction: {
             ...EXECUTION_FIXTURE_CONTRACT.interaction,
             input_required: true,
+            cancel: cancelSupported,
             resume: true,
           },
         },
@@ -240,7 +246,7 @@ describe("生产 continuation worker durable topology", () => {
         .where(eq(userActionRequestTable.invocationId, scenario.parentInvocationId));
       expect(initialRequests).toHaveLength(1);
       const request = initialRequests[0]!;
-      expect(request.requestType).toBe("confirmation");
+      expect(request.requestType).toBe(resolution === "cancel" ? "input" : "confirmation");
       expect(request.requestState).toBe("pending");
 
       const response = await resolveUserAction(
@@ -296,16 +302,34 @@ describe("生产 continuation worker durable topology", () => {
         .select()
         .from(agentCallTable)
         .where(eq(agentCallTable.id, scenario.callId));
-      expect(completedCall).toMatchObject({ id: scenario.callId, state: "completed" });
-      expect(scenario.provider.captured).toHaveLength(2);
-      const initial = scenario.provider.captured[0]!;
-      const resumed = scenario.provider.captured[1]!;
-      expect(resumed).toMatchObject({
-        resume: true,
-        taskId: initial.responseTaskId,
-        contextId: initial.responseContextId,
-        confirmationResolution: resolution,
+      if (resolution === "cancel" && !cancelSupported) {
+        expect(completedCall?.state).toBe("waiting_user");
+        expect(scenario.provider.rpcMethods).not.toContain("tasks/cancel");
+        const [parent] = await db
+          .select()
+          .from(invocationTable)
+          .where(eq(invocationTable.id, scenario.parentInvocationId));
+        expect(parent?.executionState).toBe("failed");
+        expect(parent?.errorCode).toContain("AGENT_INPUT_CANCELLATION_UNSUPPORTED");
+        return;
+      }
+      expect(completedCall).toMatchObject({
+        id: scenario.callId,
+        state: resolution === "cancel" ? "cancelled" : "completed",
       });
+      expect(scenario.provider.captured).toHaveLength(resolution === "cancel" ? 1 : 2);
+      const initial = scenario.provider.captured[0]!;
+      if (resolution === "cancel") {
+        expect(scenario.provider.cancelledTaskIds).toEqual([initial.responseTaskId]);
+      } else {
+        const resumed = scenario.provider.captured[1]!;
+        expect(resumed).toMatchObject({
+          resume: true,
+          taskId: initial.responseTaskId,
+          contextId: initial.responseContextId,
+          confirmationResolution: resolution,
+        });
+      }
       expect(await db.select().from(agentCallTable)).toHaveLength(1);
       expect(
         await db
@@ -353,7 +377,7 @@ describe("生产 continuation worker durable topology", () => {
         createdAt: new Date(),
       });
       await resumedWorker.pollOnce();
-      expect(scenario.provider.captured).toHaveLength(2);
+      expect(scenario.provider.captured).toHaveLength(resolution === "cancel" ? 1 : 2);
       expect(runtime.requests).toHaveLength(1);
       expect(
         await db

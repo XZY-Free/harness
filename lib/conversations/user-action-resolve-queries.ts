@@ -576,7 +576,7 @@ export async function resolveGenericUserAction(
         typeof agentCallId === "string" &&
         ((request.requestType === "input" &&
           request.purpose === "a2a_input_required" &&
-          params.resolution === "submit") ||
+          (params.resolution === "submit" || params.resolution === "cancel")) ||
           (request.requestType === "confirmation" &&
             request.purpose === "a2a_confirmation" &&
             (params.resolution === "approve" || params.resolution === "deny")));

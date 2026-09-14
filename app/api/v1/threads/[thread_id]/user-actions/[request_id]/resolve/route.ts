@@ -232,7 +232,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const durableAgentResume =
       (result.request.requestType === "input" &&
         result.request.purpose === "a2a_input_required" &&
-        body.resolution === "submit") ||
+        (body.resolution === "submit" || body.resolution === "cancel")) ||
       (result.request.requestType === "confirmation" &&
         result.request.purpose === "a2a_confirmation" &&
         (body.resolution === "approve" || body.resolution === "deny"));

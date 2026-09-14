@@ -1,3 +1,4 @@
+import { cancelAgentCall } from "@/lib/agents/calls/application/cancel-agent-call";
 import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/resume-agent-call-from-user-action";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import { getToolCallById } from "@/lib/capability/tool-call-queries";
@@ -53,7 +54,7 @@ const handler = createInvocationContinuationHandler({
     const validInputResolution =
       request.requestType === "input" &&
       request.purpose === "a2a_input_required" &&
-      request.resolution === "submit";
+      (request.resolution === "submit" || request.resolution === "cancel");
     const validConfirmationResolution =
       request.requestType === "confirmation" &&
       request.purpose === "a2a_confirmation" &&
@@ -82,6 +83,19 @@ const handler = createInvocationContinuationHandler({
         "EXECUTION_SUBJECT_MISMATCH",
         error instanceof Error ? error.message : "可信主体无法恢复",
       );
+    }
+    if (request.requestType === "input" && request.resolution === "cancel") {
+      const result = await cancelAgentCall({
+        tenantId: params.tenantId,
+        callId: params.agentCallId,
+      });
+      if (result.remoteCancellation === "unsupported") {
+        throw new InvocationContinuationPermanentError(
+          "AGENT_INPUT_CANCELLATION_UNSUPPORTED",
+          "智能体不支持取消；输入请求已关闭，远端任务可能仍在等待",
+        );
+      }
+      return;
     }
     await resumeAgentCallFromUserAction({
       tenantId: params.tenantId,
