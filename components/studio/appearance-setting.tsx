@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
  *
  * - 三态：跟随系统 / 亮色 / 暗色；显式选择写入 localStorage `snow-theme`，
  *   `跟随系统` 写入 "system"，theme-init.js 视同未保存并回落到系统偏好。
- * - 跟随系统时监听 prefers-color-scheme 变化实时生效。
+ * - 系统变化由常驻的 theme-init.js 处理，离开设置页仍生效。
  * - 首屏主题仍由 theme-init.js 在 hydration 前写入，本组件只同步与切换。
  */
 
@@ -49,13 +49,6 @@ export function AppearanceSetting() {
   useEffect(() => {
     setChoice(readChoice());
     setMounted(true);
-
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onSystemChange = () => {
-      if (readChoice() === "system") applyChoice("system");
-    };
-    media.addEventListener("change", onSystemChange);
-    return () => media.removeEventListener("change", onSystemChange);
   }, []);
 
   function select(next: ThemeChoice) {

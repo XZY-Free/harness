@@ -48,6 +48,7 @@ function runThemeInit(
     documentElement: {
       classList: {
         add: (theme: string) => added.push(theme),
+        remove: () => {},
       },
     },
   };
@@ -57,6 +58,33 @@ function runThemeInit(
 }
 
 describe("themeInitScript", () => {
+  it("未挂载设置页时，系统变化仍更新 Studio 主题；显式选择优先", () => {
+    let stored: string | null = "system";
+    const media = { matches: false, addEventListener: vi.fn() };
+    const classes = new Set<string>();
+    new Function("localStorage", "window", "document", extractThemeInitScript())(
+      { getItem: () => stored },
+      { location: { pathname: "/studio/agents" }, matchMedia: () => media },
+      {
+        documentElement: {
+          classList: {
+            add: (v: string) => classes.add(v),
+            remove: (...vs: string[]) => {
+              for (const v of vs) classes.delete(v);
+            },
+          },
+        },
+      },
+    );
+    expect(media.addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+    media.matches = true;
+    media.addEventListener.mock.calls[0][1]();
+    expect([...classes]).toEqual(["dark"]);
+    stored = "light";
+    media.addEventListener.mock.calls[0][1]();
+    expect([...classes]).toEqual(["light"]);
+  });
+
   it("子路径部署时从 basePath 加载主题初始化脚本", () => {
     vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
     try {
