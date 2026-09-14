@@ -9,6 +9,7 @@ import {
 import type { CapabilityCatalogSnapshot } from "./capability-catalog";
 import type { HarnessActionExecutors } from "./loop";
 import { createToolActionExecutor } from "./tool-action-executor";
+import { createUserInputResult } from "./user-input-result";
 
 /** 平台内置 Action Executor；Hosted 进程内与 Gateway HTTP 共用。 */
 export function createPlatformHarnessActionExecutors(params: {
@@ -71,20 +72,6 @@ export function createPlatformHarnessActionExecutors(params: {
         },
       };
     },
-    request_user_input: async (action) => ({
-      authorityRef: `harness-action:${action.actionId}`,
-      observation: {
-        observationType: "user_input",
-        summary: "已请求用户补充信息",
-        sourceRefs: [],
-        data: { purpose: action.payload.purpose },
-      },
-      waitingForUser: {
-        requestType: "input",
-        purpose: action.payload.purpose,
-        prompt: action.payload.prompt,
-        inputSchema: action.payload.inputSchema,
-      },
-    }),
+    request_user_input: async (action) => createUserInputResult(action, params.capabilityCatalog),
   };
 }

@@ -140,7 +140,7 @@ function formatExpiresAt(expiresAt: string | undefined): string | null {
 interface InputFieldDef {
   key: string;
   label: string;
-  type: "string" | "number" | "boolean";
+  type: "string" | "number" | "integer" | "boolean";
   required: boolean;
   description?: string;
   enum?: readonly string[];
@@ -174,7 +174,8 @@ function extractInputFields(schema: Record<string, unknown> | undefined): InputS
   for (const [key, def] of entries) {
     if (!def || typeof def !== "object") return fail;
     const type = (def.type as string | undefined) ?? "string";
-    if (type !== "string" && type !== "number" && type !== "boolean") return fail;
+    if (type !== "string" && type !== "number" && type !== "integer" && type !== "boolean")
+      return fail;
     const pattern = typeof def.pattern === "string" ? def.pattern : undefined;
     if (pattern) {
       try {
@@ -216,10 +217,11 @@ type NormalizedFieldValue =
 
 function normalizeFieldValue(field: InputFieldDef, raw: string): NormalizedFieldValue {
   const trimmed = raw.trim();
-  if (field.type === "number") {
+  if (field.type === "number" || field.type === "integer") {
     if (!trimmed) return field.required ? { ok: false } : { ok: true, omit: true };
     const num = Number(trimmed);
-    if (!Number.isFinite(num)) return { ok: false };
+    if (!Number.isFinite(num) || (field.type === "integer" && !Number.isInteger(num)))
+      return { ok: false };
     return { ok: true, omit: false, value: num };
   }
   if (field.type === "boolean") {
@@ -766,7 +768,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
                   ) : (
                     <input
                       id={`ua-input-${item.id}-${field.key}`}
-                      type={field.type === "number" ? "number" : "text"}
+                      type={field.type === "number" || field.type === "integer" ? "number" : "text"}
                       value={inputValues[field.key] ?? ""}
                       onChange={(event) => handleInputChange(field.key, event.target.value)}
                       disabled={busy || !requestId}

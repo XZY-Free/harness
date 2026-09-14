@@ -142,3 +142,44 @@ describe("Harness frozen capability authorization", () => {
     ).toThrowError(expect.objectContaining({ code: "ACTION_SCOPE_DENIED" }));
   });
 });
+
+import { createUserInputResult } from "./user-input-result";
+it("可信身份字段不能产生用户输入请求，业务年份仍可补充", () => {
+  const action = {
+    actionId: "input-1",
+    stepNo: 2,
+    actionType: "request_user_input" as const,
+    purposeCode: "query",
+    shortPurpose: "补充信息",
+    payload: {
+      purpose: "query",
+      prompt: "请提供员工编号",
+      inputSchema: {
+        type: "object",
+        properties: { employeeId: { type: "string" }, year: { type: "integer" } },
+        required: ["employeeId"],
+      },
+    },
+  };
+  const blocked = createUserInputResult(action, built.snapshot);
+  expect(blocked.waitingForUser).toBeUndefined();
+  expect(blocked.observation?.data).toMatchObject({
+    errorCode: "TRUSTED_IDENTITY_INPUT_FORBIDDEN",
+  });
+  const allowed = createUserInputResult(
+    {
+      ...action,
+      payload: {
+        ...action.payload,
+        prompt: "查询哪一年？",
+        inputSchema: {
+          type: "object",
+          properties: { year: { type: "integer" } },
+          required: ["year"],
+        },
+      },
+    },
+    built.snapshot,
+  );
+  expect(allowed.waitingForUser).toBeDefined();
+});

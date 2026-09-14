@@ -520,3 +520,33 @@ it("自定义自由文本输入沿用同一智能体的正式 submit 接口", as
     user_note: "请先说明其他方案",
   });
 });
+
+it("整数年份允许提交数字，拒绝小数", async () => {
+  const fetchMock = makeFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+  const { container } = render(
+    <UserActionItem
+      threadId="thread-1"
+      item={makeInputItem({
+        input_schema: {
+          type: "object",
+          required: ["year"],
+          properties: { year: { type: "integer", title: "年份" } },
+        },
+      })}
+    />,
+  );
+  const input = container.querySelector<HTMLInputElement>("#ua-input-item-1-year");
+  expect(input).not.toBeNull();
+  const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
+  fireEvent.change(input!, { target: { value: "2026.5" } });
+  expect(submit.disabled).toBe(true);
+  fireEvent.change(input!, { target: { value: "2026" } });
+  expect(submit.disabled).toBe(false);
+  fireEvent.click(submit);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(
+    JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)
+      .response_redacted,
+  ).toEqual({ year: 2026 });
+});
