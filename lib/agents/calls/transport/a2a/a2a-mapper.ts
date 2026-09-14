@@ -148,8 +148,8 @@ export function createA2AArtifactCache(): A2AArtifactCache {
  * @param sequence 连续 producer sequence。
  * @param update A2A stream update（已通过严格校验：taskId/contextId 非空、
  *   status-update 的 status.final 为布尔）。
- * @param artifacts 任务级最新 artifact 缓存（input-required/completed 的 status.message
- *   缺失时，追问/答复文本与 data 取自该 task 最新 artifact 累积）。
+ * @param artifacts 任务级最新 artifact 缓存（input-required/completed/failed 的
+ *   status.message 缺失时，追问、答复或失败说明取自该 task 最新 artifact 累积）。
  */
 export function mapAgentCallUpdate(
   callId: string,
@@ -244,7 +244,8 @@ export function mapAgentCallUpdate(
         },
       ];
     }
-    case "failed":
+    case "failed": {
+      const cached = artifacts.get(taskId);
       return [
         {
           ...base,
@@ -255,11 +256,12 @@ export function mapAgentCallUpdate(
             context_id: contextId,
             error: {
               code: "REMOTE_TASK_FAILED",
-              message: a2aMessageText(update.status.message) ?? "A2A task failed",
+              message: a2aMessageText(update.status.message) ?? cached?.text ?? "A2A task failed",
             },
           },
         },
       ];
+    }
     case "canceled":
       return [
         {

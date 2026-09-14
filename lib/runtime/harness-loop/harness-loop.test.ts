@@ -750,6 +750,113 @@ describe("HarnessLoop", () => {
     expect(generateFinalResponse).not.toHaveBeenCalled();
   });
 
+  it("preferred Agent 返回业务失败后只允许组织失败答复，不再调用其他能力", async () => {
+    const views: Array<{
+      capabilities: { supportedActionTypes: string[] };
+    }> = [];
+    const tool = vi.fn();
+    const loop = new HarnessLoop(
+      baseParams({
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-allowed", mode: "preferred" },
+        ],
+        decisionPort: decisionPort(
+          [
+            {
+              actionId: "action-agent-failed",
+              stepNo: 1,
+              actionType: "agent.call",
+              purposeCode: "prepare_leave_draft",
+              shortPurpose: "准备请假草稿",
+              payload: { agentId: "agent-allowed", task: "准备请假草稿" },
+            },
+            {
+              actionId: "respond-agent-failed",
+              stepNo: 2,
+              actionType: "respond",
+              purposeCode: "explain_agent_failure",
+              shortPurpose: "说明智能体暂时无法处理",
+              payload: { evidenceRefs: ["agent-call:call-1"] },
+            },
+          ],
+          views,
+        ),
+        executors: {
+          "agent.call": async () => ({
+            authorityRef: "agent-call:call-1",
+            observation: {
+              observationType: "agent" as const,
+              summary: "暂时无法取得排班数据，请稍后再试。",
+              sourceRefs: ["agent-call:call-1"],
+              data: {
+                callId: "call-1",
+                state: "failed",
+                errorCode: "AGENT_CALL_FAILED",
+                errorSummary: "暂时无法取得排班数据，请稍后再试。",
+              },
+            },
+          }),
+          "tool.call": tool,
+        },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({ completed: true, responseText: "最终回答" });
+    expect(views[1]?.capabilities.supportedActionTypes).toEqual(["respond"]);
+    expect(tool).not.toHaveBeenCalled();
+  });
+
+  it("preferred Agent 失败后即使模型提议工具兜底也 fail closed", async () => {
+    const tool = vi.fn();
+    const loop = new HarnessLoop(
+      baseParams({
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-allowed", mode: "preferred" },
+        ],
+        decisionPort: decisionPort([
+          {
+            actionId: "action-agent-failed",
+            stepNo: 1,
+            actionType: "agent.call",
+            purposeCode: "prepare_leave_draft",
+            shortPurpose: "准备请假草稿",
+            payload: { agentId: "agent-allowed", task: "准备请假草稿" },
+          },
+          {
+            actionId: "tool-fallback",
+            stepNo: 2,
+            actionType: "tool.call",
+            purposeCode: "fake_leave_draft",
+            shortPurpose: "用本地命令生成草稿",
+            payload: { toolId: "shell", operationId: "run", arguments: { command: "printf" } },
+          },
+        ]),
+        executors: {
+          "agent.call": async () => ({
+            authorityRef: "agent-call:call-1",
+            observation: {
+              observationType: "agent" as const,
+              summary: "暂时无法取得排班数据，请稍后再试。",
+              sourceRefs: ["agent-call:call-1"],
+              data: { callId: "call-1", state: "failed" },
+            },
+          }),
+          "tool.call": tool,
+        },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({
+      completed: false,
+      errorCode: "AGENT_FAILURE_FALLBACK_FORBIDDEN",
+    });
+    expect(tool).not.toHaveBeenCalled();
+  });
+
   it("超过连续相同行动预算时失败且不执行第三次", async () => {
     const knowledge = vi.fn(async () => ({
       observation: {

@@ -62,4 +62,47 @@ describe("A2A completed Host Action 投影边界", () => {
       },
     });
   });
+
+  it("failed 缺少 status.message 时保留最新 artifact 的可读失败原因", () => {
+    const artifacts = createA2AArtifactCache();
+    mapAgentCallUpdate(
+      "call-1",
+      1,
+      {
+        kind: "artifact-update",
+        taskId: "task-1",
+        contextId: "context-1",
+        artifact: {
+          artifactId: "artifact-1",
+          parts: [
+            {
+              kind: "text",
+              text: "暂时无法取得排班数据，请稍后再试。",
+            },
+          ],
+        },
+      },
+      artifacts,
+    );
+
+    const events = mapAgentCallUpdate(
+      "call-1",
+      2,
+      {
+        kind: "status-update",
+        taskId: "task-1",
+        contextId: "context-1",
+        status: { state: "failed", final: true },
+      },
+      artifacts,
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload).toMatchObject({
+      error: {
+        code: "REMOTE_TASK_FAILED",
+        message: "暂时无法取得排班数据，请稍后再试。",
+      },
+    });
+  });
 });

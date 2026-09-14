@@ -473,6 +473,12 @@ export class HarnessLoop {
         `actionId 已存在：${action.actionId}`,
       );
     }
+    if (action.actionType !== "respond" && this.hasTerminalPreferredAgentFailure()) {
+      throw new HarnessLoopError(
+        "AGENT_FAILURE_FALLBACK_FORBIDDEN",
+        "用户选择的智能体已返回终态失败，只能基于该失败事实向用户说明结果",
+      );
+    }
     if (this.params.capabilityCatalog) {
       validateHarnessActionAgainstCatalog(action, this.params.capabilityCatalog);
     }
@@ -563,6 +569,7 @@ export class HarnessLoop {
         (entry) => entry.actionType === "knowledge.search",
       ).length,
     };
+    const terminalPreferredAgentFailure = this.hasTerminalPreferredAgentFailure();
     return {
       invocation: {
         invocationId: this.params.invocationId,
@@ -579,9 +586,11 @@ export class HarnessLoop {
         traceContext: this.params.traceContext,
       },
       capabilities: {
-        supportedActionTypes: HARNESS_ACTION_TYPES.filter(
-          (actionType) => actionType === "respond" || actionType in this.params.executors,
-        ),
+        supportedActionTypes: terminalPreferredAgentFailure
+          ? ["respond"]
+          : HARNESS_ACTION_TYPES.filter(
+              (actionType) => actionType === "respond" || actionType in this.params.executors,
+            ),
         preferredAgentCandidate: this.preferredAgentId()
           ? { agentId: this.preferredAgentId() as string }
           : null,
@@ -615,6 +624,25 @@ export class HarnessLoop {
         (directive) => directive.capability_type === "agent" && directive.mode === "preferred",
       )?.capability_id ?? null
     );
+  }
+
+  private hasTerminalPreferredAgentFailure(): boolean {
+    const preferredAgentId = this.preferredAgentId();
+    if (!preferredAgentId) return false;
+    return this.actionHistory.some((entry) => {
+      if (
+        entry.action.actionType !== "agent.call" ||
+        entry.state !== "completed" ||
+        entry.action.payload.agentId !== preferredAgentId ||
+        entry.observation?.observationType !== "agent"
+      ) {
+        return false;
+      }
+      const data = entry.observation.data;
+      if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+      const state = (data as Record<string, unknown>).state;
+      return state === "failed" || state === "cancelled" || state === "lost";
+    });
   }
 
   private async writeActionEvent(
