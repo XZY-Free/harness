@@ -6,6 +6,7 @@ import {
   SESSION_COOKIE_NAME,
   completePasswordEnrollment,
   establishExternalSession,
+  localAuthenticationProvider,
 } from "@/lib/identity/local-authentication";
 import { PASSWORD_MAX_LENGTH, isPasswordAcceptable } from "@/lib/identity/password-strength";
 import { acceptAuthenticatedEvidence } from "@/lib/identity/resolver";
@@ -241,15 +242,47 @@ async function handle(
   if (method !== "POST") {
     return apiError("REQUEST_SCHEMA_INVALID", "logout 只支持 POST", { requestId });
   }
-  if (!authenticationProvider.logout) {
-    return apiError("FEATURE_NOT_READY", "当前认证提供器未声明 logout 操作", {
-      requestId,
-    });
+  // 平台会话撤销必须先成功；企业扩展失败不能保留本地登录。
+  if (!localAuthenticationProvider.logout) throw new Error("Local logout unavailable");
+  await localAuthenticationProvider.logout({ headers: request.headers });
+  let redirectTo: string | undefined;
+  let externalLogout: "redirect" | "unavailable" | undefined;
+  if (authenticationProvider !== localAuthenticationProvider && authenticationProvider.logout) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        authenticationProvider.logout({
+          headers: request.headers,
+          returnToUrl: new URL(withBasePath("/login"), request.url).toString(),
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("external logout timed out")), 3000);
+        }),
+      ]);
+      if (result) {
+        const destination = new URL(result.location);
+        if (destination.protocol !== "https:" || destination.username || destination.password)
+          throw new Error("invalid external logout destination");
+        redirectTo = destination.toString();
+        externalLogout = "redirect";
+      }
+    } catch {
+      externalLogout = "unavailable";
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
-  await authenticationProvider.logout({ headers: request.headers });
+  const headers = new Headers({ "cache-control": "no-store" });
+  headers.append("set-cookie", serializeExpiredSessionCookie(request));
+  headers.append("set-cookie", serializeExpiredNamedCookie(request, SSO_STATE_COOKIE_NAME));
+  headers.append("set-cookie", serializeExpiredNamedCookie(request, SSO_RETURN_TO_COOKIE_NAME));
   return apiSuccess(
-    { loggedOut: true },
-    { headers: { "set-cookie": serializeExpiredSessionCookie(request) } },
+    {
+      loggedOut: true,
+      ...(redirectTo ? { redirectTo } : {}),
+      ...(externalLogout ? { externalLogout } : {}),
+    },
+    { headers },
   );
 }
 

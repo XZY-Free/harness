@@ -75,7 +75,14 @@ export interface UserAuthenticationProvider {
   describeExternalAuth?(context: {
     readonly returnTo: string;
   }): Promise<ExternalAuthZoneConfig> | ExternalAuthZoneConfig;
-  logout?(input: { readonly headers: Headers }): Promise<void>;
+  /** 本地会话由平台先撤销；企业可清理自身状态并返回浏览器级 HTTPS 注销跳转。
+   * returnToUrl 由平台生成，不能使用浏览器提交的任意回跳地址。
+   */
+  logout?(input: {
+    readonly headers: Headers;
+    readonly returnToUrl?: string;
+    // biome-ignore lint/suspicious/noConfusingVoidType: 保留已有 Promise<void> 退出提供器的合同。
+  }): Promise<void | AuthenticationRedirect>;
 }
 
 export class AuthenticationProviderConfigurationError extends Error {

@@ -22,6 +22,17 @@ describe("logoutClientSession", () => {
     expect(navigate).toHaveBeenCalledWith("/login");
   });
 
+  it("企业退出使用服务端跳转，不把站外地址当站内路由", async () => {
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ loggedOut: true, redirectTo: "https://id.example.com/logout" }),
+      ),
+    );
+    const navigate = vi.fn();
+    await logoutClientSession({ navigate });
+    expect(navigate).toHaveBeenCalledWith("https://id.example.com/logout");
+  });
+
   it("服务端撤销失败时不伪装成已退出", async () => {
     apiFetch.mockResolvedValue(new Response(null, { status: 503 }));
     const cleanupDesktop = vi.fn();

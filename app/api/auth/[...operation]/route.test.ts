@@ -12,6 +12,7 @@ const provider = vi.hoisted(() => ({
 
 const acceptAuthenticatedEvidence = vi.hoisted(() => vi.fn());
 const establishExternalSession = vi.hoisted(() => vi.fn());
+const localLogout = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const completePasswordEnrollment = vi.hoisted(() => vi.fn());
 const PasswordEnrollmentError = vi.hoisted(
   () =>
@@ -26,6 +27,7 @@ vi.mock("@/lib/identity/identity-extension-bootstrap", () => ({
 vi.mock("@/lib/identity/resolver", () => ({ acceptAuthenticatedEvidence }));
 vi.mock("@/lib/identity/local-authentication", () => ({
   SESSION_COOKIE_NAME: "snow_session",
+  localAuthenticationProvider: { logout: localLogout },
   establishExternalSession,
   completePasswordEnrollment,
   PasswordEnrollmentError,
@@ -351,6 +353,64 @@ describe("auth operation facade", () => {
     ).rejects.toThrow("database unavailable");
   });
 
+  it("企业退出失败仍撤销本地会话并清 Cookie", async () => {
+    provider.logout.mockRejectedValue(new Error("private upstream secret"));
+    const response = await POST(
+      new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+      { params: Promise.resolve({ operation: ["logout"] }) },
+    );
+    expect(localLogout).toHaveBeenCalledOnce();
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(await response.json()).toEqual({ loggedOut: true, externalLogout: "unavailable" });
+  });
+  it("返回受信任提供器生成的 HTTPS 退出跳转", async () => {
+    provider.logout.mockResolvedValue({ location: "https://id.example.com/logout" });
+    const response = await POST(
+      new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+      { params: Promise.resolve({ operation: ["logout"] }) },
+    );
+    expect(await response.json()).toEqual({
+      loggedOut: true,
+      redirectTo: "https://id.example.com/logout",
+      externalLogout: "redirect",
+    });
+  });
+
+  it("企业退出超时不阻断本地退出", async () => {
+    vi.useFakeTimers();
+    try {
+      provider.logout.mockImplementationOnce(() => new Promise(() => {}));
+      const pending = POST(
+        new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+        { params: Promise.resolve({ operation: ["logout"] }) },
+      );
+      await vi.advanceTimersByTimeAsync(3001);
+      expect(await (await pending).json()).toEqual({
+        loggedOut: true,
+        externalLogout: "unavailable",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("本地撤销失败不能报告成功，也不能调用企业退出", async () => {
+    localLogout.mockRejectedValueOnce(new Error("database unavailable"));
+    await expect(
+      POST(new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }), {
+        params: Promise.resolve({ operation: ["logout"] }),
+      }),
+    ).rejects.toThrow("database unavailable");
+    expect(provider.logout).not.toHaveBeenCalled();
+  });
+  it("拒绝提供器返回的可执行地址", async () => {
+    provider.logout.mockResolvedValueOnce({ location: "javascript:alert(1)" });
+    const response = await POST(
+      new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+      { params: Promise.resolve({ operation: ["logout"] }) },
+    );
+    expect(await response.json()).toEqual({ loggedOut: true, externalLogout: "unavailable" });
+  });
+
   it("logout 撤销服务端会话并清除 cookie", async () => {
     provider.logout.mockResolvedValue(undefined);
     const request = new NextRequest("https://snow.example.com/api/auth/logout", {
@@ -361,7 +421,10 @@ describe("auth operation facade", () => {
     const response = await POST(request, { params: Promise.resolve({ operation: ["logout"] }) });
 
     expect(response.status).toBe(200);
-    expect(provider.logout).toHaveBeenCalledWith({ headers: request.headers });
+    expect(provider.logout).toHaveBeenCalledWith({
+      headers: request.headers,
+      returnToUrl: "https://snow.example.com/login",
+    });
     expect(response.headers.get("set-cookie")).toContain("snow_session=");
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
