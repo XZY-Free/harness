@@ -60,7 +60,7 @@ async function handle(
     return apiError("ACCESS_DENIED", "拒绝跨站认证请求", { requestId });
   }
 
-  const { authenticationProvider } = await getIdentityExtensions();
+  const { authenticationProvider, profileSource } = await getIdentityExtensions();
   if (operation === "sso") {
     if (method !== "GET") {
       return apiError("REQUEST_SCHEMA_INVALID", "sso 只支持 GET", { requestId });
@@ -124,7 +124,9 @@ async function handle(
     if (!loginAccount || loginAccount.length > 128) {
       return apiError("ACCESS_DENIED", "企业认证结果缺少有效账号", { requestId });
     }
-    const principal = await acceptAuthenticatedEvidence(result.evidence);
+    const principal = await acceptAuthenticatedEvidence(result.evidence, "employee", {
+      profileSource,
+    });
     const session = await establishExternalSession({
       userIdentityId: principal.userIdentityId,
       loginAccount,

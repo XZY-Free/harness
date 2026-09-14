@@ -889,3 +889,48 @@ describe("resolver", () => {
     expect(body.error.request_id).toMatch(/^req_/);
   });
 });
+
+it("SSO 回调在建立会话时接纳可信企业资料", async () => {
+  const { GET } = await import("@/app/api/auth/[...operation]/route");
+  const { NextRequest } = await import("next/server");
+  const now = new Date();
+  profileSourceState.authenticationProviderOverride = {
+    name: "callback-directory",
+    authenticate: async () => ({ status: "unauthenticated" }),
+    completeExternalLogin: async () => ({
+      status: "authenticated",
+      evidence: {
+        externalSubject: "callback-employee",
+        loginAccount: "callback-user",
+        email: "callback@example.test",
+        displayName: "回调用户",
+        trustedAuthenticationClaims: {},
+        enterpriseProfileObservation: {
+          tenantId: DEFAULT_TENANT_ID,
+          externalSubject: "callback-employee",
+          sourceSystem: "directory",
+          attributes: { employeeNo: "TEST-001" },
+          verifiedAt: now,
+          freshUntil: new Date(now.getTime() + 60000),
+          staleUntil: new Date(now.getTime() + 120000),
+        },
+      },
+    }),
+  };
+  const response = await GET(
+    new NextRequest("http://localhost/api/auth/callback?code=test-code&state=test-state", {
+      headers: { cookie: "snow_sso_state=test-state" },
+    }),
+    { params: Promise.resolve({ operation: ["callback"] }) },
+  );
+  expect(response.status).toBe(302);
+  const identity = await getUserIdentityBySubject(DEFAULT_TENANT_ID, "callback-employee");
+  expect(identity).not.toBeNull();
+  const facts = await getEnterpriseUserProfileFacts(DEFAULT_TENANT_ID, identity!.id);
+  expect(facts.syncState?.sourceSystem).toBe("directory");
+  expect(facts.attributes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ attributeKey: "employeeNo", stringValue: "TEST-001" }),
+    ]),
+  );
+});
