@@ -60,7 +60,10 @@ function runThemeInit(
 describe("themeInitScript", () => {
   it("未挂载设置页时，系统变化仍更新 Studio 主题；显式选择优先", () => {
     let stored: string | null = "system";
-    const media = { matches: false, addEventListener: vi.fn() };
+    const media = {
+      matches: false,
+      addEventListener: vi.fn<(name: string, callback: () => void) => void>(),
+    };
     const classes = new Set<string>();
     new Function("localStorage", "window", "document", extractThemeInitScript())(
       { getItem: () => stored },
@@ -77,11 +80,13 @@ describe("themeInitScript", () => {
       },
     );
     expect(media.addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+    const onChange = media.addEventListener.mock.calls[0]?.[1];
+    if (!onChange) throw new Error("缺少系统主题监听");
     media.matches = true;
-    media.addEventListener.mock.calls[0][1]();
+    onChange();
     expect([...classes]).toEqual(["dark"]);
     stored = "light";
-    media.addEventListener.mock.calls[0][1]();
+    onChange();
     expect([...classes]).toEqual(["light"]);
   });
 

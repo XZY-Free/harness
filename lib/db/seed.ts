@@ -209,7 +209,7 @@ async function main() {
 
 // 直接运行时执行；被 import（单测）时不自动跑。
 // 用 typeof require 守卫，CJS / ESM 加载器下都安全。
-if (typeof require !== "undefined" && require.main === module) {
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
   main().catch((error) => {
     console.error("[seed] 失败：", error);
     process.exit(1);
