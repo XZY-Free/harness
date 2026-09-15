@@ -225,7 +225,6 @@ function DesktopShell() {
       <div className="flex h-dvh min-h-0 overflow-hidden bg-background text-foreground">
         <DesktopSidebar
           threads={threads}
-          agents={[]}
           currentThreadId={route.kind === "thread" ? route.threadId : ""}
           userName={shell.viewer_name}
           hasNativeTitlebar

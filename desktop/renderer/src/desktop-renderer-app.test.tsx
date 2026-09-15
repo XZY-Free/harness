@@ -47,6 +47,7 @@ vi.mock("@/components/thread/thread-page", () => ({
 vi.mock("@/components/thread/new-thread-page", () => ({
   NewThreadPage: ({
     onSubmit,
+    agents,
     defaultModelRef,
     workbenchOpen,
     onWorkbenchOpenChange,
@@ -60,6 +61,7 @@ vi.mock("@/components/thread/new-thread-page", () => ({
       readonly modelRef: string | null;
       readonly workspaceId?: string | null;
     }) => Promise<boolean>;
+    readonly agents?: readonly { id: string }[];
     readonly defaultModelRef?: string;
     readonly workbenchOpen?: boolean;
     readonly onWorkbenchOpenChange?: (open: boolean) => void;
@@ -71,6 +73,7 @@ vi.mock("@/components/thread/new-thread-page", () => ({
       data-testid="desktop-new-thread-page"
       data-default-model-ref={defaultModelRef ?? ""}
       data-workspace-name={workspaceName ?? ""}
+      data-agent-source={agents === undefined ? "catalog" : "inline"}
     >
       <button type="button" onClick={() => onWorkbenchOpenChange?.(true)}>
         展开工作台
@@ -173,6 +176,7 @@ describe("DesktopRendererApp", () => {
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
     await screen.findByTestId("desktop-new-thread-page");
+    expect(screen.getByTestId("desktop-new-thread-page").dataset.agentSource).toBe("catalog");
     expect(apiFetch).toHaveBeenNthCalledWith(
       3,
       "/api/auth/login?returnTo=%2Fdesktop",
