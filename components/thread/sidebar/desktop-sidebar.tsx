@@ -303,7 +303,10 @@ export function DesktopSidebar({
                   onClick={async () => {
                     const desktop = (
                       window as unknown as {
-                        snowDesktop?: { auth?: { logout: () => Promise<{ ok: boolean }> } };
+                        snowDesktop?: {
+                          auth?: { logout: () => Promise<{ ok: boolean }> };
+                          openExternal?: (url: string) => Promise<void>;
+                        };
                       }
                     ).snowDesktop;
                     await logoutClientSession({
@@ -312,6 +315,7 @@ export function DesktopSidebar({
                             await desktop.auth?.logout();
                           }
                         : undefined,
+                      openExternal: desktop?.openExternal,
                       loginPath: surface === "desktop" ? "/desktop" : "/login",
                       navigate: (path) => window.location.assign(apiPath(path)),
                     });

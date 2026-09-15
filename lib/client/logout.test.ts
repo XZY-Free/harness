@@ -54,6 +54,49 @@ describe("logoutClientSession", () => {
     expect(navigate).toHaveBeenCalledWith("/desktop");
   });
 
+  it("Desktop 本地清理后通过系统浏览器完成企业 LDAP 注销，再回到本地入口", async () => {
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ loggedOut: true, redirectTo: "https://id.example.com/logout" }),
+      ),
+    );
+    const cleanupDesktop = vi.fn().mockResolvedValue(undefined);
+    const openExternal = vi.fn().mockResolvedValue(undefined);
+    const navigate = vi.fn();
+
+    await logoutClientSession({
+      cleanupDesktop,
+      openExternal,
+      loginPath: "/desktop",
+      navigate,
+    });
+
+    expect(cleanupDesktop).toHaveBeenCalledOnce();
+    expect(openExternal).toHaveBeenCalledWith("https://id.example.com/logout");
+    expect(navigate).toHaveBeenCalledWith("/desktop");
+  });
+
+  it("Desktop 不打开不安全或带凭据的企业注销地址", async () => {
+    for (const redirectTo of [
+      "http://id.example.com/logout",
+      "https://user:pass@id.example.com/logout",
+    ]) {
+      apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ loggedOut: true, redirectTo })));
+      const openExternal = vi.fn().mockResolvedValue(undefined);
+      const navigate = vi.fn();
+
+      await logoutClientSession({
+        cleanupDesktop: vi.fn().mockResolvedValue(undefined),
+        openExternal,
+        loginPath: "/desktop",
+        navigate,
+      });
+
+      expect(openExternal).not.toHaveBeenCalled();
+      expect(navigate).toHaveBeenCalledWith("/desktop");
+    }
+  });
+
   it("Desktop 退出后回到本地渲染入口，由同一登录页接管", async () => {
     apiFetch.mockResolvedValue(new Response(JSON.stringify({ loggedOut: true })));
     const navigate = vi.fn();
