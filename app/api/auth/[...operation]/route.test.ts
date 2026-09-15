@@ -7,6 +7,7 @@ const provider = vi.hoisted(() => ({
   login: vi.fn(),
   beginExternalLogin: vi.fn(),
   completeExternalLogin: vi.fn(),
+  describeExternalAuth: vi.fn(),
   logout: vi.fn(),
 }));
 
@@ -156,6 +157,59 @@ describe("auth operation facade", () => {
         state: expect.any(String),
       }),
     );
+  });
+
+  it("GET external-methods 返回不含秘密的企业登录入口配置", async () => {
+    provider.describeExternalAuth.mockResolvedValue({
+      dividerLabel: "或使用企业账号登录",
+      methods: [
+        {
+          id: "enterprise-sso",
+          label: "企业统一 SSO",
+          icon: "building",
+          recommended: true,
+          href: "/api/auth/sso?returnTo=%2Fdesktop",
+        },
+      ],
+    });
+    const request = new NextRequest(
+      "https://snow.example.com/api/auth/external-methods?returnTo=/desktop",
+    );
+
+    const response = await GET(request, {
+      params: Promise.resolve({ operation: ["external-methods"] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      external_auth: {
+        dividerLabel: "或使用企业账号登录",
+        methods: [
+          {
+            id: "enterprise-sso",
+            label: "企业统一 SSO",
+            icon: "building",
+            recommended: true,
+            href: "/api/auth/sso?returnTo=%2Fdesktop",
+          },
+        ],
+      },
+    });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(provider.describeExternalAuth).toHaveBeenCalledWith({ returnTo: "/desktop" });
+  });
+
+  it("external-methods 拒绝外部回跳地址", async () => {
+    const request = new NextRequest(
+      "https://snow.example.com/api/auth/external-methods?returnTo=https%3A%2F%2Fevil.example.test",
+    );
+
+    const response = await GET(request, {
+      params: Promise.resolve({ operation: ["external-methods"] }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(provider.describeExternalAuth).not.toHaveBeenCalled();
   });
 
   it("callback 在 state 不匹配时拒绝认证且不调用企业提供器", async () => {

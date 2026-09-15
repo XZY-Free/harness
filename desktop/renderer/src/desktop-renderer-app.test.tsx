@@ -3,12 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { apiFetch, getDesktopBridge } = vi.hoisted(() => ({
+const { apiFetch, apiPath, getDesktopBridge } = vi.hoisted(() => ({
   apiFetch: vi.fn(),
+  apiPath: vi.fn((path: string) => path),
   getDesktopBridge: vi.fn(),
 }));
 
-vi.mock("@/lib/api-fetch", () => ({ apiFetch }));
+vi.mock("@/lib/api-fetch", () => ({ apiFetch, apiPath }));
 vi.mock("@/lib/desktop/capabilities", () => ({
   getDesktopCapabilities: () => true,
   getDesktopBridge,
@@ -131,6 +132,24 @@ describe("DesktopRendererApp", () => {
         }),
       )
       .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            external_auth: {
+              dividerLabel: "或使用企业账号登录",
+              methods: [
+                {
+                  id: "enterprise-sso",
+                  label: "企业统一 SSO",
+                  icon: "building",
+                  recommended: true,
+                  href: "/api/auth/sso?returnTo=%2Fdesktop",
+                },
+              ],
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
         new Response(JSON.stringify({ authenticated: true, return_to: "/desktop" }), {
           status: 200,
         }),
@@ -144,6 +163,7 @@ describe("DesktopRendererApp", () => {
     render(<DesktopRendererApp />);
 
     expect(await screen.findByLabelText(`${DEFAULT_BRAND.name} 登录`)).toBeTruthy();
+    expect(await screen.findByRole("link", { name: /企业统一 SSO/ })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("账号"), {
       target: { value: "admin@example.com" },
     });
@@ -154,7 +174,7 @@ describe("DesktopRendererApp", () => {
 
     await screen.findByTestId("desktop-new-thread-page");
     expect(apiFetch).toHaveBeenNthCalledWith(
-      2,
+      3,
       "/api/auth/login?returnTo=%2Fdesktop",
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );

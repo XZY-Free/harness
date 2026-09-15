@@ -1,11 +1,12 @@
 import { LoginScreen } from "@/components/auth/login-screen";
-import { BrandName } from "@/components/brand/brand-wordmark";
 import { BrandProvider } from "@/components/brand/brand-provider";
+import { BrandName } from "@/components/brand/brand-wordmark";
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
 import { NewThreadPage } from "@/components/thread/new-thread-page";
 import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
 import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
 import { ThreadPage } from "@/components/thread/thread-page";
+import { apiFetch } from "@/lib/api-fetch";
 import {
   AuthenticationRequiredError,
   createNewThreadSession,
@@ -14,6 +15,7 @@ import {
 import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
 import { getDesktopBridge, getDesktopCapabilities } from "@/lib/desktop/capabilities";
 import type { DesktopWorkspaceSelectionResult } from "@/lib/desktop/capabilities";
+import type { ExternalAuthZoneConfig } from "@/lib/identity/authentication-provider";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { parseDesktopRoute } from "../desktop-route";
 import { navigateDesktop, usePathname } from "../next-navigation";
@@ -26,8 +28,20 @@ function DesktopError({ children }: { readonly children: ReactNode }) {
   );
 }
 
-function DesktopLogin({ onAuthenticated }: { readonly onAuthenticated: () => void }) {
-  return <LoginScreen returnTo="/desktop" onAuthenticated={onAuthenticated} />;
+function DesktopLogin({
+  onAuthenticated,
+  externalAuth,
+}: {
+  readonly onAuthenticated: () => void;
+  readonly externalAuth?: ExternalAuthZoneConfig;
+}) {
+  return (
+    <LoginScreen
+      returnTo="/desktop"
+      onAuthenticated={onAuthenticated}
+      externalAuth={externalAuth}
+    />
+  );
 }
 
 function DesktopShell() {
@@ -36,6 +50,7 @@ function DesktopShell() {
   const [shell, setShell] = useState<ClientThreadShellResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
+  const [externalAuth, setExternalAuth] = useState<ExternalAuthZoneConfig | undefined>();
   const [loadVersion, setLoadVersion] = useState(0);
   const [newThreadError, setNewThreadError] = useState<string | null>(null);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
@@ -71,6 +86,31 @@ function DesktopShell() {
       active = false;
     };
   }, [loadVersion]);
+
+  useEffect(() => {
+    if (!authRequired) return;
+    let active = true;
+    void apiFetch("/api/auth/external-methods?returnTo=%2Fdesktop", {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const body = (await response.json().catch(() => null)) as {
+          external_auth?: ExternalAuthZoneConfig | null;
+        } | null;
+        return body?.external_auth ?? null;
+      })
+      .then((config) => {
+        if (active) setExternalAuth(config ?? undefined);
+      })
+      .catch(() => {
+        if (active) setExternalAuth(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authRequired]);
 
   // /desktop 恒为新建空态页，不自动跳转最近会话；
   // 假 new 路由 /desktop/new 已移除。进入已有会话由 sidebar 导航到 /desktop/chat/{id}。
@@ -160,6 +200,7 @@ function DesktopShell() {
   if (authRequired) {
     return (
       <DesktopLogin
+        externalAuth={externalAuth}
         onAuthenticated={() => {
           setAuthRequired(false);
           setShell(null);

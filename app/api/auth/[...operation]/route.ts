@@ -13,7 +13,13 @@ import { acceptAuthenticatedEvidence } from "@/lib/identity/resolver";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-type AuthOperation = "login" | "sso" | "callback" | "setup-password" | "logout";
+type AuthOperation =
+  | "login"
+  | "sso"
+  | "callback"
+  | "setup-password"
+  | "logout"
+  | "external-methods";
 type AuthRouteContext = { params: Promise<{ operation?: string[] }> };
 
 const SSO_STATE_COOKIE_NAME = "snow_sso_state";
@@ -62,6 +68,22 @@ async function handle(
   }
 
   const { authenticationProvider, profileSource } = await getIdentityExtensions();
+  if (operation === "external-methods") {
+    if (method !== "GET") {
+      return apiError("REQUEST_SCHEMA_INVALID", "external-methods 只支持 GET", { requestId });
+    }
+    const returnTo = request.nextUrl.searchParams.get("returnTo") ?? "/";
+    if (!isInternalReturnTo(returnTo)) {
+      return apiError("REQUEST_SCHEMA_INVALID", "returnTo 必须是站内相对路径", { requestId });
+    }
+    const externalAuth = authenticationProvider.describeExternalAuth
+      ? await authenticationProvider.describeExternalAuth({ returnTo })
+      : null;
+    return apiSuccess(
+      { external_auth: externalAuth },
+      { headers: { "cache-control": "no-store" } },
+    );
+  }
   if (operation === "sso") {
     if (method !== "GET") {
       return apiError("REQUEST_SCHEMA_INVALID", "sso 只支持 GET", { requestId });
@@ -293,7 +315,8 @@ async function readOperation(context: AuthRouteContext): Promise<AuthOperation |
     operation[0] === "sso" ||
     operation[0] === "callback" ||
     operation[0] === "setup-password" ||
-    operation[0] === "logout"
+    operation[0] === "logout" ||
+    operation[0] === "external-methods"
     ? operation[0]
     : null;
 }
