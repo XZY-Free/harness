@@ -107,7 +107,12 @@ async function sendFile(response: ServerResponse, filename: string): Promise<boo
   }
 }
 
-function proxyRequest(request: IncomingMessage, response: ServerResponse, upstream: URL): void {
+function proxyRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  upstream: URL,
+  desktopRendererOrigin: string,
+): void {
   const incomingUrl = new URL(request.url ?? "/", "http://127.0.0.1");
   const basePath = upstream.pathname.replace(/\/$/, "");
   const transport = upstream.protocol === "https:" ? requestHttps : requestHttp;
@@ -124,6 +129,9 @@ function proxyRequest(request: IncomingMessage, response: ServerResponse, upstre
         // Renderer 页面与本机 proxy 同源；转发到远端后重写为远端 origin，
         // 让认证端点继续执行严格的同源 POST 校验。
         ...(request.headers.origin ? { origin: upstream.origin } : {}),
+        // SSO 回调必须回到 Electron 的 loopback renderer，不能回到服务端 origin。
+        // 该值由本地 renderer server 注入，服务端只接受 loopback origin。
+        "x-snowharness-desktop-origin": desktopRendererOrigin,
       },
     },
     (upstreamResponse) => {
@@ -158,10 +166,11 @@ export async function startLocalRendererServer(
     throw new Error("SNOW_SERVER_ORIGIN 必须是 http 或 https 地址");
   }
 
+  let desktopRendererOrigin = "";
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (isApiPath(url.pathname)) {
-      proxyRequest(request, response, upstream);
+      proxyRequest(request, response, upstream, desktopRendererOrigin);
       return;
     }
 
@@ -197,8 +206,9 @@ export async function startLocalRendererServer(
   }
 
   let closed = false;
+  desktopRendererOrigin = `http://127.0.0.1:${address.port}`;
   return {
-    origin: `http://127.0.0.1:${address.port}`,
+    origin: desktopRendererOrigin,
     close: () => {
       if (closed) return Promise.resolve();
       closed = true;

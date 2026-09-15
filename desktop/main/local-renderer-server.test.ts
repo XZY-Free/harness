@@ -93,7 +93,12 @@ describe("startLocalRendererServer", () => {
         "set-cookie",
         "snow_session=opaque; Path=/snowharness; HttpOnly; SameSite=Lax",
       );
-      response.end(JSON.stringify({ origin: request.headers.origin }));
+      response.end(
+        JSON.stringify({
+          origin: request.headers.origin,
+          desktopOrigin: request.headers["x-snowharness-desktop-origin"],
+        }),
+      );
     });
     const server = await startLocalRendererServer({
       rendererDir: await createRendererFiles(),
@@ -109,6 +114,7 @@ describe("startLocalRendererServer", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       origin: new URL(upstreamOrigin).origin,
+      desktopOrigin: server.origin,
     });
     expect(response.headers.get("set-cookie")).toContain("Path=/");
     expect(response.headers.get("set-cookie")).not.toContain("Path=/snowharness");

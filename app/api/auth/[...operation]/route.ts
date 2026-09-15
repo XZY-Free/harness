@@ -96,9 +96,10 @@ async function handle(
       return apiError("FEATURE_NOT_READY", "当前认证提供器未声明企业登录操作", { requestId });
     }
     const state = randomBytes(32).toString("base64url");
+    const callbackBase = getDesktopRendererOrigin(request) ?? request.url;
     const callbackUrl = new URL(
       `${process.env.NEXT_PUBLIC_SNOW_BASE_PATH ?? ""}/api/auth/callback`,
-      request.url,
+      callbackBase,
     ).toString();
     const redirect = await authenticationProvider.beginExternalLogin({
       request,
@@ -323,6 +324,32 @@ async function readOperation(context: AuthRouteContext): Promise<AuthOperation |
 
 function isInternalReturnTo(value: string): boolean {
   return value.startsWith("/") && !value.startsWith("//") && !value.includes("\\");
+}
+
+/**
+ * Desktop 本地代理为 SSO 请求注入的回调 origin。
+ * 只接受 loopback HTTP origin，避免任意 Header 改写 OAuth callback。
+ */
+function getDesktopRendererOrigin(request: NextRequest): string | null {
+  const value = request.headers.get("x-snowharness-desktop-origin")?.trim();
+  if (!value) return null;
+  try {
+    const origin = new URL(value);
+    if (
+      origin.protocol !== "http:" ||
+      (origin.hostname !== "localhost" && origin.hostname !== "127.0.0.1") ||
+      origin.username ||
+      origin.password ||
+      origin.pathname !== "/" ||
+      origin.search ||
+      origin.hash
+    ) {
+      return null;
+    }
+    return origin.origin;
+  } catch {
+    return null;
+  }
 }
 
 function withBasePath(path: string): string {

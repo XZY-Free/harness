@@ -159,6 +159,40 @@ describe("auth operation facade", () => {
     );
   });
 
+  it("Desktop SSO 使用本地 renderer origin 作为 callback 地址", async () => {
+    provider.beginExternalLogin.mockImplementation(async ({ callbackUrl }) => ({
+      location: `https://sso.example.com/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}`,
+    }));
+    const request = new NextRequest("http://localhost:3000/api/auth/sso?returnTo=/desktop", {
+      headers: { "x-snowharness-desktop-origin": "http://127.0.0.1:54321" },
+    });
+
+    const response = await GET(request, { params: Promise.resolve({ operation: ["sso"] }) });
+
+    expect(response.status).toBe(302);
+    expect(provider.beginExternalLogin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callbackUrl: "http://127.0.0.1:54321/api/auth/callback",
+        returnTo: "/desktop",
+      }),
+    );
+  });
+
+  it("SSO 忽略不安全的 Desktop callback origin", async () => {
+    provider.beginExternalLogin.mockImplementation(async ({ callbackUrl }) => ({
+      location: `https://sso.example.com/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}`,
+    }));
+    const request = new NextRequest("https://snow.example.com/api/auth/sso?returnTo=/chat", {
+      headers: { "x-snowharness-desktop-origin": "https://evil.example.test" },
+    });
+
+    await GET(request, { params: Promise.resolve({ operation: ["sso"] }) });
+
+    expect(provider.beginExternalLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ callbackUrl: "https://snow.example.com/api/auth/callback" }),
+    );
+  });
+
   it("GET external-methods 返回不含秘密的企业登录入口配置", async () => {
     provider.describeExternalAuth.mockResolvedValue({
       dividerLabel: "或使用企业账号登录",
