@@ -159,8 +159,13 @@ async function handle(
       session.status === "password_setup_required"
         ? `/setup-password?returnTo=${encodeURIComponent(returnTo)}`
         : returnTo;
+    // Desktop 回调请求经过本机 renderer proxy；必须把最终页面也回到该
+    // loopback origin，否则 Electron 会跟随到 Server origin 的 /desktop，
+    // 打开 Web 路由（甚至在开发服务上得到 404）。浏览器请求没有该受信
+    // header，仍按公开 Server origin 回跳。
+    const callbackBase = getDesktopRendererOrigin(request) ?? request.url;
     const headers = new Headers({
-      location: new URL(withBasePath(destination), request.url).toString(),
+      location: new URL(withBasePath(destination), callbackBase).toString(),
     });
     headers.append(
       "set-cookie",

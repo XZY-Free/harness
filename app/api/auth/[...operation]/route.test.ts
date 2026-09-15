@@ -293,6 +293,39 @@ describe("auth operation facade", () => {
     });
   });
 
+  it("Desktop 企业回调把已登录用户送回本机 renderer", async () => {
+    provider.completeExternalLogin.mockResolvedValue({
+      status: "authenticated",
+      evidence: {
+        externalSubject: "enterprise-user-1",
+        loginAccount: "zhangsan",
+        email: "zhangsan@example.com",
+        displayName: "张三",
+        trustedAuthenticationClaims: {},
+      },
+    });
+    acceptAuthenticatedEvidence.mockResolvedValue({ userIdentityId: "identity-1" });
+    establishExternalSession.mockResolvedValue({
+      status: "authenticated",
+      sessionToken: "session-token",
+      expiresAt: new Date("2026-09-17T00:00:00.000Z"),
+    });
+    const request = new NextRequest(
+      "http://127.0.0.1:3000/api/auth/callback?code=oauth-code&state=expected-state",
+      {
+        headers: {
+          cookie: "snow_sso_state=expected-state; snow_sso_return_to=%2Fdesktop",
+          "x-snowharness-desktop-origin": "http://127.0.0.1:54321",
+        },
+      },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ operation: ["callback"] }) });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("http://127.0.0.1:54321/desktop");
+  });
+
   it("子路径部署时 callback 保留 basePath 进入设密页", async () => {
     vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
     provider.completeExternalLogin.mockResolvedValue({
