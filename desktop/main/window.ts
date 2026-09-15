@@ -15,7 +15,10 @@ import * as path from "node:path";
  * - did-create-window：防御性回调，对子窗口套用相同导航约束。
  */
 import { BrowserWindow, shell } from "electron";
-import { shouldBlockNavigation } from "./origin-guard";
+import {
+  isAllowedAuthenticationWindowNavigation,
+  shouldBlockNavigation,
+} from "./origin-guard";
 
 /** Desktop 路由路径（本机 renderer origin 后追加）。 */
 const DESKTOP_ROUTE_PATH = "/desktop";
@@ -66,8 +69,100 @@ export function createMainWindow(rendererOrigin: string): BrowserWindow {
     },
   });
 
+  let ssoRedirectPending = false;
+  let authenticationWindow: BrowserWindow | null = null;
+
+  const isRendererNavigation = (url: string): boolean => {
+    try {
+      return new URL(url).origin === new URL(rendererOrigin).origin;
+    } catch {
+      return false;
+    }
+  };
+
+  const isSsoStartNavigation = (url: string): boolean => {
+    try {
+      const parsed = new URL(url);
+      return isRendererNavigation(url) && parsed.pathname.endsWith("/api/auth/sso");
+    } catch {
+      return false;
+    }
+  };
+
+  const closeAuthenticationWindow = (child: BrowserWindow) => {
+    if (authenticationWindow !== child) return;
+    authenticationWindow = null;
+    if (!child.isDestroyed()) child.close();
+    if (!win.isDestroyed()) {
+      // 回调已经写入同一 partition 的会话 Cookie，主窗口重新加载后即可进入 Desktop。
+      void win.loadURL(desktopUrl);
+    }
+  };
+
+  const openAuthenticationWindow = (url: string) => {
+    if (authenticationWindow && !authenticationWindow.isDestroyed()) {
+      authenticationWindow.focus();
+      return;
+    }
+
+    const child = new BrowserWindow({
+      width: 1180,
+      height: 760,
+      minWidth: 960,
+      minHeight: 640,
+      title: "企业统一登录",
+      parent: win,
+      modal: false,
+      webPreferences: {
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        partition: "persist:snowharness-app",
+      },
+    });
+    authenticationWindow = child;
+
+    child.webContents.on("will-navigate", (event, targetUrl) => {
+      if (!isAllowedAuthenticationWindowNavigation(targetUrl, rendererOrigin)) {
+        event.preventDefault();
+      }
+    });
+    child.webContents.on("did-navigate", (_event, targetUrl) => {
+      if (isRendererNavigation(targetUrl)) {
+        closeAuthenticationWindow(child);
+      }
+    });
+    child.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+      if (isAllowedAuthenticationWindowNavigation(targetUrl, rendererOrigin)) {
+        return { action: "allow" };
+      }
+      return { action: "deny" };
+    });
+    child.on("closed", () => {
+      if (authenticationWindow === child) authenticationWindow = null;
+    });
+    void child.loadURL(url);
+  };
+
   // 页面仅允许留在本机 renderer origin；远端地址只经 API proxy 调用，不能被导航为 UI 页面。
   win.webContents.on("will-navigate", (event, url) => {
+    if (isSsoStartNavigation(url)) {
+      ssoRedirectPending = true;
+      return;
+    }
+    if (ssoRedirectPending && !isRendererNavigation(url)) {
+      ssoRedirectPending = false;
+      if (isAllowedAuthenticationWindowNavigation(url, rendererOrigin)) {
+        event.preventDefault();
+        openAuthenticationWindow(url);
+        return;
+      }
+    }
+    if (isRendererNavigation(url)) {
+      ssoRedirectPending = false;
+    }
     if (shouldBlockNavigation(url, [rendererOrigin], true)) {
       event.preventDefault();
     }

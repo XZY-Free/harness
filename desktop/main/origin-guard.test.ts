@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SERVER_ORIGIN,
   getOrigin,
+  isAllowedAuthenticationWindowNavigation,
   isTrustedServerOrigin,
   loadAllowedOrigins,
   shouldBlockNavigation,
@@ -133,6 +134,36 @@ describe("origin-guard shouldBlockNavigation (V10 Phase 3)", () => {
 
   it("无效 URL 阻止", () => {
     expect(shouldBlockNavigation("not a url", TRUSTED)).toBe(true);
+  });
+});
+
+describe("认证窗口导航规则", () => {
+  const rendererOrigin = "http://127.0.0.1:57730";
+
+  it("允许 HTTPS 认证站点继续跳转", () => {
+    expect(
+      isAllowedAuthenticationWindowNavigation(
+        "https://ldap-uat.crc.com.cn/idp/authCenter/authnEngine?loginToken=opaque",
+        rendererOrigin,
+      ),
+    ).toBe(true);
+  });
+
+  it("允许认证完成后回到本机 renderer", () => {
+    expect(
+      isAllowedAuthenticationWindowNavigation(
+        `${rendererOrigin}/api/auth/callback?code=opaque&state=opaque`,
+        rendererOrigin,
+      ),
+    ).toBe(true);
+  });
+
+  it("拒绝非 HTTPS 外部跳转和无效地址", () => {
+    expect(
+      isAllowedAuthenticationWindowNavigation("http://ldap-uat.crc.com.cn/login", rendererOrigin),
+    ).toBe(false);
+    expect(isAllowedAuthenticationWindowNavigation("file:///tmp/login", rendererOrigin)).toBe(false);
+    expect(isAllowedAuthenticationWindowNavigation("not-a-url", rendererOrigin)).toBe(false);
   });
 });
 
