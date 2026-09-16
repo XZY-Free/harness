@@ -239,7 +239,7 @@ export async function processCancelCommand(
       payload: {
         job_id: job.id,
         command_id: current.id,
-        reason_code: current.reasonCode,
+        reason_code: (current.payloadJson as Record<string, unknown> | null)?.reasonCode ?? null,
         cancelled_at: new Date().toISOString(),
       },
       correlationId: params.correlationId,
@@ -280,7 +280,7 @@ export interface ProcessRetryCommandParams {
   unknownEffectVerifier?: (jobId: string) => Promise<boolean> | boolean;
   /**
    * override 字段校验回调：返回 true 表示 override 字段允许；false 表示拒绝。
-   * 默认回调：commandPayloadJson.override 为空时返回 true，非空时返回 false（保守策略）。
+   * 默认回调：payloadJson.override 为空时返回 true，非空时返回 false（保守策略）。
    */
   overrideVerifier?: (
     jobId: string,
@@ -327,7 +327,7 @@ export interface ProcessRetryCommandResult {
  * - retry 不修改原 Job 状态/事件
  * - replacement Job 通过 replaces_job_id 引用原 Job
  * - replacement Job 状态为 queued（由 createJob 默认）
- * - commandPayloadJson.reuse_input / override 透传到 replacement Job
+ * - payloadJson.reuse_input / override 透传到 replacement Job
  */
 export async function processRetryCommand(
   params: ProcessRetryCommandParams,
@@ -344,8 +344,8 @@ export async function processRetryCommand(
     throw new JobNotFoundError(params.commandId);
   }
 
-  // 解析 commandPayloadJson
-  const payload = (cmd.commandPayloadJson ?? {}) as {
+  // 解析持久化 command payload
+  const payload = (cmd.payloadJson ?? {}) as {
     reuse_input?: boolean;
     override?: Record<string, unknown> | null;
     reason_code?: string | null;
@@ -395,11 +395,13 @@ export async function processRetryCommand(
     if (current.commandState === "acknowledged" || current.commandState === "rejected") {
       // 查询 replacement Job（若有）
       let replacementJob: Job | null = null;
-      if (current.replacementJobId) {
+      const replacementJobId =
+        (current.resultJson as { replacementJobId?: string } | null)?.replacementJobId ?? null;
+      if (replacementJobId) {
         const [rj] = await tx
           .select()
           .from(jobTable)
-          .where(eq(jobTable.id, current.replacementJobId))
+          .where(eq(jobTable.id, replacementJobId))
           .limit(1);
         replacementJob = rj ?? null;
       }
@@ -750,10 +752,10 @@ async function acknowledgeCommandInternal(
 
   const updates: Partial<JobCommand> = {
     commandState: "acknowledged",
-    acknowledgedAt: new Date(),
+    completedAt: new Date(),
   };
   if (replacementJobId) {
-    updates.replacementJobId = replacementJobId;
+    updates.resultJson = { replacementJobId };
   }
 
   await tx.update(jobCommandTable).set(updates).where(eq(jobCommandTable.id, commandId));
@@ -797,9 +799,9 @@ async function rejectCommandInternal(
     .update(jobCommandTable)
     .set({
       commandState: "rejected",
-      errorCode,
-      errorSummary,
-      acknowledgedAt: new Date(),
+      lastErrorCode: errorCode,
+      resultJson: { errorSummary },
+      completedAt: new Date(),
     })
     .where(eq(jobCommandTable.id, commandId));
 
@@ -839,12 +841,15 @@ async function createReplacementJobInternal(
     agentId: originalJob.agentId,
     jobType: originalJob.jobType,
     triggerRef: originalJob.triggerRef,
+    creationKey: `${originalJob.creationKey}:replacement:${jobId}`,
     jobState: "queued",
     replacesJobId: originalJob.id,
     threadId: originalJob.threadId,
+    inputKind: reuseInput ? originalJob.inputKind : "inline",
+    inputJson: reuseInput ? originalJob.inputJson : {},
     completionPolicyJson: originalJob.completionPolicyJson,
     inputRef,
-    inputHash,
+    inputHash: inputHash ?? `sha256:${"0".repeat(64)}`,
     lastEventSequence: 0,
     resultRef: null,
     resultHash: null,

@@ -149,7 +149,7 @@ describe("processCancelCommand", () => {
 
     expect(result.outcome).toBe("rejected_unknown_effect");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
+    expect(result.command.lastErrorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
     // Job 状态未变
     const dbJob = await getJobById(fx.tenantId, job.id);
     expect(dbJob?.jobState).toBe("queued");
@@ -180,7 +180,7 @@ describe("processCancelCommand", () => {
 
     expect(result.outcome).toBe("rejected_job_terminal");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_ALREADY_TERMINAL");
+    expect(result.command.lastErrorCode).toBe("JOB_ALREADY_TERMINAL");
   });
 });
 
@@ -216,7 +216,7 @@ describe("processRetryCommand", () => {
     expect(result.replacementJob?.agentId).toBe(fx.agentId);
     expect(result.replacementJob?.inputRef).toBe("input://batch/001"); // reuseInput=true 默认
     expect(result.command.commandState).toBe("acknowledged");
-    expect(result.command.replacementJobId).toBe(result.replacementJob?.id);
+    expect(result.command.resultJson).toEqual({ replacementJobId: result.replacementJob?.id });
   });
 
   it("reuseInput=false → replacement Job inputRef 为空", async () => {
@@ -240,7 +240,9 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("retry_created");
     expect(result.replacementJob?.inputRef).toBeNull();
-    expect(result.replacementJob?.inputHash).toBeNull();
+    // canonical schema：Job.inputHash NOT NULL（Job_input_shape check）。
+    // reuseInput=false 时 inputRef 清空、inputJson 置空对象，inputHash 落零值占位摘要。
+    expect(result.replacementJob?.inputHash).toBe(`sha256:${"0".repeat(64)}`);
   });
 
   it("unknown_effect 未核对 → rejected_unknown_effect", async () => {
@@ -264,7 +266,7 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("rejected_unknown_effect");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
+    expect(result.command.lastErrorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
     expect(result.replacementJob).toBeNull();
   });
 
@@ -290,7 +292,7 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("rejected_override");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_OVERRIDE_NOT_ALLOWED");
+    expect(result.command.lastErrorCode).toBe("JOB_OVERRIDE_NOT_ALLOWED");
     expect(result.replacementJob).toBeNull();
   });
 
@@ -315,7 +317,7 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("rejected_input");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_INPUT_NO_LONGER_AVAILABLE");
+    expect(result.command.lastErrorCode).toBe("JOB_INPUT_NO_LONGER_AVAILABLE");
     expect(result.replacementJob).toBeNull();
   });
 });

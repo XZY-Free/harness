@@ -25,6 +25,7 @@
  * 创建 replacement Job 等）留给 S09-C05 实现。
  */
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
   JobAlreadyTerminalError,
@@ -55,6 +56,14 @@ const TERMINAL_JOB_STATES: readonly Job["jobState"][] = ["completed", "failed", 
 
 /** JobCommand 终态集合。 */
 const TERMINAL_COMMAND_STATES: readonly JobCommandState[] = ["acknowledged", "rejected"];
+
+function commandPayloadHash(payload: unknown): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
+}
+
+function requestedByType(actorType: JobEventActorType | undefined): string {
+  return actorType === "user" || actorType === "service" ? actorType : "system";
+}
 
 /** JobCommand 幂等查找条件。 */
 interface IdempotentCommandLookup {
@@ -204,15 +213,11 @@ export async function createCancelCommand(
       commandType: "cancel",
       commandState: "queued",
       idempotencyKey: params.idempotencyKey,
-      requestedBy: params.requestedBy,
-      reasonCode: params.reasonCode ?? null,
-      replacementJobId: null,
-      errorCode: null,
-      errorSummary: null,
-      commandPayloadJson: params.reasonCode ? { reason_code: params.reasonCode } : null,
-      createdAt: now,
-      dispatchedAt: null,
-      acknowledgedAt: null,
+      payloadJson: { reasonCode: params.reasonCode ?? null },
+      payloadHash: commandPayloadHash({ reasonCode: params.reasonCode ?? null }),
+      requestedByType: requestedByType(params.actorType),
+      requestedById: params.requestedBy,
+      nextAttemptAt: now,
     });
 
     // 4. allocateJobEventSequences(1) + insertJobEvent(job.cancel_requested)
@@ -376,19 +381,21 @@ export async function createRetryCommand(
       commandType: "retry",
       commandState: "queued",
       idempotencyKey: params.idempotencyKey,
-      requestedBy: params.requestedBy,
-      reasonCode: params.reasonCode ?? null,
-      replacementJobId: null,
-      errorCode: null,
-      errorSummary: null,
-      commandPayloadJson: {
+      payloadJson: {
+        reasonCode: params.reasonCode ?? null,
         reuse_input: reuseInput,
         override: params.overrideJson ?? null,
         reason_code: params.reasonCode ?? null,
       },
-      createdAt: now,
-      dispatchedAt: null,
-      acknowledgedAt: null,
+      payloadHash: commandPayloadHash({
+        reasonCode: params.reasonCode ?? null,
+        reuse_input: reuseInput,
+        override: params.overrideJson ?? null,
+        reason_code: params.reasonCode ?? null,
+      }),
+      requestedByType: requestedByType(params.actorType),
+      requestedById: params.requestedBy,
+      nextAttemptAt: now,
     });
 
     // 4. allocateJobEventSequences(1) + insertJobEvent(job.retry_requested)
@@ -466,10 +473,10 @@ export async function acknowledgeCommand(params: AcknowledgeCommandParams): Prom
 
     const updates: Partial<JobCommand> = {
       commandState: "acknowledged",
-      acknowledgedAt: new Date(),
+      completedAt: new Date(),
     };
     if (current.commandType === "retry" && params.replacementJobId) {
-      updates.replacementJobId = params.replacementJobId;
+      updates.resultJson = { replacementJobId: params.replacementJobId };
     }
 
     await tx.update(jobCommandTable).set(updates).where(eq(jobCommandTable.id, params.commandId));
@@ -530,9 +537,9 @@ export async function rejectCommand(params: RejectCommandParams): Promise<JobCom
       .update(jobCommandTable)
       .set({
         commandState: "rejected",
-        errorCode: params.errorCode,
-        errorSummary: params.errorSummary ?? null,
-        acknowledgedAt: new Date(),
+        lastErrorCode: params.errorCode,
+        resultJson: params.errorSummary ? { errorSummary: params.errorSummary } : null,
+        completedAt: new Date(),
       })
       .where(eq(jobCommandTable.id, params.commandId));
 

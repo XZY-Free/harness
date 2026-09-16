@@ -22,7 +22,7 @@
  * - completion_policy_json 决定整个 Job 终态；单 Invocation 终态只写 job.invocation_*。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
 import { JobNotFoundError, JobStateConflictError, JobVersionConflictError } from "@/lib/job/errors";
@@ -31,8 +31,10 @@ import {
   type Job,
   type JobEvent,
   type JobEventActorType,
+  type JobInputKind,
   type JobState,
   type JobType,
+  jobEventTable,
   jobTable,
 } from "@/lib/persistence/schema/job";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -62,6 +64,8 @@ export interface CreateJobParams {
   jobType: JobType;
   /** 领域触发引用（如 schedule_id、batch_id、deployment_id）。 */
   triggerRef: string;
+  /** Stable business creation identity used to deduplicate scheduler delivery. */
+  creationKey?: string;
   /** 完成策略：all_success / fail_fast / threshold / 自定义。 */
   completionPolicyJson: Record<string, unknown>;
   /** 结果需要进入员工会话时预先关联的 Thread（可选）。 */
@@ -70,6 +74,8 @@ export interface CreateJobParams {
   replacesJobId?: string;
   /** Job 输入引用（领域服务保证输入仍可访问）。 */
   inputRef?: string;
+  inputJson?: unknown;
+  inputKind?: JobInputKind;
   inputHash?: string;
   createdBy?: string;
   /** Event actor（默认 system，因领域服务触发）。 */
@@ -84,6 +90,13 @@ export interface CreateJobResult {
   job: Job;
   /** 写入的 job.queued Event（sequence=1）。 */
   queuedEvent: JobEvent;
+}
+
+export class JobCreationConflictError extends Error {
+  constructor(public readonly creationKey: string) {
+    super(`Job creationKey 已绑定不同 inputHash：${creationKey}`);
+    this.name = "InputDigestMismatch";
+  }
 }
 
 /**
@@ -117,8 +130,51 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
   const actorType: JobEventActorType = params.actorType ?? "system";
   const now = new Date();
   const jobId = randomUUID();
+  const inputKind: JobInputKind = params.inputRef ? "reference" : (params.inputKind ?? "inline");
+  if (inputKind === "reference" && !params.inputRef) {
+    throw new Error("createJob: reference input 必须提供 inputRef");
+  }
+  if (inputKind === "inline" && params.inputRef) {
+    throw new Error("createJob: inline input 不得提供 inputRef");
+  }
+  const inputJson = inputKind === "inline" ? (params.inputJson ?? {}) : null;
+  const inputHash =
+    params.inputHash ??
+    `sha256:${createHash("sha256")
+      .update(JSON.stringify(inputKind === "inline" ? inputJson : params.inputRef))
+      .digest("hex")}`;
 
   const result = await db.transaction(async (tx) => {
+    // creationKey 来自领域服务的正式业务触发身份（09 §8.2）；未提供时用 Job 自身 id
+    // 满足 NOT NULL/UNIQUE，不形成隐式去重（同 triggerRef 的 replacement Job 必须可创建）。
+    const creationKey = params.creationKey ?? jobId;
+    const [existing] = params.creationKey
+      ? await tx
+          .select()
+          .from(jobTable)
+          .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.creationKey, creationKey)))
+          .for("update")
+          .limit(1)
+      : [];
+    if (existing) {
+      if (existing.inputHash !== inputHash) throw new JobCreationConflictError(creationKey);
+      const [queuedEvent] = await tx
+        .select()
+        .from(jobEventTable)
+        .where(
+          and(
+            eq(jobEventTable.tenantId, params.tenantId),
+            eq(jobEventTable.jobId, existing.id),
+            eq(jobEventTable.eventType, "job.queued"),
+          ),
+        )
+        .orderBy(jobEventTable.eventSequence)
+        .limit(1);
+      if (!queuedEvent)
+        throw new Error(`createJob: 已存在 Job 但缺少 job.queued Event（id=${existing.id}）`);
+      return { job: existing, queuedEvent };
+    }
+
     // 1. INSERT Job
     await tx.insert(jobTable).values({
       id: jobId,
@@ -126,18 +182,21 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
       agentId: params.agentId,
       jobType: params.jobType,
       triggerRef: params.triggerRef,
+      creationKey,
       jobState: "queued",
       replacesJobId: params.replacesJobId ?? null,
       threadId: params.threadId ?? null,
       completionPolicyJson: params.completionPolicyJson,
+      inputKind,
+      inputJson,
       inputRef: params.inputRef ?? null,
-      inputHash: params.inputHash ?? null,
+      inputHash,
       lastEventSequence: 0,
       resultRef: null,
       resultHash: null,
       errorCode: null,
       errorSummary: null,
-      createdBy: params.createdBy ?? null,
+      createdBy: params.createdBy ?? "system",
       createdAt: now,
       startedAt: null,
       finishedAt: null,
@@ -163,7 +222,9 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
         replaces_job_id: params.replacesJobId ?? null,
         completion_policy: params.completionPolicyJson,
         input_ref: params.inputRef ?? null,
-        input_hash: params.inputHash ?? null,
+        input_hash: inputHash,
+        input_kind: inputKind,
+        input_json: inputJson,
         created_by: params.createdBy ?? null,
       },
       correlationId: params.correlationId,

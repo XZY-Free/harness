@@ -720,9 +720,8 @@ describe("createCancelCommand", () => {
     expect(result.command.commandType).toBe("cancel");
     expect(result.command.commandState).toBe("queued");
     expect(result.command.idempotencyKey).toBe("cancel-001");
-    expect(result.command.requestedBy).toBe(fx.ownerId);
-    expect(result.command.reasonCode).toBe("user_request");
-    expect(result.command.replacementJobId).toBeNull();
+    expect(result.command.requestedById).toBe(fx.ownerId);
+    expect(result.command.payloadJson).toMatchObject({ reasonCode: "user_request" });
     expect(result.replayed).toBe(false);
 
     // cancel_requested Event
@@ -804,9 +803,8 @@ describe("createRetryCommand", () => {
     expect(result.command.commandType).toBe("retry");
     expect(result.command.commandState).toBe("queued");
     expect(result.command.idempotencyKey).toBe("retry-001");
-    expect(result.command.reasonCode).toBe("transient_error");
-    expect(result.command.replacementJobId).toBeNull(); // S09-C05 在 acknowledge 时回填
-    expect(result.command.commandPayloadJson).toMatchObject({
+    expect(result.command.payloadJson).toMatchObject({ reasonCode: "transient_error" });
+    expect(result.command.payloadJson).toMatchObject({
       reuse_input: true,
       override: null,
       reason_code: "transient_error",
@@ -883,8 +881,8 @@ describe("acknowledgeCommand / rejectCommand", () => {
     });
 
     expect(acked.commandState).toBe("acknowledged");
-    expect(acked.acknowledgedAt).toBeInstanceOf(Date);
-    expect(acked.replacementJobId).toBeNull(); // cancel 无 replacement
+    expect(acked.completedAt).toBeInstanceOf(Date);
+    expect(acked.resultJson).toBeNull(); // cancel 无 replacement
   });
 
   it("acknowledgeCommand：retry 命令 → acknowledged + replacementJobId 回填", async () => {
@@ -908,7 +906,7 @@ describe("acknowledgeCommand / rejectCommand", () => {
     });
 
     expect(acked.commandState).toBe("acknowledged");
-    expect(acked.replacementJobId).toBe(replacementJobId);
+    expect(acked.resultJson).toEqual({ replacementJobId });
   });
 
   it("acknowledgeCommand：终态命令抛 JobCommandAlreadyTerminalError", async () => {
@@ -962,9 +960,9 @@ describe("acknowledgeCommand / rejectCommand", () => {
     });
 
     expect(rejected.commandState).toBe("rejected");
-    expect(rejected.errorCode).toBe("JOB_ALREADY_TERMINAL");
-    expect(rejected.errorSummary).toBe("Job 在 race condition 下已终态");
-    expect(rejected.acknowledgedAt).toBeInstanceOf(Date);
+    expect(rejected.lastErrorCode).toBe("JOB_ALREADY_TERMINAL");
+    expect(rejected.resultJson).toEqual({ errorSummary: "Job 在 race condition 下已终态" });
+    expect(rejected.completedAt).toBeInstanceOf(Date);
   });
 
   it("rejectCommand：终态命令抛 JobCommandAlreadyTerminalError", async () => {
