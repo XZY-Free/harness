@@ -82,7 +82,7 @@ interface VerifyBody {
 
 function projectResponse(attestation: ArtifactAttestation) {
   return {
-    attestationId: attestation.id,
+    attestation_id: attestation.id,
     artifact_revision_id: attestation.artifactRevisionId,
     artifact_digest: attestation.artifactDigest,
     verification_state: attestation.verificationState,

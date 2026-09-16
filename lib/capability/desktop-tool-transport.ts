@@ -1,5 +1,4 @@
 import { runtimeGatewayConfig } from "@/lib/config";
-import { issueWorkloadToken } from "@/lib/identity/workload-token";
 import type { ExecResult } from "@/lib/runtime/types";
 import {
   ProviderExecutionError,
@@ -18,19 +17,23 @@ export async function executeDesktopTool(
       "permanent",
       false,
     );
-  const token = issueWorkloadToken({
-    type: "gateway",
-    audience: "gateway",
-    tenantId: input.executionSubject.tenantId,
-    invocationId: input.invocationId,
-    expiresAt: Date.now() + 60000,
-  });
+  if (!input.credential?.authorization) {
+    throw new ProviderExecutionError(
+      "DESKTOP_EXECUTION_UNAVAILABLE",
+      "缺少当前 Execution Authority 凭据",
+      "permanent",
+      false,
+    );
+  }
   let response: Response;
   try {
     response = await fetch(`${baseUrl}/gateway/desktop-tool-executions`, {
       method: "POST",
       redirect: "error",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: {
+        authorization: input.credential.authorization,
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ toolCallId: input.toolCallId, attemptId: input.attemptId }),
       signal: AbortSignal.timeout(Math.min(input.timeoutMs, 30000) + 5000),
     });

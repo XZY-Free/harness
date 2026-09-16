@@ -246,11 +246,11 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
 
   // 3. 协议只接受 a2a 且 contract revision 精确支持 0.3.0/a2a-0.3.0；其它网络前拒绝。
   const supportedRevisions = new Set(["0.3.0", "a2a-0.3.0"]);
-  if (binding.protocolType !== "a2a" || !supportedRevisions.has(binding.protocolContractRevision)) {
+  if (binding.protocolType !== "a2a" || !supportedRevisions.has(binding.protocolContractDigest)) {
     throw new AgentCallUnsupportedProtocolError(
       callId,
       binding.protocolType,
-      binding.protocolContractRevision,
+      binding.protocolContractDigest,
     );
   }
 

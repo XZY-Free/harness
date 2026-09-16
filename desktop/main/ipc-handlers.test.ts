@@ -512,8 +512,8 @@ describe("registerIpcHandlers (本地目录选择)", () => {
       displayName: "工作目录",
     });
     const [, init] = fetchImpl.mock.calls[0] as [string, { body: string }];
-    const requestBody = JSON.parse(init.body) as Record<string, unknown>;
-    expect(requestBody).not.toHaveProperty("absolute_path");
+    const request = JSON.parse(init.body) as Record<string, unknown>;
+    expect(request).not.toHaveProperty("absolute_path");
     expect(JSON.stringify(result)).not.toContain(canonicalPath);
   });
 });

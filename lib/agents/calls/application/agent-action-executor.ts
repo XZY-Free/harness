@@ -70,6 +70,12 @@ export function createAgentActionExecutor(
       );
     }
     await throwIfAgentActionCancelled(context.abortSignal);
+    if (!context.authority) {
+      throw new AgentActionExecutionError(
+        "NotCurrentExecutor",
+        "Agent action 缺少 Current Execution Authority",
+      );
+    }
 
     try {
       const logicalCallKey = buildAgentCallLogicalKey(action.actionId, action.payload.agentId);
@@ -133,6 +139,7 @@ export function createAgentActionExecutor(
         const created = await createAgentCall({
           tenantId: params.tenantId,
           parentInvocationId: context.invocationId,
+          authority: context.authority,
           agentId: action.payload.agentId,
           actionId: action.actionId,
           transportChannel: params.transportChannel,

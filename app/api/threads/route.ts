@@ -71,7 +71,7 @@ export async function GET(request: Request): Promise<Response> {
   );
 }
 
-/** 请求体 schema（与 §3.1 requestBody 对齐）。 */
+/** 请求体 schema（与 §3.1 request 对齐）。 */
 interface CreateThreadBody {
   tool_permission_mode?: "auto" | "ask" | "full_access";
   title?: string;

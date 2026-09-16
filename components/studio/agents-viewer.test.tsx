@@ -36,8 +36,8 @@ describe("AgentsViewer", () => {
 
     expect(screen.getByRole("status").textContent).toContain("正在加载智能体");
     await waitFor(() => expect(screen.getByText("客服智能体")).toBeTruthy());
-    expect(screen.getByText("已启用")).toBeTruthy();
-    expect(screen.getByText("已关联版本")).toBeTruthy();
+    expect(screen.getByText("已登记")).toBeTruthy();
+    expect(screen.getByText("已保存")).toBeTruthy();
     expect(screen.queryByText("revision-1")).toBeNull();
     expect(screen.queryByText("support")).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/admin/api/agents", expect.any(Object));

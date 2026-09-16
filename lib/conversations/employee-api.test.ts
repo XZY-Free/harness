@@ -587,8 +587,10 @@ describe("GET /api/threads/{thread_id}/items", () => {
     expect(body.items[0]?.item_type).toBe("user_message");
     expect(body.items[0]?.item_state).toBe("completed");
     expect(body.next_cursor).toBeNull(); // 未满 limit
-    // Turn 接纳后会立即写入 invocation.queued / turn.queued / invocation.started 调度事件。
-    expect(body.latest_event_cursor?.sequence).toBeGreaterThanOrEqual(6);
+    // Turn 接纳后会同步写入 invocation.queued / turn.queued 调度事件；
+    // invocation.started 只能由 Ingress execution.started 异步提交（冻结设计：
+    // Resume/scheduling 不直接写 running，只有 execution.started 提交）。
+    expect(body.latest_event_cursor?.sequence).toBeGreaterThanOrEqual(5);
   });
 
   it("turn_id 过滤：只返回指定 Turn 的 Item", async () => {

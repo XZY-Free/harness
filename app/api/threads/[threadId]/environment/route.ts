@@ -1,9 +1,4 @@
 import { getEnvironmentStatus } from "@/lib/conversations/environment-status-queries";
-import {
-  EMPTY_CONDITIONS,
-  type TakeoverConditions,
-  getTakeoverConditions,
-} from "@/lib/conversations/environment-takeover-queries";
 /**
  * GET /api/threads/{threadId}/environment — 查询 Thread 当前 Environment 状态。
  *
@@ -38,6 +33,7 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getTurnsByThread } from "@/lib/conversations/turn-queries";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
+import type { ExecutionOwnership } from "@/lib/persistence/schema/executions";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +48,6 @@ function projectEnvironmentDefinition(def: {
   environmentKey: string;
   displayName: string;
   description: string | null;
-  environmentType: string;
   lifecycleState: string;
 }): Record<string, unknown> {
   return {
@@ -60,7 +55,6 @@ function projectEnvironmentDefinition(def: {
     environment_key: def.environmentKey,
     display_name: def.displayName,
     description: def.description,
-    environment_type: def.environmentType,
     lifecycle_state: def.lifecycleState,
   };
 }
@@ -69,54 +63,29 @@ function projectEnvironmentDefinition(def: {
 function projectLease(lease: EnvironmentLease): Record<string, unknown> {
   return {
     id: lease.id,
-    environment_definition_id: lease.environmentDefinitionId,
+    environment_revision_id: lease.environmentDefinitionRevisionId,
     invocation_id: lease.invocationId,
     attempt_id: lease.attemptId,
     device_id: lease.deviceId,
     lease_state: lease.leaseState,
     allocated_at: lease.allocatedAt.toISOString(),
     last_heartbeat_at: lease.lastHeartbeatAt?.toISOString() ?? null,
-    expires_at: lease.expiresAt?.toISOString() ?? null,
+    expires_at: lease.expiresAt.toISOString(),
     released_at: lease.releasedAt?.toISOString() ?? null,
   };
 }
 
 /** 投影 ExecutionOwnership 为响应体（snake_case）。 */
-function projectOwnership(ownership: {
-  id: string;
-  invocationId: string;
-  deviceId: string | null;
-  environmentLeaseId: string | null;
-  ownershipState: string;
-  leaseEpoch: number;
-  acquiredAt: Date;
-  lastHeartbeatAt: Date | null;
-  releasedAt: Date | null;
-}): Record<string, unknown> {
+function projectOwnership(ownership: ExecutionOwnership): Record<string, unknown> {
   return {
     id: ownership.id,
     invocation_id: ownership.invocationId,
-    device_id: ownership.deviceId,
     environment_lease_id: ownership.environmentLeaseId,
     ownership_state: ownership.ownershipState,
     lease_epoch: ownership.leaseEpoch,
     acquired_at: ownership.acquiredAt.toISOString(),
-    last_heartbeat_at: ownership.lastHeartbeatAt?.toISOString() ?? null,
+    last_heartbeat_at: ownership.lastHeartbeatAt.toISOString(),
     released_at: ownership.releasedAt?.toISOString() ?? null,
-  };
-}
-
-/** 投影 TakeoverConditions 为响应体（snake_case）。 */
-function projectTakeoverConditions(conditions: TakeoverConditions): Record<string, unknown> {
-  return {
-    can_takeover: conditions.can_takeover,
-    blocking_reasons: conditions.blocking_reasons,
-    pending_tool_calls: conditions.pending_tool_calls,
-    unknown_effects: conditions.unknown_effects,
-    active_write_locks: conditions.active_write_locks,
-    owner_heartbeat_stale: conditions.owner_heartbeat_stale,
-    owner_device_id: conditions.owner_device_id,
-    ownership_id: conditions.ownership_id,
   };
 }
 
@@ -153,29 +122,24 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     activeInvocationId,
   });
 
-  // 5. 聚合查询接管条件（仅当有 active ownership 时才有意义）
-  let takeoverConditions: TakeoverConditions = EMPTY_CONDITIONS;
-  if (status.activeOwnership) {
-    takeoverConditions = await getTakeoverConditions({
-      tenantId: principal.tenantId,
-      threadId,
-      activeInvocationId,
-      activeOwnership: status.activeOwnership,
-      activeLease: status.activeLease,
-    });
-  }
-
-  // 6. 返回 200 + 投影响应体
+  // 5. 返回 200 + canonical revision/lease/ownership projection。
   const responseBody = {
     threadId,
     environment_definition: status.environmentDefinition
       ? projectEnvironmentDefinition(status.environmentDefinition)
       : null,
+    environment_revision: status.environmentRevision
+      ? {
+          id: status.environmentRevision.id,
+          revision_no: status.environmentRevision.revisionNo,
+          environment_type: status.environmentRevision.environmentType,
+          semantic_digest: status.environmentRevision.semanticDigest,
+        }
+      : null,
     active_lease: status.activeLease ? projectLease(status.activeLease) : null,
     active_ownership: status.activeOwnership ? projectOwnership(status.activeOwnership) : null,
     availability: status.availability,
     active_invocation_id: activeInvocationId,
-    takeover_conditions: projectTakeoverConditions(takeoverConditions),
   };
 
   return apiSuccess(responseBody, {

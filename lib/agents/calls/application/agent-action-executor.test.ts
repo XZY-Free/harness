@@ -4,6 +4,7 @@ import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/re
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
   EXECUTION_FIXTURE_CONTRACT,
+  acquireExecutionAuthorityForInvocation,
   seedAgentCallExecutionScenario,
   waitForCallTerminal,
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
@@ -87,7 +88,12 @@ describe("AgentActionExecutor", () => {
       .where(eq(capabilityUseTable.invocationId, scenario.parentInvocationId));
     scenario.provider.reset();
     scenario.provider.setScenario(providerScenario);
-    return scenario;
+    // canonical executor 要求 context.authority；为 parent Invocation 构造真实执行权威。
+    const authority = await acquireExecutionAuthorityForInvocation({
+      tenantId: scenario.tenantId,
+      invocationId: scenario.parentInvocationId,
+    });
+    return { ...scenario, authority };
   }
 
   it("使用 Harness task 创建 harness_planned AgentCall，并以 actionId 稳定幂等", async () => {
@@ -111,6 +117,7 @@ describe("AgentActionExecutor", () => {
       },
     };
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -214,6 +221,7 @@ describe("AgentActionExecutor", () => {
         },
       },
       {
+        authority: scenario.authority,
         invocationId: scenario.parentInvocationId,
         tenantId: scenario.tenantId,
         threadId: scenario.threadId,
@@ -258,6 +266,7 @@ describe("AgentActionExecutor", () => {
           payload: { agentId: scenario.agentId, task: "不应出站" },
         },
         {
+          authority: scenario.authority,
           invocationId: scenario.parentInvocationId,
           tenantId: scenario.tenantId,
           threadId: scenario.threadId,
@@ -304,6 +313,7 @@ describe("AgentActionExecutor", () => {
           payload: { agentId: scenario.agentId, task: "不得出站" },
         },
         {
+          authority: scenario.authority,
           invocationId: scenario.parentInvocationId,
           tenantId: scenario.tenantId,
           threadId: scenario.threadId,
@@ -348,6 +358,7 @@ describe("AgentActionExecutor", () => {
       payload: { agentId: scenario.agentId, task: "查询当前员工年假余额" },
     };
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -382,6 +393,7 @@ describe("AgentActionExecutor", () => {
       transportChannel: "hosted",
     });
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -424,6 +436,7 @@ describe("AgentActionExecutor", () => {
       payload: { agentId: scenario.agentId, task: "查询当前员工年假余额" },
     };
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -516,7 +529,7 @@ describe("AgentActionExecutor", () => {
       .from(turnTable)
       .where(eq(turnTable.id, scenario.turnId));
     expect(resumedTurn?.turnState).toBe("running");
-    expect(resolved.resumeCommand.commandPayloadJson).toMatchObject({
+    expect(resolved.resumeCommand.payloadJson).toMatchObject({
       agent_call_id: callId,
       action_id: request?.harnessActionId,
       task_id: (request?.promptJson as Record<string, unknown>)?.task_id,
@@ -560,6 +573,7 @@ describe("AgentActionExecutor", () => {
       payload: { agentId: scenario.agentId, task: "提交我的年假申请" },
     };
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,

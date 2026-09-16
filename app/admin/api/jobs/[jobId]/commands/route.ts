@@ -66,15 +66,15 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     command_type: c.commandType,
     command_state: c.commandState,
     idempotency_key: c.idempotencyKey,
-    requested_by: c.requestedBy,
-    reason_code: c.reasonCode,
-    replacement_job_id: c.replacementJobId,
-    error_code: c.errorCode,
-    error_summary: c.errorSummary,
-    command_payload_json: c.commandPayloadJson,
+    requested_by_type: c.requestedByType,
+    requested_by_id: c.requestedById,
+    payload_json: c.payloadJson,
+    payload_hash: c.payloadHash,
+    last_error_code: c.lastErrorCode,
+    result_json: c.resultJson,
     created_at: c.createdAt.toISOString(),
-    dispatched_at: c.dispatchedAt?.toISOString() ?? null,
-    acknowledged_at: c.acknowledgedAt?.toISOString() ?? null,
+    next_attempt_at: c.nextAttemptAt.toISOString(),
+    completed_at: c.completedAt?.toISOString() ?? null,
   }));
 
   return apiSuccess(

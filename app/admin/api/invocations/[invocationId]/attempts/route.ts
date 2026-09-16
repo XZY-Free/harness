@@ -3,9 +3,9 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { getAttemptsByInvocation } from "@/lib/executions/persistence/attempt-store";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { getAttemptsByInvocation } from "@/lib/runtime/invocation-attempt-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
 /**
  * GET /admin/api/invocations/{invocationId}/attempts — 列出 Invocation 的执行尝试（S11-W04）。
  *
@@ -53,14 +53,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     invocationId: a.invocationId,
     attempt_no: a.attemptNo,
     attempt_state: a.attemptState,
-    environment_lease_id: a.environmentLeaseId,
-    worker_ref: a.workerRef,
-    runtime_execution_ref: a.runtimeExecutionRef,
-    checkpoint_ref: a.checkpointRef,
+    preparation_state: a.preparationState,
+    preparation_digest: a.preparationDigest,
+    prepared_at: a.preparedAt?.toISOString() ?? null,
+    filesystem_checkpoint_id: a.filesystemCheckpointId,
     retry_reason_code: a.retryReasonCode,
     started_at: a.startedAt?.toISOString() ?? null,
     finished_at: a.finishedAt?.toISOString() ?? null,
-    last_heartbeat_at: a.lastHeartbeatAt?.toISOString() ?? null,
     error_code: a.errorCode,
     error_summary: a.errorSummary,
     created_at: a.createdAt.toISOString(),

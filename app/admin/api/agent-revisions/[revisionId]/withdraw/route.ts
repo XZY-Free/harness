@@ -96,8 +96,8 @@ function serializeResponse(result: {
 
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
   const requestId = getRequestId(request);
-  const { revision_id } = await context.params;
-  const revisionId = typeof revision_id === "string" ? revision_id : "";
+  const params = await context.params;
+  const revisionId = typeof params.revisionId === "string" ? params.revisionId : "";
   let principal: AdminPrincipal;
   try {
     principal = await resolveAdminPrincipalAsync(request.headers);

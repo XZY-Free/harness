@@ -3,9 +3,9 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { getUserActionRequestsByInvocation } from "@/lib/permission/user-action-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
 /**
  * GET /admin/api/invocations/{invocationId}/user-actions — 列出 Invocation 的 UserActionRequest（S11-W04）。
  *

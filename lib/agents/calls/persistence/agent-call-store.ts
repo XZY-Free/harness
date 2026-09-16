@@ -15,11 +15,13 @@ import type {
   AgentCallBindingCandidate,
   AgentCallBindingConfigInput,
 } from "@/lib/agents/calls/domain/agent-call-binding";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 
 export interface StoreAgentCallInput {
   id: string;
   tenantId: string;
   parentInvocationId: string;
+  authority?: AuthorityIdentity;
   agentId: string;
   sourceType: AgentCallSourceType;
   sourceRef: string;

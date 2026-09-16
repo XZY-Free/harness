@@ -20,7 +20,7 @@ import type { RouteResolution } from "@/lib/routes/domain/route-resolution-polic
 /** 协议事实（来自 exact AgentContractSnapshot，权威）。 */
 export interface AgentProtocolFacts {
   protocolType: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 }
 
 export interface BuildAgentCallBindingCandidateInput {
@@ -78,7 +78,7 @@ export function buildAgentCallBindingCandidate(
     credentialRefId: target.agentCredentialRefId,
     networkZone: target.agentNetworkZone,
     protocolType: input.protocolFacts.protocolType,
-    protocolContractRevision: input.protocolFacts.protocolContractRevision,
+    protocolContractDigest: input.protocolFacts.protocolContractDigest,
     policyRevisionId: input.policyRevisionId,
     policyRulesDigest: input.policyRulesDigest,
     governanceConfigRevisionId: input.governanceConfigRevisionId,

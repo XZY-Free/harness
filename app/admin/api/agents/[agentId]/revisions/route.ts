@@ -87,7 +87,7 @@ interface RouteContext {
   params: Promise<{ agentId: string }>;
 }
 
-/** 请求体 schema（与 OpenAPI requestBody 对齐）。 */
+/** 请求体 schema（与 OpenAPI request 对齐）。 */
 interface CreateRevisionBody {
   /** 绑定的不可变 AgentContractSnapshot id（发布权威；必填且非空白）。 */
   agent_contract_snapshot_id: string;
@@ -159,14 +159,14 @@ function createdByFromAdminPrincipal(principal: AdminPrincipal): string {
   if ("userIdentityId" in principal) {
     return principal.userIdentityId;
   }
-  return principal.serviceId ?? principal.claims.tenantId;
+  return principal.serviceId ?? principal.tenantId;
 }
 
 /** 投影 Revision 为响应体（snake_case + etag）。 */
 function projectRevision(revision: AgentRevision): Record<string, unknown> {
   return {
     id: revision.id,
-    agentId: revision.agentId,
+    agent_id: revision.agentId,
     revision_no: revision.revisionNo,
     revision_state: revision.revisionState,
     agent_contract_snapshot_id: revision.agentContractSnapshotId,

@@ -53,7 +53,7 @@ interface RouteContext {
   params: Promise<{ threadId: string }>;
 }
 
-/** 请求体 schema（§3.10 requestBody）。 */
+/** 请求体 schema（§3.10 request）。 */
 interface ForkBody {
   from_turn_id: string;
   title?: string | null;

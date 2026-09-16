@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { POST as forkPOST } from "@/app/api/threads/[threadId]/forks/route";
 import { POST as createThreadPOST } from "@/app/api/threads/route";
 import { POST as interruptPOST } from "@/app/api/turns/[turnId]/interrupt/route";
@@ -26,9 +27,9 @@ import {
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
-import { invocationCommandTable } from "@/lib/persistence/schema/executions";
+import { invocationCommandTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 employee-api.test.ts 一致）。
@@ -117,6 +118,41 @@ async function transitionTurn(
   if (!result) throw new Error(`Turn 状态转换失败: ${turnId} → ${nextState}`);
 }
 
+/**
+ * 为 Turn 绑定活动 Invocation（interrupt/steer 的 canonical 前置事实：
+ * 活动 Turn 必须绑定同一个 Invocation，命令才能精确投递）。
+ * Invocation 遵守 Invocation_subject_shape：triggerItemId 指向 Turn 的真实触发 Item。
+ */
+async function bindActiveInvocation(
+  tenantId: string,
+  threadId: string,
+  turnId: string,
+): Promise<string> {
+  const turn = await getTurnRow(turnId);
+  if (!turn) throw new Error(`Turn 不存在: ${turnId}`);
+  if (!turn.triggerItemId) throw new Error(`Turn 缺少 triggerItemId: ${turnId}`);
+  const invocationId = randomUUID();
+  await db.insert(invocationTable).values({
+    id: invocationId,
+    tenantId,
+    subjectType: "thread",
+    threadId,
+    turnId,
+    triggerItemId: turn.triggerItemId,
+    invocationSequence: 1,
+    invocationKind: "initial",
+    executionState: turn.turnState === "waiting_user" ? "waiting_user" : "running",
+    inputDigest: `sha256:${"0".repeat(64)}`,
+    startedAt: new Date(),
+    versionNo: 1,
+  });
+  await db
+    .update(turnTable)
+    .set({ activeInvocationId: invocationId, latestInvocationId: invocationId })
+    .where(eq(turnTable.id, turnId));
+  return invocationId;
+}
+
 /** 查询 Turn 的所有事件（按 sequence 升序）。 */
 async function getTurnEvents(turnId: string) {
   return db
@@ -126,9 +162,18 @@ async function getTurnEvents(turnId: string) {
     .orderBy(threadEventTable.eventSequence);
 }
 
-/** 查询 Turn 的 InvocationCommand 记录。 */
+/** 查询 Turn 的 InvocationCommand 记录（V12：命令经 invocationId 关联 Turn）。 */
 async function getTurnCommands(turnId: string) {
-  return db.select().from(invocationCommandTable).where(eq(invocationCommandTable.turnId, turnId));
+  const invocations = await db
+    .select({ id: invocationTable.id })
+    .from(invocationTable)
+    .where(eq(invocationTable.turnId, turnId));
+  const invocationIds = invocations.map((row) => row.id);
+  if (invocationIds.length === 0) return [];
+  return db
+    .select()
+    .from(invocationCommandTable)
+    .where(inArray(invocationCommandTable.invocationId, invocationIds));
 }
 
 /** 查询 Turn 的 ThreadItem 记录。 */
@@ -309,6 +354,7 @@ describe("POST /api/turns/{turn_id}/regenerate", () => {
     // 将 Turn 转换到 completed 状态
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
+    const turnBeforeRegen = await getTurnRow(turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -342,11 +388,20 @@ describe("POST /api/turns/{turn_id}/regenerate", () => {
     expect(turnRow?.preferredAgentId).toBe(agent.id);
     expect(turnRow?.agentUseMode).toBe("preferred");
 
-    // 验证 DB：InvocationCommand 已创建
-    const commands = await getTurnCommands(turnId);
-    expect(commands).toHaveLength(1);
-    expect(commands[0]?.commandType).toBe("regenerate");
-    expect(commands[0]?.commandState).toBe("queued");
+    // 验证 DB：V12 canonical——Regenerate 创建新 Invocation（invocationKind=regenerate），
+    // 不再把产品级 Regenerate 伪装成 InvocationCommand（regenerate-queries.ts）。
+    const [regenInvocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, body.invocation_id))
+      .limit(1);
+    expect(regenInvocation?.invocationKind).toBe("regenerate");
+    expect(regenInvocation?.executionState).toBe("queued");
+    expect(regenInvocation?.turnId).toBe(turnId);
+    expect(regenInvocation?.triggerItemId).not.toBeNull();
+    // replacesInvocationId = Turn.latestInvocationId（调度前为 null 的合法事实）
+    expect(regenInvocation?.replacesInvocationId).toBe(turnBeforeRegen?.latestInvocationId ?? null);
+    expect(await getTurnCommands(turnId)).toHaveLength(0);
 
     // 验证 DB：turn.regeneration_started 事件已写
     const events = await getTurnEvents(turnId);
@@ -484,6 +539,7 @@ describe("POST /api/turns/{turn_id}/interrupt", () => {
     const threadId = await createThread("intr-thread-001");
     const turnId = await createTurn(threadId, "intr-turn-001");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -519,7 +575,7 @@ describe("POST /api/turns/{turn_id}/interrupt", () => {
     // 验证 DB：InvocationCommand 已创建
     const commands = await getTurnCommands(turnId);
     expect(commands).toHaveLength(1);
-    expect(commands[0]?.commandType).toBe("interrupt");
+    expect(commands[0]?.commandType).toBe("cancel");
     expect(commands[0]?.commandState).toBe("queued");
 
     // 验证 DB：turn.interrupt_requested 事件已写
@@ -534,6 +590,7 @@ describe("POST /api/turns/{turn_id}/interrupt", () => {
     const turnId = await createTurn(threadId, "intr-turn-002");
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "waiting_user");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -617,6 +674,7 @@ describe("POST /api/turns/{turn_id}/interrupt", () => {
     const threadId = await createThread("intr-thread-006");
     const turnId = await createTurn(threadId, "intr-turn-006");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req1 = buildApiRequest({
       audience: "employee",
@@ -657,6 +715,7 @@ describe("POST /api/turns/{turn_id}/steer", () => {
     const threadId = await createThread("steer-thread-001");
     const turnId = await createTurn(threadId, "steer-turn-001");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -795,6 +854,7 @@ describe("POST /api/turns/{turn_id}/steer", () => {
     const threadId = await createThread("steer-thread-006");
     const turnId = await createTurn(threadId, "steer-turn-006");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req1 = buildApiRequest({
       audience: "employee",
@@ -916,6 +976,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
     const threadId = await createThread("idem-steer-thread");
     const turnId = await createTurn(threadId, "idem-steer-turn");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     // 第一次请求
     const req1 = buildApiRequest({

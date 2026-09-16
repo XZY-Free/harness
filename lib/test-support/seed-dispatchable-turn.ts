@@ -112,7 +112,7 @@ export interface DispatchableTurnContext {
   routeSetId: string;
   threadId: string;
   turnId: string;
-  triggerItemId: string | null;
+  triggerItemId: string;
   agentInvokeBindingId: string | null;
 }
 
@@ -192,6 +192,11 @@ export async function seedDispatchableTurn(
     actorId: ownerId,
   });
 
+  // acceptUserMessageTurn 对 user-message turn 必定写入 triggerItemId（指向 user_message Item）
+  if (!turn.triggerItemId) {
+    throw new Error("seedDispatchableTurn: acceptUserMessageTurn 未返回 triggerItemId");
+  }
+
   return {
     tenantId,
     ownerId,
@@ -202,7 +207,7 @@ export async function seedDispatchableTurn(
     routeSetId: routeSet.id,
     threadId: thread.id,
     turnId: turn.id,
-    triggerItemId: turn.triggerItemId ?? null,
+    triggerItemId: turn.triggerItemId,
     agentInvokeBindingId: invokeBinding?.id ?? null,
   };
 }

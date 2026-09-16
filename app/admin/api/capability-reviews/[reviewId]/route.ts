@@ -89,7 +89,7 @@ function reviewedByFromAdminPrincipal(principal: AdminPrincipal): string {
   if ("userIdentityId" in principal) {
     return principal.userIdentityId;
   }
-  return principal.serviceId ?? principal.claims.tenantId;
+  return principal.serviceId ?? principal.tenantId;
 }
 
 /** 投影 CapabilityReview 为响应体（snake_case）。 */

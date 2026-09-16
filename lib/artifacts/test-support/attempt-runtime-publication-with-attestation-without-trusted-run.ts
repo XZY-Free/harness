@@ -33,7 +33,7 @@ async function insertConformanceRunInDb(params: {
   revisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   overallResult: "passed" | "failed";
   caseResults: Array<{ caseId: string; passed: boolean; reason?: string }>;
 }): Promise<string> {
@@ -48,7 +48,7 @@ async function insertConformanceRunInDb(params: {
     runtimeRevisionId: params.revisionId,
     runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
-    protocolContractRevision: params.protocolContractRevision,
+    protocolContractDigest: params.protocolContractDigest,
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: params.runtimeTargetDigest,
     runnerIdentity: "test-runner",
@@ -68,10 +68,12 @@ async function insertConformanceRunInDb(params: {
     idempotencyKey: `conformance-run:${runId}`,
     requestId: `req:${runId}`,
     recordedAt: now,
+    protocolVersion: 3,
   });
 
   const caseRows = params.caseResults.map((cr) => ({
     id: randomUUID(),
+    tenantId: params.tenantId,
     runId,
     caseId: cr.caseId,
     passed: cr.passed,
@@ -86,7 +88,7 @@ async function insertConformanceRunInDb(params: {
 /**
  * 测试有 Attestation + ConformanceRun 时的发布行为。
  *
- * 从 DB 读取 Revision 真实的 artifactDigest / configHash / protocolContractRevision，
+ * 从 DB 读取 Revision 真实的 artifactDigest / configHash / protocolContractDigest，
  * 在 DB 中创建与之绑定的真实 ConformanceRun，传递真实 conformanceRunId
  * 给生产函数 publishRuntimeRevisionThroughControlPlane。
  */
@@ -116,7 +118,7 @@ export async function publishRuntimeRevisionWithAttestation(
     revisionId,
     runtimeTargetDigest: revisionRow.runtimeTargetDigest,
     runtimeConfigDigest: revisionRow.configHash,
-    protocolContractRevision: revisionRow.protocolContractRevision,
+    protocolContractDigest: revisionRow.protocolContractDigest,
     overallResult,
     caseResults: conformanceResults,
   });

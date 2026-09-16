@@ -3,6 +3,7 @@ import { TurnNotFoundError, TurnStateConflictError } from "@/lib/conversations/e
 import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regenerate-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { eq } from "drizzle-orm";
@@ -59,18 +60,15 @@ export async function requestPausedTurnResume(params: {
       resume_source: "user_pause",
       resume_payload: { source: "user_pause" },
     };
-    await tx.insert(invocationCommandTable).values({
-      id: commandId,
+    await createInvocationCommandInTransaction(tx, {
+      tenantId: params.tenantId,
       invocationId: turn.activeInvocationId,
-      threadId: thread.id,
-      turnId: turn.id,
       commandType: "resume",
-      commandPayloadJson: commandPayload,
-      commandPayloadHash: computeInvocationCommandPayloadHash(commandPayload),
-      commandState: "queued",
       idempotencyKey: params.idempotencyKey,
-      createdAt: now,
-      updatedAt: now,
+      payloadJson: commandPayload,
+      requestedByType: "user",
+      requestedById: params.ownerUserId,
+      commandId,
     });
 
     const sequence = await allocateEventSequences(tx, thread.id, 1);

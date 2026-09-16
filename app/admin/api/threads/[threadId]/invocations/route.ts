@@ -5,8 +5,8 @@ import {
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
+import { listInvocationsByThread } from "@/lib/executions/persistence/invocation-store";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { listInvocationsByThread } from "@/lib/runtime/invocation-queries";
 /**
  * GET /admin/api/threads/{threadId}/invocations — 列出 Thread 下的 Invocation（S11-W04）。
  *
@@ -65,10 +65,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     }
   }
 
-  const invocations = await listInvocationsByThread(principal.tenantId, threadId, {
-    limit,
-    afterSequence,
-  });
+  const invocations = await listInvocationsByThread(principal.tenantId, threadId);
 
   const projected = invocations.map((i) => ({
     id: i.id,
@@ -83,11 +80,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     replaces_invocation_id: i.replacesInvocationId,
     output_item_id: i.outputItemId,
     result_ref: i.resultRef,
-    runtime_session_binding_id: i.runtimeSessionBindingId,
-    runtime_execution_ref: i.runtimeExecutionRef,
+    input_digest: i.inputDigest,
+    result_digest: i.resultDigest,
+    last_ownership_epoch: i.lastOwnershipEpoch,
+    recovery_version: i.recoveryVersion,
     started_at: i.startedAt?.toISOString() ?? null,
     finished_at: i.finishedAt?.toISOString() ?? null,
-    last_heartbeat_at: i.lastHeartbeatAt?.toISOString() ?? null,
     error_code: i.errorCode,
     error_summary: i.errorSummary,
     version_no: i.versionNo,

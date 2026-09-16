@@ -20,6 +20,10 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import {
+  getInvocationById,
+  updateInvocationState,
+} from "@/lib/executions/persistence/invocation-store";
 import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
 import {
   getLatestPermissionDecision,
@@ -43,8 +47,9 @@ import {
   toolTable,
 } from "@/lib/persistence/schema/tool";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { authorizeRuntimeAction } from "@/lib/runtime/application/authorize-runtime-action";
 import { verifyCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
-import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import {
   type ExecutionSubject,
   recoverTrustedExecutionSubject,
@@ -55,6 +60,8 @@ import { and, desc, eq, sql } from "drizzle-orm";
 export interface ApplyToolCallInput {
   tenantId: string;
   invocationId: string;
+  /** Required when the request originates from a Runtime generation. */
+  authority?: AuthorityIdentity;
   executionSubject: ExecutionSubject;
   toolId: string;
   toolSchemaRevisionId: string;
@@ -101,6 +108,13 @@ async function applyToolCallTx(
   tx: ApplicationTx,
   input: ApplyToolCallInput,
 ): Promise<ApplyToolCallResult> {
+  if (input.authority) {
+    await authorizeRuntimeAction({
+      tenantId: input.tenantId,
+      authority: input.authority,
+      executor: tx,
+    });
+  }
   const invocation = await getInvocationById(input.tenantId, input.invocationId, tx);
   if (!invocation) throw new ToolApplicationError("INVOCATION_MISSING", "Invocation 不存在");
   const invocationBinding = await getExecutionBindingByInvocation(

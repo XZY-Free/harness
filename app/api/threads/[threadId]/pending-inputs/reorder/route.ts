@@ -47,7 +47,7 @@ interface RouteContext {
   params: Promise<Record<string, string | string[]>>;
 }
 
-/** 请求体 schema（§3.8 requestBody）。 */
+/** 请求体 schema（§3.8 request）。 */
 interface ReorderPendingInputsBody {
   ordered_ids: string[];
 }

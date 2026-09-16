@@ -91,15 +91,15 @@ interface PublishBody {
   evidence_refs?: unknown[];
 }
 
-/** 旧 source Attestation 键（出现即 400）。 */
-const LEGACY_ATTESTATION_KEYS = new Set(["artifact_attestation_id"]);
+/** 该发布契约不接受的来源证明字段（出现即 400）。 */
+const UNSUPPORTED_ATTESTATION_KEYS = new Set(["artifact_attestation_id"]);
 
 /** 校验请求体。 */
 function validateBody(body: unknown): body is PublishBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
   for (const key of Object.keys(b)) {
-    if (LEGACY_ATTESTATION_KEYS.has(key)) return false;
+    if (UNSUPPORTED_ATTESTATION_KEYS.has(key)) return false;
   }
   if (typeof b.release_notes !== "string") return false;
   if (b.evidence_refs !== undefined && !Array.isArray(b.evidence_refs)) return false;

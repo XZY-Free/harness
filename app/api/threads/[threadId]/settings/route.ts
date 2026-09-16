@@ -47,7 +47,7 @@ interface RouteContext {
   params: Promise<{ threadId: string }>;
 }
 
-/** 请求体 schema（§3.2 requestBody：所有字段可选，至少一个）。 */
+/** 请求体 schema（§3.2 request：所有字段可选，至少一个）。 */
 interface UpdateSettingsBody {
   tool_permission_mode?: ToolPermissionMode;
   default_model_ref?: string | null;

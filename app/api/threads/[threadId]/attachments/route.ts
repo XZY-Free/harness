@@ -183,7 +183,7 @@ async function handleFileUpload(
   });
 
   if (outcome.kind === "replay") {
-    return buildReplayResponse(outcome.record, requestId, isAttachmentResponseBody);
+    return buildReplayResponse(outcome.record, requestId, isAttachmentResponseBody, toWireResponse);
   }
   if (outcome.kind === "in_flight" || outcome.kind === "conflict") {
     return buildIdempotencyErrorResponse({
@@ -257,7 +257,7 @@ async function handleFileUpload(
         .catch(() => false);
       throw error;
     }
-    return Response.json(responseBody, { status: 201 });
+    return Response.json(toWireResponse(responseBody), { status: 201 });
   } catch (err) {
     await failRecord(recordId).catch(() => undefined);
     logger.error("[file-storage] 原文件写入失败", {
@@ -268,13 +268,26 @@ async function handleFileUpload(
   }
 }
 
+/** 幂等记录存储体（lowerCamelCase）的合法结构校验，fail-closed。 */
 function isAttachmentResponseBody(body: Record<string, unknown>): boolean {
   return (
     body.kind === "attachment" &&
-    typeof body.attachment_id === "string" &&
+    typeof body.attachmentId === "string" &&
     typeof body.url === "string" &&
     typeof body.filename === "string" &&
     typeof body.size === "number" &&
     typeof body.type === "string"
   );
+}
+
+/** 幂等存储体 → HTTP wire 响应体（snake_case 字段）。 */
+function toWireResponse(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    kind: body.kind,
+    attachment_id: body.attachmentId,
+    url: body.url,
+    filename: body.filename,
+    size: body.size,
+    type: body.type,
+  };
 }

@@ -59,7 +59,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** 请求体 schema（与 OpenAPI requestBody 对齐）。 */
+/** 请求体 schema（与 OpenAPI request 对齐）。 */
 interface CreateToolBody {
   provider_id: string;
   tool_key: string;

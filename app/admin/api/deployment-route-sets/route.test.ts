@@ -111,7 +111,7 @@ describe("POST /admin/api/deployment-route-setsï¼ˆensure RouteSet exact payloadï
         path: "/deployment-route-sets",
         idempotencyKey: "idem-ensure-nested-001",
         body: {
-          target: { kind: "agent", agentId },
+          target: { kind: "agent", agent_id: agentId },
           route_scope_key: "prod",
           route_scope: {},
         },
@@ -119,7 +119,7 @@ describe("POST /admin/api/deployment-route-setsï¼ˆensure RouteSet exact payloadï
     );
     expect(response.status).toBe(201);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.target).toEqual({ kind: "agent", agentId });
+    expect(body.target).toEqual({ kind: "agent", agent_id: agentId });
 
     const [routeSet] = await db
       .select()

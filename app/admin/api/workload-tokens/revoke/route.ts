@@ -43,8 +43,6 @@ function actorFromAdminPrincipal(principal: AdminPrincipal): AuditActor {
   return actorFromWorkloadPrincipal(principal);
 }
 
-const VALID_TOKEN_TYPES = new Set(["runtime", "gateway", "service"]);
-
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
@@ -60,9 +58,9 @@ export async function POST(request: Request): Promise<Response> {
   // 解析请求体
   const body = (await request.json().catch(() => null)) as {
     jti?: string;
-    token_type?: string;
-    reason?: string;
-    expires_at?: string;
+    invocation_id?: string;
+    reason_code?: string;
+    token_expires_at?: string;
   } | null;
 
   const jti = body?.jti?.trim();
@@ -70,33 +68,33 @@ export async function POST(request: Request): Promise<Response> {
     return schemaInvalidTable(requestId, "缺少必填字段 jti");
   }
 
-  const tokenType = body?.token_type?.trim();
-  if (!tokenType || !VALID_TOKEN_TYPES.has(tokenType)) {
-    return schemaInvalidTable(requestId, "缺少或非法 token_type（期望 runtime/gateway/service）");
+  const invocationId = body?.invocation_id?.trim();
+  if (!invocationId) {
+    return schemaInvalidTable(requestId, "缺少必填字段 invocation_id");
   }
 
-  const reason = body?.reason?.trim();
-  if (!reason) {
-    return schemaInvalidTable(requestId, "缺少必填字段 reason");
+  const reasonCode = body?.reason_code?.trim();
+  if (!reasonCode) {
+    return schemaInvalidTable(requestId, "缺少必填字段 reason_code");
   }
 
-  // expires_at 可选；缺省使用当前时间 + 1 小时（保证撤销记录有 TTL）
-  let expiresAt: Date;
-  if (body?.expires_at) {
-    const parsed = new Date(body.expires_at);
+  // token_expires_at 必须使用原 Token 的过期时间，避免撤销记录无限期保留。
+  let tokenExpiresAt: Date;
+  if (body?.token_expires_at) {
+    const parsed = new Date(body.token_expires_at);
     if (Number.isNaN(parsed.getTime())) {
-      return schemaInvalidTable(requestId, "expires_at 非合法 RFC 3339 时间");
+      return schemaInvalidTable(requestId, "token_expires_at 非合法 RFC 3339 时间");
     }
-    expiresAt = parsed;
+    tokenExpiresAt = parsed;
   } else {
-    expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    return schemaInvalidTable(requestId, "缺少必填字段 token_expires_at");
   }
 
   // action scope 校验：按 invocation 维度授权（jti 关联 Invocation）
   const scopeResult = await requireAdminActionScope(
     principal,
     "workload.token.revoke",
-    { type: "invocation", id: jti },
+    { type: "invocation", id: invocationId },
     requestId,
   );
   if (!scopeResult.ok) return scopeResult.response;
@@ -104,12 +102,12 @@ export async function POST(request: Request): Promise<Response> {
   // 执行撤销（幂等：已撤销返回原记录）
   const revoked = await revokeWorkloadToken({
     tenantId: principal.tenantId,
+    invocationId,
     jti,
-    tokenType: tokenType as "runtime" | "gateway" | "service",
     revokedBy:
       "userIdentityId" in principal ? principal.userIdentityId : (principal.serviceId ?? "unknown"),
-    reason,
-    expiresAt,
+    reasonCode,
+    tokenExpiresAt,
     actor: actorFromAdminPrincipal(principal),
     requestId,
   });
@@ -118,10 +116,10 @@ export async function POST(request: Request): Promise<Response> {
     {
       id: revoked.id,
       jti: revoked.jti,
-      token_type: revoked.tokenType,
+      invocation_id: revoked.invocationId,
       revoked_by: revoked.revokedBy,
-      reason: revoked.reason,
-      expires_at: revoked.expiresAt.toISOString(),
+      reason_code: revoked.reasonCode,
+      token_expires_at: revoked.tokenExpiresAt.toISOString(),
       revoked_at: revoked.revokedAt.toISOString(),
     },
     { headers: { [REQUEST_ID_HEADER]: requestId } },

@@ -111,7 +111,7 @@ describe("submitAgentContractRegistration", () => {
     expect(result.contract.publicAgentId).toBe("hr-assistant");
     expect(result.contract.publicAgentVersion).toBe("1.0.0");
     expect(result.contract.protocolType).toBe("a2a");
-    expect(result.contract.protocolContractRevision).toBe("0.3.0");
+    expect(result.contract.protocolContractDigest).toBe("0.3.0");
     expect(result.contract.contractDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(result.contract.interaction).toEqual({
       streamingTransport: true,

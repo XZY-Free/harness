@@ -126,7 +126,7 @@ export function buildContractSnapshotRows(params: {
     agentNameZhCn: facts.agent.nameZhCn,
     agentNameEn: facts.agent.nameEn,
     protocolType: params.protocol.type,
-    protocolContractRevision: params.protocol.contractRevision,
+    protocolContractDigest: params.protocol.contractRevision,
     scenarioDeclaration: facts.scenarioDeclaration,
     applicableScenarios: facts.applicableScenarios,
     excludedScenarios: facts.excludedScenarios,

@@ -25,6 +25,7 @@ import { TurnNotFoundError, TurnStateConflictError } from "@/lib/conversations/e
 import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regenerate-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import type { ThreadEventActorType, TurnState } from "@/lib/persistence/schema/conversation";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationCommandTable } from "@/lib/persistence/schema/executions";
@@ -121,6 +122,9 @@ export async function requestInterrupt(params: {
     if (!INTERRUPTIBLE_STATES.includes(turn.turnState)) {
       throw new TurnStateConflictError(params.turnId, turn.turnState, "interrupt");
     }
+    if (!turn.activeInvocationId) {
+      throw new TurnStateConflictError(params.turnId, turn.turnState, "interrupt");
+    }
 
     // 3. 创建 InvocationCommand（command_type=interrupt, state=queued）。
     // 活动 Turn 必须绑定同一个 Invocation，Hosted local transport 才能执行真实取消。
@@ -130,24 +134,15 @@ export async function requestInterrupt(params: {
     };
     const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
 
-    await tx.insert(invocationCommandTable).values({
-      id: commandId,
+    await createInvocationCommandInTransaction(tx, {
+      tenantId: params.tenantId,
       invocationId: turn.activeInvocationId,
-      threadId: thread.id,
-      turnId: turn.id,
-      commandType: "interrupt",
-      commandPayloadJson: commandPayload,
-      commandPayloadHash,
-      commandState: "queued",
-      runtimeExecutionRef: null,
+      commandType: "cancel",
       idempotencyKey: params.idempotencyKey,
-      errorCode: null,
-      errorMessage: null,
-      createdAt: now,
-      dispatchedAt: null,
-      acknowledgedAt: null,
-      failedAt: null,
-      updatedAt: now,
+      payloadJson: commandPayload,
+      requestedByType: "user",
+      requestedById: params.ownerUserId,
+      commandId,
     });
 
     // 4. 写 turn.interrupt_requested Event（不立即改变 Turn 状态）

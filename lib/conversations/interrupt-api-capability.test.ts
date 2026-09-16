@@ -95,8 +95,8 @@ describe("POST /api/turns/{turn_id}/interrupt — capability 前置门禁（05 �
     expect(response.status).toBe(409);
     const body = (await response.json()) as { error: { code: string } };
     expect(body.error.code).toBe("UNSUPPORTED_CAPABILITY");
-    // 不创建 interrupt command（DB 无 interrupt 命令行）。
+    // 不创建 interrupt command（V12 起 interrupt 语义并入 cancel，DB 无对应命令行）。
     const commands = await db.select().from(invocationCommandTable);
-    expect(commands.filter((c) => c.commandType === "interrupt")).toHaveLength(0);
+    expect(commands.filter((c) => c.commandType === "cancel")).toHaveLength(0);
   });
 });

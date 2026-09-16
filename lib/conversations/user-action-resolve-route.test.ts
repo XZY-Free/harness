@@ -24,21 +24,37 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import {
+  createAttempt,
+  getLatestAttempt,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationCommandTable } from "@/lib/persistence/schema/executions";
-import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  executionBindingTable,
+  executionOwnershipTable,
+  invocationAttemptTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
-import { createConfiguredHostedRuntimeApplicationService } from "@/lib/runtime/application/production-resume-harness-invocation";
+import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
+import { createConfiguredHostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
-import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import {
+  createRuntimeSessionBinding,
+  updateRuntimeSessionDispatch,
+} from "@/lib/runtime/persistence/runtime-session-store";
 import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
-import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
-import { eq } from "drizzle-orm";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
@@ -76,26 +92,28 @@ async function seedWaitingInputOnThread(params: {
   ownerId: string;
   threadId: string;
   turnId: string;
+  /** canonical Invocation_subject_shape：thread subject 必须挂真实 trigger ThreadItem。 */
+  triggerItemId: string;
 }): Promise<{ invocationId: string; requestId: string }> {
+  if (!params.triggerItemId) throw new Error("seedWaitingInputOnThread 需要 triggerItemId");
   const invocationId = randomUUID();
   await db.insert(invocationTable).values({
     id: invocationId,
     tenantId: params.tenantId,
+    subjectType: "thread",
     threadId: params.threadId,
     turnId: params.turnId,
     jobId: null,
     invocationSequence: 1,
     invocationKind: "initial",
     executionState: "waiting_user",
-    triggerItemId: null,
+    inputDigest: `sha256:${"0".repeat(64)}`,
+    triggerItemId: params.triggerItemId,
     replacesInvocationId: null,
     outputItemId: null,
     resultRef: null,
-    runtimeSessionBindingId: null,
-    runtimeExecutionRef: null,
     startedAt: new Date(),
     finishedAt: null,
-    lastHeartbeatAt: new Date(),
     errorCode: null,
     errorSummary: null,
     versionNo: 1,
@@ -155,10 +173,12 @@ async function attachA2ABinding(params: {
   const runtimeRevisionId = randomUUID();
   await db.insert(runtimeRevisionTable).values({
     id: runtimeRevisionId,
+    tenantId: params.tenantId,
     runtimeId,
     revisionNo: 1,
     protocolType: "a2a",
-    protocolContractRevision: "0.3.0",
+    protocolVersion: 3,
+    protocolContractDigest: "0.3.0",
     runtimeEvidenceKind: "external_endpoint",
     runtimeTargetDigest: DUMMY_DIGEST,
     endpointRef: params.endpoint,
@@ -185,17 +205,49 @@ async function attachA2ABinding(params: {
   });
   const taskId = `task-${randomUUID().slice(0, 8)}`;
   const contextId = `ctx-${randomUUID().slice(0, 8)}`;
-  const binding = await createSessionBinding({
+  // V12：external A2A 会话权威 = prepared Attempt + ExecutionBinding + Ownership + SessionBinding；
+  // remote ref 存储在 RuntimeSessionBinding（不再有 Invocation.runtimeExecutionRef 列）。
+  const workspace = await createNoPlatformWorkspaceBinding(params.tenantId, "test-service");
+  const attempt = await createAttempt({
     tenantId: params.tenantId,
+    invocationId: params.invocationId,
+  });
+  const attemptEvidence = { kind: "a2a-resume-route-test", attemptId: attempt.id };
+  await db.transaction((tx) =>
+    markAttemptPreparedInTransaction(tx, {
+      attemptId: attempt.id,
+      evidence: attemptEvidence,
+      digest: protocolDigest(attemptEvidence),
+    }),
+  );
+  const ownership = await acquireExecutionOwnership({
+    tenantId: params.tenantId,
+    invocationId: params.invocationId,
+    attemptId: attempt.id,
     runtimeRevisionId,
-    threadId: params.threadId,
-    externalSessionRef: contextId,
-    runtimeCapabilities: defaultRuntimeCapabilities(),
+    acquiredByType: "service",
+    acquiredById: "a2a-resume-route-test",
+  });
+  const session = await createRuntimeSessionBinding({
+    tenantId: params.tenantId,
+    invocationId: params.invocationId,
+    attemptId: attempt.id,
+    ownershipId: ownership.ownership.id,
+    runtimeRevisionId,
+    leaseEpoch: ownership.ownership.leaseEpoch,
+    intentType: "resume",
+    startIntentKey: `start:${ownership.ownership.id}`,
+    runtimeCapabilitiesJson: defaultRuntimeCapabilities(),
   });
   await db
-    .update(invocationTable)
-    .set({ runtimeExecutionRef: taskId, runtimeSessionBindingId: binding.id })
-    .where(eq(invocationTable.id, params.invocationId));
+    .update(executionOwnershipTable)
+    .set({ executionPhase: "executing", updatedAt: new Date() })
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, params.tenantId),
+        eq(executionOwnershipTable.id, ownership.ownership.id),
+      ),
+    );
   await db.insert(executionBindingTable).values({
     ...testCapabilityCatalogBindingFields(params.invocationId),
     invocationId: params.invocationId,
@@ -205,13 +257,11 @@ async function attachA2ABinding(params: {
     modelProvider: "none",
     modelId: "none",
     modelRevisionRef: null,
-    initialEnvironmentLeaseId: null,
-    workspaceBindingId: null,
+    workspaceBindingId: workspace.id,
     policyRevisionId: randomUUID(),
     policyRulesDigest: DUMMY_DIGEST,
     governanceConfigRevisionId: randomUUID(),
     governanceConfigDigest: DUMMY_DIGEST,
-    contextCheckpointId: null,
     routeRevisionId: randomUUID(),
     routeActivationId: randomUUID(),
     routeContentDigest: DUMMY_DIGEST,
@@ -226,24 +276,47 @@ async function attachA2ABinding(params: {
     conformanceRunId: randomUUID(),
     resolutionInputDigest: DUMMY_DIGEST,
     projectionVersionNo: 1,
+    environmentMode: "NO_PLATFORM_ENVIRONMENT",
     environmentDefinitionRevisionId: null,
     configHash: DUMMY_DIGEST,
     boundAt: new Date(),
   });
+  const semanticRequest = { fixture: "a2a-resume-route", invocationId: params.invocationId };
+  await updateRuntimeSessionDispatch(params.tenantId, session.id, {
+    bindingState: "active",
+    semanticRequestJson: semanticRequest,
+    semanticRequestDigest: protocolDigest(semanticRequest),
+    remoteSessionRef: contextId,
+    remoteExecutionRef: taskId,
+    transportAcknowledgement: {
+      capabilitiesDigest: protocolDigest({ fixture: "a2a-resume-route" }),
+    },
+    startedEventId: randomUUID(),
+  });
   // resume 事件序号 MAX+1：预置一条 ingress 事件（producer_sequence=1）。
-  await ingressEventBatch({
+  await ingressRuntimeEvents({
     tenantId: params.tenantId,
     invocationId: params.invocationId,
-    producerSequenceStart: 1,
-    events: [
-      {
-        producer_event_id: `seed:${params.invocationId}:1`,
-        producer_sequence: 1,
-        schema_version: 1,
-        type: "progress.snapshot",
-        payload: { source: "a2a", task_id: taskId, task_state: "working" },
+    batch: {
+      protocolVersion: 3,
+      authority: {
+        invocationId: params.invocationId,
+        runtimeRevisionId,
+        attemptId: attempt.id,
+        ownershipId: ownership.ownership.id,
+        leaseEpoch: String(ownership.ownership.leaseEpoch),
+        sessionBindingId: session.id,
       },
-    ],
+      events: [
+        {
+          eventId: randomUUID(),
+          producerSequence: "1",
+          type: "progress",
+          schemaVersion: 1,
+          payload: { source: "a2a", taskId, taskState: "working" },
+        },
+      ],
+    },
   });
   return { runtimeRevisionId, taskId, contextId };
 }
@@ -263,8 +336,8 @@ async function callResolve(
     }),
     {
       params: Promise.resolve({
-        thread_id: threadId,
-        request_id: requestId,
+        threadId: threadId,
+        requestId: requestId,
       }),
     },
   );
@@ -289,29 +362,28 @@ async function waitForInvocationCompletion(
 describe("POST resolve — Resume 调度真值（03 专项）", () => {
   it("hosted 协议通过 local transport 完成真实 resume dispatch", async () => {
     const decisionViews: Array<{ observations: unknown[] }> = [];
-    setCommandGatewayHostedApplicationServiceForTest(
-      createConfiguredHostedRuntimeApplicationService({
-        decisionPort: {
-          async decideNextAction(view) {
-            decisionViews.push(view);
-            return {
-              actionId: "respond-after-user-input",
-              stepNo: 1,
-              actionType: "respond",
-              purposeCode: "answer_ready",
-              shortPurpose: "按用户补充信息回答",
-              payload: { evidenceRefs: [] },
-            };
-          },
+    const debugSvc = createConfiguredHostedRuntimeApplicationService({
+      decisionPort: {
+        async decideNextAction(view) {
+          decisionViews.push(view);
+          return {
+            actionId: "respond-after-user-input",
+            stepNo: 1,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "按用户补充信息回答",
+            payload: { evidenceRefs: [] },
+          };
         },
-        finalResponsePort: {
-          async generateFinalResponse() {
-            return "已根据补充信息完成";
-          },
+      },
+      finalResponsePort: {
+        async generateFinalResponse() {
+          return "已根据补充信息完成";
         },
-        modelRef: "test-model",
-      }),
-    );
+      },
+      modelRef: "test-model",
+    });
+    setCommandGatewayHostedApplicationServiceForTest(debugSvc);
     const ctx = await seedDispatchableTurn();
     const dispatch = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
@@ -320,7 +392,8 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
     });
     const invocation = dispatch.invocation;
     if (!invocation) throw new Error("调度失败：未创建 Invocation");
-    // hosted Invocation 推进到 waiting_user + UAR。
+    // hosted Invocation 推进到 waiting_user + UAR。canonical Resume 的前置事实：
+    // latest Attempt 处于 suspended（与 ingress execution.suspended 的暂停面一致）。
     await db
       .update(invocationTable)
       .set({ executionState: "waiting_user" })
@@ -329,6 +402,12 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
       .update(turnTable)
       .set({ turnState: "waiting_user" })
       .where(eq(turnTable.id, ctx.turnId));
+    const attempt = await getLatestAttempt(invocation.id);
+    if (!attempt) throw new Error("调度失败：缺少 InvocationAttempt");
+    await db
+      .update(invocationAttemptTable)
+      .set({ attemptState: "suspended", preparationState: "pending", updatedAt: new Date() })
+      .where(eq(invocationAttemptTable.id, attempt.id));
     const requestId = randomUUID();
     await db.insert(userActionRequestTable).values({
       id: requestId,
@@ -461,6 +540,7 @@ describe("POST resolve — dispatched=false 显式 switch（04 专项 P1-4）", 
       ownerId,
       threadId,
       turnId,
+      triggerItemId: ctx.triggerItemId,
     });
     // 不 attach ExecutionBinding → 网关 loadCommandContext 返回 command_not_found
     // （Invocation 存在但 Binding 缺失 = 内部一致性错误）。
@@ -490,6 +570,7 @@ describe("POST resolve — dispatched=false 显式 switch（04 专项 P1-4）", 
       ownerId,
       threadId,
       turnId,
+      triggerItemId: ctx.triggerItemId,
     });
     const response = await callResolve(threadId, requestId, "idem-resolve-sanitized-1");
     const text = JSON.stringify(await response.json());

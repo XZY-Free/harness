@@ -136,7 +136,7 @@ function routeSetTargetToWire(row: DeploymentRouteSetRow) {
     ) {
       throw new Error(`RouteSet ${row.id} agent target trio 畸形`);
     }
-    return { kind: "agent" as const, agentId: row.agentId };
+    return { kind: "agent" as const, agent_id: row.agentId };
   }
   throw new Error(`RouteSet ${row.id} targetKind 非法: ${String(row.targetKind)}`);
 }

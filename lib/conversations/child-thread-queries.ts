@@ -41,6 +41,7 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import type {
   ThreadEvent,
   ThreadEventActorType,
@@ -370,7 +371,7 @@ export interface RequestCancellationResult {
  * - 终态（completed/failed/cancelled）→ ChildThreadAlreadyTerminalError
  * 4. UPDATE relation_state=cancel_requested
  * 5. 查询子 Thread 当前 active Invocation（running/waiting_user）作为 cancel command 目标
- * 6. INSERT InvocationCommand（commandType=cancel，commandPayloadJson={relation_id, reason_code}）
+ * 6. INSERT InvocationCommand（commandType=cancel，payloadJson={relation_id, reason_code}）
  * 7. allocateEventSequences(父) → INSERT child_thread.cancel_requested Event
  *
  * 注意（§9 行 412-417）：取消请求 ≠ 已取消。本函数仅发起请求 + 入队 cancel command；
@@ -472,23 +473,15 @@ export async function requestChildThreadCancellation(params: {
         reason: params.reason ?? null,
         reason_code: params.reasonCode ?? null,
       };
-      const commandPayloadHash = computeEventPayloadHash(commandPayload);
-      await tx.insert(invocationCommandTable).values({
-        id: cancelCommandId,
+      cancelCommandId = await createInvocationCommandInTransaction(tx, {
+        tenantId: params.tenantId,
         invocationId: childInvocation.id,
-        threadId: relation.childThreadId, // cancel command 入队到子 Thread 流
-        turnId: childInvocation.turnId ?? null,
         commandType: "cancel",
-        commandPayloadJson: commandPayload,
-        commandPayloadHash,
-        commandState: "queued",
-        runtimeExecutionRef: null,
-        idempotencyKey: params.idempotencyKey ?? null,
-        errorCode: null,
-        errorMessage: null,
-        dispatchedAt: null,
-        acknowledgedAt: null,
-        failedAt: null,
+        idempotencyKey: params.idempotencyKey ?? `child-cancel:${params.relationId}`,
+        payloadJson: commandPayload,
+        requestedByType: actorType === "user" ? "user" : "service",
+        requestedById: params.actorId ?? "child-thread-cancellation",
+        commandId: cancelCommandId,
       });
     }
 

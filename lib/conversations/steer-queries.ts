@@ -35,6 +35,7 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import type {
   ThreadEventActorType,
   ThreadItemAuthorType,
@@ -166,6 +167,9 @@ export async function queueSteer(params: {
     if (turn.turnState !== "running") {
       throw new TurnStateConflictError(params.turnId, turn.turnState, "steer");
     }
+    if (!turn.activeInvocationId) {
+      throw new TurnStateConflictError(params.turnId, turn.turnState, "steer");
+    }
 
     // 3. 创建 user_guidance ThreadItem（item_state=pending，pending 状态不进入模型上下文）
     // 分配 itemSequence（锁定 Thread 行原子递增）
@@ -196,24 +200,15 @@ export async function queueSteer(params: {
     };
     const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
 
-    await tx.insert(invocationCommandTable).values({
-      id: commandId,
-      invocationId: turn.activeInvocationId, // running Turn 必有活动 invocation
-      threadId: thread.id,
-      turnId: turn.id,
+    await createInvocationCommandInTransaction(tx, {
+      tenantId: params.tenantId,
+      invocationId: turn.activeInvocationId,
       commandType: "steer",
-      commandPayloadJson: commandPayload,
-      commandPayloadHash,
-      commandState: "queued",
-      runtimeExecutionRef: null,
       idempotencyKey: params.idempotencyKey,
-      errorCode: null,
-      errorMessage: null,
-      createdAt: now,
-      dispatchedAt: null,
-      acknowledgedAt: null,
-      failedAt: null,
-      updatedAt: now,
+      payloadJson: commandPayload,
+      requestedByType: "user",
+      requestedById: params.ownerUserId,
+      commandId,
     });
 
     // 5. 写 turn.steer_queued Event

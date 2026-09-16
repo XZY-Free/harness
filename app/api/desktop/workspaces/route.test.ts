@@ -23,7 +23,7 @@ const principal = {
 const body = {
   device_id: "device-key-1",
   display_name: "snow_harness",
-  location_fingerprint: `sha256:${"a".repeat(64)}`,
+  storage_scope_digest: `sha256:${"a".repeat(64)}`,
 };
 
 function request(value: unknown): Request {
@@ -54,7 +54,7 @@ describe("POST /api/desktop/workspaces", () => {
       userId: "user-1",
       deviceKey: "device-key-1",
       displayName: "snow_harness",
-      locationFingerprint: body.location_fingerprint,
+      storageScopeDigest: body.storage_scope_digest,
     });
     expect(await response.json()).toEqual({
       ok: true,
@@ -68,7 +68,7 @@ describe("POST /api/desktop/workspaces", () => {
 
   it("拒绝绝对路径字段和非法指纹", async () => {
     const response = await POST(
-      request({ ...body, path: "/Users/example/project", location_fingerprint: "bad" }),
+      request({ ...body, path: "/Users/example/project", storage_scope_digest: "bad" }),
     );
 
     expect(response.status).toBe(400);

@@ -100,7 +100,7 @@ function requestedByFromAdminPrincipal(principal: AdminPrincipal): string {
   if ("userIdentityId" in principal) {
     return principal.userIdentityId;
   }
-  return principal.serviceId ?? principal.claims.tenantId;
+  return principal.serviceId ?? principal.tenantId;
 }
 
 function principalKindFromAdminPrincipal(principal: AdminPrincipal): ExportPrincipalKind {

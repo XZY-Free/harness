@@ -239,7 +239,7 @@ export async function POST(request: Request): Promise<Response> {
         snapshotId: result.contract.snapshotId,
         contract_digest: result.contract.contractDigest,
         protocol_type: result.contract.protocolType,
-        protocol_contract_revision: result.contract.protocolContractRevision,
+        protocol_contract_revision: result.contract.protocolContractDigest,
         created_agent: result.agent.created,
       },
       reason: `登记 Public Agent Contract（agentKey=${result.agent.agentKey}，snapshot=${result.contract.snapshotId}）`,

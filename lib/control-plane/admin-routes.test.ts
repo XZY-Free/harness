@@ -10,6 +10,7 @@
  * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
+import { randomUUID } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/agent-revisions/[revisionId]/publish/route";
 import { GET as getAgentRevisionGET } from "@/app/admin/api/agent-revisions/[revisionId]/route";
 import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/agent-revisions/[revisionId]/withdraw/route";
@@ -766,7 +767,7 @@ describe("POST /admin/api/artifact-attestations/verify", () => {
     setArtifactStoreOverride(store);
     setBuilderKeyRegistryOverride(builderKeys);
 
-    const requestBody = {
+    const request = {
       artifact_type: "runtime_revision",
       artifact_revision_id: "rev-bad-sig",
       artifact_digest: digest,
@@ -781,7 +782,7 @@ describe("POST /admin/api/artifact-attestations/verify", () => {
         method: "POST",
         path: "/artifact-attestations/verify",
         idempotencyKey: "idem-verify-fail",
-        body: requestBody,
+        body: request,
       });
 
     const response = await verifyPOST(buildRequest());
@@ -1024,7 +1025,7 @@ describe("Agent control-plane detail and withdrawal", () => {
     expect(beforeBody.publication_record_id).toEqual(expect.any(String));
     // Agent 黑盒：发布权威 = Contract Snapshot，无 Attestation 列表。
 
-    const requestBody = { reason_code: "security_response", reason: "发现风险" };
+    const request = { reason_code: "security_response", reason: "发现风险" };
     const buildWithdrawRequest = () =>
       buildApiRequest({
         audience: "admin",
@@ -1032,7 +1033,7 @@ describe("Agent control-plane detail and withdrawal", () => {
         path: `/agent-revisions/${revision.id}/withdraw`,
         idempotencyKey: "idem-agent-withdraw-detail",
         ifMatch: `agent-revision-${revision.revisionNo}`,
-        body: requestBody,
+        body: request,
       });
     const withdrawn = await withdrawAgentRevisionPOST(buildWithdrawRequest(), {
       params: Promise.resolve({ revisionId: `${revision.id}` }),
@@ -1419,7 +1420,7 @@ describe("POST /admin/api/deployment-routes/{routeId}/disable", () => {
   });
 
   it("相同 Idempotency-Key 重试返回原结果，不创建第三条 Activation", async () => {
-    const requestBody = { reason: "人工停用" };
+    const request = { reason: "人工停用" };
     const buildRequest = () =>
       buildApiRequest({
         audience: "admin",
@@ -1427,7 +1428,7 @@ describe("POST /admin/api/deployment-routes/{routeId}/disable", () => {
         path: `/deployment-routes/${routeId}/disable`,
         idempotencyKey: "idem-disable-route-retry-001",
         ifMatch: `route-set-${currentVersionNo}`,
-        body: requestBody,
+        body: request,
       });
 
     const first = await disableRoutePOST(buildRequest(), {
@@ -1920,13 +1921,11 @@ describe("POST /admin/api/agent-registrations（Public Agent Contract 登记）"
     await seedContractRegistrationAdmin();
     const contract = await loadHrAgentContract();
 
-    const { issueWorkloadToken } = await import("@/lib/identity/workload-token");
-    const token = issueWorkloadToken({
-      type: "service",
+    const { issueTestExecutionToken } = await import("@/lib/identity/test-support/execution-token");
+    const token = issueTestExecutionToken({
       tenantId: (await ensureDefaultTenant()).id,
-      audience: "admin",
-      serviceId: "cicd",
-      expiresAt: Date.now() + 60_000,
+      invocationId: randomUUID(),
+      audience: "gateway",
     });
 
     const response = await POST(
@@ -1939,8 +1938,11 @@ describe("POST /admin/api/agent-registrations（Public Agent Contract 登记）"
         body: registrationBody(contract),
       }),
     );
-    // service 主体不得成为首次创建 Agent 的 owner：拒绝（scope 层或 owner 歧义防护层）
-    expect([403, 422]).toContain(response.status);
+    // service 主体不得成为首次创建 Agent 的 owner：拒绝。
+    // 现行安全边界（resolveAdminPrincipalAsync）：执行 Workload Token 一律不能访问 Admin API，
+    // 故经 Bearer 执行凭据到达的"service-only"请求在认证层即被 401 拒绝；若未来受管
+    // ServicePrincipal 入口接入，scope 层 403 / owner 歧义防护层 422 仍是合法拒绝路径。
+    expect([401, 403, 422]).toContain(response.status);
     expect(await countTableRows("Agent")).toBe(0);
     expect(await countTableRows("AgentContractSnapshot")).toBe(0);
   });

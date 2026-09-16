@@ -48,6 +48,23 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import {
+  createAttempt,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import {
+  createInvocation,
+  getInvocationById,
+  updateInvocationState,
+} from "@/lib/executions/persistence/invocation-store";
+import {
+  TEST_EXECUTION_BINDING_EVIDENCE,
+  createExecutionBinding,
+} from "@/lib/executions/test-support/create-unverified-execution-binding";
+import {
+  TEST_RUNTIME_REVISION_ID,
+  acquireTestRuntimeAuthority,
+} from "@/lib/executions/test-support/seed-runtime-authority";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -57,12 +74,10 @@ import {
   threadRelationTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
-import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
-import {
-  createInvocation,
-  getInvocationById,
-  updateInvocationState,
-} from "@/lib/runtime/invocation-queries";
+import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
+import { updateRuntimeSessionDispatch } from "@/lib/runtime/persistence/runtime-session-store";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -1201,18 +1216,63 @@ describe("子取消 ack 集成（requestChildThreadCancellation + ingress execut
 
     // 子 Runtime 经正式 ingress 回传 execution.cancelled → post-commit
     // handleChildThreadTerminal(cancelled) → finalizeChildThreadCancellation。
-    await ingressEventBatch({
+    // V12：ingress 需要 ExecutionAuthority（prepared Attempt + ExecutionBinding +
+    // active Ownership + SessionBinding），与生产调度链一致。
+    const attempt = await createAttempt({ tenantId, invocationId: childInvocation.id });
+    const attemptEvidence = { kind: "test-child-cancel", attemptId: attempt.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: attempt.id,
+        evidence: attemptEvidence,
+        digest: protocolDigest(attemptEvidence),
+      }),
+    );
+    const workspace = await createNoPlatformWorkspaceBinding(tenantId, "test-service");
+    await createExecutionBinding({
       tenantId,
       invocationId: childInvocation.id,
-      producerSequenceStart: 1,
-      events: [
-        {
-          producer_event_id: `evt-cancel-${randomUUID()}`,
-          producer_sequence: 1,
-          type: "execution.cancelled",
-          payload: { cancelled_by: "parent" },
-        },
-      ],
+      runtimeRevisionId: TEST_RUNTIME_REVISION_ID,
+      deploymentRouteId: "test-route",
+      modelProvider: "test",
+      modelId: "test-model",
+      workspaceBindingId: workspace.id,
+      controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
+      projectionVersionNo: 1,
+      executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
+    });
+    const acquired = await acquireTestRuntimeAuthority({
+      tenantId,
+      invocationId: childInvocation.id,
+      attemptId: attempt.id,
+      runtimeRevisionId: TEST_RUNTIME_REVISION_ID,
+      phase: "executing",
+    });
+    const semanticRequest = { fixture: "child-cancel", invocationId: childInvocation.id };
+    await updateRuntimeSessionDispatch(tenantId, acquired.session.id, {
+      bindingState: "active",
+      semanticRequestJson: semanticRequest,
+      semanticRequestDigest: protocolDigest(semanticRequest),
+      remoteSessionRef: `runtime-session:${acquired.session.id}`,
+      remoteExecutionRef: `runtime-execution:${childInvocation.id}`,
+      transportAcknowledgement: { capabilitiesDigest: protocolDigest({ fixture: "child-cancel" }) },
+      startedEventId: randomUUID(),
+    });
+    await ingressRuntimeEvents({
+      tenantId,
+      invocationId: childInvocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: acquired.authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: "1",
+            type: "execution.cancelled",
+            schemaVersion: 1,
+            payload: { cancelledBy: "parent" },
+          },
+        ],
+      },
     });
 
     const postAckInvocation = await getInvocationById(tenantId, childInvocation.id);

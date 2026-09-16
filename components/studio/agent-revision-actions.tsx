@@ -380,24 +380,32 @@ export function AgentRevisionActions({
                 ? "这个服务需要识别当前员工。勾选它办理业务必须使用的资料，未勾选的资料不会提供。"
                 : "这个服务不要求员工资料，平台不会额外提供。"}
             </p>
-            <label className="block space-y-2">
+            <label htmlFor={`${formId}-profile-requirement`} className="block space-y-2">
               <span className="text-sm">员工资料更新方式</span>
-              <select
-                aria-label="员工资料更新方式"
+              <Select
                 value={profileRequirement}
-                disabled={!requiresIdentity}
-                onChange={(event) => {
-                  setProfileRequirement(event.target.value);
-                  if (event.target.value === "none") setAllowedFields([]);
+                onValueChange={(value) => {
+                  if (!value) return;
+                  setProfileRequirement(value);
+                  if (value === "none") setAllowedFields([]);
                 }}
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
               >
-                <option value="none" disabled={requiresIdentity}>
-                  不提供企业资料
-                </option>
-                <option value="stale_allowed">允许使用上次获取的资料</option>
-                <option value="fresh_required">每次使用前确认资料有效</option>
-              </select>
+                <SelectTrigger
+                  id={`${formId}-profile-requirement`}
+                  aria-label="员工资料更新方式"
+                  disabled={!requiresIdentity}
+                  className="w-full bg-background"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  <SelectItem value="none" disabled={requiresIdentity}>
+                    不提供企业资料
+                  </SelectItem>
+                  <SelectItem value="stale_allowed">允许使用上次获取的资料</SelectItem>
+                  <SelectItem value="fresh_required">每次使用前确认资料有效</SelectItem>
+                </SelectContent>
+              </Select>
             </label>
             {profileRequirement !== "none" && (
               <div className="grid gap-2 sm:grid-cols-2">

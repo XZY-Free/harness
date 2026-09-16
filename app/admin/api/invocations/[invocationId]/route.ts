@@ -3,8 +3,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
 /**
  * GET /admin/api/invocations/{invocationId} — Invocation 单资源详情（S11-W04）。
  *
@@ -54,12 +54,15 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     trigger_item_id: invocation.triggerItemId,
     replaces_invocation_id: invocation.replacesInvocationId,
     output_item_id: invocation.outputItemId,
+    input_digest: invocation.inputDigest,
     result_ref: invocation.resultRef,
-    runtime_session_binding_id: invocation.runtimeSessionBindingId,
-    runtime_execution_ref: invocation.runtimeExecutionRef,
+    result_digest: invocation.resultDigest,
+    last_ownership_epoch: invocation.lastOwnershipEpoch,
+    last_producer_sequence: invocation.lastProducerSequence,
+    recovery_version: invocation.recoveryVersion,
+    checkpoint_gate: invocation.checkpointGate,
     started_at: invocation.startedAt?.toISOString() ?? null,
     finished_at: invocation.finishedAt?.toISOString() ?? null,
-    last_heartbeat_at: invocation.lastHeartbeatAt?.toISOString() ?? null,
     error_code: invocation.errorCode,
     error_summary: invocation.errorSummary,
     version_no: invocation.versionNo,

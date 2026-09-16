@@ -4,9 +4,9 @@ import {
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { getIngressByInvocation } from "@/lib/runtime/event-ingress-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { getIngressByInvocation } from "@/lib/runtime/application/ingress-runtime-events";
 /**
  * GET /admin/api/invocations/{invocationId}/ingress — 列出 Invocation 的 RuntimeEventIngress（S11-W04）。
  *
@@ -80,13 +80,14 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     schema_version: g.schemaVersion,
     payload_hash: g.payloadHash,
     payload_json: g.payloadJson,
-    ingress_state: g.ingressState,
-    mapped_item_id: g.mappedItemId,
-    mapped_thread_event_id: g.mappedThreadEventId,
-    mapped_job_event_id: g.mappedJobEventId,
+    accepted_attempt_id: g.acceptedAttemptId,
+    accepted_ownership_id: g.acceptedOwnershipId,
+    accepted_session_id: g.acceptedSessionId,
+    accepted_epoch: g.acceptedEpoch,
+    receipt_json: g.receiptJson,
+    recovery_version_after: g.recoveryVersionAfter,
     received_at: g.receivedAt.toISOString(),
-    mapped_at: g.mappedAt?.toISOString() ?? null,
-    rejected_reason: g.rejectedReason,
+    accepted_at: g.acceptedAt.toISOString(),
   }));
 
   return apiSuccess(

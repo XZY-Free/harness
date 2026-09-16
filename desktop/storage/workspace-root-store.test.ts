@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,19 @@ import { describe, expect, it } from "vitest";
 import { executeWorkspaceCommand } from "../bridge/workspace-command";
 import type { MigrationDb, PreparedStmt } from "./db-interface";
 import { WorkspaceRootStore } from "./workspace-root-store";
+
+/** 探测 sandbox-exec 是否真的可用（嵌套沙箱等环境下 sandbox_apply 会 EPERM）。 */
+function sandboxExecAvailable(): boolean {
+  try {
+    execFileSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/bin/true"], {
+      stdio: "ignore",
+      timeout: 5000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function createDb(): { raw: Database.Database; db: MigrationDb } {
   const raw = new Database(":memory:");
@@ -29,7 +43,11 @@ function createDb(): { raw: Database.Database; db: MigrationDb } {
 describe("WorkspaceRootStore", () => {
   it.runIf(process.platform === "darwin")(
     "本机命令使用 SQLite 绑定目录和真实沙箱，不能读取工作区外文件",
-    async () => {
+    async (ctx) => {
+      if (!sandboxExecAvailable()) {
+        console.warn("[skip] sandbox-exec 在当前运行环境不可用（sandbox_apply EPERM）");
+        ctx.skip();
+      }
       const { raw, db } = createDb();
       const root = await realpath(await mkdtemp(join(tmpdir(), "snow-native-shell-")));
       const outside = `${root}-outside`;

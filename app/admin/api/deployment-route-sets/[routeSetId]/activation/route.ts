@@ -246,10 +246,10 @@ function actorFromAdminPrincipal(principal: AdminPrincipal): AuditActor {
 
 function buildActivationResponse(result: ActivateRouteSetResult) {
   return {
-    routeSetId: result.routeSetId,
+    route_set_id: result.routeSetId,
     route_set_version_no: result.routeSetVersionNo,
     activations: result.activations.map((activation) => ({
-      routeId: activation.routeId,
+      route_id: activation.routeId,
       route_revision_id: activation.routeRevisionId,
       route_activation_id: activation.routeActivationId,
       activation_state: activation.activationState,

@@ -20,9 +20,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { TurnNotFoundError, TurnStateConflictError } from "@/lib/conversations/errors";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { allocateInvocationSequence } from "@/lib/executions/persistence/invocation-store";
 import type { ThreadEventActorType, TurnState } from "@/lib/persistence/schema/conversation";
 import { threadEventTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
-import { invocationCommandTable } from "@/lib/persistence/schema/executions";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import { and, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -97,7 +99,6 @@ export async function startRegeneration(params: {
   correlationId?: string;
 }): Promise<StartRegenerationResult> {
   const newInvocationId = randomUUID();
-  const commandId = randomUUID();
   const now = new Date();
 
   const meta = await db.transaction(async (tx) => {
@@ -138,33 +139,45 @@ export async function startRegeneration(params: {
     const replacesInvocationId = turn.latestInvocationId;
     const newRegenerationNo = turn.regenerationNo + 1;
 
-    // 3. 创建 InvocationCommand（command_type=regenerate, state=queued）
-    const commandPayload: Record<string, unknown> = {
-      binding_mode: params.bindingMode,
-      reason: params.reason ?? null,
-      new_invocation_id: newInvocationId,
-      replaces_invocation_id: replacesInvocationId,
-    };
-    const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
-
-    await tx.insert(invocationCommandTable).values({
-      id: commandId,
-      invocationId: newInvocationId, // regenerate 命令目标即新 invocationId
+    // Regenerate 本身创建新的 Invocation；InvocationCommand 只承载运行期控制，
+    // 不把产品级 Regenerate 伪装成 cancel/resume/steer 命令。
+    const invocationSequence = await allocateInvocationSequence(tx, thread.id, null);
+    await tx.insert(invocationTable).values({
+      id: newInvocationId,
+      tenantId: params.tenantId,
+      subjectType: "thread",
       threadId: thread.id,
       turnId: turn.id,
-      commandType: "regenerate",
-      commandPayloadJson: commandPayload,
-      commandPayloadHash,
-      commandState: "queued",
-      runtimeExecutionRef: null,
-      idempotencyKey: params.idempotencyKey,
+      jobId: null,
+      triggerItemId: turn.triggerItemId,
+      replacesInvocationId,
+      outputItemId: null,
+      invocationSequence,
+      invocationKind: "regenerate",
+      executionState: "queued",
+      inputDigest: computeInvocationCommandPayloadHash({
+        turnId: turn.id,
+        triggerItemId: turn.triggerItemId,
+        replacesInvocationId,
+      }),
+      resultRef: null,
+      resultDigest: null,
+      lastOwnershipEpoch: 0,
+      lastProducerSequence: 0,
+      recoveryVersion: 0,
+      checkpointGate: "open",
+      checkpointIntentId: null,
+      checkpointOwnerId: null,
+      checkpointDeadline: null,
+      checkpointProducerSequence: null,
+      checkpointRecoveryVersion: null,
+      checkpointAnchor: null,
+      checkpointPreparedEvidence: null,
+      startedAt: null,
+      finishedAt: null,
       errorCode: null,
-      errorMessage: null,
-      createdAt: now,
-      dispatchedAt: null,
-      acknowledgedAt: null,
-      failedAt: null,
-      updatedAt: now,
+      errorSummary: null,
+      versionNo: 1,
     });
 
     // 4. 更新 Turn：turn_state=regenerating, regeneration_no+=1, latest_invocation_id=newInvocationId, active_invocation_id=null
@@ -211,7 +224,6 @@ export async function startRegeneration(params: {
       replacesInvocationId,
       originalUserItemId: turn.triggerItemId,
       currentFinalItemId: turn.finalItemId,
-      commandId,
     };
   });
 

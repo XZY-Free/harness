@@ -208,7 +208,7 @@ function createEvidenceProvider(options?: {
         runtimeRevisionId: input.runtimeRevisionId,
         runtimeTargetDigest: input.runtimeTargetDigest,
         runtimeConfigDigest: input.runtimeConfigDigest,
-        protocolContractRevision: input.protocolContractRevision,
+        protocolContractDigest: input.protocolContractDigest,
         suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
         runnerArtifactDigest,
         runnerIdentity: RUNNER_IDENTITY,
@@ -222,7 +222,7 @@ function createEvidenceProvider(options?: {
           runtimeRevisionId: input.runtimeRevisionId,
           runtimeTargetDigest: input.runtimeTargetDigest,
           runtimeConfigDigest: input.runtimeConfigDigest,
-          protocolContractRevision: input.protocolContractRevision,
+          protocolContractDigest: input.protocolContractDigest,
           runnerArtifactDigest,
           cases: caseResults.map((result) => ({
             caseId: result.caseId,

@@ -5,8 +5,8 @@ import {
 } from "@/lib/admin/route-helpers";
 import { serializeExecutionBinding } from "@/lib/executions/application/serialize-execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
 /**
  * GET /admin/api/invocations/{invocationId}/execution-binding — Invocation 的 ExecutionBinding（S11-W04）。
  *

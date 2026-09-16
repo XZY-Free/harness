@@ -59,7 +59,7 @@ interface RouteContext {
   params: Promise<Record<string, string | string[]>>;
 }
 
-/** 请求体 schema（§3.9 requestBody）。 */
+/** 请求体 schema（§3.9 request）。 */
 interface RegenerateBody {
   binding_mode?: RegenerateBindingMode;
   reason?: string;

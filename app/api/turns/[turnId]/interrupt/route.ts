@@ -60,7 +60,7 @@ interface RouteContext {
   params: Promise<{ turnId: string }>;
 }
 
-/** 请求体 schema（§3.8 requestBody）。 */
+/** 请求体 schema（§3.8 request）。 */
 interface InterruptBody {
   reason_code: string;
   preserve_pending_inputs?: boolean;

@@ -39,6 +39,8 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { updateInvocationState } from "@/lib/executions/persistence/invocation-store";
 import { issueGrant } from "@/lib/permission/permission-queries";
 import { expireUserActionRequest } from "@/lib/permission/user-action-expiry-queries";
 import {
@@ -70,7 +72,6 @@ import {
   type UserActionResolution,
   userActionRequestTable,
 } from "@/lib/persistence/schema/user-action-request";
-import { updateInvocationState } from "@/lib/runtime/invocation-queries";
 import Ajv, { type ValidateFunction } from "ajv";
 import { and, eq, sql } from "drizzle-orm";
 
@@ -582,23 +583,15 @@ export async function resolveGenericUserAction(
           (request.requestType === "confirmation" &&
             request.purpose === "a2a_confirmation" &&
             (params.resolution === "approve" || params.resolution === "deny")));
-      await tx.insert(invocationCommandTable).values({
-        id: resumeCommandId,
+      await createInvocationCommandInTransaction(tx, {
+        tenantId: params.tenantId,
         invocationId: invocation.id,
-        threadId: thread.id,
-        turnId: request.turnId,
         commandType: "resume",
-        commandPayloadJson: resumePayload,
-        commandPayloadHash: resumePayloadHash,
-        // Agent UAR 先由 durable continuation 恢复同一外部 Agent；父 Runtime 不能抢跑。
-        commandState: durableAgentResume ? "acknowledged" : "queued",
-        runtimeExecutionRef: null,
-        idempotencyKey: params.idempotencyKey ?? null,
-        errorCode: null,
-        errorMessage: null,
-        dispatchedAt: null,
-        acknowledgedAt: durableAgentResume ? now : null,
-        failedAt: null,
+        idempotencyKey: params.idempotencyKey ?? `resume:${request.id}`,
+        payloadJson: resumePayload,
+        requestedByType: "user",
+        requestedById: params.resolvedBy,
+        commandId: resumeCommandId,
       });
 
       if (durableAgentResume && agentCallId) {

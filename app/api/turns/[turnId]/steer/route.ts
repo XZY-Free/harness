@@ -55,7 +55,7 @@ interface RouteContext {
   params: Promise<{ turnId: string }>;
 }
 
-/** 请求体 schema（§3.7 requestBody）。 */
+/** 请求体 schema（§3.7 request）。 */
 interface SteerBody {
   guidance_text: string;
 }

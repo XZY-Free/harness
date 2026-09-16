@@ -7,9 +7,9 @@ import {
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { agentCallAttemptTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
-import { hostedRuntimeApplicationService } from "@/lib/runtime/application/production-resume-harness-invocation";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { hostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

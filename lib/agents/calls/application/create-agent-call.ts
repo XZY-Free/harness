@@ -18,10 +18,13 @@ import {
   computeAgentCallBindingHash,
 } from "@/lib/agents/calls/domain/agent-call-binding";
 import type { AgentCallStore } from "@/lib/agents/calls/persistence/agent-call-store";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 
 export interface CreateAgentCallCommand {
   tenantId: string;
   parentInvocationId: string;
+  /** Runtime generation that may create this parent Invocation action. */
+  authority?: AuthorityIdentity;
   agentId: string;
   /** 来源 Harness actionId。 */
   actionId: string;
@@ -52,6 +55,7 @@ export function createCreateAgentCall(dependencies: {
       id: randomUUID(),
       tenantId: command.tenantId,
       parentInvocationId: command.parentInvocationId,
+      authority: command.authority,
       agentId: command.agentId,
       sourceType: "harness_planned",
       sourceRef: command.actionId.trim(),

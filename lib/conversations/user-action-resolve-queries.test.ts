@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
  *
  * 冻结设计（authority payload）：
  * - request_type=input + resolution=submit 时，入队的 resume InvocationCommand 必须在
- *   commandPayloadJson.resume_payload 中持久化精确的脱敏响应对象（UI schema {text:string}），
+ *   payloadJson.resume_payload 中持久化精确的脱敏响应对象（UI schema {text:string}），
  *   不能只写 has_response:true 布尔证据。
  * - 其他 request_type 保持既有语义；不发明 text。
  * - 缺失/非对象 responseRedactedJson 维持既有拒绝。
@@ -64,52 +64,28 @@ async function seedWaitingInputRequest(): Promise<{
   await seedThread(threadId);
 
   const turnId = randomUUID();
+  const triggerItemId = randomUUID();
   await db.insert(turnTable).values({
     id: turnId,
     threadId,
     turnSequence: 1,
     triggerType: "user_message",
     triggerRef: null,
-    triggerItemId: null,
+    triggerItemId,
     turnState: "waiting_user",
     startedAt: new Date(Date.now() - 120_000),
     waitingAt: new Date(Date.now() - 60_000),
     versionNo: 1,
   });
 
-  const invocationId = randomUUID();
-  await db.insert(invocationTable).values({
-    id: invocationId,
-    tenantId: TENANT,
-    threadId,
-    turnId,
-    jobId: null,
-    invocationSequence: 1,
-    invocationKind: "initial",
-    executionState: "waiting_user",
-    triggerItemId: null,
-    replacesInvocationId: null,
-    outputItemId: null,
-    resultRef: null,
-    runtimeSessionBindingId: null,
-    runtimeExecutionRef: null,
-    startedAt: new Date(),
-    finishedAt: null,
-    lastHeartbeatAt: new Date(),
-    errorCode: null,
-    errorSummary: null,
-    versionNo: 1,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
-
   const requestId = randomUUID();
-  const itemId = randomUUID();
+  // canonical Invocation_subject_shape：triggerItemId 必须指向真实 ThreadItem。
+  // ThreadItem.invocationId 为逻辑外键（无 DB FK），可先于 Invocation 播种。
   await db.insert(threadItemTable).values({
-    id: itemId,
+    id: triggerItemId,
     threadId,
     turnId,
-    invocationId,
+    invocationId: null,
     itemSequence: 1,
     itemType: "user_action",
     itemState: "pending",
@@ -117,6 +93,35 @@ async function seedWaitingInputRequest(): Promise<{
     contentJson: { requestId: requestId, request_type: "input", prompt: "请提供请假事由" },
     contentHash: "initial",
   });
+
+  const invocationId = randomUUID();
+  await db.insert(invocationTable).values({
+    id: invocationId,
+    tenantId: TENANT,
+    subjectType: "thread",
+    threadId,
+    turnId,
+    jobId: null,
+    invocationSequence: 1,
+    invocationKind: "initial",
+    executionState: "waiting_user",
+    inputDigest: `sha256:${"0".repeat(64)}`,
+    triggerItemId,
+    replacesInvocationId: null,
+    outputItemId: null,
+    resultRef: null,
+    startedAt: new Date(),
+    finishedAt: null,
+    errorCode: null,
+    errorSummary: null,
+    versionNo: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  await db
+    .update(threadItemTable)
+    .set({ invocationId })
+    .where(eq(threadItemTable.id, triggerItemId));
   await db.insert(userActionRequestTable).values({
     id: requestId,
     tenantId: TENANT,
@@ -124,7 +129,7 @@ async function seedWaitingInputRequest(): Promise<{
     turnId,
     invocationId,
     toolCallId: null,
-    itemId,
+    itemId: triggerItemId,
     requestType: "input",
     purpose: "a2a_input_required",
     requestState: "pending",
@@ -284,7 +289,7 @@ describe("resolveGenericUserAction input submit（authority payload）", () => {
 
     // 冻结断言：queued resume 命令必须携带精确 resume_payload 对象（非仅 has_response）
     // + 内部来源标记（post-authority Resume 凭证）。
-    const payload = result.resumeCommand.commandPayloadJson as Record<string, unknown>;
+    const payload = result.resumeCommand.payloadJson as Record<string, unknown>;
     expect(payload.resume_payload).toEqual({ text: "年休假，明天一天" });
     expect(payload.resume_source).toBe("user_action_resolution");
     expect(payload.request_id).toBe(seeded.requestId);
@@ -413,7 +418,7 @@ describe("resolveGenericUserAction input submit 按 inputSchemaJson 校验（RED
       actorId: "user-1",
     });
     expect(result.request.requestState).toBe("resolved");
-    expect(result.resumeCommand.commandPayloadJson).toMatchObject({
+    expect(result.resumeCommand.payloadJson).toMatchObject({
       resume_source: "user_action_resolution",
       resume_payload: { text: "年休假，明天一天" },
     });
@@ -529,7 +534,7 @@ it("自定义替代回复原子取消请求并写入可恢复的用户引导", a
   expect(guidance!.contextPolicy).toBe("include");
   expect(guidance!.itemState).toBe("completed");
   expect(guidance!.contentJson).toMatchObject({ text: "以上选项都不合适，请先说明其他方案" });
-  expect(result.resumeCommand.commandPayloadJson).toMatchObject({
+  expect(result.resumeCommand.payloadJson).toMatchObject({
     resume_source: "user_action_resolution",
   });
 });
@@ -545,7 +550,7 @@ it("补充说明不污染严格输入 schema，保存正文和说明", async () 
     userNote: "请用中文答复",
   });
   expect(result.request.responseRedactedJson).toEqual({ text: "周一" });
-  expect(result.resumeCommand.commandPayloadJson).toMatchObject({
+  expect(result.resumeCommand.payloadJson).toMatchObject({
     resume_payload: { text: "周一" },
     user_note: "请用中文答复",
   });

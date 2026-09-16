@@ -60,7 +60,7 @@ const VALID_LIFECYCLE_STATES: readonly SkillLifecycleState[] = [
 ];
 const VALID_VISIBILITY_SCOPES: readonly SkillVisibilityScope[] = ["tenant", "internal", "owner"];
 
-/** 请求体 schema（与 OpenAPI requestBody 对齐）。 */
+/** 请求体 schema（与 OpenAPI request 对齐）。 */
 interface CreateSkillBody {
   skill_key: string;
   display_name: string;
@@ -102,7 +102,7 @@ function createdByFromAdminPrincipal(principal: AdminPrincipal): string {
   if ("userIdentityId" in principal) {
     return principal.userIdentityId;
   }
-  return principal.serviceId ?? principal.claims.tenantId;
+  return principal.serviceId ?? principal.tenantId;
 }
 
 /** 投影 Skill 为响应体（snake_case + etag）。 */

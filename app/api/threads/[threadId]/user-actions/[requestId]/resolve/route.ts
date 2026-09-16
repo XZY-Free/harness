@@ -62,9 +62,9 @@ import {
 } from "@/lib/identity/idempotency";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
+import { markInvocationLost } from "@/lib/runtime/application/runtime-recovery";
 import { dispatchResumeCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { InvocationAlreadyTerminalError } from "@/lib/runtime/errors";
-import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";

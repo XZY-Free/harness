@@ -507,8 +507,9 @@ describe("GET /api/threads/{thread_id}/events — 新事件推送", () => {
       expect(delta?.id).toBeUndefined();
       expect(delta?.data).toMatchObject({
         transient_id: "delta-route-1",
-        threadId: threadId,
-        turnId: "turn-transient-1",
+        thread_id: threadId,
+        turn_id: "turn-transient-1",
+        occurred_at: "2026-07-21T00:00:00.000Z",
         payload: { delta: "增量正文" },
       });
     });

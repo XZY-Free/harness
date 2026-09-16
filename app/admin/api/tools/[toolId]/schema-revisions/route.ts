@@ -67,7 +67,7 @@ interface RouteContext {
   params: Promise<{ toolId: string }>;
 }
 
-/** 请求体 schema（snake_case，与 OpenAPI requestBody 对齐）。 */
+/** 请求体 schema（snake_case，与 OpenAPI request 对齐）。 */
 interface CreateToolSchemaRevisionBody {
   description?: string;
   input_schema: Record<string, unknown>;
@@ -120,7 +120,7 @@ function createdByFromAdminPrincipal(principal: AdminPrincipal): string {
   if ("userIdentityId" in principal) {
     return principal.userIdentityId;
   }
-  return principal.serviceId ?? principal.claims.tenantId;
+  return principal.serviceId ?? principal.tenantId;
 }
 
 /** 投影 ToolSchemaRevision 为响应体（snake_case）。 */

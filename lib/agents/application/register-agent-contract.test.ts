@@ -138,7 +138,7 @@ describe("registerAgentContract", () => {
     expect(header.agentNameZhCn).toBe("企业人力智能助手");
     expect(header.agentNameEn).toBe("Enterprise HR Assistant");
     expect(header.protocolType).toBe("a2a");
-    expect(header.protocolContractRevision).toBe("0.3.0");
+    expect(header.protocolContractDigest).toBe("0.3.0");
     expect(header.scenarioDeclaration).toBe("unspecified");
     expect(header.applicableScenarios).toEqual([]);
     expect(header.excludedScenarios).toEqual([]);

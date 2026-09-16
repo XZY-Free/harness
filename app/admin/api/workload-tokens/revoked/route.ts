@@ -28,7 +28,6 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
-const VALID_TOKEN_TYPES = new Set(["runtime", "gateway", "service"]);
 
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
@@ -59,11 +58,6 @@ export async function GET(request: Request): Promise<Response> {
     return schemaInvalidTable(requestId, `limit 必须为 1-${MAX_LIMIT} 之间的整数`);
   }
 
-  const tokenType = url.searchParams.get("token_type");
-  if (tokenType && !VALID_TOKEN_TYPES.has(tokenType)) {
-    return schemaInvalidTable(requestId, "token_type 必须为 runtime/gateway/service");
-  }
-
   const cursorRevokedAt = url.searchParams.get("cursor");
   let cursorDate: Date | null = null;
   if (cursorRevokedAt) {
@@ -75,9 +69,6 @@ export async function GET(request: Request): Promise<Response> {
 
   // 构造查询条件（drizzle and() 组合多条件 WHERE）
   const conditions = [eq(workloadTokenRevocationTable.tenantId, principal.tenantId)];
-  if (tokenType) {
-    conditions.push(eq(workloadTokenRevocationTable.tokenType, tokenType));
-  }
   if (cursorDate) {
     conditions.push(lt(workloadTokenRevocationTable.revokedAt, cursorDate));
   }
@@ -86,10 +77,10 @@ export async function GET(request: Request): Promise<Response> {
     .select({
       id: workloadTokenRevocationTable.id,
       jti: workloadTokenRevocationTable.jti,
-      token_type: workloadTokenRevocationTable.tokenType,
+      invocation_id: workloadTokenRevocationTable.invocationId,
       revoked_by: workloadTokenRevocationTable.revokedBy,
-      reason: workloadTokenRevocationTable.reason,
-      expires_at: workloadTokenRevocationTable.expiresAt,
+      reason_code: workloadTokenRevocationTable.reasonCode,
+      token_expires_at: workloadTokenRevocationTable.tokenExpiresAt,
       revoked_at: workloadTokenRevocationTable.revokedAt,
     })
     .from(workloadTokenRevocationTable)
@@ -107,10 +98,10 @@ export async function GET(request: Request): Promise<Response> {
       items: page.map((row) => ({
         id: row.id,
         jti: row.jti,
-        token_type: row.token_type,
+        invocation_id: row.invocation_id,
         revoked_by: row.revoked_by,
-        reason: row.reason,
-        expires_at: row.expires_at.toISOString(),
+        reason_code: row.reason_code,
+        token_expires_at: row.token_expires_at.toISOString(),
         revoked_at: row.revoked_at.toISOString(),
       })),
       next_cursor: nextCursor,

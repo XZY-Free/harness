@@ -4,8 +4,8 @@ import {
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
 import { listEffectRecordsByInvocation } from "@/lib/capability/effect-queries";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
 /**
  * GET /admin/api/invocations/{invocationId}/effects — 列出 Invocation 的 EffectRecord（S11-W04）。
  *

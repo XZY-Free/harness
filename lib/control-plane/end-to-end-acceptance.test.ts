@@ -68,6 +68,7 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
@@ -379,7 +380,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolContractDigest: "a2a@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -476,7 +477,7 @@ function buildSignedConformanceReport(
   revisionId: string,
   runtimeTargetDigest: string,
   runtimeConfigDigest: string,
-  protocolContractRevision: string,
+  protocolContractDigest: string,
   overrides: Record<string, unknown> = {},
 ) {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
@@ -495,7 +496,7 @@ function buildSignedConformanceReport(
     runtimeRevisionId: revisionId,
     runtimeTargetDigest,
     runtimeConfigDigest,
-    protocolContractRevision,
+    protocolContractDigest,
     suiteRevision: "runtime-conformance@1",
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: RUNNER_IDENTITY,
@@ -514,7 +515,7 @@ function buildSignedConformanceReport(
       runtimeRevisionId: revisionId,
       runtimeTargetDigest,
       runtimeConfigDigest,
-      protocolContractRevision,
+      protocolContractDigest,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
       cases: baseReport.caseResults.map((result) => ({
         caseId: result.caseId,
@@ -531,12 +532,44 @@ function buildSignedConformanceReport(
 // ─── 辅助：插入测试用 Invocation 行 ──────────────────────
 
 async function seedInvocation(tenantId: string, invocationId: string): Promise<void> {
+  // canonical Invocation_subject_shape：subjectType=thread 必须携带 threadId/turnId/triggerItemId。
+  // 先播种 Thread → Turn → ThreadItem(user_message) 链，再挂 Invocation。
+  const threadId = randomUUID();
+  const turnId = randomUUID();
+  const triggerItemId = randomUUID();
+  await db.insert(threadTable).values({
+    id: threadId,
+    tenantId,
+    ownerUserId: DEFAULT_USER_ID,
+  });
+  await db.insert(turnTable).values({
+    id: turnId,
+    threadId,
+    turnSequence: 1,
+    triggerType: "user_message",
+    triggerItemId,
+  });
+  await db.insert(threadItemTable).values({
+    id: triggerItemId,
+    threadId,
+    turnId,
+    itemSequence: 1,
+    itemType: "user_message",
+    authorType: "user",
+    contentJson: { kind: "user_message", text: "e2e acceptance fixture" },
+    contentHash: `sha256:${"0".repeat(64)}`,
+  });
   await db.insert(invocationTable).values({
     id: invocationId,
     tenantId,
+    subjectType: "thread",
+    threadId,
+    turnId,
+    triggerItemId,
     invocationSequence: 1,
     invocationKind: "initial",
     executionState: "queued",
+    inputDigest: `sha256:${"0".repeat(64)}`,
     versionNo: 1,
   });
 }
@@ -615,13 +648,12 @@ async function createBindingFromResolved(params: {
     modelProvider: "doubao",
     modelId: "doubao-pro",
     modelRevisionRef: null,
-    initialEnvironmentLeaseId: null,
-    workspaceBindingId: null,
+    workspaceBindingId: randomUUID(),
     policyRevisionId: bindingGovernance.policyRevisionId,
     policyRulesDigest: bindingGovernance.policyRulesDigest,
     governanceConfigRevisionId: bindingGovernance.governanceConfigRevisionId,
     governanceConfigDigest: bindingGovernance.governanceConfigDigest,
-    contextCheckpointId: null,
+    environmentMode: "NO_PLATFORM_ENVIRONMENT",
     environmentDefinitionRevisionId: null,
     controlPlaneEvidence: {
       ...(() => {
@@ -742,7 +774,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
       tenantId: tenant.id,
       runtimeId: runtime.id,
       protocolType: "harness_runtime_protocol",
-      protocolContractRevision: "harness-runtime-protocol@1",
+      protocolContractDigest: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://conformance-runtime",
       runtimeArtifactRef: `oci://registry/runtime@sha256:${"a".repeat(64)}`,
@@ -757,7 +789,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
       revision.id,
       revision.runtimeTargetDigest,
       `sha256:${"b".repeat(64)}`,
-      revision.protocolContractRevision,
+      revision.protocolContractDigest,
     );
 
     const record = createRecordRuntimeConformanceRun({
@@ -2144,7 +2176,7 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
       tenantId,
       runtimeId: runtime.id,
       protocolType: "a2a",
-      protocolContractRevision: "a2a@1",
+      protocolContractDigest: "a2a@1",
       runtimeEvidenceKind: "external_endpoint",
       endpointRef: `https://external-runtime-${contentSuffix}.example.com`,
       runtimeArtifactRef: null,
@@ -2159,7 +2191,7 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
       revision.id,
       revision.runtimeTargetDigest,
       revision.configHash,
-      revision.protocolContractRevision,
+      revision.protocolContractDigest,
     );
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,

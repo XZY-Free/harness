@@ -55,7 +55,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** 请求体 schema（与 OpenAPI requestBody 对齐）。 */
+/** 请求体 schema（与 OpenAPI request 对齐）。 */
 interface CreateConnectionBody {
   connection_key: string;
   connection_type: ConnectionType;
