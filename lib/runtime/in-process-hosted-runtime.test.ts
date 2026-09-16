@@ -1,7 +1,23 @@
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
-import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
+import type {
+  AuthorityIdentity,
+  CancelRequest,
+  ExecutionBinding,
+  RuntimeStartRequest,
+  SteerRequest,
+} from "@/lib/runtime/runtime-protocol";
 import { describe, expect, it, vi } from "vitest";
+
+const authority: AuthorityIdentity = {
+  invocationId: "00000000-0000-4000-8000-000000000001",
+  runtimeRevisionId: "00000000-0000-4000-8000-000000000002",
+  attemptId: "00000000-0000-4000-8000-000000000003",
+  ownershipId: "00000000-0000-4000-8000-000000000004",
+  leaseEpoch: "1",
+  sessionBindingId: "00000000-0000-4000-8000-000000000005",
+};
+const digest = `sha256:${"0".repeat(64)}`;
 
 function applicationService(): HostedRuntimeApplicationService {
   return {
@@ -20,83 +36,138 @@ function applicationService(): HostedRuntimeApplicationService {
   };
 }
 
-function startRequest(invocationId: string) {
+function startRequest(): RuntimeStartRequest {
+  const now = Date.now();
+  const context = {
+    common: {
+      contractVersion: 1 as const,
+      tenantId: authority.invocationId,
+      invocationId: authority.invocationId,
+      bindingDigest: digest,
+      principal: { type: "service" as const, id: "test", source: "trusted_service" as const },
+      runtimeRevisionId: authority.runtimeRevisionId,
+      policy: { revisionId: authority.runtimeRevisionId, digest },
+      workspace: { bindingId: authority.attemptId, contractDigest: digest },
+      environment: { mode: "NO_PLATFORM_ENVIRONMENT" as const },
+      contextSourceDigest: digest,
+      issuedAt: now,
+      expiresAt: now + 60_000,
+      jti: authority.sessionBindingId,
+    },
+    subject: {
+      type: "job" as const,
+      jobId: authority.invocationId,
+      inputKind: "inline" as const,
+      inputHash: digest,
+      triggerRef: "test",
+    },
+  };
   return {
-    runtimeEndpoint: "in-process://hosted",
-    auth: { mode: "workload_token" as const, token: "runtime-token" },
-    idempotencyKey: `start:${invocationId}`,
-    requestBody: {
-      protocol_version: RUNTIME_PROTOCOL_VERSION,
-      invocation_id: invocationId,
-      turn_context: { thread_id: "thread-1", turn_id: "turn-1" },
-      job_context: null,
-      input_items: [],
-      context_handle: "context-1",
-      gateway_endpoints: {
-        events: "in-process://events",
-        cancel: "in-process://cancel",
-        resume: "in-process://resume",
-        steer: "in-process://steer",
-        tools: "in-process://tools",
-        tool_calls: "in-process://tool-calls",
-        user_action_requests: "in-process://user-action-requests",
-        capability_actions: "in-process://capability-actions",
-      },
-      governance_config: { revision_id: "gov-1", config_digest: "sha256:test", config: {} },
-      gateway_access: {
-        access_token: "gateway-token",
-        expires_at: "2026-09-05T00:00:00.000Z",
-      },
-      execution_limits: { max_invocation_seconds: 60, max_event_bytes: 1024 },
-      trace_context: { trace_id: "trace-1", span_id: "span-1" },
+    protocolVersion: 3,
+    authority,
+    intentType: "start",
+    semanticRequestDigest: digest,
+    executionBinding: {
+      bindingDigest: digest,
+      runtimeRevisionId: authority.runtimeRevisionId,
+      policyRefs: [authority.runtimeRevisionId],
+      governanceRefs: [authority.runtimeRevisionId],
+      capabilityRefs: [authority.runtimeRevisionId],
+      modelRefs: [],
+      allowedEgress: [],
+    } satisfies ExecutionBinding,
+    context,
+    inputs: [{ kind: "inline", digest }],
+    environment: { mode: "NO_PLATFORM_ENVIRONMENT" },
+    workspace: { mode: "NONE" },
+    activationDigest: digest,
+    recovery: { kind: "initial" },
+    producerSequenceStart: "1",
+    callbackEndpoints: {
+      events: "https://test.invalid/events",
+      heartbeat: "https://test.invalid/heartbeat",
+      context: "https://test.invalid/context",
+      capabilityActions: "https://test.invalid/capability-actions",
+      toolCalls: "https://test.invalid/tool-calls",
+      userActions: "https://test.invalid/user-actions",
+    },
+    credentials: {
+      runtimeToken: "runtime-token",
+      gatewayToken: "gateway-token",
+      expiresAt: now + 60_000,
+    },
+    executionLimits: {
+      maxEventBytes: 1024,
+      maxBatchEvents: 10,
+      maxBatchBytes: 8192,
+      dispatchDeadlineMs: 60_000,
+      executionTimeoutMs: 60_000,
     },
   };
 }
 
+function cancelRequest(): CancelRequest {
+  return {
+    protocolVersion: 3,
+    commandId: "00000000-0000-4000-8000-000000000006",
+    targetAuthority: authority,
+    reasonCode: "user_cancel",
+  };
+}
+
+function steerRequest(): SteerRequest {
+  return {
+    protocolVersion: 3,
+    commandId: "00000000-0000-4000-8000-000000000007",
+    targetAuthority: authority,
+    inputRef: "input:test-guidance",
+    inputDigest: digest,
+  };
+}
+
+const commonAuth = {
+  runtimeEndpoint: "in-process://hosted",
+  auth: { mode: "workload_token" as const, token: "runtime-token" },
+};
+
 describe("InProcessHostedRuntimeClient", () => {
-  it("start 不保存请求，新实例仍可只凭 invocationId 启动 durable application service", async () => {
+  it("start 只向 application service 交付 durable invocation identity", async () => {
     const service = applicationService();
     const first = createInProcessHostedRuntimeClient({
-      tenantId: "tenant-1",
+      tenantId: authority.invocationId,
       applicationService: service,
     });
-    const response = await first.startInvocation(startRequest("invocation-1"));
+    const response = await first.startInvocation({
+      ...commonAuth,
+      idempotencyKey: `start:${authority.ownershipId}`,
+      request: startRequest(),
+    });
     expect(response.accepted).toBe(true);
-    expect(service.start).not.toHaveBeenCalled();
-
-    const fresh = createInProcessHostedRuntimeClient({
-      tenantId: "tenant-1",
-      applicationService: service,
-    });
-    await fresh.launchAcceptedInvocation("invocation-1");
     expect(service.start).toHaveBeenCalledWith({
-      tenantId: "tenant-1",
-      invocationId: "invocation-1",
-      idempotencyKey: "hosted-start:invocation-1",
+      tenantId: authority.invocationId,
+      invocationId: authority.invocationId,
+      idempotencyKey: `start:${authority.ownershipId}`,
     });
   });
 
   it("cancel/resume/steer 全部进入正式应用服务", async () => {
     const service = applicationService();
     const client = createInProcessHostedRuntimeClient({
-      tenantId: "tenant-1",
+      tenantId: authority.invocationId,
       applicationService: service,
     });
-    const common = {
-      runtimeEndpoint: "in-process://hosted",
-      auth: { mode: "workload_token" as const, token: "runtime-token" },
-      invocationId: "invocation-1",
+    const cancel = {
+      ...commonAuth,
+      invocationId: authority.invocationId,
       idempotencyKey: "command-1",
     };
-    await client.cancelInvocation({ ...common, requestBody: { reason: "user_cancel" } });
+    const resume = { ...commonAuth, idempotencyKey: "command-1" };
+    await client.cancelInvocation({ ...cancel, request: cancelRequest() });
     await client.resumeInvocation({
-      ...common,
-      requestBody: {
-        resume_payload: { request_id: "uar-1" },
-        gateway_access: { access_token: "gw", expires_at: "2026-09-05T00:00:00.000Z" },
-      },
+      ...resume,
+      request: { ...startRequest(), intentType: "resume", inputs: [{ kind: "inline", digest }] },
     });
-    await client.steerInvocation({ ...common, requestBody: { steer_payload: { text: "继续" } } });
+    await client.steerInvocation({ ...cancel, request: steerRequest() });
 
     expect(service.cancel).toHaveBeenCalledOnce();
     expect(service.resume).toHaveBeenCalledOnce();
@@ -110,31 +181,21 @@ describe("InProcessHostedRuntimeClient", () => {
     service.resume = vi.fn(
       async ({ invocationId }): Promise<ResumeResult> =>
         await new Promise<ResumeResult>((resolve) => {
-          finishResume = () =>
-            resolve({
-              status: "resumed" as const,
-              invocationId,
-              runtime: "hosted" as const,
-            });
+          finishResume = () => resolve({ status: "resumed", invocationId, runtime: "hosted" });
         }),
     );
     const client = createInProcessHostedRuntimeClient({
-      tenantId: "tenant-1",
+      tenantId: authority.invocationId,
       applicationService: service,
     });
 
-    await expect(
-      client.resumeInvocation({
-        runtimeEndpoint: "in-process://hosted",
-        auth: { mode: "workload_token", token: "runtime-token" },
-        invocationId: "invocation-1",
-        idempotencyKey: "resume-1",
-        requestBody: {
-          resume_payload: { source: "user_pause" },
-          gateway_access: { access_token: "gw", expires_at: "2026-09-05T00:00:00.000Z" },
-        },
-      }),
-    ).resolves.toMatchObject({ invocation_id: "invocation-1", resumed: true });
+    const response = await client.resumeInvocation({
+      ...commonAuth,
+      idempotencyKey: "resume-1",
+      request: { ...startRequest(), intentType: "resume", inputs: [{ kind: "inline", digest }] },
+    });
+    expect(response.authority).toEqual(authority);
+    expect(response.accepted).toBe(true);
     expect(service.resume).toHaveBeenCalledOnce();
     expect(client.getLastLaunchPromise()).not.toBeNull();
 
@@ -144,7 +205,7 @@ describe("InProcessHostedRuntimeClient", () => {
 
   it("尚未启动时不暴露 Agent Loop Promise", () => {
     const client = createInProcessHostedRuntimeClient({
-      tenantId: "tenant-1",
+      tenantId: authority.invocationId,
       applicationService: applicationService(),
     });
     expect(client.getLastLaunchPromise()).toBeNull();

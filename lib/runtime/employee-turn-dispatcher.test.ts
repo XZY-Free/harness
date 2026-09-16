@@ -24,31 +24,41 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { getAttemptsByInvocation } from "@/lib/executions/persistence/attempt-store";
+import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import type { AuditActor } from "@/lib/identity/audit";
 import { registerDevice, revokeDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
-import { invocationCommandTable } from "@/lib/persistence/schema/executions";
-import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  invocationAttemptTable,
+  invocationCommandTable,
+} from "@/lib/persistence/schema/executions";
+import {
+  executionBindingTable,
+  invocationTable,
+  runtimeSessionBindingTable,
+} from "@/lib/persistence/schema/executions";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
 } from "@/lib/routes/application/deployment-route-service";
+import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import {
   dispatchInterruptCommandToRuntime,
   dispatchResumeCommandToRuntime,
   dispatchSteerCommandToRuntime,
 } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
-import { getAttemptsByInvocation } from "@/lib/runtime/invocation-attempt-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { getRuntimeSessionBindingsByInvocation } from "@/lib/runtime/persistence/runtime-session-store";
 import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
-import { getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { createHttpRuntimeConformanceAdapterForTest } from "@/lib/runtime/test-support/http-runtime-conformance-adapter";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
@@ -57,7 +67,8 @@ import {
   publishRuntimeRevisionForTest,
 } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
-import { eq } from "drizzle-orm";
+import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeEach(async () => {
@@ -71,36 +82,35 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
+// V12 RuntimeProtocol v3：External fixture 直接声明正式 RuntimeCapabilities 形状
+// （probe 响应、revision.runtimeCapabilitiesJson 与 start 回执 digest 均以此为准）。
 const EXTERNAL_CAPABILITIES = {
-  protocol_versions: ["2"],
+  protocolVersion: 3 as const,
+  contractDigest: `sha256:${"c".repeat(64)}`,
+  runtimeTargetDigest: `sha256:${"d".repeat(64)}`,
   features: {
-    event_stream: true,
+    heartbeat: true,
+    durableStartIdempotency: true,
+    startedEvent: true,
+    exactReplay: true,
     cancel: true,
     resume: true,
     steer: true,
-    dynamic_tools: false,
-    user_action: true,
-    workspace_types: ["cloud"],
-    filesystem_checkpoint: false,
-  },
-  limits: { max_invocation_seconds: 600, max_event_bytes: 1_048_576 },
-};
-
-function externalCapabilityProjection(capabilities = EXTERNAL_CAPABILITIES) {
-  return {
-    declared: {},
-    measured: {
-      features: {
-        streaming_transport: capabilities.features.event_stream ? "pass" : "not_applicable",
-        input_required: capabilities.features.user_action ? "pass" : "not_applicable",
-        resume: capabilities.features.resume ? "pass" : "not_applicable",
-        cancel: capabilities.features.cancel ? "pass" : "not_applicable",
-        steer: capabilities.features.steer ? "pass" : "not_applicable",
-      },
+    subjectTypes: ["thread", "job"],
+    workspaceModes: ["NO_PLATFORM_WORKSPACE"],
+    filesystemSemantics: {
+      kind: "external-posix",
+      caseSensitive: true,
+      symlinks: true,
+      permissions: true,
+      hardlinks: true,
+      specialFiles: false,
+      xattrsAcl: false,
+      mtime: "coarse",
     },
-    effective: {},
-  };
-}
+  },
+  limits: { maxEventBytes: 262_144, maxBatchEvents: 100, maxBatchBytes: 1_048_576 },
+};
 
 interface ExternalRequest {
   method: string;
@@ -108,6 +118,61 @@ interface ExternalRequest {
   authorization?: string;
   idempotencyKey?: string;
   body: Record<string, unknown> | null;
+}
+
+/**
+ * 模拟 External Runtime 的正式行为：接纳 Start/Resume 后先发送 execution.started
+ * （正式状态只由 Ingress 确认）。Conformance 阶段的假 Authority 查不到真实
+ * SessionBinding，静默跳过；只有真实 dispatch 产生的 session 会被推进。
+ */
+async function emitExecutionStarted(
+  tenantId: string,
+  body: Record<string, unknown>,
+  capabilitiesDigest: string,
+): Promise<void> {
+  const authority = body.authority as { invocationId?: string };
+  const invocationId = String(authority?.invocationId ?? "");
+  if (!invocationId) return;
+  const [session] = await db
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, tenantId),
+        eq(runtimeSessionBindingTable.invocationId, invocationId),
+      ),
+    )
+    .limit(1);
+  if (!session || session.bindingState !== "dispatching" || !session.semanticRequestDigest) return;
+  const [invocation] = await db
+    .select()
+    .from(invocationTable)
+    .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)))
+    .limit(1);
+  if (!invocation) return;
+  await ingressRuntimeEvents({
+    tenantId,
+    invocationId,
+    batch: {
+      protocolVersion: 3,
+      authority: body.authority as never,
+      events: [
+        {
+          eventId: randomUUID(),
+          producerSequence: String(Number(invocation.lastProducerSequence) + 1),
+          type: "execution.started",
+          schemaVersion: 1,
+          payload: {
+            intentKey: session.startIntentKey,
+            semanticRequestDigest: session.semanticRequestDigest,
+            remoteSessionRef: session.remoteSessionRef ?? `external-session:${invocationId}`,
+            remoteExecutionRef: session.remoteExecutionRef ?? `external-execution:${invocationId}`,
+            capabilitiesDigest,
+          },
+        },
+      ],
+    },
+  });
 }
 
 async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) {
@@ -135,11 +200,9 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
       response.end(JSON.stringify(capabilities));
       return;
     }
-    const invocationId =
-      request.url === "/runtime/invocations"
-        ? String(body?.invocation_id ?? "")
-        : (request.url?.split("/")[4] ?? "");
-    if (request.url === "/runtime/invocations") {
+    const authority = (body?.authority ?? null) as Record<string, unknown> | null;
+    const invocationId = String(authority?.invocationId ?? request.url?.split("/")[4] ?? "");
+    if (request.url === "/runtime/invocations" || request.url?.endsWith("/resume")) {
       if (startFailureStatus !== null) {
         response.statusCode = startFailureStatus;
         response.end(
@@ -154,29 +217,56 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
         request.socket.destroy();
         return;
       }
+      // V3 Start/Resume 回执：echo authority + semanticRequestDigest，capabilitiesDigest
+      // 按发布事实（RuntimeRevision manifest）口径由 live capabilities 计算。
+      const capabilitiesDigest = computeCapabilityManifestDigest({
+        runtimeRevisionId: String(authority?.runtimeRevisionId ?? ""),
+        runtimeCapabilities: capabilities,
+      });
+      // 真实 dispatch 产生的 session：模拟 Runtime 先发 execution.started 再开始执行。
+      // 在响应前同步完成，避免与测试主线程的后续事务（interrupt/steer 命令创建）
+      // 形成 ExecutionOwnership 行锁交叉导致 InnoDB 死锁。
+      const contextTenantId = (body?.context as { common?: { tenantId?: string } } | undefined)
+        ?.common?.tenantId;
+      if (contextTenantId) {
+        await emitExecutionStarted(
+          contextTenantId,
+          body as Record<string, unknown>,
+          capabilitiesDigest,
+        ).catch(() => undefined);
+      }
       response.end(
         JSON.stringify({
-          invocation_id: invocationId,
+          protocolVersion: 3,
+          authority,
+          semanticRequestDigest: body?.semanticRequestDigest,
           accepted: true,
-          attempt_no: 1,
-          runtime_session_ref: `external-session:${invocationId}`,
-          runtime_execution_ref: `external-execution:${invocationId}`,
-          capabilities,
+          remoteSessionRef: `external-session:${invocationId}`,
+          remoteExecutionRef: `external-execution:${invocationId}`,
+          capabilitiesDigest,
+          acceptedAt: Date.now(),
         }),
       );
       return;
     }
-    response.end(
-      JSON.stringify({
-        invocation_id: invocationId,
-        attempt_no: 1,
-        ...(request.url?.endsWith("/cancel")
-          ? { cancelled: true }
-          : request.url?.endsWith("/resume")
-            ? { resumed: true, requires_redispatch: false }
-            : { steered: true }),
-      }),
-    );
+    // Cancel/Steer 请求体是顶层 CancelRequest/SteerRequest（targetAuthority 不嵌套）。
+    const targetAuthority = (body?.targetAuthority ?? null) as unknown;
+    if (request.url?.endsWith("/cancel")) {
+      response.end(JSON.stringify({ accepted: true, targetAuthority, stopState: "requested" }));
+      return;
+    }
+    if (request.url?.endsWith("/steer")) {
+      response.end(
+        JSON.stringify({
+          accepted: true,
+          commandId: body?.commandId,
+          targetAuthority,
+          inputDigest: body?.inputDigest,
+        }),
+      );
+      return;
+    }
+    response.end(JSON.stringify({ accepted: true, targetAuthority }));
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -339,7 +429,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -431,11 +521,11 @@ async function seedReadyExternalEmployeeTurn(suffix: string, capabilities = EXTE
     tenantId: tenant.id,
     runtimeId: runtime.id,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "external_endpoint",
     endpointRef: server.endpoint,
     runtimeArtifactRef: null,
-    runtimeCapabilitiesJson: externalCapabilityProjection(capabilities),
+    runtimeCapabilitiesJson: capabilities,
     identityMode: "none",
     networkZone: "external",
     configHash: computeArtifactDigest(`external-config-${suffix}`),
@@ -487,25 +577,24 @@ async function seedReadyExternalEmployeeTurn(suffix: string, capabilities = EXTE
 }
 
 async function createExternalResumeCommand(params: {
+  tenantId: string;
   threadId: string;
   turnId: string;
   invocationId: string;
 }) {
   const id = randomUUID();
-  const now = new Date();
   const commandPayload = { resume_payload: { answer: "继续" }, turn_id: params.turnId };
   await db.insert(invocationCommandTable).values({
     id,
+    tenantId: params.tenantId,
     invocationId: params.invocationId,
-    threadId: params.threadId,
-    turnId: params.turnId,
     commandType: "resume",
-    commandPayloadJson: commandPayload,
-    commandPayloadHash: computeInvocationCommandPayloadHash(commandPayload),
+    payloadJson: commandPayload,
+    payloadDigest: computeInvocationCommandPayloadHash(commandPayload),
     commandState: "queued",
     idempotencyKey: `external-resume:${id}`,
-    createdAt: now,
-    updatedAt: now,
+    requestedByType: "system",
+    requestedById: "external-resume-fixture",
   });
   return id;
 }
@@ -528,7 +617,7 @@ describe("dispatchEmployeeTurn", () => {
         userId: fixture.ownerId,
         deviceKey: "desktop-device-1",
         displayName: "snow_harness",
-        locationFingerprint: `sha256:${"b".repeat(64)}`,
+        storageScopeDigest: `sha256:${"b".repeat(64)}`,
       });
       await db
         .update(threadTable)
@@ -572,7 +661,15 @@ describe("dispatchEmployeeTurn", () => {
         .from(executionBindingTable)
         .where(eq(executionBindingTable.invocationId, dispatchedTurn?.activeInvocationId ?? ""))
         .limit(1);
-      expect(binding?.workspaceBindingId).toBe(revoked ? null : workspace.bindingId);
+      // 冻结设计（schema-design §ExecutionBinding.workspaceBindingId）：Turn 调度
+      // 不携带平台 Workspace writer，执行绑定引用显式 NO_PLATFORM_WORKSPACE 契约
+      // Binding；桌面绑定事实不回滚，能力降级冻结在 catalog unavailableFacts。
+      expect(binding?.workspaceBindingId).not.toBe(workspace.bindingId);
+      const fallbackWorkspace = await getWorkspaceBindingById(
+        fixture.tenantId,
+        binding?.workspaceBindingId ?? "",
+      );
+      expect(fallbackWorkspace?.continuityMode).toBe("NO_PLATFORM_WORKSPACE");
       const catalog = binding?.capabilityCatalogJson as { tools: Array<{ operationId: string }> };
       expect(catalog.tools.some((tool) => tool.operationId === "shell")).toBe(!revoked);
       await result.completion;
@@ -652,15 +749,19 @@ describe("dispatchEmployeeTurn", () => {
     expect(server.requests[0]?.body).not.toHaveProperty("tenantId");
     expect(server.requests[0]?.body).not.toHaveProperty("userId");
     expect(server.requests[0]?.body).not.toHaveProperty("execution_subject");
-    expect(server.requests[0]?.body?.gateway_endpoints).toEqual({
-      events: "https://platform.example.test/base/gateway/runtime-events",
-      cancel: "https://platform.example.test/base/gateway/runtime-commands/cancel",
-      resume: "https://platform.example.test/base/gateway/runtime-commands/resume",
-      steer: "https://platform.example.test/base/gateway/runtime-commands/steer",
-      tools: "https://platform.example.test/base/gateway/tools",
-      tool_calls: "https://platform.example.test/base/gateway/tool-calls",
-      user_action_requests: "https://platform.example.test/base/gateway/user-action-requests",
-      capability_actions: "https://platform.example.test/base/gateway/capability-actions",
+    // V3 Start 请求：Gateway 回调端点冻结在 callbackEndpoints（六端点 camelCase 形状）。
+    const startBody = server.requests[0]?.body as {
+      authority?: { invocationId?: string };
+      callbackEndpoints?: Record<string, string>;
+    };
+    const startInvocationId = startBody?.authority?.invocationId ?? "";
+    expect(startBody?.callbackEndpoints).toEqual({
+      events: `https://platform.example.test/base/runtime/invocations/${startInvocationId}/events`,
+      heartbeat: `https://platform.example.test/base/runtime/invocations/${startInvocationId}/heartbeat`,
+      context: "https://platform.example.test/base/gateway/context",
+      capabilityActions: "https://platform.example.test/base/gateway/capability-actions",
+      toolCalls: "https://platform.example.test/base/gateway/tool-calls",
+      userActions: "https://platform.example.test/base/gateway/user-action-requests",
     });
 
     const updatedTurn = await getTurnById(tenantId, turn.id);
@@ -670,14 +771,12 @@ describe("dispatchEmployeeTurn", () => {
     );
     expect(invocation).toMatchObject({
       executionState: "running",
-      runtimeExecutionRef: `external-execution:${invocation?.id}`,
     });
-    const session = await getSessionBindingById(
-      tenantId,
-      invocation?.runtimeSessionBindingId ?? "missing",
-    );
+    // V12：remote ref 由 Invocation 列迁移到 RuntimeSessionBinding。
+    const [session] = await getRuntimeSessionBindingsByInvocation(tenantId, invocation?.id ?? "");
     expect(session).toMatchObject({
-      externalSessionRef: `external-session:${invocation?.id}`,
+      remoteSessionRef: `external-session:${invocation?.id}`,
+      remoteExecutionRef: `external-execution:${invocation?.id}`,
       runtimeCapabilitiesJson: EXTERNAL_CAPABILITIES,
     });
   });
@@ -701,9 +800,14 @@ describe("dispatchEmployeeTurn", () => {
     expect(invocation).toBeTruthy();
     const [attempt] = await getAttemptsByInvocation(invocation?.id ?? "");
     expect(attempt?.attemptState).toBe("queued");
+    // V12：Attempt 的 nextDispatchAt 迁移到 RuntimeSessionBinding.nextDispatchAt。
+    const [dispatchSession] = await getRuntimeSessionBindingsByInvocation(
+      tenantId,
+      invocation?.id ?? "",
+    );
     const worker = createRuntimeDispatchRetryWorker({
       workerId: "external-default-retry-worker",
-      clock: () => new Date((attempt?.nextDispatchAt?.getTime() ?? Date.now()) + 1),
+      clock: () => new Date((dispatchSession?.nextDispatchAt?.getTime() ?? Date.now()) + 1),
       dispatchCommand: async () => {},
     });
 
@@ -712,10 +816,20 @@ describe("dispatchEmployeeTurn", () => {
       (request) => request.method === "POST" && request.url === "/runtime/invocations",
     );
     expect(startRequests).toHaveLength(2);
-    expect(startRequests[0]?.body?.invocation_id).toBe(invocation?.id);
-    expect(startRequests[1]?.body?.invocation_id).toBe(invocation?.id);
+    // V3 Start 请求：invocation 身份冻结在 body.authority.invocationId。
+    expect(
+      startRequests.map(
+        (request) => (request.body?.authority as { invocationId?: string })?.invocationId,
+      ),
+    ).toEqual([invocation?.id, invocation?.id]);
+    // canonical 不变量：start idempotency key 与 session.startIntentKey 同源
+    //（= `start:${ownershipId}`，见 runtime-session-store.createRuntimeSessionBinding）。
+    const owner = await getActiveExecutionOwnership({
+      tenantId,
+      invocationId: invocation?.id ?? "",
+    });
     expect(new Set(startRequests.map((request) => request.idempotencyKey))).toEqual(
-      new Set([`invocation-attempt:${attempt?.id}`]),
+      new Set([`start:${owner?.id}`]),
     );
     expect(server.acceptedExecutionCount()).toBe(1);
     expect((await getInvocationById(tenantId, invocation?.id ?? ""))?.executionState).toBe(
@@ -743,23 +857,22 @@ describe("dispatchEmployeeTurn", () => {
     const invocationId = updatedTurn?.latestInvocationId;
     if (!invocationId) throw new Error("暂态失败缺少 Invocation");
     expect((await getInvocationById(tenantId, invocationId))?.executionState).toBe("queued");
-    expect(await getAttemptsByInvocation(invocationId)).toEqual([
+    // V12：dispatch 重试状态属 RuntimeSessionBinding（Attempt 不再持有重试列）。
+    expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocationId)).toEqual([
       expect.objectContaining({
-        attemptState: "queued",
-        dispatchAttemptCount: 1,
-        lastTransientErrorCode: "runtime_unavailable",
+        dispatchCount: 1,
+        lastErrorCode: "runtime_unavailable",
         nextDispatchAt: expect.any(Date),
       }),
     ]);
   });
 
   it("External start capabilities 与发布事实不一致时 fail closed", async () => {
-    const capabilities = {
-      ...EXTERNAL_CAPABILITIES,
-      features: { ...EXTERNAL_CAPABILITIES.features },
-    };
+    const capabilities = structuredClone(EXTERNAL_CAPABILITIES);
     const fixture = await seedReadyExternalEmployeeTurn("capability-mismatch", capabilities);
-    capabilities.features.cancel = false;
+    // seed 后原地变更 live capabilities（部署 target 指纹），使 server 回执 digest
+    // 偏离发布事实（revision 冻结 JSON）的 manifest digest → fail closed。
+    capabilities.runtimeTargetDigest = `sha256:${"e".repeat(64)}`;
     const hostedDecision = vi.fn();
     await expect(
       dispatchEmployeeTurn({
@@ -813,7 +926,7 @@ describe("dispatchEmployeeTurn", () => {
       command: { commandState: "acknowledged" },
     });
     expect(cancelFixture.server.requests.map((request) => request.url)).toEqual([
-      expect.stringMatching(/^\/runtime\/v1\/invocations\/[^/]+\/cancel$/),
+      expect.stringMatching(/^\/runtime\/invocations\/[^/]+\/cancel$/),
     ]);
   });
 
@@ -851,7 +964,7 @@ describe("dispatchEmployeeTurn", () => {
       command: { commandState: "acknowledged" },
     });
     expect(steerFixture.server.requests.map((request) => request.url)).toEqual([
-      expect.stringMatching(/^\/runtime\/v1\/invocations\/[^/]+\/steer$/),
+      expect.stringMatching(/^\/runtime\/invocations\/[^/]+\/steer$/),
     ]);
   });
 
@@ -878,7 +991,13 @@ describe("dispatchEmployeeTurn", () => {
       .update(turnTable)
       .set({ turnState: "waiting_user" })
       .where(eq(turnTable.id, fixture.turn.id));
+    // Resume dispatch 要求 Latest Attempt 处于 suspended（受控暂停后的再派发语义）。
+    await db
+      .update(invocationAttemptTable)
+      .set({ attemptState: "suspended" })
+      .where(eq(invocationAttemptTable.invocationId, invocationId));
     const commandId = await createExternalResumeCommand({
+      tenantId: fixture.tenantId,
       threadId: fixture.thread.id,
       turnId: fixture.turn.id,
       invocationId,
@@ -921,6 +1040,11 @@ describe("dispatchEmployeeTurn", () => {
       .update(turnTable)
       .set({ turnState: "waiting_user", errorCode: "USER_PAUSED", waitingAt: new Date() })
       .where(eq(turnTable.id, fixture.turn.id));
+    // Resume dispatch 要求 Latest Attempt 处于 suspended（受控暂停后的再派发语义）。
+    await db
+      .update(invocationAttemptTable)
+      .set({ attemptState: "suspended" })
+      .where(eq(invocationAttemptTable.invocationId, invocationId));
 
     const requested = await requestPausedTurnResume({
       tenantId: fixture.tenantId,
@@ -959,10 +1083,8 @@ describe("dispatchEmployeeTurn", () => {
   });
 
   it("External session 声明 resume=false 时 fail closed，网络请求为零", async () => {
-    const capabilities = {
-      ...EXTERNAL_CAPABILITIES,
-      features: { ...EXTERNAL_CAPABILITIES.features, resume: false },
-    };
+    const capabilities: typeof EXTERNAL_CAPABILITIES = structuredClone(EXTERNAL_CAPABILITIES);
+    capabilities.features.resume = false;
     const fixture = await seedReadyExternalEmployeeTurn("resume-unsupported", capabilities);
     await dispatchEmployeeTurn({
       tenantId: fixture.tenantId,
@@ -985,7 +1107,13 @@ describe("dispatchEmployeeTurn", () => {
       .update(turnTable)
       .set({ turnState: "waiting_user" })
       .where(eq(turnTable.id, fixture.turn.id));
+    // Resume dispatch 要求 Latest Attempt 处于 suspended（受控暂停后的再派发语义）。
+    await db
+      .update(invocationAttemptTable)
+      .set({ attemptState: "suspended" })
+      .where(eq(invocationAttemptTable.invocationId, invocationId));
     const commandId = await createExternalResumeCommand({
+      tenantId: fixture.tenantId,
       threadId: fixture.thread.id,
       turnId: fixture.turn.id,
       invocationId,

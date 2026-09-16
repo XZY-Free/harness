@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 
 function extractCallId(url: string): string | null {
   // 路径形如 /gateway/agent-calls/{callId}/cancel
-  const match = url.match(/\/gateway\/v1\/agent-calls\/([^/?#]+)\/cancel/);
+  const match = url.match(/\/gateway\/agent-calls\/([^/?#]+)\/cancel/);
   const id = match?.[1];
   return id ? decodeURIComponent(id) : null;
 }

@@ -205,7 +205,9 @@ export const FilesystemSemanticsSchema = z
 export type FilesystemSemantics = z.infer<typeof FilesystemSemanticsSchema>;
 
 /**
- * Runtime 必须能力集合。前 7 项固定为 true（协议要求）；后 3 项按真实能力收窄。
+ * Runtime 必须能力集合。前 5 项固定为 true（协议要求）；resume/steer 为声明式
+ * 可选能力（为 false 时发布套件只验证「不宣称支持」，不伪造成功）；后 3 项按真实
+ * 能力收窄。
  * 发布 / Route 选择不得把不支持 Job 的 Runtime 用作 Job 执行；平台标准 Hosted
  * 实现必须两种 Subject 都支持。
  */
@@ -216,8 +218,8 @@ export const RuntimeFeaturesSchema = z
     startedEvent: z.literal(true),
     exactReplay: z.literal(true),
     cancel: z.literal(true),
-    resume: z.literal(true),
-    steer: z.literal(true),
+    resume: z.boolean(),
+    steer: z.boolean(),
     subjectTypes: z.array(SubjectTypeSchema).min(1),
     workspaceModes: z.array(WorkspaceModeSchema).min(1),
     filesystemSemantics: FilesystemSemanticsSchema,
@@ -283,16 +285,34 @@ export type ExecutionBinding = z.infer<typeof ExecutionBindingSchema>;
  */
 export const ContextHandleCommonSchema = z
   .object({
+    contractVersion: z.literal(1),
     tenantId: uuidSchema,
     invocationId: uuidSchema,
-    executionBindingId: uuidSchema,
-    principalType: z.enum(["user", "service"]),
-    principalId: z.string().min(1),
-    policyRef: uuidSchema,
-    workspaceBindingId: uuidSchema,
-    environmentRevisionId: uuidSchema,
+    bindingDigest: sha256DigestSchema,
+    principal: z
+      .object({
+        type: z.enum(["user", "service"]),
+        id: z.string().min(1),
+        source: z.enum(["authenticated_user", "trusted_service"]),
+      })
+      .strict(),
     runtimeRevisionId: uuidSchema,
-    contextSource: z.string().min(1),
+    policy: z.object({ revisionId: uuidSchema, digest: sha256DigestSchema }).strict(),
+    workspace: z.object({ bindingId: uuidSchema, contractDigest: sha256DigestSchema }).strict(),
+    environment: z.discriminatedUnion("mode", [
+      z
+        .object({
+          mode: z.literal("MANAGED"),
+          revisionId: uuidSchema,
+          semanticDigest: sha256DigestSchema,
+        })
+        .strict(),
+      z.object({ mode: z.literal("NO_PLATFORM_ENVIRONMENT") }).strict(),
+    ]),
+    contextSourceDigest: sha256DigestSchema,
+    issuedAt: unixMillisSchema,
+    expiresAt: unixMillisSchema,
+    jti: uuidSchema,
   })
   .strict();
 
@@ -302,7 +322,7 @@ export const ContextHandleThreadSubjectSchema = z
     threadId: uuidSchema,
     turnId: uuidSchema,
     triggerItemId: uuidSchema,
-    conversationContextDigest: sha256DigestSchema,
+    triggerItemDigest: sha256DigestSchema,
   })
   .strict();
 
@@ -310,11 +330,20 @@ export const ContextHandleJobSubjectSchema = z
   .object({
     type: z.literal("job"),
     jobId: uuidSchema,
-    jobInputDigest: sha256DigestSchema,
+    inputKind: z.enum(["inline", "reference"]),
+    inputHash: sha256DigestSchema,
+    inputRef: z.string().min(1).optional(),
     triggerRef: z.string().min(1),
-    jobLineageDigest: sha256DigestSchema,
+    replacesJobId: uuidSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.inputKind === "reference" ? Boolean(value.inputRef) : value.inputRef === undefined,
+    {
+      message: "job inputRef must match inputKind",
+    },
+  );
 
 export const ContextHandleSubjectSchema = z.discriminatedUnion("type", [
   ContextHandleThreadSubjectSchema,
@@ -541,6 +570,12 @@ export const RuntimeEventTypeSchema = z.enum([
   "user-action",
   "action",
   "terminal",
+  // Harness 行动事实（RUNTIME_EVENT_INGRESS_TYPES 同款）；由平台 Gateway/Hosted Loop 产生，
+  // mysql-recovery-port 依赖该 candidateType 前缀重建 durable action 历史。
+  "harness.action.proposed",
+  "harness.action.started",
+  "harness.action.completed",
+  "harness.action.failed",
 ]);
 export type RuntimeEventType = z.infer<typeof RuntimeEventTypeSchema>;
 
@@ -898,14 +933,35 @@ export function buildStartSemanticDigestInput(
   request: RuntimeStartRequest,
 ): Record<string, unknown> {
   const {
+    semanticRequestDigest: _semanticRequestDigest,
     credentials: _credentials,
     traceContext: _trace,
     callbackEndpoints: _cb,
     ...semantic
   } = request;
+  void _semanticRequestDigest;
   void _credentials;
   void _trace;
   void _cb;
+  const common = semantic.context?.common;
+  if (common && typeof common === "object") {
+    const {
+      issuedAt: _issuedAt,
+      expiresAt: _expiresAt,
+      jti: _jti,
+      ...stableCommon
+    } = common as Record<string, unknown>;
+    void _issuedAt;
+    void _expiresAt;
+    void _jti;
+    return {
+      ...semantic,
+      context: {
+        ...semantic.context,
+        common: stableCommon,
+      },
+    };
+  }
   return semantic;
 }
 
@@ -937,7 +993,9 @@ export function computeEventPayloadHash(event: RuntimeEvent): string {
  * 覆盖 protocolVersion / features / limits；runtimeTargetDigest 单独存在，
  * 不重复进入 contractDigest。
  */
-export function computeCapabilitiesContractDigest(capabilities: RuntimeCapabilities): string {
+export function computeCapabilitiesContractDigest(
+  capabilities: Pick<RuntimeCapabilities, "protocolVersion" | "features" | "limits">,
+): string {
   return protocolDigest({
     protocolVersion: capabilities.protocolVersion,
     features: capabilities.features,

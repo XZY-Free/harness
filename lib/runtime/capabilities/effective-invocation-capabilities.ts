@@ -15,9 +15,9 @@
 import type { RuntimeRevisionRow } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
-  type RuntimeCapabilitiesResponse,
-  isRuntimeCapabilitiesResponse,
-} from "@/lib/runtime/runtime-client";
+  type RuntimeCapabilities,
+  RuntimeCapabilitiesSchema,
+} from "@/lib/runtime/runtime-protocol";
 
 /** Invocation 级 effective 能力（至少统一表达  五项）。 */
 export interface EffectiveInvocationCapabilities {
@@ -126,6 +126,19 @@ export function resolveRuntimeLevelCapabilities(
       user_action: pass(features.input_required),
       streaming: pass(features.streaming_transport),
     };
+  } else if (RuntimeCapabilitiesSchema.safeParse(json).success) {
+    // V12 canonical RuntimeCapabilities 快照（probe 响应同形状）：external 发布事实
+    // 直接声明正式协议形状；resume/steer 为声明式可选能力。
+    const canonical = RuntimeCapabilitiesSchema.parse(json);
+    measured = {
+      cancel: canonical.features.cancel,
+      resume: canonical.features.resume,
+      steer: canonical.features.steer,
+      user_action: true,
+      streaming:
+        canonical.features.workspaceModes.includes("SHARED_DURABLE") ||
+        canonical.features.workspaceModes.includes("CHECKPOINT_RESTORABLE"),
+    };
   } else {
     // 形状不可识别 → fail-closed。
     measured = {
@@ -147,22 +160,26 @@ export function resolveRuntimeLevelCapabilities(
 
 /** 把已通过 Runtime Protocol schema 的 session 能力快照投影为控制能力。 */
 export function resolveSessionRuntimeCapabilities(value: unknown): RuntimeLevelCapabilities {
-  if (!isRuntimeCapabilitiesResponse(value)) {
+  const parsed = RuntimeCapabilitiesSchema.safeParse(value);
+  if (!parsed.success) {
     return NO_CAPABILITIES;
   }
+  const capabilities = parsed.data;
   return {
-    cancel: value.features.cancel,
-    resume: value.features.resume,
-    steer: value.features.steer,
-    user_action: value.features.user_action,
-    streaming: value.features.event_stream,
+    cancel: capabilities.features.cancel,
+    resume: capabilities.features.resume,
+    steer: capabilities.features.steer,
+    user_action: true,
+    streaming:
+      capabilities.features.workspaceModes.includes("SHARED_DURABLE") ||
+      capabilities.features.workspaceModes.includes("CHECKPOINT_RESTORABLE"),
   };
 }
 
 /** 发布时 measured 能力与 start 响应必须一致；不一致时不能建立会话事实。 */
 export function runtimeCapabilitiesMatchPublishedRevision(
   revision: Pick<RuntimeRevisionRow, "protocolType" | "runtimeCapabilitiesJson">,
-  observed: RuntimeCapabilitiesResponse,
+  observed: RuntimeCapabilities,
 ): boolean {
   // Hosted 的发布事实是旧有 string[] capability catalog，并非完整 probe 快照；
   // 会话能力仍持久化并参与 effective 交集，但不能对不等形状做伪精确比较。

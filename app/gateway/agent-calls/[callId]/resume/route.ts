@@ -54,7 +54,7 @@ function validateBody(body: unknown): body is ResumeBody {
 
 function extractCallId(url: string): string | null {
   // 路径形如 /gateway/agent-calls/{callId}/resume
-  const match = url.match(/\/gateway\/v1\/agent-calls\/([^/?#]+)\/resume/);
+  const match = url.match(/\/gateway\/agent-calls\/([^/?#]+)\/resume/);
   const id = match?.[1];
   return id ? decodeURIComponent(id) : null;
 }

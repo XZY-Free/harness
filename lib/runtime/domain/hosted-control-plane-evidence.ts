@@ -23,7 +23,7 @@ export interface HostedRuntimeConformanceInput {
   /** Conformance 被测对象统一 digest，不再无条件绑定 Artifact digest。 */
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 }
 
 export interface HostedControlPlaneEvidenceProvider {

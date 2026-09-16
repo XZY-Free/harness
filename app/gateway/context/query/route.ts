@@ -1,9 +1,8 @@
 import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
 import type { ContextBudgetConfig } from "@/lib/context/budget";
 import {
-  CONTEXT_CLASSIFICATIONS,
+  BASE_CONTEXT_SOURCES,
   CONTEXT_SOURCE_TYPES,
-  type ContextHandleBinding,
   ContextHandleError,
   type ContextSourceType,
   resolveContextHandle,
@@ -30,6 +29,7 @@ import {
   type CapabilityCatalogSnapshot,
   verifyCapabilityCatalogSnapshot,
 } from "@/lib/runtime/harness-loop/capability-catalog";
+import type { ContextHandle } from "@/lib/runtime/runtime-protocol";
 import {
   type ExecutionSubject,
   recoverTrustedExecutionSubject,
@@ -69,7 +69,7 @@ function validateBody(value: unknown): value is ContextQueryBody {
 interface ParsedContextLimits {
   maxItems: number;
   maxTokens: number;
-  maxSensitivity: ContextHandleBinding["classification"];
+  maxSensitivity: "public" | "internal" | "confidential" | "restricted";
   budget: ContextBudgetConfig;
 }
 
@@ -82,14 +82,14 @@ function parseLimits(limits: Record<string, unknown>): ParsedContextLimits | nul
   if (!Number.isInteger(maxTokens) || (maxTokens as number) <= 0) return null;
   if (
     typeof maxSensitivity !== "string" ||
-    !CONTEXT_CLASSIFICATIONS.includes(maxSensitivity as ContextHandleBinding["classification"])
+    !["public", "internal", "confidential", "restricted"].includes(maxSensitivity)
   ) {
     return null;
   }
   return {
     maxItems: maxItems as number,
     maxTokens: maxTokens as number,
-    maxSensitivity: maxSensitivity as ContextHandleBinding["classification"],
+    maxSensitivity: maxSensitivity as ParsedContextLimits["maxSensitivity"],
     budget: {
       totalBudget: maxTokens as number,
       modelOutputReserve: 0,
@@ -155,7 +155,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  let binding: ContextHandleBinding;
+  let binding: ContextHandle;
   try {
     binding = await resolveContextHandle(body.context_handle, {
       tenantId: principal.tenantId,
@@ -168,23 +168,7 @@ export async function POST(request: Request): Promise<Response> {
     throw error;
   }
 
-  if (binding.classification === "restricted") {
-    return apiError("ACCESS_DENIED", "restricted 数据不得通过 Context Query 返回正文", {
-      requestId,
-    });
-  }
-  const sensitivityRank = new Map(
-    CONTEXT_CLASSIFICATIONS.map((classification, index) => [classification, index]),
-  );
-  if (
-    (sensitivityRank.get(binding.classification) ?? Number.POSITIVE_INFINITY) >
-    (sensitivityRank.get(limits.maxSensitivity) ?? -1)
-  ) {
-    return apiError("ACCESS_DENIED", "请求的敏感级别上限低于当前上下文分类", {
-      requestId,
-    });
-  }
-  if (body.sources.some((source) => !binding.allowedSources.includes(source))) {
+  if (body.sources.some((source) => !BASE_CONTEXT_SOURCES.includes(source))) {
     return apiError("ACCESS_DENIED", "请求包含 context_handle 未授权的来源", { requestId });
   }
 
@@ -210,18 +194,20 @@ export async function POST(request: Request): Promise<Response> {
   const view = await assembleContextView({
     ctx: {
       ...binding,
+      tenantId: principal.tenantId,
+      invocationId: principal.invocationId,
       executionSubject,
       allowedKnowledgeBaseIds: capabilityCatalog.knowledgeSources.map(
         (source) => source.knowledgeBaseId,
       ),
-      allowedSources: binding.allowedSources,
-      allowedSkillIds: binding.allowedSkillIds,
+      allowedSources: BASE_CONTEXT_SOURCES,
+      allowedSkillIds: [],
       query: body.query,
       maxItems: limits.maxItems,
       maxTokens: limits.maxTokens,
       maxSensitivity: limits.maxSensitivity,
     },
-    resolvers: buildResolvers(body.sources, binding.allowedSkillIds),
+    resolvers: buildResolvers(body.sources, []),
     budget: limits.budget,
   });
 

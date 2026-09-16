@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
@@ -6,20 +6,23 @@ import {
   parseHostControls,
 } from "@/lib/agents/calls/transport/a2a/host-control-contract";
 import { agentHostControlConfig } from "@/lib/config";
-import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
+import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
+import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
 import { agentTable } from "@/lib/persistence/schema/agents";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
+  ProducerSequenceGapError,
   getIngressByInvocation,
   getIngressByProducerEventId,
-  ingressEventBatch,
-} from "@/lib/runtime/event-ingress-queries";
+  ingressRuntimeEvents,
+} from "@/lib/runtime/application/ingress-runtime-events";
 import {
   buildConfirmationActionId,
   computeConfirmationProposalSemanticDigest,
 } from "@/lib/runtime/harness-loop/confirmation-proposal-identity";
+import { getRuntimeSessionBindingByOwnership } from "@/lib/runtime/persistence/runtime-session-store";
 import { and, desc, eq } from "drizzle-orm";
 
 export interface CoordinateAgentInputRequiredResult {
@@ -169,9 +172,21 @@ export async function coordinateAgentInputRequired(
   const parsedHostControls = parseHostControls(payload?.data, "input-required", hostControlPolicy);
   const confirmation =
     parsedHostControls?.kind === "confirmation" ? parsedHostControls.proposal : null;
-  const producerEventId = `agent-input-required:${inputEvent.id}`;
+  const producerEventId = randomUUID();
   const existing = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
   if (existing) return { coordinated: true, runtimeProducerEventId: producerEventId };
+  const owner = await getActiveExecutionOwnership({ tenantId, invocationId: parent.id });
+  if (!owner) throw new Error(`Parent Invocation ${parent.id} 缺少 Current ExecutionOwnership`);
+  const session = await getRuntimeSessionBindingByOwnership(tenantId, owner.id);
+  if (!session) throw new Error(`Parent Invocation ${parent.id} 缺少 RuntimeSessionBinding`);
+  const authority = authorityIdentity({
+    invocationId: parent.id,
+    runtimeRevisionId: session.runtimeRevisionId,
+    attemptId: owner.attemptId,
+    ownershipId: owner.id,
+    leaseEpoch: owner.leaseEpoch,
+    sessionBindingId: session.id,
+  });
 
   const runtimePayload = buildAgentInputRequiredRuntimePayload({
     callId: call.id,
@@ -189,25 +204,28 @@ export async function coordinateAgentInputRequired(
     const ingress = await getIngressByInvocation(tenantId, parent.id, { limit: 500 });
     const sequence = Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1;
     try {
-      await ingressEventBatch({
+      await ingressRuntimeEvents({
         tenantId,
         invocationId: parent.id,
-        producerSequenceStart: sequence,
-        events: [
-          {
-            producer_event_id: producerEventId,
-            producer_sequence: sequence,
-            type: "user_action.requested",
-            schema_version: 1,
-            payload: { ...runtimePayload },
-          },
-        ],
+        batch: {
+          protocolVersion: 3,
+          authority,
+          events: [
+            {
+              eventId: producerEventId,
+              producerSequence: String(sequence),
+              type: "user-action",
+              schemaVersion: 1,
+              payload: { ...runtimePayload },
+            },
+          ],
+        },
       });
       return { coordinated: true, runtimeProducerEventId: producerEventId };
     } catch (error) {
       const raced = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
       if (raced) return { coordinated: true, runtimeProducerEventId: producerEventId };
-      if (!(error instanceof EventSequenceGapError) || retry === 2) throw error;
+      if (!(error instanceof ProducerSequenceGapError) || retry === 2) throw error;
     }
   }
   return { coordinated: false };

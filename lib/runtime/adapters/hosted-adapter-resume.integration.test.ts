@@ -4,6 +4,14 @@ import { createHostedAdapter } from "./hosted-adapter";
 
 describe("Hosted Adapter durable resume", () => {
   it("全新 Adapter 不依赖旧实例 Map，直接把 invocationId 交给 durable service", async () => {
+    const authority = {
+      invocationId: "00000000-0000-4000-8000-000000000021",
+      runtimeRevisionId: "00000000-0000-4000-8000-000000000022",
+      attemptId: "00000000-0000-4000-8000-000000000023",
+      ownershipId: "00000000-0000-4000-8000-000000000024",
+      leaseEpoch: "1",
+      sessionBindingId: "00000000-0000-4000-8000-000000000025",
+    } as const;
     const resume = vi.fn(async ({ invocationId }: { invocationId: string }) => ({
       status: "resumed" as const,
       invocationId,
@@ -31,15 +39,16 @@ describe("Hosted Adapter durable resume", () => {
     });
 
     const result = await freshAdapter.handleResume({
-      invocationId: "inv-resume-from-db",
+      invocationId: authority.invocationId,
+      authority,
       resumePayload: { requestId: "uar-1" },
     });
 
-    expect(result.resume_state).toBe("accepted");
+    expect(result.response.accepted).toBe(true);
     expect(resume).toHaveBeenCalledWith({
       tenantId: "tenant-1",
-      invocationId: "inv-resume-from-db",
-      idempotencyKey: "hosted-resume:inv-resume-from-db",
+      invocationId: authority.invocationId,
+      idempotencyKey: `hosted-resume:${authority.invocationId}`,
       resumePayload: { requestId: "uar-1" },
     });
   });

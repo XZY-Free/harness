@@ -11,7 +11,7 @@ export interface RuntimeConformanceRevisionBinding {
   runtimeTargetDigest: string;
   artifactDigest: string | null;
   configHash: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 }
 
 export interface RuntimeConformanceRunStore {

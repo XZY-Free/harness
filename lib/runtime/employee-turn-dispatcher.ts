@@ -6,8 +6,6 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
-import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
@@ -16,7 +14,7 @@ import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/m
 import {
   createConfiguredHostedRuntimeApplicationService,
   hostedRuntimeApplicationService,
-} from "@/lib/runtime/application/production-resume-harness-invocation";
+} from "@/lib/runtime/application/runtime-resume";
 import {
   type RuntimeTransportAuth,
   resolveOutboundRuntimeAuth,
@@ -223,14 +221,7 @@ export async function dispatchEmployeeTurn(params: {
         })
       : Promise.resolve({
           mode: "workload_token",
-          token: issueWorkloadToken({
-            type: "runtime",
-            tenantId: params.tenantId,
-            invocationId: "transport-resolution",
-            runtimeRevisionId: runtimeRevision.id,
-            audience: "runtime",
-            expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-          }),
+          token: "in-process-runtime",
         });
 
   const resolveTransport = createRuntimeTransportResolver({
@@ -273,33 +264,15 @@ export async function dispatchEmployeeTurn(params: {
     executionSubject: params.executionSubject,
     runtimeClient: transport,
     runtimeEndpointResolver: async (binding) => {
-      // §24：下发 Binding 冻结的 Governance Revision（非 Tenant current），fail-closed。
-      const frozenGovernance = await loadFrozenGovernanceConfig(
-        binding.tenantId,
-        binding.governanceConfigRevisionId,
-      );
       return {
         // protocolType 决定 Transport：external Harness Runtime endpoint 用 managedEndpoint；
         // Hosted 保持 in-process 引用（Hosted 路径无行为回退）。
         runtimeEndpoint: managedEndpoint,
         auth: await resolveOutboundAuth(),
-        gatewayEndpoints: buildGatewayEndpoints({ external: isExternalEndpoint }),
-        governanceConfig: {
-          revision_id: binding.governanceConfigRevisionId,
-          config_digest: binding.governanceConfigDigest,
-          config: frozenGovernance.config as unknown as Record<string, unknown>,
-        },
-        gatewayAccess: {
-          access_token: issueWorkloadToken({
-            type: "gateway",
-            tenantId: binding.tenantId,
-            invocationId: binding.invocationId,
-            runtimeRevisionId: binding.runtimeRevisionId,
-            audience: "gateway",
-            expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
-          }),
-          expires_at: new Date(Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway).toISOString(),
-        },
+        callbackEndpoints: buildGatewayEndpoints({
+          external: isExternalEndpoint,
+          invocationId: binding.invocationId,
+        }),
       };
     },
   });
@@ -328,13 +301,15 @@ export async function dispatchEmployeeTurn(params: {
   if (!result.binding) {
     throw new Error(`Turn 调度缺少 ExecutionBinding（turnId=${params.turnId}）`);
   }
-  // Hosted Transport 需要显式启动 Agent Loop；External Harness Runtime Transport
-  // 的事件流由 Transport 内部消费并经归一化 ingress 进入。
+  // Hosted Transport 在 startInvocation 接纳时已在进程内启动 Agent Loop；
+  // 这里取同一次 launch 的 Promise 作为 completion，绝不二次 launch（双重 loop 会
+  // 重复提交 action 与进度事实）。External Harness Runtime Transport 的事件流由
+  // Transport 内部消费并经归一化 ingress 进入。
   if (isExternalEndpoint) {
     return { dispatched: true, completion: Promise.resolve() };
   }
   const hostedClient = transport as InProcessHostedRuntimeClient;
-  const completion = hostedClient.launchAcceptedInvocation(result.invocation.id);
+  const completion = hostedClient.getLastLaunchPromise() ?? Promise.resolve();
   void completion.catch((error) => {
     logger.error("[runtime] Hosted Runtime 执行失败", {
       turnId: params.turnId,

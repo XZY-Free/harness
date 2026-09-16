@@ -108,23 +108,30 @@ const validExecutionBinding = {
 
 const validContext = {
   common: {
+    contractVersion: 1 as const,
     tenantId: TENANT_ID,
     invocationId: INVOCATION_ID,
-    executionBindingId: EXECUTION_BINDING_ID,
-    principalType: "user" as const,
-    principalId: "user-1",
-    policyRef: POLICY_REF,
-    workspaceBindingId: WORKSPACE_BINDING_ID,
-    environmentRevisionId: ENV_REVISION_ID,
+    bindingDigest: DIGEST_A,
+    principal: { type: "user" as const, id: "user-1", source: "authenticated_user" as const },
     runtimeRevisionId: RUNTIME_REVISION_ID,
-    contextSource: "chat",
+    policy: { revisionId: POLICY_REF, digest: DIGEST_A },
+    workspace: { bindingId: WORKSPACE_BINDING_ID, contractDigest: DIGEST_A },
+    environment: {
+      mode: "MANAGED" as const,
+      revisionId: ENV_REVISION_ID,
+      semanticDigest: DIGEST_A,
+    },
+    contextSourceDigest: DIGEST_A,
+    issuedAt: 1_700_000_000_000,
+    expiresAt: 1_700_000_300_000,
+    jti: "12121212-1212-4121-8121-121212121212",
   },
   subject: {
     type: "thread" as const,
     threadId: THREAD_ID,
     turnId: TURN_ID,
     triggerItemId: TRIGGER_ITEM_ID,
-    conversationContextDigest: DIGEST_B,
+    triggerItemDigest: DIGEST_B,
   },
 };
 
@@ -460,9 +467,9 @@ describe("RuntimeStartRequest 子结构 discriminated unions", () => {
       subject: {
         type: "job",
         jobId: INVOCATION_ID,
-        jobInputDigest: DIGEST_A,
+        inputKind: "inline",
+        inputHash: DIGEST_A,
         triggerRef: "scheduler:daily",
-        jobLineageDigest: DIGEST_B,
       },
     };
     expect(ContextHandleSchema.safeParse(jobContext).success).toBe(true);
@@ -777,6 +784,7 @@ describe("Start digest exclusion domains (§7.1)", () => {
     expect(semantic).not.toHaveProperty("credentials");
     expect(semantic).not.toHaveProperty("traceContext");
     expect(semantic).not.toHaveProperty("callbackEndpoints");
+    expect(semantic).not.toHaveProperty("semanticRequestDigest");
     // 稳定资源身份仍保留
     expect(semantic).toHaveProperty("authority");
     expect(semantic).toHaveProperty("executionBinding");

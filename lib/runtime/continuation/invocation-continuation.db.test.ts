@@ -2,9 +2,15 @@ import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
 import type { ControlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import {
+  createAttempt,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { TEST_RUNTIME_REVISION_ID } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
-import { tryAcquireInvocationExecutionLease } from "@/lib/runtime/persistence/invocation-execution-lease";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -144,47 +150,62 @@ describe("Invocation continuation handler", () => {
   });
 });
 
-describe("Invocation continuation execution lease", () => {
-  it("同一 Invocation 只有一个新鲜 owner，60 秒过期后按新 epoch 重领", async () => {
+describe("Invocation continuation execution ownership", () => {
+  it("同一 Invocation 只有一个新鲜 owner，租约过期后按新 epoch 接管重领", async () => {
     const tenant = await ensureDefaultTenant();
     await db.insert(invocationTable).values({
       id: "invocation-lease",
       tenantId: tenant.id,
+      subjectType: "job",
       threadId: null,
       turnId: null,
       jobId: "job-lease",
       invocationSequence: 1,
       invocationKind: "job",
       executionState: "running",
-    });
-    const startedAt = new Date("2026-01-01T00:00:00Z");
-
-    const first = await tryAcquireInvocationExecutionLease({
-      tenantId: tenant.id,
-      invocationId: "invocation-lease",
-      ownerRef: "worker-a",
-      now: startedAt,
-    });
-    const competing = await tryAcquireInvocationExecutionLease({
-      tenantId: tenant.id,
-      invocationId: "invocation-lease",
-      ownerRef: "worker-b",
-      now: new Date(startedAt.getTime() + 30_000),
-    });
-    const reclaimed = await tryAcquireInvocationExecutionLease({
-      tenantId: tenant.id,
-      invocationId: "invocation-lease",
-      ownerRef: "worker-b",
-      now: new Date(startedAt.getTime() + 60_001),
+      inputDigest: `sha256:${"0".repeat(64)}`,
     });
 
-    expect(first).not.toBeNull();
-    expect(competing).toBeNull();
-    expect(reclaimed?.id).not.toBe(first?.id);
+    // V12：Invocation 执行租约统一由 ExecutionOwnership 承载（prepared Attempt + active Owner）。
+    const attempt = await createAttempt({
+      tenantId: tenant.id,
+      invocationId: "invocation-lease",
+    });
+    const attemptEvidence = { kind: "invocation-continuation-lease-test" };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: attempt.id,
+        evidence: attemptEvidence,
+        digest: protocolDigest(attemptEvidence),
+      }),
+    );
+    const acquire = (acquiredById: string) =>
+      acquireExecutionOwnership({
+        tenantId: tenant.id,
+        invocationId: "invocation-lease",
+        attemptId: attempt.id,
+        runtimeRevisionId: TEST_RUNTIME_REVISION_ID,
+        acquiredByType: "service",
+        acquiredById,
+      });
+
+    const first = await acquire("worker-a");
+    // 新鲜 owner 存活期间，竞争者无法取得执行权。
+    await expect(acquire("worker-b")).rejects.toMatchObject({ code: "HealthyOwnerExists" });
+    // 租约过期后按新 epoch 接管：旧 owner 置 lost，新 owner epoch+1。
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .where(eq(executionOwnershipTable.id, first.ownership.id));
+    const reclaimed = await acquire("worker-b");
+
+    expect(first.ownership.leaseEpoch).toBe(1);
+    expect(reclaimed.ownership.leaseEpoch).not.toBe(first.ownership.leaseEpoch);
     const rows = await db
       .select()
       .from(executionOwnershipTable)
-      .where(eq(executionOwnershipTable.invocationId, "invocation-lease"));
+      .where(eq(executionOwnershipTable.invocationId, "invocation-lease"))
+      .orderBy(executionOwnershipTable.leaseEpoch);
     expect(rows.map((row) => [row.leaseEpoch, row.ownershipState])).toEqual([
       [1, "lost"],
       [2, "active"],

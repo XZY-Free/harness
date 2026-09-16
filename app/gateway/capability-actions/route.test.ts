@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { POST as runtimeEventsPOST } from "@/app/runtime/invocations/[invocationId]/events/route";
 import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import {
+  createAttempt,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
@@ -12,37 +18,136 @@ import {
   computeGovernanceConfigDigest,
   ensureDefaultTenant,
 } from "@/lib/identity/tenant-bootstrap";
-import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
+import { issueTestExecutionToken } from "@/lib/identity/test-support/execution-token";
 import {
   agentCallAttemptTable,
   agentCallBindingTable,
   agentCallTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { capabilityUseTable } from "@/lib/persistence/schema/capability-use";
-import { threadEventTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
-import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
+import {
+  threadEventTable,
+  threadItemTable,
+  threadTable,
+  turnTable,
+} from "@/lib/persistence/schema/conversation";
+import {
+  executionOwnershipTable,
+  invocationTable,
+  runtimeEventIngressTable,
+} from "@/lib/persistence/schema/executions";
 import {
   governanceConfigRevisionTable,
   governanceConfigSetTable,
 } from "@/lib/persistence/schema/governance-config";
-import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
   type CapabilityCatalogAgent,
   buildCapabilityCatalogSnapshot,
 } from "@/lib/runtime/harness-loop/capability-catalog";
+import {
+  createRuntimeSessionBinding,
+  updateRuntimeSessionDispatch,
+} from "@/lib/runtime/persistence/runtime-session-store";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, asc, eq, like } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { POST as runtimeEventsPOST } from "../runtime-events/route";
 import { POST as userActionRequestsPOST } from "../user-action-requests/route";
 import { POST } from "./route";
 
 const TENANT = DEFAULT_TENANT_ID;
 const agentScenarios: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>[] = [];
 
+/** 每个 Invocation 的 Current Execution Authority claims（gateway token 必须与之绑定）。 */
+interface GatewayAuthorityClaims {
+  runtimeRevisionId: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: string;
+  sessionBindingId: string;
+}
+const authorityByInvocation = new Map<string, GatewayAuthorityClaims>();
+
+/**
+ * 为已有 Invocation + ExecutionBinding 播种 canonical Authority 链：
+ * prepared InvocationAttempt → ExecutionOwnership(executing) → active RuntimeSessionBinding。
+ */
+async function seedRuntimeAuthority(input: {
+  tenantId: string;
+  invocationId: string;
+  runtimeRevisionId: string;
+}): Promise<void> {
+  const attempt = await createAttempt({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+  });
+  const evidence = {
+    kind: "test-candidate",
+    invocationId: input.invocationId,
+    attemptId: attempt.id,
+  };
+  await db.transaction((tx) =>
+    markAttemptPreparedInTransaction(tx, {
+      attemptId: attempt.id,
+      evidence,
+      digest: protocolDigest(evidence),
+    }),
+  );
+  const acquired = await acquireExecutionOwnership({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+    attemptId: attempt.id,
+    runtimeRevisionId: input.runtimeRevisionId,
+    acquiredByType: "service",
+    acquiredById: "capability-actions-test",
+  });
+  const session = await createRuntimeSessionBinding({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    runtimeRevisionId: input.runtimeRevisionId,
+    leaseEpoch: acquired.ownership.leaseEpoch,
+    intentType: "start",
+    startIntentKey: `start:${acquired.ownership.id}`,
+  });
+  // canonical 约束：bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
+  await updateRuntimeSessionDispatch(input.tenantId, session.id, {
+    bindingState: "active",
+    semanticRequestJson: { kind: "capability-actions-test" },
+    semanticRequestDigest: `sha256:${"0".repeat(64)}`,
+    remoteSessionRef: "capability-actions-test-session",
+    remoteExecutionRef: "capability-actions-test-execution",
+    startedEventId: randomUUID(),
+  });
+  await db
+    .update(executionOwnershipTable)
+    .set({
+      executionPhase: "executing",
+      activatedAt: new Date(),
+      activationDigest: `sha256:${"0".repeat(64)}`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, input.tenantId),
+        eq(executionOwnershipTable.id, acquired.ownership.id),
+      ),
+    );
+  authorityByInvocation.set(input.invocationId, {
+    runtimeRevisionId: input.runtimeRevisionId,
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    leaseEpoch: String(acquired.ownership.leaseEpoch),
+    sessionBindingId: session.id,
+  });
+}
+
 beforeEach(async () => {
   await resetDatabase(db);
   await ensureDefaultTenant();
   agentScenarios.length = 0;
+  authorityByInvocation.clear();
 });
 
 afterEach(async () => {
@@ -67,7 +172,7 @@ async function seedRunningTurn(
     lifecycleState: "active",
     lastActivityAt: new Date(),
     lastTurnSequence: 1,
-    lastItemSequence: 0,
+    lastItemSequence: 1,
     lastEventSequence: 0,
     pendingQueueVersionNo: 1,
     versionNo: 1,
@@ -85,15 +190,31 @@ async function seedRunningTurn(
     agentUseMode: preferredAgentId ? "preferred" : null,
     versionNo: 1,
   });
+  // canonical 约束：Invocation.threadId/turnId/triggerItemId 是真实外键，
+  // 且 Invocation_subject_shape 要求 thread 主体 triggerItemId 非空。
+  const triggerItemId = randomUUID();
+  await db.insert(threadItemTable).values({
+    id: triggerItemId,
+    threadId,
+    turnId,
+    itemSequence: 1,
+    itemType: "user_message",
+    itemState: "completed",
+    authorType: "user",
+    contentJson: { text: "trigger" },
+    contentHash: "test-trigger-item",
+  });
   await db.insert(invocationTable).values({
     id: invocationId,
     tenantId: TENANT,
+    subjectType: "thread",
     threadId,
     turnId,
-    jobId: null,
+    triggerItemId,
     invocationSequence: 1,
     invocationKind: "initial",
     executionState: "running",
+    inputDigest: `sha256:${"0".repeat(64)}`,
     versionNo: 1,
   });
   const [governanceSet] = await db
@@ -123,13 +244,16 @@ async function seedRunningTurn(
       .set({ configJson: config, configDigest: governanceDigest })
       .where(eq(governanceConfigRevisionTable.id, governanceSet.revisionId));
   }
+  const workspace = await createNoPlatformWorkspaceBinding(TENANT, "capability-actions-test");
   await createExecutionBinding({
     invocationId,
     tenantId: TENANT,
-    runtimeRevisionId: "runtime-revision-test",
+    // canonical：authority.runtimeRevisionId 必须是 UUID，且与 token claims 一致
+    runtimeRevisionId: invocationId,
     deploymentRouteId: "deployment-route-test",
     modelProvider: "test",
     modelId: "test-model",
+    workspaceBindingId: workspace.id,
     governanceConfigRevisionId: governanceSet.revisionId,
     governanceConfigDigest: governanceDigest,
     controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
@@ -144,6 +268,7 @@ async function seedRunningTurn(
         }
       : {}),
   });
+  await seedRuntimeAuthority({ tenantId: TENANT, invocationId, runtimeRevisionId: invocationId });
   return { threadId, turnId, invocationId };
 }
 
@@ -185,25 +310,25 @@ function capabilityCatalogFields(
     capabilityCatalogVersion: catalog.version,
     capabilityCatalogSourceRefs: catalog.sourceRefs,
     capabilityCatalogCreatedAt: catalog.createdAt,
-    executionSubjectType: "user" as const,
-    executionSubjectId: "test-user",
-    executionSubjectSource: "authenticated_user" as const,
-    executionSubjectFrozenAt: new Date("2026-09-04T00:00:00.000Z"),
+    principalType: "user" as const,
+    principalId: "test-user",
+    principalSource: "authenticated_user" as const,
+    principalFrozenAt: new Date("2026-09-04T00:00:00.000Z"),
   };
 }
 
 function token(
   invocationId: string,
   tenantId = TENANT,
-  runtimeRevisionId = "runtime-revision-test",
+  runtimeRevisionId = authorityByInvocation.get(invocationId)?.runtimeRevisionId ?? invocationId,
 ): string {
-  return issueWorkloadToken({
-    type: "gateway",
+  const authority = authorityByInvocation.get(invocationId);
+  return issueTestExecutionToken({
     tenantId,
     invocationId,
     runtimeRevisionId,
     audience: "gateway",
-    expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
+    ...(authority ?? {}),
   });
 }
 
@@ -212,7 +337,7 @@ function request(
   action: unknown,
   producerSequenceStart = 1,
   tenantId = TENANT,
-  runtimeRevisionId = "runtime-revision-test",
+  runtimeRevisionId = invocationId,
 ): Request {
   return new Request("http://localhost/gateway/capability-actions", {
     method: "POST",
@@ -222,7 +347,7 @@ function request(
       "idempotency-key": `${invocationId}:${(action as { actionId?: string })?.actionId ?? ""}`,
     },
     body: JSON.stringify({
-      invocationId,
+      invocation_id: invocationId,
       producer_sequence_start: producerSequenceStart,
       action,
     }),
@@ -230,83 +355,128 @@ function request(
 }
 
 describe("POST /gateway/capability-actions", () => {
+  /** Runtime 协议 audience token（/runtime events 端点要求 audience=runtime）。 */
+  function runtimeToken(invocationId: string, tenantId = TENANT): string {
+    const authority = authorityByInvocation.get(invocationId);
+    return issueTestExecutionToken({
+      tenantId,
+      invocationId,
+      runtimeRevisionId: authority?.runtimeRevisionId ?? invocationId,
+      audience: "runtime",
+      ...(authority ?? {}),
+    });
+  }
+
+  /** 组装 canonical Runtime Event batch envelope（authority 必须与 token claims 一致）。 */
+  function runtimeBatch(invocationId: string, events: unknown[]): Record<string, unknown> {
+    const authority = authorityByInvocation.get(invocationId);
+    if (!authority) throw new Error("seedRuntimeAuthority must run first");
+    return {
+      protocolVersion: 3,
+      authority: { invocationId, ...authority },
+      events,
+    };
+  }
+
+  function protocolEvent(
+    producerSequence: number,
+    type: string,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      eventId: randomUUID(),
+      producerSequence: String(producerSequence),
+      type,
+      schemaVersion: 1,
+      payload,
+    };
+  }
+
   it("External Runtime 通过 Gateway 回传事件与 user_action 请求，写入同一 Ingress/Authority", async () => {
     const seeded = await seedRunningTurn();
-    const gatewayHeaders = {
-      authorization: `Bearer ${token(seeded.invocationId)}`,
-      "content-type": "application/json",
-      "idempotency-key": `${seeded.invocationId}:runtime-events:1`,
-    };
-    const eventBody = {
-      invocation_id: seeded.invocationId,
-      producer_sequence_start: 1,
-      events: [
-        {
-          producer_event_id: "external-user-action-1",
-          producer_sequence: 1,
-          type: "user_action.requested",
-          schema_version: 1,
-          payload: {
-            request_type: "confirmation",
-            purpose: "external_runtime_confirmation",
-            prompt: "请确认继续",
-          },
-        },
-      ],
-    };
+    const eventBody = runtimeBatch(seeded.invocationId, [
+      protocolEvent(1, "user-action", {
+        request_type: "confirmation",
+        purpose: "external_runtime_confirmation",
+        prompt: "请确认继续",
+      }),
+    ]);
     const runtimeResponse = await runtimeEventsPOST(
       new Request("http://localhost/gateway/runtime-events", {
         method: "POST",
-        headers: gatewayHeaders,
+        headers: {
+          authorization: `Bearer ${runtimeToken(seeded.invocationId)}`,
+          "content-type": "application/json",
+          "idempotency-key": `${seeded.invocationId}:runtime-events:1`,
+        },
         body: JSON.stringify(eventBody),
       }),
+      { params: Promise.resolve({ invocationId: seeded.invocationId }) },
     );
     expect(runtimeResponse.status).toBe(200);
-    expect(await db.select().from(userActionRequestTable)).toHaveLength(1);
+    // 外部 Runtime 的 user_action 请求 canonical 投影：user_action ThreadItem。
+    expect(
+      await db
+        .select()
+        .from(threadItemTable)
+        .where(
+          and(
+            eq(threadItemTable.threadId, seeded.threadId),
+            eq(threadItemTable.itemType, "user_action"),
+          ),
+        ),
+    ).toHaveLength(1);
 
     const second = await seedRunningTurn();
     const userActionResponse = await userActionRequestsPOST(
       new Request("http://localhost/gateway/user-action-requests", {
         method: "POST",
         headers: {
-          ...gatewayHeaders,
           authorization: `Bearer ${token(second.invocationId)}`,
+          "content-type": "application/json",
           "idempotency-key": `${second.invocationId}:user-action:1`,
         },
-        body: JSON.stringify({ ...eventBody, invocation_id: second.invocationId }),
+        body: JSON.stringify(
+          runtimeBatch(second.invocationId, [
+            protocolEvent(1, "user-action", {
+              request_type: "confirmation",
+              purpose: "external_runtime_confirmation",
+              prompt: "请确认继续",
+            }),
+          ]),
+        ),
       }),
     );
     expect(userActionResponse.status).toBe(200);
-    expect(await db.select().from(userActionRequestTable)).toHaveLength(2);
+    expect(
+      await db
+        .select()
+        .from(threadItemTable)
+        .where(
+          and(
+            eq(threadItemTable.threadId, second.threadId),
+            eq(threadItemTable.itemType, "user_action"),
+          ),
+        ),
+    ).toHaveLength(1);
 
     const completed = await seedRunningTurn();
     const completedResponse = await runtimeEventsPOST(
       new Request("http://localhost/gateway/runtime-events", {
         method: "POST",
         headers: {
-          authorization: `Bearer ${token(completed.invocationId)}`,
+          authorization: `Bearer ${runtimeToken(completed.invocationId)}`,
           "content-type": "application/json",
           "idempotency-key": `${completed.invocationId}:runtime-events:1`,
         },
-        body: JSON.stringify({
-          invocation_id: completed.invocationId,
-          producer_sequence_start: 1,
-          events: [
-            {
-              producer_event_id: "external-response-1",
-              producer_sequence: 1,
-              type: "response.completed",
-              payload: { text: "外部 Runtime 已完成" },
-            },
-            {
-              producer_event_id: "external-execution-2",
-              producer_sequence: 2,
-              type: "execution.completed",
-              payload: { outcome: "success" },
-            },
-          ],
-        }),
+        body: JSON.stringify(
+          runtimeBatch(completed.invocationId, [
+            protocolEvent(1, "response.completed", { text: "外部 Runtime 已完成" }),
+            protocolEvent(2, "execution.completed", { outcome: "success" }),
+          ]),
+        ),
       }),
+      { params: Promise.resolve({ invocationId: completed.invocationId }) },
     );
     expect(completedResponse.status).toBe(200);
     expect(
@@ -489,13 +659,20 @@ describe("POST /gateway/capability-actions", () => {
       contractSummary: "AgentCall execution contract",
       contextRequirements: ["execution_subject"],
     };
+    // canonical：authority.runtimeRevisionId 必须是 UUID，且与 token claims 一致。
+    const externalRuntimeRevisionId = randomUUID();
+    const externalWorkspace = await createNoPlatformWorkspaceBinding(
+      scenario.tenantId,
+      "external-runtime-test",
+    );
     await createExecutionBinding({
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
-      runtimeRevisionId: "external-runtime-revision-test",
+      runtimeRevisionId: externalRuntimeRevisionId,
       deploymentRouteId: "external-runtime-route-test",
       modelProvider: "test",
       modelId: "test-model",
+      workspaceBindingId: externalWorkspace.id,
       governanceConfigRevisionId: scenario.binding.governanceConfigRevisionId,
       governanceConfigDigest: scenario.binding.governanceConfigDigest,
       controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
@@ -505,6 +682,11 @@ describe("POST /gateway/capability-actions", () => {
         scenario.agentId,
         agentCandidate,
       ),
+    });
+    await seedRuntimeAuthority({
+      tenantId: scenario.tenantId,
+      invocationId: scenario.parentInvocationId,
+      runtimeRevisionId: externalRuntimeRevisionId,
     });
     const action = {
       actionId: "agent-external-pending",
@@ -519,15 +701,7 @@ describe("POST /gateway/capability-actions", () => {
       },
     };
 
-    const response = await POST(
-      request(
-        scenario.parentInvocationId,
-        action,
-        1,
-        scenario.tenantId,
-        "external-runtime-revision-test",
-      ),
-    );
+    const response = await POST(request(scenario.parentInvocationId, action, 1, scenario.tenantId));
     const body = await response.json();
 
     expect(response.status).toBe(200);

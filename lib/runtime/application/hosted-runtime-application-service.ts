@@ -1,4 +1,11 @@
-import type { ResumeHarnessInvocationResult } from "./resume-harness-invocation";
+export interface HostedRuntimeResumeResult {
+  status: "handled_noop" | "resumed";
+  invocationId: string;
+  runtime?: "hosted" | "external";
+  completed?: boolean;
+  pending?: boolean;
+  waitingForUser?: boolean;
+}
 
 interface HostedControlInput {
   tenantId: string;
@@ -8,10 +15,10 @@ interface HostedControlInput {
 
 /** Hosted Runtime 的正式本地应用边界；所有方法只接受 durable identity。 */
 export interface HostedRuntimeApplicationService {
-  start(input: HostedControlInput): Promise<ResumeHarnessInvocationResult>;
+  start(input: HostedControlInput): Promise<HostedRuntimeResumeResult>;
   resume(
     input: HostedControlInput & { resumePayload?: unknown },
-  ): Promise<ResumeHarnessInvocationResult>;
+  ): Promise<HostedRuntimeResumeResult>;
   cancel(input: HostedControlInput & { reason?: string }): Promise<void>;
   steer(input: HostedControlInput & { steerPayload?: unknown }): Promise<void>;
 }

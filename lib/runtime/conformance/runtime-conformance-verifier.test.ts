@@ -44,7 +44,7 @@ function createBaseInput(envelopeJson: string, report = buildTestConformanceRepo
     expectedRuntimeRevisionId: report.runtimeRevisionId,
     expectedRuntimeTargetDigest: report.runtimeTargetDigest,
     expectedRuntimeConfigDigest: report.runtimeConfigDigest,
-    expectedProtocolContractRevision: report.protocolContractRevision,
+    expectedProtocolContractRevision: report.protocolContractDigest,
     tenantId: "t1",
   };
 }

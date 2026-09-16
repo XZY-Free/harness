@@ -83,7 +83,7 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
     revisionId: string;
     runtimeTargetDigest: string;
     configHash: string;
-    protocolContractRevision: string;
+    protocolContractDigest: string;
   }
 
   async function seedExternalRevision(): Promise<SeededRevision> {
@@ -105,10 +105,12 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
     });
     await db.insert(runtimeRevisionTable).values({
       id: revisionId,
+      tenantId: tenant.id,
       runtimeId,
       revisionNo: 1,
       protocolType: "harness_runtime_protocol",
-      protocolContractRevision: "harness-runtime-protocol@1",
+      protocolVersion: 3,
+      protocolContractDigest: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "external_endpoint",
       runtimeTargetDigest,
       endpointRef: `https://runtime.example.test/${revisionId}`,
@@ -124,7 +126,7 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
       revisionId,
       runtimeTargetDigest,
       configHash,
-      protocolContractRevision: "harness-runtime-protocol@1",
+      protocolContractDigest: "harness-runtime-protocol@1",
     };
   }
 
@@ -145,7 +147,7 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
       runtimeRevisionId: revision.revisionId,
       runtimeTargetDigest: options.targetDigest ?? revision.runtimeTargetDigest,
       runtimeConfigDigest: revision.configHash,
-      protocolContractRevision: revision.protocolContractRevision,
+      protocolContractDigest: revision.protocolContractDigest,
       suiteRevision: "runtime-conformance@1",
       runnerArtifactDigest: `sha256:${"1".repeat(64)}`,
       runnerIdentity: "test-runner",
@@ -163,12 +165,14 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
       predicateType: "predicate",
       verifiedAt: options.completedAt,
       idempotencyKey: `idem-${options.runId}`,
+      protocolVersion: 3,
       requestId: `req-${options.runId}`,
       recordedAt: options.recordedAt,
     });
     await db.insert(runtimeConformanceCaseResult).values(
       PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
         id: randomUUID(),
+        tenantId: revision.tenantId,
         runId: options.runId,
         caseId,
         passed: true,

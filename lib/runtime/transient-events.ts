@@ -1,8 +1,5 @@
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { INVOCATION_TERMINAL_STATES } from "@/lib/persistence/schema/executions";
-import {
-  IngressInvocationNotFoundError,
-  IngressInvocationTerminalError,
-} from "@/lib/runtime/errors";
 /**
  * Transient 事件处理。
  *
@@ -24,11 +21,12 @@ import {
  * - transient 事件不影响 Invocation/Turn 状态。
  * - 批次非空校验 + transientSequenceStart 与 events[0] 一致校验。
  */
+import { IngressBatchEmptyError } from "@/lib/runtime/application/ingress-runtime-events";
+import { IngressAuthorityMismatchError } from "@/lib/runtime/application/ingress-runtime-events";
 import {
-  IngressBatchEmptyError,
-  IngressSequenceStartMismatchError,
-} from "@/lib/runtime/event-ingress-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+  IngressInvocationNotFoundError,
+  IngressInvocationTerminalError,
+} from "@/lib/runtime/errors";
 import { publishThreadTransientEvent } from "@/lib/runtime/transient-event-bus";
 
 /** Transient 事件输入（不持久化）。 */
@@ -103,11 +101,7 @@ export async function ingressTransientBatch(
   // 4. 校验 transientSequenceStart 与 events[0] 一致
   const firstEvent = params.events[0];
   if (firstEvent && firstEvent.transient_sequence !== params.transientSequenceStart) {
-    throw new IngressSequenceStartMismatchError(
-      params.invocationId,
-      params.transientSequenceStart,
-      firstEvent?.transient_sequence ?? 0,
-    );
+    throw new IngressAuthorityMismatchError(params.invocationId);
   }
 
   // 5. 校验 transient_sequence 连续性（从 transientSequenceStart 开始递增）

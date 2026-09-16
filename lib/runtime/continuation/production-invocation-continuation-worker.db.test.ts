@@ -11,10 +11,18 @@ import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-pl
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
+import {
+  createAttempt,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
@@ -24,10 +32,15 @@ import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/run
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
-import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
-import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
+import {
+  getRuntimeSessionBindingByOwnership,
+  updateRuntimeSessionDispatch,
+} from "@/lib/runtime/persistence/runtime-session-store";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, desc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -45,12 +58,12 @@ async function startExternalRuntime(tenantId: string): Promise<ExternalRuntimeFi
   const server = createServer(async (request, response) => {
     if (
       request.method !== "POST" ||
-      !request.url?.match(/^\/runtime\/v1\/invocations\/[^/]+\/resume$/)
+      !request.url?.match(/^\/runtime\/invocations\/[^/]+\/resume$/)
     ) {
       response.writeHead(404).end();
       return;
     }
-    const invocationId = request.url.split("/")[4] ?? "";
+    const invocationId = request.url.split("/")[3] ?? "";
     const body = await new Promise<string>((resolve, reject) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -59,21 +72,38 @@ async function startExternalRuntime(tenantId: string): Promise<ExternalRuntimeFi
     });
     const parsedBody = body ? JSON.parse(body) : null;
     requests.push({ invocationId, body: parsedBody });
-    const producerSequence = (await getLatestProducerSequence(tenantId, invocationId)) ?? 0;
-    await ingressEventBatch({
+    // V12：事件回传必须携带当前 ExecutionOwnership 权威（与生产 resume 流程一致）。
+    const owner = await getActiveExecutionOwnership({ tenantId, invocationId });
+    if (!owner) throw new Error("外部 Runtime 模拟：父 Invocation 无活跃 ExecutionOwnership");
+    const session = await getRuntimeSessionBindingByOwnership(tenantId, owner.id);
+    if (!session) throw new Error("外部 Runtime 模拟：父 Invocation 无 RuntimeSessionBinding");
+    const authority = authorityIdentity({
+      invocationId,
+      runtimeRevisionId: session.runtimeRevisionId,
+      attemptId: owner.attemptId,
+      ownershipId: owner.id,
+      leaseEpoch: owner.leaseEpoch,
+      sessionBindingId: session.id,
+    });
+    const invocation = await getInvocationById(tenantId, invocationId);
+    if (!invocation) throw new Error("外部 Runtime 模拟：父 Invocation 不存在");
+    const nextSequence = invocation.lastProducerSequence + 1;
+    await ingressRuntimeEvents({
       tenantId,
       invocationId,
-      producerSequenceStart: producerSequence + 1,
-      events: [
-        {
-          producer_event_id: `external-runtime-completed:${invocationId}:${producerSequence + 1}`,
-          producer_sequence: producerSequence + 1,
-          type: "execution.completed",
-          schema_version: 1,
-          occurred_at: new Date().toISOString(),
-          payload: { finish_reason: "execution.completed" },
-        },
-      ],
+      batch: {
+        protocolVersion: 3,
+        authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: String(nextSequence),
+            type: "execution.completed",
+            schemaVersion: 1,
+            payload: { finishReason: "execution.completed" },
+          },
+        ],
+      },
     });
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ invocationId: invocationId, resumed: true, attempt_no: 1 }));
@@ -163,10 +193,12 @@ describe("生产 continuation worker durable topology", () => {
       });
       await db.insert(runtimeRevisionTable).values({
         id: runtimeRevisionId,
+        tenantId: scenario.tenantId,
         runtimeId,
         revisionNo: 1,
         protocolType: "harness_runtime_protocol",
-        protocolContractRevision: "1",
+        protocolVersion: 3,
+        protocolContractDigest: "1",
         runtimeEvidenceKind: "external_endpoint",
         runtimeTargetDigest,
         endpointRef: runtime.endpoint,
@@ -187,6 +219,11 @@ describe("生产 continuation worker durable topology", () => {
         invocationId: scenario.parentInvocationId,
         tenantId: scenario.tenantId,
         runtimeRevisionId,
+        // canonical schema：ExecutionBinding.workspaceBindingId NOT NULL 且必须可解析，
+        // 悬空默认值会在 ingress 校验时触发 WorkspaceNotReady。
+        workspaceBindingId: (
+          await createNoPlatformWorkspaceBinding(scenario.tenantId, "invocation-continuation-test")
+        ).id,
         deploymentRouteId: "continuation-test-route",
         modelProvider: "test",
         modelId: "test-model",
@@ -222,12 +259,56 @@ describe("生产 continuation worker durable topology", () => {
         shortPurpose: "提交请假",
         payload: { agentId: scenario.agentId, task: "提交我的年假申请" },
       };
+      // canonical Ownership acquire：Agent action 必须携带 Current Execution Authority。
+      const attempt = await createAttempt({
+        tenantId: scenario.tenantId,
+        invocationId: scenario.parentInvocationId,
+      });
+      const attemptEvidence = {
+        kind: "test-candidate",
+        invocationId: scenario.parentInvocationId,
+        attemptId: attempt.id,
+      };
+      await db.transaction((tx) =>
+        markAttemptPreparedInTransaction(tx, {
+          attemptId: attempt.id,
+          evidence: attemptEvidence,
+          digest: protocolDigest(attemptEvidence),
+        }),
+      );
+      const { authority } = await acquireTestRuntimeAuthority({
+        tenantId: scenario.tenantId,
+        invocationId: scenario.parentInvocationId,
+        attemptId: attempt.id,
+        runtimeRevisionId,
+        // canonical 生产拓扑：AgentCall 等待用户输入时 Parent Invocation 必然已
+        // Start（executing/running），ingress user-action 事件也要求 executing 阶段。
+        phase: "executing",
+      });
+      // canonical 生产拓扑：Parent Start 成功后 session 必须已 ack 为 active，
+      // 否则 ingress user-action 的 executing 阶段校验（NotCurrentExecutor）不通过。
+      const parentSemanticRequest = {
+        fixture: "invocation-continuation-parent-start",
+        invocationId: scenario.parentInvocationId,
+      };
+      await updateRuntimeSessionDispatch(scenario.tenantId, authority.sessionBindingId, {
+        bindingState: "active",
+        semanticRequestJson: parentSemanticRequest,
+        semanticRequestDigest: protocolDigest(parentSemanticRequest),
+        remoteSessionRef: `runtime-session:${authority.sessionBindingId}`,
+        remoteExecutionRef: `runtime-execution:${scenario.parentInvocationId}`,
+        transportAcknowledgement: {
+          capabilitiesDigest: protocolDigest(parentSemanticRequest),
+        },
+        startedEventId: randomUUID(),
+      });
       const started = await execute(action, {
         invocationId: scenario.parentInvocationId,
         tenantId: scenario.tenantId,
         threadId: scenario.threadId,
         turnId: scenario.turnId,
         actionDigest: `sha256:${"b".repeat(64)}`,
+        authority,
       });
       expect(started.pending).toMatchObject({ kind: "agent_call", callId: scenario.callId });
       expect(scenario.provider.captured).toHaveLength(1);
@@ -259,7 +340,7 @@ describe("生产 continuation worker durable topology", () => {
       );
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
-        requestId: request.id,
+        request_id: request.id,
         resume_dispatch: { mode: "agent_continuation", command_state: "acknowledged" },
       });
 

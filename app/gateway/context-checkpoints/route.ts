@@ -238,9 +238,8 @@ function toWorkloadPrincipal(principal: GatewayPrincipal): WorkloadPrincipal {
     audience: principal.audience,
     callerType: "workload",
     claims: principal,
-    serviceId: principal.serviceId ?? null,
     invocationId: principal.invocationId,
-    runtimeRevisionId: principal.runtimeRevisionId ?? null,
+    runtimeRevisionId: principal.runtimeRevisionId,
   };
 }
 

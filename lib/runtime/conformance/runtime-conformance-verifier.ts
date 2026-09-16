@@ -189,10 +189,10 @@ export function createDSSEConformanceVerifier(
         return fail("config_digest_mismatch");
       }
 
-      // 步骤 11: 校验 protocolContractRevision（可选绑定校验）
+      // 步骤 11: 校验 protocolContractDigest（可选绑定校验）
       if (
         input.expectedProtocolContractRevision &&
-        report.protocolContractRevision !== input.expectedProtocolContractRevision
+        report.protocolContractDigest !== input.expectedProtocolContractRevision
       ) {
         return fail("protocol_revision_mismatch");
       }

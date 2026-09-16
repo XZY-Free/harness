@@ -28,10 +28,10 @@ export type ExecutionSubjectSource = (typeof EXECUTION_SUBJECT_SOURCES)[number];
 
 /** ExecutionBinding 中唯一、不可变的可信主体事实。tenant 复用 Binding.tenantId。 */
 export interface FrozenExecutionSubjectFields {
-  executionSubjectType: ExecutionSubject["subjectType"];
-  executionSubjectId: string;
-  executionSubjectSource: ExecutionSubjectSource;
-  executionSubjectFrozenAt: Date;
+  principalType: "user" | "service";
+  principalId: string;
+  principalSource: "authenticated_user" | "trusted_service";
+  principalFrozenAt: Date;
 }
 
 export interface ExecutionSubjectBindingView extends FrozenExecutionSubjectFields {
@@ -60,11 +60,10 @@ export function freezeTrustedExecutionSubject(
     throw new TrustedExecutionSubjectError("冻结时间非法");
   }
   return {
-    executionSubjectType: subject.subjectType,
-    executionSubjectId: subject.subjectId,
-    executionSubjectSource:
-      subject.subjectType === "user" ? "authenticated_user" : "trusted_service",
-    executionSubjectFrozenAt: frozenAt,
+    principalType: subject.subjectType,
+    principalId: subject.subjectId,
+    principalSource: subject.subjectType === "user" ? "authenticated_user" : "trusted_service",
+    principalFrozenAt: frozenAt,
   };
 }
 
@@ -76,20 +75,24 @@ export function recoverTrustedExecutionSubject(
   if (!binding || binding.tenantId !== expectedTenantId) {
     throw new TrustedExecutionSubjectError("Binding tenant 与调用租户不一致");
   }
+  const subjectType = binding.principalType;
+  if (subjectType !== "user" && subjectType !== "service") {
+    throw new TrustedExecutionSubjectError("主体类型非法");
+  }
   const subject: ExecutionSubject = {
     tenantId: binding.tenantId,
-    subjectType: binding.executionSubjectType,
-    subjectId: binding.executionSubjectId,
+    subjectType,
+    subjectId: binding.principalId,
   };
   assertTrustedExecutionSubject(subject, expectedTenantId);
   const expectedSource: ExecutionSubjectSource =
     subject.subjectType === "user" ? "authenticated_user" : "trusted_service";
-  if (binding.executionSubjectSource !== expectedSource) {
+  if (binding.principalSource !== expectedSource) {
     throw new TrustedExecutionSubjectError("主体类型与来源类别不一致");
   }
   if (
-    !(binding.executionSubjectFrozenAt instanceof Date) ||
-    Number.isNaN(binding.executionSubjectFrozenAt.getTime())
+    !(binding.principalFrozenAt instanceof Date) ||
+    Number.isNaN(binding.principalFrozenAt.getTime())
   ) {
     throw new TrustedExecutionSubjectError("Binding 缺少有效冻结时间");
   }

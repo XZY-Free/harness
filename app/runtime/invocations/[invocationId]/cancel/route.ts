@@ -1,23 +1,3 @@
-/**
- * POST /runtime/invocations/{invocationId}/cancel — Hosted Runtime 取消 Invocation（ +  参考实现）。
- *
- * 事实源：
- * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
- * - docs/architecture/agent-control-plane.md §3.8（Stop/Interrupt）
- * - docs/architecture/runtime-control-plane.md
- *
- * 行为：
- * - 解析 Bearer Token（Workload Token，audience=runtime + invocation 绑定校验）。
- * - 校验 Idempotency-Key（必填）。
- * - 校验请求体（reason 必填）。
- * -  扩展：调用 RuntimeAdapter.handleCancel，异步回传 execution.cancelled 事件。
- * - 返回 cancelled=true（Runtime ack，平台标记命令 acknowledged）。
- *
- * 错误映射：
- * - 缺少/非法 Token → 401 AUTHENTICATION_REQUIRED
- * - 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID
- * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
- */
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -25,92 +5,47 @@ import {
   apiSuccess,
   getRequestId,
 } from "@/lib/http";
-import { extractBearerToken } from "@/lib/identity/workload-token";
-import { getRouteHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
 import {
+  type WorkloadTokenClaims,
   resolveRuntimePrincipal,
   runtimeAuthErrorResponse,
   runtimeSchemaInvalidTable,
 } from "@/lib/runtime/route-helpers";
-import type {
-  CancelInvocationRequestBody,
-  CancelInvocationResponse,
-} from "@/lib/runtime/runtime-client";
+import {
+  CancelRequestSchema,
+  type CancelResponse,
+  CancelResponseSchema,
+} from "@/lib/runtime/runtime-protocol";
 
 export const dynamic = "force-dynamic";
-
-/**
- * 路径参数上下文（Next.js App Router 原生动态段）。
- * 命令作为资源子路径（`/{id}/command`），动态参数直接从 params 解构。
- */
-interface RouteContext {
-  params: Promise<Record<string, string | string[]>>;
-}
-
-/** 校验请求体结构。 */
-function validateBody(body: unknown): body is CancelInvocationRequestBody {
-  if (!body || typeof body !== "object") return false;
-  const b = body as Record<string, unknown>;
-  if (typeof b.reason !== "string" || b.reason.length === 0) return false;
-  return true;
-}
+type RouteContext = { params: Promise<{ invocationId: string }> };
 
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
   const requestId = getRequestId(request);
-  const params = await context.params;
-  const rawValue = params.invocationId;
-  const invocationId = typeof rawValue === "string" ? rawValue : "";
-
-  if (!invocationId) {
-    return runtimeSchemaInvalidTable(requestId, "路径参数 invocationId 缺失");
-  }
-
-  // 1. 解析 Bearer Token（audience=runtime + invocation 绑定校验）
+  const { invocationId } = await context.params;
+  let claims: WorkloadTokenClaims;
   try {
-    await resolveRuntimePrincipal(request.headers, invocationId);
-  } catch (err) {
-    const authResp = runtimeAuthErrorResponse(err, requestId);
-    if (authResp) return authResp;
-    throw err;
+    claims = await resolveRuntimePrincipal(request.headers, invocationId);
+  } catch (error) {
+    const response = runtimeAuthErrorResponse(error, requestId);
+    if (response) return response;
+    throw error;
   }
-
-  // 2. 校验 Idempotency-Key（必填）
-  if (!request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim()) {
-    return runtimeSchemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
-  }
-
-  // 3. 解析请求体
-  const body = await request.json().catch(() => null);
-  if (!validateBody(body)) {
-    return runtimeSchemaInvalidTable(requestId, "请求体非法：reason 必填且为非空字符串");
-  }
-
-  // 4.  扩展：调用 RuntimeAdapter.handleCancel，异步回传 execution.cancelled 事件
-  //
-  // adapter.handleCancel 立即返回 ack（cancel_state="accepted"），异步通过 EventBatchSink 回传
-  // execution.cancelled 事件（fire-and-forget，不阻塞响应）。
-  // 路由层把 adapter 响应翻译为 CancelInvocationResponse（保持外部 API 契约不变）。
-  const authToken = extractBearerToken(request.headers) ?? undefined;
-  const adapter = getRouteHostedAdapter();
-  if (!adapter) {
-    return apiError("RUNTIME_UNAVAILABLE", "Hosted Runtime 尚未配置模型执行器", { requestId });
-  }
-  await adapter.handleCancel({
-    invocationId,
-    reason: body.reason,
-    cancelledBy: "runtime_command",
-    authToken,
-  });
-
-  // 5. 返回 cancelled=true（Runtime ack）
-  const response: CancelInvocationResponse = {
-    invocation_id: invocationId,
-    cancelled: true,
-    attempt_no: 1,
+  const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
+  if (!idempotencyKey) return runtimeSchemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
+  const parsed = CancelRequestSchema.safeParse(await request.json().catch(() => null));
+  if (
+    !parsed.success ||
+    parsed.data.targetAuthority.invocationId !== claims.invocationId ||
+    parsed.data.targetAuthority.ownershipId !== claims.ownershipId ||
+    parsed.data.targetAuthority.leaseEpoch !== claims.leaseEpoch
+  )
+    return runtimeSchemaInvalidTable(requestId, "CancelRequest 或 Authority 非法");
+  const response: CancelResponse = {
+    accepted: true,
+    targetAuthority: parsed.data.targetAuthority,
+    stopState: "requested",
   };
-
-  return apiSuccess(response, {
-    status: 200,
-    headers: { [REQUEST_ID_HEADER]: requestId },
-  });
+  CancelResponseSchema.parse(response);
+  return apiSuccess(response, { status: 202, headers: { [REQUEST_ID_HEADER]: requestId } });
 }

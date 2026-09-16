@@ -115,7 +115,7 @@ export function buildTestConformanceReport(
     runtimeRevisionId: revisionId,
     runtimeTargetDigest: `sha256:${"a".repeat(64)}`,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: "ci/runtime-conformance",
@@ -133,7 +133,7 @@ export function buildTestConformanceReport(
       runtimeRevisionId: base.runtimeRevisionId,
       runtimeTargetDigest: base.runtimeTargetDigest,
       runtimeConfigDigest: base.runtimeConfigDigest,
-      protocolContractRevision: base.protocolContractRevision,
+      protocolContractDigest: base.protocolContractDigest,
       runnerArtifactDigest: base.runnerArtifactDigest,
       cases: base.caseResults.map((result) => ({
         caseId: result.caseId,

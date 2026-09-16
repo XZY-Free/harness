@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 /**
  * 02-6 P6 Tool Gateway 集成测试（真实 MySQL 8 · 冻结方案 §14 / §15 / §16 / §18 / §55.5）。
  *
@@ -39,9 +40,14 @@ import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolv
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { BridgeServer, setBridgeServer } from "@/lib/desktop-bridge/bridge-server";
+import {
+  createAttempt,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { registerDevice } from "@/lib/identity/device-queries";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
-import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
+import { issueTestExecutionToken } from "@/lib/identity/test-support/execution-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
 import {
   threadEventTable,
@@ -50,7 +56,11 @@ import {
   turnTable,
 } from "@/lib/persistence/schema/conversation";
 import { effectRecordTable } from "@/lib/persistence/schema/effect";
-import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  executionBindingTable,
+  executionOwnershipTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
 import { userIdentity } from "@/lib/persistence/schema/identity";
 import { permissionDecisionTable } from "@/lib/persistence/schema/permission";
 import {
@@ -68,8 +78,18 @@ import {
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { createInvocationContinuationHandler } from "@/lib/runtime/continuation/invocation-continuation";
 import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
+import {
+  createRuntimeSessionBinding,
+  updateRuntimeSessionDispatch,
+} from "@/lib/runtime/persistence/runtime-session-store";
 import { resolveToolExecutionTarget } from "@/lib/runtime/resolve-tool-execution-target";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
+import {
+  activateWorkspaceWriter,
+  reserveWorkspaceWriter,
+} from "@/lib/workspace/workspace-write-lock-queries";
 import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocketServer } from "ws";
@@ -79,6 +99,28 @@ import { POST } from "./route";
 const TENANT = DEFAULT_TENANT_ID;
 const REQ = "req-gw-1";
 const SIGNING_SECRET = "test-gateway-signing-secret-0123456789abcdef"; // ≥32 字节
+
+/** 探测 sandbox-exec 是否真的可用（嵌套沙箱等环境下 sandbox_apply 会 EPERM）。 */
+function sandboxExecAvailable(): boolean {
+  try {
+    execFileSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/bin/true"], {
+      stdio: "ignore",
+      timeout: 5000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** seedBinding 播种的 Current Execution Authority claims（gateway token 必须与之绑定）。 */
+let currentAuthority: {
+  runtimeRevisionId: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: string;
+  sessionBindingId: string;
+} | null = null;
 
 let catalogTool: Parameters<typeof buildCapabilityCatalogSnapshot>[0]["tools"][number] | null =
   null;
@@ -227,24 +269,66 @@ async function seedInvocation(opts: {
   jobId?: string | null;
 }): Promise<string> {
   const invocationId = randomUUID();
+  if (opts.jobId) {
+    await db.insert(invocationTable).values({
+      id: invocationId,
+      tenantId: TENANT,
+      subjectType: "job",
+      jobId: opts.jobId,
+      invocationSequence: 1,
+      invocationKind: "job",
+      executionState: "running",
+      inputDigest: `sha256:${"0".repeat(64)}`,
+      startedAt: new Date(),
+      versionNo: 1,
+    });
+    return invocationId;
+  }
+  const threadId = opts.threadId!;
+  const turnId = opts.turnId!;
+  // canonical 约束：Invocation.threadId/turnId/triggerItemId 是真实外键，
+  // 且 Invocation_subject_shape 要求 thread 主体 triggerItemId 非空。
+  await seedThread(threadId);
+  await db.insert(turnTable).values({
+    id: turnId,
+    threadId,
+    turnSequence: 1,
+    triggerType: "user_message",
+    turnState: "running",
+    activeInvocationId: invocationId,
+    latestInvocationId: invocationId,
+    regenerationNo: 0,
+    versionNo: 1,
+  });
+  const triggerItemId = randomUUID();
+  await db.insert(threadItemTable).values({
+    id: triggerItemId,
+    threadId,
+    turnId,
+    itemSequence: 1,
+    itemType: "user_message",
+    itemState: "completed",
+    authorType: "user",
+    contentJson: { text: "trigger" },
+    contentHash: "test-trigger-item",
+  });
   await db.insert(invocationTable).values({
     id: invocationId,
     tenantId: TENANT,
-    threadId: opts.threadId ?? null,
-    turnId: opts.turnId ?? null,
-    jobId: opts.jobId ?? null,
+    subjectType: "thread",
+    threadId,
+    turnId,
+    jobId: null,
     invocationSequence: 1,
-    invocationKind: opts.jobId ? "job" : "initial",
+    invocationKind: "initial",
     executionState: "running",
-    triggerItemId: null,
+    inputDigest: `sha256:${"0".repeat(64)}`,
+    triggerItemId,
     replacesInvocationId: null,
     outputItemId: null,
     resultRef: null,
-    runtimeSessionBindingId: null,
-    runtimeExecutionRef: null,
     startedAt: new Date(),
     finishedAt: null,
-    lastHeartbeatAt: new Date(),
     errorCode: null,
     errorSummary: null,
     versionNo: 1,
@@ -254,14 +338,21 @@ async function seedInvocation(opts: {
   return invocationId;
 }
 
-/** 直接插入不可变 ExecutionBinding（其余 digest 用占位值）。 */
+/**
+ * 直接插入不可变 ExecutionBinding（其余 digest 用占位值），
+ * 并按 canonical Authority 链播种：WorkspaceBinding（NO_PLATFORM 或桌面 HOST_AFFINE）
+ * → prepared InvocationAttempt → ExecutionOwnership(executing) → active RuntimeSessionBinding
+ * （HOST_AFFINE 还需 active WorkspaceWriteLock + workspaceWriterGeneration）。
+ * 之后 gatewayToken 必须携带同一条 authority 链的 claims。
+ */
 async function seedBinding(
   invocationId: string,
   frozen: {
     policyRevisionId: string;
     policyRulesDigest: string;
-    workspaceBindingId?: string;
     toolPermissionMode?: "auto" | "ask" | "full_access";
+    /** 桌面 HOST_AFFINE 场景：使用已登记的桌面 WorkspaceBinding。 */
+    desktopWorkspace?: { bindingId: string; storageScopeDigest: string };
   },
 ): Promise<void> {
   if (!catalogTool) throw new Error("seedToolchain must run first");
@@ -274,30 +365,32 @@ async function seedBinding(
     knowledgeSources: [],
     sourceRefs: ["test-fixture:tool-capability-catalog"],
   });
+  const workspaceBindingId =
+    frozen.desktopWorkspace?.bindingId ??
+    (await createNoPlatformWorkspaceBinding(TENANT, "tool-gateway-test")).id;
+  const runtimeRevisionId = randomUUID();
   await db.insert(executionBindingTable).values({
     capabilityCatalogJson: catalog.snapshot,
     capabilityCatalogDigest: catalog.digest,
     capabilityCatalogVersion: catalog.version,
     capabilityCatalogSourceRefs: catalog.sourceRefs,
     capabilityCatalogCreatedAt: catalog.createdAt,
-    executionSubjectType: "user",
-    executionSubjectId: "test-user",
-    executionSubjectSource: "authenticated_user",
-    executionSubjectFrozenAt: new Date(),
+    principalType: "user",
+    principalId: "test-user",
+    principalSource: "authenticated_user",
+    principalFrozenAt: new Date(),
     invocationId,
     tenantId: TENANT,
-    runtimeRevisionId: "runtime-rev-fake",
+    runtimeRevisionId,
     deploymentRouteId: "route-fake",
     modelProvider: "provider",
     modelId: "model",
     modelRevisionRef: null,
-    initialEnvironmentLeaseId: null,
-    workspaceBindingId: frozen.workspaceBindingId ?? null,
+    workspaceBindingId,
     policyRevisionId: frozen.policyRevisionId,
     policyRulesDigest: frozen.policyRulesDigest,
     governanceConfigRevisionId: "governance-rev-fake",
     governanceConfigDigest: hash("9"),
-    contextCheckpointId: null,
     routeRevisionId: "route-rev-fake",
     routeActivationId: "route-act-fake",
     routeContentDigest: hash("1"),
@@ -312,9 +405,93 @@ async function seedBinding(
     conformanceRunId: "conformance-fake",
     resolutionInputDigest: hash("6"),
     projectionVersionNo: 0,
+    environmentMode: "NO_PLATFORM_ENVIRONMENT",
     environmentDefinitionRevisionId: null,
     configHash: hash("7"),
   });
+  const attempt = await createAttempt({ tenantId: TENANT, invocationId });
+  const evidence = { kind: "test-candidate", invocationId, attemptId: attempt.id };
+  await db.transaction((tx) =>
+    markAttemptPreparedInTransaction(tx, {
+      attemptId: attempt.id,
+      evidence,
+      digest: protocolDigest(evidence),
+    }),
+  );
+  const acquired = await acquireExecutionOwnership({
+    tenantId: TENANT,
+    invocationId,
+    attemptId: attempt.id,
+    runtimeRevisionId,
+    acquiredByType: "service",
+    acquiredById: "tool-gateway-test",
+  });
+  const session = await createRuntimeSessionBinding({
+    tenantId: TENANT,
+    invocationId,
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    runtimeRevisionId,
+    leaseEpoch: acquired.ownership.leaseEpoch,
+    intentType: "start",
+    startIntentKey: `start:${acquired.ownership.id}`,
+  });
+  // canonical 约束：bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
+  await updateRuntimeSessionDispatch(TENANT, session.id, {
+    bindingState: "active",
+    semanticRequestJson: { kind: "tool-gateway-test" },
+    semanticRequestDigest: `sha256:${"0".repeat(64)}`,
+    remoteSessionRef: "tool-gateway-test-session",
+    remoteExecutionRef: "tool-gateway-test-execution",
+    startedEventId: randomUUID(),
+  });
+  // HOST_AFFINE 桌面工作区：执行前必须持有 active WorkspaceWriteLock 并回填 writer generation。
+  let workspaceWriterGeneration: number | null = null;
+  if (frozen.desktopWorkspace) {
+    const reserved = await reserveWorkspaceWriter({
+      tenantId: TENANT,
+      storageScopeDigest: frozen.desktopWorkspace.storageScopeDigest,
+      invocationId,
+      attemptId: attempt.id,
+      ownershipId: acquired.ownership.id,
+      workspaceBindingId: frozen.desktopWorkspace.bindingId,
+      leaseExpiresAt: new Date(Date.now() + 3600_000),
+    });
+    await activateWorkspaceWriter({
+      tenantId: TENANT,
+      lockId: reserved.lock.id,
+      ownershipId: acquired.ownership.id,
+      writerGeneration: reserved.writerGeneration,
+      backendGrantRef: "test-desktop-grant",
+      backendEvidence: {
+        scopeDigest: frozen.desktopWorkspace.storageScopeDigest,
+        writerGeneration: reserved.writerGeneration,
+      },
+    });
+    workspaceWriterGeneration = reserved.writerGeneration;
+  }
+  await db
+    .update(executionOwnershipTable)
+    .set({
+      executionPhase: "executing",
+      activatedAt: new Date(),
+      activationDigest: `sha256:${"0".repeat(64)}`,
+      workspaceWriterGeneration,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, TENANT),
+        eq(executionOwnershipTable.id, acquired.ownership.id),
+      ),
+    );
+  currentAuthority = {
+    runtimeRevisionId,
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    leaseEpoch: String(acquired.ownership.leaseEpoch),
+    sessionBindingId: session.id,
+  };
 }
 
 /** 最小 Thread 行（resolveGenericUserAction approve/deny 需要事件流 + resume InvocationCommand）。 */
@@ -330,7 +507,7 @@ async function seedThread(id: string): Promise<void> {
     defaultEnvironmentDefinitionId: null,
     lastActivityAt: new Date(),
     lastTurnSequence: 1,
-    lastItemSequence: 0,
+    lastItemSequence: 1,
     lastEventSequence: 0,
     pendingQueueVersionNo: 1,
     versionNo: 1,
@@ -340,33 +517,14 @@ async function seedThread(id: string): Promise<void> {
   });
 }
 
-/** 与 Invocation 一致的真实 running Turn；Gateway pause 必须原子推进两者。 */
-async function seedRunningTurn(
-  threadId: string,
-  turnId: string,
-  invocationId: string,
-): Promise<void> {
-  await db.insert(turnTable).values({
-    id: turnId,
-    threadId,
-    turnSequence: 1,
-    triggerType: "user_message",
-    turnState: "running",
-    activeInvocationId: invocationId,
-    latestInvocationId: invocationId,
-    regenerationNo: 0,
-    versionNo: 1,
-  });
-}
-
-/** 签发 Gateway Access Token。 */
+/** 签发 Gateway Access Token（必须绑定 seedBinding 播种的 authority claims）。 */
 function gatewayToken(invocationId: string): string {
-  return issueWorkloadToken({
-    type: "gateway",
+  if (!currentAuthority) throw new Error("seedBinding must run before gatewayToken");
+  return issueTestExecutionToken({
     tenantId: TENANT,
     invocationId,
     audience: "gateway",
-    expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
+    ...currentAuthority,
   });
 }
 
@@ -384,7 +542,7 @@ function gatewayRequest(token: string, body: unknown): Request {
 
 function toolCallBody(patch: Partial<Record<string, unknown>>): Record<string, unknown> {
   return {
-    invocationId: "unused", // route 以 token 的 invocationId 为准校验
+    invocation_id: "unused", // route 以 token 的 invocationId 为准校验
     tool_id: "unused",
     schema_hash: "unused",
     operation_id: "op-1",
@@ -412,6 +570,7 @@ async function getDecisions(toolCallId: string) {
 beforeEach(async () => {
   await resetDatabase(db);
   catalogTool = null;
+  currentAuthority = null;
   process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
   await ensureDefaultTenant();
@@ -425,7 +584,13 @@ afterEach(() => {
 describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () => {
   it.runIf(process.platform === "darwin")(
     "真实桌面签名桥只执行已授权命令，持久 Attempt 防止并发重复发送",
-    async () => {
+    async (ctx) => {
+      // 命令经真实 seatbelt 沙箱执行；sandbox_apply EPERM 的环境（嵌套沙箱等）
+      // 无法满足"真实执行成功"断言，产品按设计 fail-closed，此处条件跳过。
+      if (!sandboxExecAvailable()) {
+        console.warn("[skip] sandbox-exec 在当前运行环境不可用（sandbox_apply EPERM）");
+        ctx.skip();
+      }
       const identity = createDeviceIdentity();
       identity.tenantId = TENANT;
       await db.insert(userIdentity).values({
@@ -447,7 +612,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
         userId: "test-user",
         deviceKey: identity.deviceId,
         displayName: "test",
-        locationFingerprint: `sha256:${"a".repeat(64)}`,
+        storageScopeDigest: `sha256:${"a".repeat(64)}`,
       });
       await registerBuiltinTools({ tenantId: TENANT, ownerUserId: "test-user" });
       const tool = (await listTools({ tenantId: TENANT })).items.find(
@@ -478,13 +643,19 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
         threadId: "desktop-thread",
         turnId: "desktop-turn",
       });
-      await seedBinding(invocationId, { ...policy, workspaceBindingId: workspace.bindingId });
+      await seedBinding(invocationId, {
+        ...policy,
+        desktopWorkspace: {
+          bindingId: workspace.bindingId,
+          storageScopeDigest: `sha256:${"a".repeat(64)}`,
+        },
+      });
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
           toolCallBody({
-            invocationId,
-            toolId: tool.id,
+            invocation_id: invocationId,
+            tool_id: tool.id,
             schema_hash: revision.schemaHash,
             arguments: { command: "date" },
           }),
@@ -535,18 +706,18 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       client.connect();
       try {
         await vi.waitFor(() => expect(client.isReady()).toBe(true), { timeout: 5000 });
-        const requestBody = {
+        const request = {
           toolCallId: claimed.binding.toolCallId,
           attemptId: claimed.attempt.id,
         };
         const forged = await dispatchDesktopPost(
-          gatewayRequest(gatewayToken(invocationId), { ...requestBody, command: "other-command" }),
+          gatewayRequest(gatewayToken(invocationId), { ...request, command: "other-command" }),
         );
         expect(forged.status).toBe(400);
         expect(send).not.toHaveBeenCalled();
         const responses = await Promise.all([
-          dispatchDesktopPost(gatewayRequest(gatewayToken(invocationId), requestBody)),
-          dispatchDesktopPost(gatewayRequest(gatewayToken(invocationId), requestBody)),
+          dispatchDesktopPost(gatewayRequest(gatewayToken(invocationId), request)),
+          dispatchDesktopPost(gatewayRequest(gatewayToken(invocationId), request)),
         ]);
         expect(responses.map((item) => item.status).sort()).toEqual([200, 409]);
         const success = responses.find((item) => item.status === 200)!;
@@ -609,8 +780,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const invocationId = await seedInvocation({ threadId: "shell-thread", turnId: "shell-turn" });
       await seedBinding(invocationId, policy);
       const body = toolCallBody({
-        invocationId,
-        toolId: tool.id,
+        invocation_id: invocationId,
+        tool_id: tool.id,
         schema_hash: revision.schemaHash,
         arguments: { command: 'node -p "new Date().toISOString()"' },
       });
@@ -661,8 +832,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocationId,
-          toolId: tool.id,
+          invocation_id: invocationId,
+          tool_id: tool.id,
           schema_hash: revision.schemaHash,
           arguments: { url: "https://example.com" },
         }),
@@ -706,15 +877,13 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     ]);
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
-    await seedThread("t-1");
-    await seedRunningTurn("t-1", "turn-1", invocationId);
     const call = (operation_id: string, path: string) =>
       POST(
         gatewayRequest(
           gatewayToken(invocationId),
           toolCallBody({
-            invocationId,
-            toolId,
+            invocation_id: invocationId,
+            tool_id: toolId,
             schema_hash: schemaHash,
             operation_id,
             arguments: { path },
@@ -738,7 +907,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(200);
@@ -774,13 +943,11 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const { policyRevisionId, policyRulesDigest } = await seedPolicy("pause", []);
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
-    await seedThread("t-1");
-    await seedRunningTurn("t-1", "turn-1", invocationId);
 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(200);
@@ -804,7 +971,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     );
     expect(projected.itemType).toBe("user_action");
     expect(projected.contentJson).toMatchObject({
-      requestId: uars[0]!.id,
+      request_id: uars[0]!.id,
       request_type: "confirmation",
       state: "pending",
     });
@@ -833,7 +1000,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(403);
@@ -858,7 +1025,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(403);
@@ -881,8 +1048,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
 
     const body = toolCallBody({
-      invocationId,
-      toolId,
+      invocation_id: invocationId,
+      tool_id: toolId,
       schema_hash: schemaHash,
     });
     const res1 = await POST(gatewayRequest(gatewayToken(invocationId), body));
@@ -906,8 +1073,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
 
     const base = {
-      invocationId,
-      toolId,
+      invocation_id: invocationId,
+      tool_id: toolId,
       schema_hash: schemaHash,
     };
     const first = await POST(
@@ -939,8 +1106,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocationId,
-          toolId,
+          invocation_id: invocationId,
+          tool_id: toolId,
           schema_hash: schemaHash,
           arguments: { path: "/tmp/foo.txt", token: "must-not-be-forwarded" },
         }),
@@ -978,7 +1145,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1015,7 +1182,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const terminalReplay = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       );
       expect(await terminalReplay.json()).toMatchObject({
@@ -1067,7 +1234,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1123,7 +1290,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1187,7 +1354,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const response = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     const body = await response.json();
@@ -1271,7 +1438,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       );
       expect((await response.json()).call_state).toBe("queued");
@@ -1324,7 +1491,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1373,7 +1540,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const response = await POST(
         gatewayRequest(
           gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       );
       const body = await response.json();
@@ -1405,7 +1572,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const response = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     const body = await response.json();
@@ -1446,7 +1613,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res1 = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res1.status).toBe(200);
@@ -1455,8 +1622,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocationId,
-          toolId,
+          invocation_id: invocationId,
+          tool_id: toolId,
           schema_hash: schemaHash,
           arguments: { path: "/tmp/other.txt" },
         }),
@@ -1474,8 +1641,8 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
     const token = gatewayToken(invocationId);
     const body = toolCallBody({
-      invocationId,
-      toolId,
+      invocation_id: invocationId,
+      tool_id: toolId,
       schema_hash: schemaHash,
     });
 
@@ -1506,7 +1673,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(409);
@@ -1526,7 +1693,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: hash("z") }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: hash("z") }),
       ),
     );
     expect(res.status).toBe(409);
@@ -1548,12 +1715,10 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
     const { policyRevisionId, policyRulesDigest } = await seedPolicy("pause", []);
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
-    await seedThread("t-1");
-    await seedRunningTurn("t-1", "turn-1", invocationId);
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
-        toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+        toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
       ),
     );
     expect(res.status).toBe(200);
@@ -1583,11 +1748,9 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
     const { policyRevisionId, policyRulesDigest } = await seedPolicy("pause", []);
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
-    await seedThread("t-1");
-    await seedRunningTurn("t-1", "turn-1", invocationId);
     const body = toolCallBody({
-      invocationId,
-      toolId,
+      invocation_id: invocationId,
+      tool_id: toolId,
       schema_hash: schemaHash,
     });
 
@@ -1630,15 +1793,15 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
   it("approve：同一 ToolCall 追加 allow 后进入 queued，等待 durable worker", async () => {
     const { toolCallId, userActionRequestId, invocationId, toolId, schemaHash } = await pauseTurn();
     const resolved = await approve(userActionRequestId);
-    expect(resolved.resumeCommand.commandPayloadJson).toMatchObject({
+    expect(resolved.resumeCommand.payloadJson).toMatchObject({
       resume_source: "user_action_resolution",
-      resume_payload: { requestId: userActionRequestId, resolution: "approve" },
+      resume_payload: { request_id: userActionRequestId, resolution: "approve" },
     });
 
     // approve 已恢复 Invocation → running + 入队 resume；此处直接重提交验证 gateway 侧。
     const body = toolCallBody({
-      invocationId,
-      toolId,
+      invocation_id: invocationId,
+      tool_id: toolId,
       schema_hash: schemaHash,
     });
 
@@ -1711,8 +1874,8 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocationId,
-          toolId,
+          invocation_id: invocationId,
+          tool_id: toolId,
           schema_hash: schemaHash,
           arguments: { path: "/tmp/other.txt" },
         }),
@@ -1741,8 +1904,8 @@ describe("POST /gateway/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§55.
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocationId,
-          toolId,
+          invocation_id: invocationId,
+          tool_id: toolId,
           schema_hash: schemaHash,
         }),
       ),
@@ -1784,8 +1947,6 @@ it.each(["auto", "ask", "full_access"] as const)(
     };
     const policy = await seedPolicy("pause", []);
     const invocationId = await seedInvocation({ threadId: "mode-thread", turnId: "mode-turn" });
-    await seedThread("mode-thread");
-    await seedRunningTurn("mode-thread", "mode-turn", invocationId);
     await seedBinding(invocationId, { ...policy, toolPermissionMode: mode });
     // 当前 Thread 偏好与冻结模式相反，执行仍遵从冻结值。
     await db
@@ -1796,8 +1957,8 @@ it.each(["auto", "ask", "full_access"] as const)(
       gatewayRequest(
         gatewayToken(invocationId),
         toolCallBody({
-          invocationId,
-          toolId: tool.id,
+          invocation_id: invocationId,
+          tool_id: tool.id,
           tool_schema_revision_id: revision.id,
           schema_hash: revision.schemaHash,
           arguments: { url: "https://example.com" },

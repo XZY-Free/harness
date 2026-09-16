@@ -2,9 +2,9 @@
  * Runtime Target Digest — Conformance 被测对象的统一绑定。
  *
  * Conformance 需要统一绑定"被测对象"，但不能强迫都是 Artifact：
- * - hosted_artifact：canonical(runtimeArtifactDigest, runtimeConfigDigest, protocolContractRevision)；
+ * - hosted_artifact：canonical(runtimeArtifactDigest, runtimeConfigDigest, protocolContractDigest)；
  * - external_endpoint：canonical(endpointRef 稳定非 Secret identity, runtimeConfigDigest,
- *   protocolType, protocolContractRevision, identityMode, networkZone)。
+ *   protocolType, protocolContractDigest, identityMode, networkZone)。
  *
  * Conformance 报告绑定 runtimeTargetDigest，而不是无条件绑定 runtimeArtifactDigest。
  */
@@ -15,7 +15,7 @@ export interface HostedRuntimeTargetFacts {
   runtimeEvidenceKind: "hosted_artifact";
   runtimeArtifactDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 }
 
 /** external_endpoint 证据事实（全部必填，缺失 fail-closed）。 */
@@ -24,7 +24,7 @@ export interface ExternalRuntimeTargetFacts {
   endpointRef: string;
   runtimeConfigDigest: string;
   protocolType: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   identityMode: string;
   networkZone: string;
 }
@@ -41,7 +41,7 @@ export function runtimeTargetFactsFromRevision(revision: {
   runtimeEvidenceKind: string;
   artifactDigest: string | null;
   configHash: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   endpointRef: string;
   protocolType: string;
   identityMode: string;
@@ -53,7 +53,7 @@ export function runtimeTargetFactsFromRevision(revision: {
       runtimeEvidenceKind: "hosted_artifact",
       runtimeArtifactDigest: revision.artifactDigest,
       runtimeConfigDigest: revision.configHash,
-      protocolContractRevision: revision.protocolContractRevision,
+      protocolContractDigest: revision.protocolContractDigest,
     };
   }
   if (revision.runtimeEvidenceKind === "external_endpoint") {
@@ -63,7 +63,7 @@ export function runtimeTargetFactsFromRevision(revision: {
       endpointRef: revision.endpointRef,
       runtimeConfigDigest: revision.configHash,
       protocolType: revision.protocolType,
-      protocolContractRevision: revision.protocolContractRevision,
+      protocolContractDigest: revision.protocolContractDigest,
       identityMode: revision.identityMode,
       networkZone: revision.networkZone,
     };
@@ -78,7 +78,7 @@ export function computeRuntimeTargetDigest(facts: RuntimeTargetFacts): string {
       runtime_evidence_kind: "hosted_artifact",
       runtime_artifact_digest: facts.runtimeArtifactDigest,
       runtime_config_digest: facts.runtimeConfigDigest,
-      protocol_contract_revision: facts.protocolContractRevision,
+      protocol_contract_digest: facts.protocolContractDigest,
     });
   }
   return computeCanonicalDigest({
@@ -86,7 +86,7 @@ export function computeRuntimeTargetDigest(facts: RuntimeTargetFacts): string {
     endpoint_ref: facts.endpointRef,
     runtime_config_digest: facts.runtimeConfigDigest,
     protocol_type: facts.protocolType,
-    protocol_contract_revision: facts.protocolContractRevision,
+    protocol_contract_digest: facts.protocolContractDigest,
     identity_mode: facts.identityMode,
     network_zone: facts.networkZone,
   });

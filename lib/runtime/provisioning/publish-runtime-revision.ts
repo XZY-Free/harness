@@ -33,7 +33,7 @@ export interface PublishRuntimeRevisionResult {
     runtimeArtifactRef: string | null;
     artifactDigest: string | null;
     configHash: string;
-    protocolContractRevision: string;
+    protocolContractDigest: string;
     publishedAt: Date | null;
   };
   /** 可选 Attestation；hosted_artifact 必填，external_endpoint 必须为 null。 */
@@ -201,11 +201,11 @@ export function createPublishRuntimeRevision(dependencies: {
           `Config Digest 不一致（Run: ${conformanceRun.runtimeConfigDigest}, Revision: ${revision.configHash}）`,
         );
       }
-      if (conformanceRun.protocolContractRevision !== revision.protocolContractRevision) {
+      if (conformanceRun.protocolContractDigest !== revision.protocolContractDigest) {
         throw new RuntimeConformanceRunInvalidError(
           revision.id,
           conformanceRun.id,
-          `Protocol Contract Revision 不一致（Run: ${conformanceRun.protocolContractRevision}, Revision: ${revision.protocolContractRevision}）`,
+          `Protocol Contract Revision 不一致（Run: ${conformanceRun.protocolContractDigest}, Revision: ${revision.protocolContractDigest}）`,
         );
       }
 

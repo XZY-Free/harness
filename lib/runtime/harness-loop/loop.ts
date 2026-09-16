@@ -1,4 +1,5 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import { ZodError } from "zod";
 import { parseHarnessNextAction } from "./action-schema";
 import {
@@ -84,6 +85,8 @@ export interface HarnessActionExecutionContext {
   threadId: string;
   turnId: string;
   actionDigest: string;
+  /** Runtime generation that is authorized to create this parent Invocation action. */
+  authority?: AuthorityIdentity;
   /** 上游运行时的真实绝对截止；行动内的短等待必须继续取更早值。 */
   deadlineAt?: Date;
   abortSignal?: AbortSignal;
@@ -115,6 +118,7 @@ export interface HarnessLoopRecoveryPort {
 export interface HarnessLoopParams {
   invocationId: string;
   tenantId: string;
+  authority?: AuthorityIdentity;
   threadId: string;
   turnId: string;
   objective: string;
@@ -241,7 +245,8 @@ export class HarnessLoop {
         // 过程透明合同 v2.3：决策开始发射思考进度（落 user_guidance item，历史可重建）。
         // 进度只是展示事实，恢复端不得将其当作用户输入；只有真实持久上下文变化
         // 才应使下面的决策结果失效，单纯调整写入顺序无法建立这一边界。
-        await this.params.eventWriter.write("progress.snapshot", {
+        await this.params.eventWriter.write("progress", {
+          kind: "progress.snapshot",
           message: "正在思考下一步…",
         });
         const beforeDecision = this.durableContextFingerprint();
@@ -268,7 +273,8 @@ export class HarnessLoop {
         }
         this.validateAction(action, nextStepNo);
         // 过程透明合同 v2.3：思考完成，think 携带公开决策摘要（思考行展开的最小单元）
-        await this.params.eventWriter.write("progress.snapshot", {
+        await this.params.eventWriter.write("progress", {
+          kind: "progress.snapshot",
           message: "思考完成",
           think: `决定：${action.shortPurpose || action.actionType}`,
         });
@@ -376,6 +382,7 @@ export class HarnessLoop {
       threadId: this.params.threadId,
       turnId: this.params.turnId,
       actionDigest: historyEntry.actionDigest,
+      authority: this.params.authority,
       deadlineAt: this.params.actionDeadlineAt,
       abortSignal: this.params.abortSignal,
     });
@@ -427,7 +434,8 @@ export class HarnessLoop {
       await this.writeActionEvent("harness.action.started", historyEntry);
     }
     // 过程透明合同 v2.3：正文生成前发射组织回答进度
-    await this.params.eventWriter.write("progress.snapshot", {
+    await this.params.eventWriter.write("progress", {
+      kind: "progress.snapshot",
       message: "正在组织回答…",
     });
     const responseText = await this.params.finalResponsePort.generateFinalResponse(

@@ -15,15 +15,22 @@ export function createConformanceHostedApplicationService(params: {
     async cancel({ invocationId, reason }) {
       await params.eventBatchSink({
         invocationId,
-        producerSequenceStart: 1,
+        authority: {
+          invocationId,
+          runtimeRevisionId: invocationId,
+          attemptId: invocationId,
+          ownershipId: invocationId,
+          leaseEpoch: "1",
+          sessionBindingId: invocationId,
+        },
         events: [
           {
-            producer_event_id: `conformance-cancel-${invocationId}`,
-            producer_sequence: 1,
+            eventId: invocationId,
+            producerSequence: "1",
             type: "execution.cancelled",
-            schema_version: 1,
+            schemaVersion: 1,
             payload: {
-              cancelled_by: "conformance_control",
+              cancelledBy: "conformance_control",
               reason: reason ?? "conformance_cancel",
             },
           },

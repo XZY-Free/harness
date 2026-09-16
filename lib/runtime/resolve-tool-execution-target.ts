@@ -14,7 +14,8 @@ export async function resolveToolExecutionTarget(input: {
 }): Promise<ToolExecutionTarget | null> {
   if (input.workspaceBindingId) {
     const binding = await getWorkspaceBindingById(input.tenantId, input.workspaceBindingId);
-    if (!binding || binding.bindingState !== "active") return null;
+    if (!binding) return null;
+    if (!binding.workspaceId) return null;
     const workspace = await getWorkspaceById(input.tenantId, binding.workspaceId);
     if (
       !workspace ||
@@ -22,7 +23,7 @@ export async function resolveToolExecutionTarget(input: {
       workspace.ownerUserId !== input.ownerUserId
     )
       return null;
-    if (binding.bindingType !== "desktop" || !binding.deviceId) return null;
+    if (binding.continuityMode !== "HOST_AFFINE" || !binding.deviceId) return null;
     const device = await getDeviceById(binding.deviceId);
     if (
       !device ||
@@ -37,7 +38,7 @@ export async function resolveToolExecutionTarget(input: {
       workspaceBindingId: binding.id,
       deviceId: binding.deviceId,
       ownerUserId: input.ownerUserId,
-      bindingVersion: binding.versionNo,
+      bindingVersion: binding.contractDigest,
     };
   }
   const kind = runtimeConfig.defaultType;

@@ -1,715 +1,497 @@
-/**
- * Runtime HTTP 客户端。
- *
- * 事实源：
- * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
- * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
- * - docs/architecture/runtime-control-plane.md
- *
- * 职责：
- * - 提供调用 Runtime HTTP API 的接口（Runtime 协议 = HTTP+JSON）。
- * - 支持真实 HTTP（createHttpRuntimeClient）与 mock（createMockRuntimeClient）两种实现。
- * - 五个端点：probeCapabilities / startInvocation / cancelInvocation / resumeInvocation / steerInvocation。
- *
- * 安全边界：
- * - 客户端只持有 runtimeEndpoint 和 auth（ 协议中立 RuntimeTransportAuth），
- *   不读数据库与平台 Secret。
- * - auth 由调用方解析：Hosted = 短期 Workload Token；External = 唯一 resolver
- *   resolveOutboundRuntimeAuth 解析的 CredentialRef 凭据；Transport 映射 HTTP header。
- * - 网络错误统一抛 RuntimeHttpClientError（kind=network），调度器据此判断是否重试。
- *
- * 关键约束：
- * - Runtime 不可达（kind=network）时 Turn 保持 queued，不报错（§7 接纳周期）。
- * - Runtime 409 IDEMPOTENCY_CONFLICT：调用方复用现有 session_binding。
- * - Runtime 503 RUNTIME_UNAVAILABLE：调用方回退，Turn 保持 queued。
- * - 响应体结构非法抛 kind=protocol（不可重试）。
- */
-
+/** Runtime HTTP transport for the single RuntimeProtocol contract. */
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/http";
 import {
   type RuntimeTransportAuth,
   outboundAuthHeaders,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
-import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
+import {
+  type CallbackEndpoints,
+  type CancelRequest,
+  CancelRequestSchema,
+  type CancelResponse,
+  CancelResponseSchema,
+  type HeartbeatRequest,
+  HeartbeatRequestSchema,
+  type HeartbeatResponse,
+  HeartbeatResponseSchema,
+  PROTOCOL_VERSION,
+  type RuntimeCapabilities,
+  RuntimeCapabilitiesSchema,
+  type RuntimeEventBatch,
+  RuntimeEventBatchSchema,
+  type RuntimeStartRequest,
+  RuntimeStartRequestSchema,
+  type RuntimeStartResponse,
+  RuntimeStartResponseSchema,
+  type SafePointReleaseRequest,
+  SafePointReleaseRequestSchema,
+  type SafePointRequest,
+  SafePointRequestSchema,
+  type SafePointResponse,
+  SafePointResponseSchema,
+  type SteerRequest,
+  SteerRequestSchema,
+  type SteerResponse,
+  SteerResponseSchema,
+} from "@/lib/runtime/runtime-protocol";
 
-// ─── 共享类型 ──────────────────────────────────────────────
+export const RUNTIME_PROTOCOL_VERSION = PROTOCOL_VERSION;
 
-/** Runtime Protocol 协商版本（冻结方案 §23：harness-runtime-protocol@1，无 @1 fallback）。 */
-export const RUNTIME_PROTOCOL_VERSION = "2" as const;
-
-/** Gateway Access Token（§25 / §27：type=gateway，与 inbound auth token 不混用）。 */
-export interface GatewayAccess {
-  /** 短期 Gateway Workload Token（HMAC 签名，§26）。 */
-  access_token: string;
-  /** 过期时间（ISO 8601）。 */
-  expires_at: string;
-}
-
-/** 下发 Runtime 的 Governance Config 引用（§24：可下发；不含 permission_policy.rules）。 */
-export interface GovernanceConfigRef {
-  revision_id: string;
-  config_digest: string;
-  /** Governance config 全量快照（Runtime 按 Snapshot 约束本地行为）。 */
-  config: Record<string, unknown>;
-}
-
-/** 平台 Gateway 回调端点集合（Runtime 通过这些 URL 调用 Tool Gateway / 上报事件 / 接收控制指令）。 */
-export interface GatewayEndpoints {
-  events: string;
-  cancel: string;
-  resume: string;
-  steer: string;
-  tools: string;
-  tool_calls: string;
-  user_action_requests: string;
-  capability_actions: string;
-}
-
-/** Runtime 能力探测响应（GET /runtime/capabilities）。 */
-export interface RuntimeCapabilitiesResponse {
-  /** Runtime 支持的协议版本列表（@2 必须声明 ["2"]，§49）。 */
-  protocol_versions: string[];
-  /** 能力声明。 */
-  features: {
-    event_stream: boolean;
-    cancel: boolean;
-    resume: boolean;
-    steer: boolean;
-    dynamic_tools: boolean;
-    user_action: boolean;
-    workspace_types: string[];
-    filesystem_checkpoint: boolean;
-  };
-  /** Runtime 限制。 */
-  limits: {
-    max_invocation_seconds: number;
-    max_event_bytes: number;
-  };
-  harness_action_protocol?: {
-    version: "1";
-    action_types: Array<
-      "knowledge.search" | "tool.call" | "agent.call" | "request_user_input" | "respond"
-    >;
-  };
-}
-
-/** startInvocation 请求体（POST /runtime/invocations）。 */
-export interface StartInvocationRequestBody {
-  /** 协商的 Runtime Protocol 版本（§23：固定 "2"，无 @1 fallback）。 */
-  protocol_version: typeof RUNTIME_PROTOCOL_VERSION;
-  invocation_id: string;
-  turn_context?: {
-    thread_id: string;
-    turn_id: string;
-    trigger_item_id?: string | null;
-  } | null;
-  job_context?: {
-    job_id: string;
-    trigger_item_id?: string | null;
-  } | null;
-  /** 本 Turn 的能力使用提示；preferred 只影响 Harness 决策，不承诺调用。 */
-  capability_directives?: Array<{
-    capability_type: "agent";
-    capability_id: string;
-    mode: "preferred";
-  }>;
-  /** Invocation 创建时冻结且经摘要验证的安全能力目录。 */
-  capability_catalog?: CapabilityCatalogSnapshot;
-  input_items: unknown[];
-  context_handle: string;
-  /** §24：下发 Governance Config 引用（Runtime 按 Snapshot 约束本地行为；不含 permission_policy.rules）。 */
-  governance_config: GovernanceConfigRef;
-  /** §24/§27：Gateway Access Token（Runtime 调用 Tool Gateway 用，type=gateway）。 */
-  gateway_access: GatewayAccess;
-  gateway_endpoints: GatewayEndpoints;
-  workspace?: {
-    workspace_binding_id: string | null;
-    workspace_type: string;
-  } | null;
-  execution_limits: {
-    max_invocation_seconds: number;
-    max_event_bytes: number;
-    max_loop_steps?: number;
-    max_agent_calls?: number;
-    max_tool_calls?: number;
-    max_knowledge_searches?: number;
-    max_consecutive_same_action?: number;
-  };
-  trace_context: {
-    trace_id: string;
-    span_id: string;
-  };
-  /**
-   * 允许外发的 Invocation Context：Binding 冻结合同 + external egress
-   * policy 过滤后的 supplied 条目（公开合同 key + 已脱敏 value）。
-   * Transport 只做 wire 映射，不查 DB/合同/Policy/User/Context storage。
-   * Base Harness（无 Agent Contract）不携带该字段。
-   * execution_subject 只经 invocation_context 单一 Authority 进入 wire，
-   * 独立 execution_subject 字段已删除（A2A 不再 fallback 第二份 subject）。
-   */
-  invocation_context?: Array<{ context_kind: string; value: unknown }>;
-  attempt?: {
-    attempt_no: number;
-    /** 重调度时平台分配的 Attempt id（关联 InvocationAttempt 行）。 */
-    attempt_id?: string;
-    /** 重调度原因码（如 infra_error / runtime_lost / requires_redispatch）。 */
-    retry_reason?: string;
-    /** 重调度检查点引用（必须避开已确认副作用，事实源 L755）。 */
-    checkpoint_ref?: string;
-    /** 重调度时 Runtime 的 producer_sequence 起点（整个 Invocation 内连续，事实源 L500）。 */
-    producer_sequence_start?: number;
-  } | null;
-}
-
-/** startInvocation 响应体。 */
-export interface StartInvocationResponse {
-  invocation_id: string;
-  accepted: boolean;
-  attempt_no: number;
-  runtime_session_ref: string;
-  runtime_execution_ref: string;
-  capabilities: RuntimeCapabilitiesResponse;
-}
-
-/** startInvocation 请求参数。 */
-export interface StartInvocationRequest {
+export interface RuntimeStartTransportRequest {
   runtimeEndpoint: string;
   auth: RuntimeTransportAuth;
   idempotencyKey: string;
-  requestBody: StartInvocationRequestBody;
+  request: RuntimeStartRequest;
 }
 
-/** cancelInvocation 请求体。 */
-export interface CancelInvocationRequestBody {
-  reason: string;
-  trace_context?: { trace_id: string; span_id: string } | null;
+export interface RuntimeEventTransportRequest {
+  runtimeEndpoint: string;
+  auth: RuntimeTransportAuth;
+  invocationId: string;
+  idempotencyKey?: string;
+  request: RuntimeEventBatch;
 }
 
-/** cancelInvocation 响应体。 */
-export interface CancelInvocationResponse {
-  invocation_id: string;
-  cancelled: boolean;
-  attempt_no: number;
-}
-
-/** cancelInvocation 请求参数。 */
-export interface CancelInvocationRequest {
+export interface RuntimeHeartbeatTransportRequest {
   runtimeEndpoint: string;
   auth: RuntimeTransportAuth;
   invocationId: string;
   idempotencyKey: string;
-  requestBody: CancelInvocationRequestBody;
+  request: HeartbeatRequest;
 }
 
-/** resumeInvocation 请求体。 */
-export interface ResumeInvocationRequestBody {
-  resume_payload: unknown;
-  trace_context?: { trace_id: string; span_id: string } | null;
-  /** §28：员工 resolve 后 resume 必须重新签发新 Gateway Access Token。 */
-  gateway_access: GatewayAccess;
-  /**
-   * 04 专项：Resume 重新构建的 Binding-frozen Invocation Context（与 Start 同一
-   * 语义字段；每次真正 dispatch 刷新 current_datetime 等）。Transport 只做 wire
-   * 映射，不查 DB/合同/Policy。
-   */
-  invocation_context?: Array<{ context_kind: string; value: unknown }>;
-}
-
-/** resumeInvocation 响应体。 */
-export interface ResumeInvocationResponse {
-  invocation_id: string;
-  resumed: boolean;
-  attempt_no: number;
-  /**
-   * Runtime 要求平台为同一 Invocation 创建新 Attempt 重调度（事实源 L924-928）。
-   *
-   * - true：Runtime 内存状态已丢失，平台必须创建新 Attempt + 新 EnvironmentLease，
-   * 从安全 Checkpoint 重调度；不能新建 continuation Invocation，不能更换 ExecutionBinding。
-   * - false / undefined：Resume 成功，平台按原流程写 turn.resumed + invocation.resumed Events。
-   */
-  requires_redispatch?: boolean;
-}
-
-/** resumeInvocation 请求参数。 */
-export interface ResumeInvocationRequest {
+export interface RuntimeCancelTransportRequest {
   runtimeEndpoint: string;
   auth: RuntimeTransportAuth;
   invocationId: string;
   idempotencyKey: string;
-  requestBody: ResumeInvocationRequestBody;
+  request: CancelRequest;
 }
 
-/** steerInvocation 请求体。 */
-export interface SteerInvocationRequestBody {
-  steer_payload: unknown;
-  trace_context?: { trace_id: string; span_id: string } | null;
-}
-
-/** steerInvocation 响应体。 */
-export interface SteerInvocationResponse {
-  invocation_id: string;
-  steered: boolean;
-  attempt_no: number;
-}
-
-/** steerInvocation 请求参数。 */
-export interface SteerInvocationRequest {
+export interface RuntimeSteerTransportRequest {
   runtimeEndpoint: string;
   auth: RuntimeTransportAuth;
   invocationId: string;
   idempotencyKey: string;
-  requestBody: SteerInvocationRequestBody;
+  request: SteerRequest;
 }
 
-// ─── 接口 ─────────────────────────────────────────────────
+export interface RuntimeSafePointTransportRequest {
+  runtimeEndpoint: string;
+  auth: RuntimeTransportAuth;
+  invocationId: string;
+  idempotencyKey: string;
+  request: SafePointRequest;
+}
 
-/** Runtime HTTP 客户端接口。 */
+export interface RuntimeSafePointReleaseTransportRequest {
+  runtimeEndpoint: string;
+  auth: RuntimeTransportAuth;
+  invocationId: string;
+  checkpointIntentId: string;
+  idempotencyKey: string;
+  request: SafePointReleaseRequest;
+}
+
 export interface RuntimeHttpClient {
-  probeCapabilities(
-    endpoint: string,
-    auth: RuntimeTransportAuth,
-  ): Promise<RuntimeCapabilitiesResponse>;
-  startInvocation(req: StartInvocationRequest): Promise<StartInvocationResponse>;
-  cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse>;
-  resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse>;
-  steerInvocation(req: SteerInvocationRequest): Promise<SteerInvocationResponse>;
+  probeCapabilities(endpoint: string, auth: RuntimeTransportAuth): Promise<RuntimeCapabilities>;
+  startInvocation(request: RuntimeStartTransportRequest): Promise<RuntimeStartResponse>;
+  resumeInvocation(request: RuntimeStartTransportRequest): Promise<RuntimeStartResponse>;
+  postEventBatch(request: RuntimeEventTransportRequest): Promise<unknown>;
+  heartbeat(request: RuntimeHeartbeatTransportRequest): Promise<HeartbeatResponse>;
+  cancelInvocation(request: RuntimeCancelTransportRequest): Promise<CancelResponse>;
+  steerInvocation(request: RuntimeSteerTransportRequest): Promise<SteerResponse>;
+  requestSafePoint(request: RuntimeSafePointTransportRequest): Promise<SafePointResponse>;
+  releaseSafePoint(request: RuntimeSafePointReleaseTransportRequest): Promise<void>;
 }
 
-// ─── 真实 HTTP 实现 ───────────────────────────────────────
+const DEFAULT_TIMEOUT_MS = 15_000;
 
-/** 默认请求超时（10s）。 */
-const DEFAULT_TIMEOUT_MS = 10_000;
-
-/**
- * 创建真实 HTTP Runtime 客户端（生产用）。
- *
- * 用全局 fetch；超时由 AbortController 控制。
- * 网络错误（fetch 抛错）统一包装为 RuntimeHttpClientError(kind=network)。
- */
-export function createHttpRuntimeClient(options?: {
-  timeoutMs?: number;
-}): RuntimeHttpClient {
+export function createHttpRuntimeClient(options?: { timeoutMs?: number }): RuntimeHttpClient {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  async function doFetch(
+  async function requestJson(
     url: string,
-    init: RequestInit & { headers: Record<string, string> },
-    dispatchPossiblyStarted: boolean,
-  ): Promise<Response> {
+    method: "GET" | "POST",
+    auth: RuntimeTransportAuth,
+    body: unknown,
+    idempotencyKey: string | undefined,
+    possiblyStarted: boolean,
+  ): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
-    } catch (err) {
-      const stableCode = controller.signal.aborted
-        ? "RUNTIME_TIMEOUT"
-        : classifyNetworkFailure(err);
+      const headers: Record<string, string> = {
+        ...outboundAuthHeaders(auth, { allowWorkloadToken: true }),
+      };
+      if (body !== undefined) headers["content-type"] = "application/json";
+      if (idempotencyKey) headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        let message = `Runtime HTTP ${response.status}`;
+        let code: string | undefined;
+        try {
+          const errorBody = (await response.json()) as {
+            error?: { code?: string; message?: string };
+          };
+          code = errorBody.error?.code;
+          if (errorBody.error?.message) message = errorBody.error.message;
+        } catch {
+          // Preserve the status-based error when the peer did not return JSON.
+        }
+        throw new RuntimeHttpClientError("http", message, response.status, code, {
+          dispatchPossiblyStarted: possiblyStarted,
+        });
+      }
+      try {
+        return await response.json();
+      } catch {
+        throw new RuntimeHttpClientError(
+          "protocol",
+          "Runtime 返回了非法 JSON",
+          undefined,
+          undefined,
+          {
+            stableCode: "RUNTIME_INVALID_JSON",
+            retryable: false,
+            dispatchPossiblyStarted: possiblyStarted,
+          },
+        );
+      }
+    } catch (error) {
+      if (error instanceof RuntimeHttpClientError) throw error;
+      const code = controller.signal.aborted ? "RUNTIME_TIMEOUT" : classifyNetworkFailure(error);
       throw new RuntimeHttpClientError(
         "network",
-        stableCode === "RUNTIME_TIMEOUT" ? "Runtime 请求超时" : "Runtime 网络连接失败",
+        controller.signal.aborted ? "Runtime 请求超时" : "Runtime 网络连接失败",
         undefined,
         undefined,
-        { stableCode, retryable: true, dispatchPossiblyStarted },
+        { stableCode: code, retryable: true, dispatchPossiblyStarted: possiblyStarted },
       );
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** 读取非 2xx 响应错误体，构造 RuntimeHttpClientError(kind=http)。 */
-  async function throwHttpError(resp: Response, dispatchPossiblyStarted: boolean): Promise<never> {
-    let runtimeErrorCode: string | undefined;
-    let message = `Runtime HTTP ${resp.status}`;
-    try {
-      const body = (await resp.json()) as { error?: { code?: string; message?: string } };
-      runtimeErrorCode = body?.error?.code;
-      if (body?.error?.message) {
-        message = body.error.message;
-      }
-    } catch {
-      // 响应体非 JSON 或为空，使用默认 message
-    }
-    throw new RuntimeHttpClientError("http", message, resp.status, runtimeErrorCode, {
-      dispatchPossiblyStarted,
-    });
-  }
-
-  async function readJson(resp: Response, dispatchPossiblyStarted: boolean): Promise<unknown> {
-    try {
-      return await resp.json();
-    } catch {
+  async function postStart(
+    request: RuntimeStartTransportRequest,
+    suffix: string,
+  ): Promise<RuntimeStartResponse> {
+    const parsedRequest = RuntimeStartRequestSchema.parse(request.request);
+    const body = await requestJson(
+      `${trimEndpoint(request.runtimeEndpoint)}/runtime/invocations${suffix}`,
+      "POST",
+      request.auth,
+      parsedRequest,
+      request.idempotencyKey,
+      true,
+    );
+    const parsed = RuntimeStartResponseSchema.safeParse(body);
+    if (
+      !parsed.success ||
+      parsed.data.authority.invocationId !== parsedRequest.authority.invocationId
+    ) {
       throw new RuntimeHttpClientError(
         "protocol",
-        "Runtime 返回了非法 JSON",
+        "Runtime Start/Resume 响应结构非法",
         undefined,
         undefined,
         {
-          stableCode: "RUNTIME_INVALID_JSON",
+          stableCode: "RUNTIME_PROTOCOL_SCHEMA_MISMATCH",
           retryable: false,
-          dispatchPossiblyStarted,
+          dispatchPossiblyStarted: true,
         },
       );
     }
+    return parsed.data;
   }
 
   return {
-    async probeCapabilities(
-      endpoint: string,
-      auth: RuntimeTransportAuth,
-    ): Promise<RuntimeCapabilitiesResponse> {
-      const url = `${endpoint}/runtime/capabilities?protocol_version=${RUNTIME_PROTOCOL_VERSION}`;
-      const resp = await doFetch(
-        url,
-        {
-          method: "GET",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-          headers: outboundAuthHeaders(auth, { allowWorkloadToken: true }),
-        },
+    async probeCapabilities(endpoint, auth) {
+      const body = await requestJson(
+        `${trimEndpoint(endpoint)}/runtime/capabilities?protocolVersion=${PROTOCOL_VERSION}`,
+        "GET",
+        auth,
+        undefined,
+        undefined,
         false,
       );
-      if (!resp.ok) {
-        await throwHttpError(resp, false);
-      }
-      const body = await readJson(resp, false);
-      if (!isRuntimeCapabilitiesResponse(body)) {
+      const parsed = RuntimeCapabilitiesSchema.safeParse(body);
+      if (!parsed.success) {
         throw new RuntimeHttpClientError(
           "protocol",
-          "Runtime 能力响应结构非法：缺少 protocol_versions 或 features",
+          "Runtime capabilities 响应结构非法",
           undefined,
           undefined,
-          { dispatchPossiblyStarted: false },
+          {
+            stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+            retryable: false,
+            dispatchPossiblyStarted: false,
+          },
         );
       }
-      return body;
+      return parsed.data;
     },
-
-    async startInvocation(req: StartInvocationRequest): Promise<StartInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/invocations`;
-      const resp = await doFetch(
-        url,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
-          },
-          body: JSON.stringify(req.requestBody),
-        },
+    startInvocation(request) {
+      return postStart(request, "");
+    },
+    resumeInvocation(request) {
+      return postStart(request, `/${request.request.authority.invocationId}/resume`);
+    },
+    async postEventBatch(request) {
+      const parsedRequest = RuntimeEventBatchSchema.parse(request.request);
+      return requestJson(
+        `${trimEndpoint(request.runtimeEndpoint)}/runtime/invocations/${request.invocationId}/events`,
+        "POST",
+        request.auth,
+        parsedRequest,
+        request.idempotencyKey,
         true,
       );
-      if (!resp.ok) {
-        await throwHttpError(resp, true);
-      }
-      const body = await readJson(resp, true);
-      if (
-        !isStartInvocationResponse(body) ||
-        body.invocation_id !== req.requestBody.invocation_id
-      ) {
-        throw new RuntimeHttpClientError(
-          "protocol",
-          "Runtime startInvocation 响应结构非法：缺少 invocation_id 或 accepted",
-          undefined,
-          undefined,
-          { dispatchPossiblyStarted: true },
-        );
-      }
-      return body;
     },
-
-    async cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/invocations/${req.invocationId}/cancel`;
-      const resp = await doFetch(
-        url,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
-          },
-          body: JSON.stringify(req.requestBody),
-        },
+    async heartbeat(request) {
+      const parsedRequest = HeartbeatRequestSchema.parse(request.request);
+      const body = await requestJson(
+        `${trimEndpoint(request.runtimeEndpoint)}/runtime/invocations/${request.invocationId}/heartbeat`,
+        "POST",
+        request.auth,
+        parsedRequest,
+        request.idempotencyKey,
         true,
       );
-      if (!resp.ok) {
-        await throwHttpError(resp, true);
-      }
-      const body = await readJson(resp, true);
-      if (!isCancelInvocationResponse(body) || body.invocation_id !== req.invocationId) {
-        throw new RuntimeHttpClientError(
-          "protocol",
-          "Runtime cancelInvocation 响应结构非法",
-          undefined,
-          undefined,
-          { dispatchPossiblyStarted: true },
-        );
-      }
-      return body;
+      const parsed = HeartbeatResponseSchema.safeParse(body);
+      if (!parsed.success) throw protocolMismatch("Heartbeat 响应结构非法", true);
+      return parsed.data;
     },
-
-    async resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/invocations/${req.invocationId}/resume`;
-      const resp = await doFetch(
-        url,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
-          },
-          body: JSON.stringify(req.requestBody),
-        },
+    async cancelInvocation(request) {
+      const parsedRequest = CancelRequestSchema.parse(request.request);
+      const body = await requestJson(
+        `${trimEndpoint(request.runtimeEndpoint)}/runtime/invocations/${request.invocationId}/cancel`,
+        "POST",
+        request.auth,
+        parsedRequest,
+        request.idempotencyKey,
         true,
       );
-      if (!resp.ok) {
-        await throwHttpError(resp, true);
-      }
-      const body = await readJson(resp, true);
-      if (!isResumeInvocationResponse(body) || body.invocation_id !== req.invocationId) {
-        throw new RuntimeHttpClientError(
-          "protocol",
-          "Runtime resumeInvocation 响应结构非法",
-          undefined,
-          undefined,
-          { dispatchPossiblyStarted: true },
-        );
-      }
-      return body;
+      const parsed = CancelResponseSchema.safeParse(body);
+      if (!parsed.success) throw protocolMismatch("Cancel 响应结构非法", true);
+      return parsed.data;
     },
-
-    async steerInvocation(req: SteerInvocationRequest): Promise<SteerInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/invocations/${req.invocationId}/steer`;
-      const resp = await doFetch(
-        url,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
-            ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
-            [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
-          },
-          body: JSON.stringify(req.requestBody),
-        },
+    async steerInvocation(request) {
+      const parsedRequest = SteerRequestSchema.parse(request.request);
+      const body = await requestJson(
+        `${trimEndpoint(request.runtimeEndpoint)}/runtime/invocations/${request.invocationId}/steer`,
+        "POST",
+        request.auth,
+        parsedRequest,
+        request.idempotencyKey,
         true,
       );
-      if (!resp.ok) {
-        await throwHttpError(resp, true);
+      const parsed = SteerResponseSchema.safeParse(body);
+      if (!parsed.success) throw protocolMismatch("Steer 响应结构非法", true);
+      return parsed.data;
+    },
+    async requestSafePoint(request) {
+      const parsedRequest = SafePointRequestSchema.parse(request.request);
+      const body = await requestJson(
+        `${trimEndpoint(request.runtimeEndpoint)}/runtime/invocations/${request.invocationId}/safe-points`,
+        "POST",
+        request.auth,
+        parsedRequest,
+        request.idempotencyKey,
+        true,
+      );
+      const parsed = SafePointResponseSchema.safeParse(body);
+      if (!parsed.success || parsed.data.checkpointIntentId !== parsedRequest.checkpointIntentId) {
+        throw protocolMismatch("Safe-point 响应结构非法", true);
       }
-      const body = await readJson(resp, true);
-      if (!isSteerInvocationResponse(body) || body.invocation_id !== req.invocationId) {
-        throw new RuntimeHttpClientError(
-          "protocol",
-          "Runtime steerInvocation 响应结构非法",
-          undefined,
-          undefined,
-          { dispatchPossiblyStarted: true },
-        );
-      }
-      return body;
+      return parsed.data;
+    },
+    async releaseSafePoint(request) {
+      const parsedRequest = SafePointReleaseRequestSchema.parse(request.request);
+      await requestJson(
+        `${trimEndpoint(request.runtimeEndpoint)}/runtime/invocations/${request.invocationId}/safe-points/${request.checkpointIntentId}/release`,
+        "POST",
+        request.auth,
+        parsedRequest,
+        request.idempotencyKey,
+        true,
+      );
     },
   };
+}
+
+function protocolMismatch(message: string, possiblyStarted: boolean): RuntimeHttpClientError {
+  return new RuntimeHttpClientError("protocol", message, undefined, undefined, {
+    stableCode: "RUNTIME_PROTOCOL_SCHEMA_MISMATCH",
+    retryable: false,
+    dispatchPossiblyStarted: possiblyStarted,
+  });
+}
+
+function trimEndpoint(endpoint: string): string {
+  return endpoint.replace(/\/+$/, "");
 }
 
 function classifyNetworkFailure(
   error: unknown,
 ): "RUNTIME_CONNECT_FAILED" | "RUNTIME_DNS_FAILED" | "RUNTIME_TLS_FAILED" {
-  const cause = isRecord(error) ? error.cause : null;
-  const code = isRecord(cause) && typeof cause.code === "string" ? cause.code : "";
+  const cause =
+    error && typeof error === "object" && "cause" in error
+      ? (error as { cause?: unknown }).cause
+      : undefined;
+  const code =
+    cause && typeof cause === "object" && "code" in cause
+      ? String((cause as { code?: unknown }).code ?? "")
+      : "";
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "RUNTIME_DNS_FAILED";
   if (/CERT|TLS|SSL/.test(code)) return "RUNTIME_TLS_FAILED";
   return "RUNTIME_CONNECT_FAILED";
 }
 
-export function isRuntimeCapabilitiesResponse(
-  value: unknown,
-): value is RuntimeCapabilitiesResponse {
-  if (!isRecord(value) || !Array.isArray(value.protocol_versions)) return false;
-  if (!value.protocol_versions.every((item) => typeof item === "string")) return false;
-  if (!isRecord(value.features) || !isRecord(value.limits)) return false;
-  const features = value.features;
-  if (
-    ![
-      "event_stream",
-      "cancel",
-      "resume",
-      "steer",
-      "dynamic_tools",
-      "user_action",
-      "filesystem_checkpoint",
-    ].every((key) => typeof features[key] === "boolean") ||
-    !Array.isArray(features.workspace_types) ||
-    !features.workspace_types.every((item) => typeof item === "string")
-  ) {
-    return false;
-  }
-  return (
-    typeof value.limits.max_invocation_seconds === "number" &&
-    Number.isFinite(value.limits.max_invocation_seconds) &&
-    typeof value.limits.max_event_bytes === "number" &&
-    Number.isFinite(value.limits.max_event_bytes)
-  );
-}
-
-function isStartInvocationResponse(value: unknown): value is StartInvocationResponse {
-  return (
-    isRecord(value) &&
-    typeof value.invocation_id === "string" &&
-    typeof value.accepted === "boolean" &&
-    Number.isInteger(value.attempt_no) &&
-    typeof value.runtime_session_ref === "string" &&
-    value.runtime_session_ref.length > 0 &&
-    typeof value.runtime_execution_ref === "string" &&
-    value.runtime_execution_ref.length > 0 &&
-    isRuntimeCapabilitiesResponse(value.capabilities)
-  );
-}
-
-function isCancelInvocationResponse(value: unknown): value is CancelInvocationResponse {
-  return (
-    isRecord(value) &&
-    typeof value.invocation_id === "string" &&
-    typeof value.cancelled === "boolean" &&
-    Number.isInteger(value.attempt_no)
-  );
-}
-
-function isResumeInvocationResponse(value: unknown): value is ResumeInvocationResponse {
-  return (
-    isRecord(value) &&
-    typeof value.invocation_id === "string" &&
-    typeof value.resumed === "boolean" &&
-    Number.isInteger(value.attempt_no) &&
-    (value.requires_redispatch === undefined || typeof value.requires_redispatch === "boolean")
-  );
-}
-
-function isSteerInvocationResponse(value: unknown): value is SteerInvocationResponse {
-  return (
-    isRecord(value) &&
-    typeof value.invocation_id === "string" &&
-    typeof value.steered === "boolean" &&
-    Number.isInteger(value.attempt_no)
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-// ─── Mock 实现 ────────────────────────────────────────────
-
-/** Mock 客户端的处理器集合（每个端点可独立 mock）。 */
 export interface MockRuntimeClientHandlers {
   probeCapabilities?: (
     endpoint: string,
     auth: RuntimeTransportAuth,
-  ) => Promise<RuntimeCapabilitiesResponse>;
-  startInvocation?: (req: StartInvocationRequest) => Promise<StartInvocationResponse>;
-  cancelInvocation?: (req: CancelInvocationRequest) => Promise<CancelInvocationResponse>;
-  resumeInvocation?: (req: ResumeInvocationRequest) => Promise<ResumeInvocationResponse>;
-  steerInvocation?: (req: SteerInvocationRequest) => Promise<SteerInvocationResponse>;
+  ) => Promise<RuntimeCapabilities>;
+  startInvocation?: (request: RuntimeStartTransportRequest) => Promise<RuntimeStartResponse>;
+  resumeInvocation?: (request: RuntimeStartTransportRequest) => Promise<RuntimeStartResponse>;
+  postEventBatch?: (request: RuntimeEventTransportRequest) => Promise<unknown>;
+  heartbeat?: (request: RuntimeHeartbeatTransportRequest) => Promise<HeartbeatResponse>;
+  cancelInvocation?: (request: RuntimeCancelTransportRequest) => Promise<CancelResponse>;
+  steerInvocation?: (request: RuntimeSteerTransportRequest) => Promise<SteerResponse>;
+  requestSafePoint?: (request: RuntimeSafePointTransportRequest) => Promise<SafePointResponse>;
+  releaseSafePoint?: (request: RuntimeSafePointReleaseTransportRequest) => Promise<void>;
 }
 
-/**
- * 创建 mock Runtime 客户端（测试用）。
- *
- * 未提供 handler 的端点抛 RuntimeHttpClientError(kind=protocol, "未实现")。
- * 调用记录存入 calls 数组，便于测试断言。
- */
 export function createMockRuntimeClient(handlers: MockRuntimeClientHandlers): RuntimeHttpClient & {
-  /** 累积调用记录，供测试断言。 */
   calls: {
     probeCapabilities: Array<{ endpoint: string; auth: RuntimeTransportAuth }>;
-    startInvocation: StartInvocationRequest[];
-    cancelInvocation: CancelInvocationRequest[];
-    resumeInvocation: ResumeInvocationRequest[];
-    steerInvocation: SteerInvocationRequest[];
+    startInvocation: RuntimeStartTransportRequest[];
+    resumeInvocation: RuntimeStartTransportRequest[];
+    postEventBatch: RuntimeEventTransportRequest[];
+    heartbeat: RuntimeHeartbeatTransportRequest[];
+    cancelInvocation: RuntimeCancelTransportRequest[];
+    steerInvocation: RuntimeSteerTransportRequest[];
+    requestSafePoint: RuntimeSafePointTransportRequest[];
+    releaseSafePoint: RuntimeSafePointReleaseTransportRequest[];
   };
 } {
   const calls = {
     probeCapabilities: [] as Array<{ endpoint: string; auth: RuntimeTransportAuth }>,
-    startInvocation: [] as StartInvocationRequest[],
-    cancelInvocation: [] as CancelInvocationRequest[],
-    resumeInvocation: [] as ResumeInvocationRequest[],
-    steerInvocation: [] as SteerInvocationRequest[],
+    startInvocation: [] as RuntimeStartTransportRequest[],
+    resumeInvocation: [] as RuntimeStartTransportRequest[],
+    postEventBatch: [] as RuntimeEventTransportRequest[],
+    heartbeat: [] as RuntimeHeartbeatTransportRequest[],
+    cancelInvocation: [] as RuntimeCancelTransportRequest[],
+    steerInvocation: [] as RuntimeSteerTransportRequest[],
+    requestSafePoint: [] as RuntimeSafePointTransportRequest[],
+    releaseSafePoint: [] as RuntimeSafePointReleaseTransportRequest[],
   };
-
+  const missing = (name: string): never => {
+    throw new RuntimeHttpClientError("protocol", `mock ${name} 未实现`, undefined, undefined, {
+      stableCode: "RUNTIME_PROTOCOL_SCHEMA_MISMATCH",
+      retryable: false,
+      dispatchPossiblyStarted: false,
+    });
+  };
   return {
     calls,
-
-    async probeCapabilities(
-      endpoint: string,
-      auth: RuntimeTransportAuth,
-    ): Promise<RuntimeCapabilitiesResponse> {
+    async probeCapabilities(endpoint, auth) {
       calls.probeCapabilities.push({ endpoint, auth });
-      if (!handlers.probeCapabilities) {
-        throw new RuntimeHttpClientError("protocol", "mock probeCapabilities 未实现");
-      }
-      return handlers.probeCapabilities(endpoint, auth);
+      return handlers.probeCapabilities
+        ? handlers.probeCapabilities(endpoint, auth)
+        : missing("probeCapabilities");
     },
-
-    async startInvocation(req: StartInvocationRequest): Promise<StartInvocationResponse> {
-      calls.startInvocation.push(req);
-      if (!handlers.startInvocation) {
-        throw new RuntimeHttpClientError("protocol", "mock startInvocation 未实现");
-      }
-      return handlers.startInvocation(req);
+    async startInvocation(request) {
+      calls.startInvocation.push(request);
+      return handlers.startInvocation
+        ? handlers.startInvocation(request)
+        : missing("startInvocation");
     },
-
-    async cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse> {
-      calls.cancelInvocation.push(req);
-      if (!handlers.cancelInvocation) {
-        throw new RuntimeHttpClientError("protocol", "mock cancelInvocation 未实现");
-      }
-      return handlers.cancelInvocation(req);
+    async resumeInvocation(request) {
+      calls.resumeInvocation.push(request);
+      return handlers.resumeInvocation
+        ? handlers.resumeInvocation(request)
+        : missing("resumeInvocation");
     },
-
-    async resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
-      calls.resumeInvocation.push(req);
-      if (!handlers.resumeInvocation) {
-        throw new RuntimeHttpClientError("protocol", "mock resumeInvocation 未实现");
-      }
-      return handlers.resumeInvocation(req);
+    async postEventBatch(request) {
+      calls.postEventBatch.push(request);
+      return handlers.postEventBatch ? handlers.postEventBatch(request) : missing("postEventBatch");
     },
-
-    async steerInvocation(req: SteerInvocationRequest): Promise<SteerInvocationResponse> {
-      calls.steerInvocation.push(req);
-      if (!handlers.steerInvocation) {
-        throw new RuntimeHttpClientError("protocol", "mock steerInvocation 未实现");
-      }
-      return handlers.steerInvocation(req);
+    async heartbeat(request) {
+      calls.heartbeat.push(request);
+      return handlers.heartbeat ? handlers.heartbeat(request) : missing("heartbeat");
+    },
+    async cancelInvocation(request) {
+      calls.cancelInvocation.push(request);
+      return handlers.cancelInvocation
+        ? handlers.cancelInvocation(request)
+        : missing("cancelInvocation");
+    },
+    async steerInvocation(request) {
+      calls.steerInvocation.push(request);
+      return handlers.steerInvocation
+        ? handlers.steerInvocation(request)
+        : missing("steerInvocation");
+    },
+    async requestSafePoint(request) {
+      calls.requestSafePoint.push(request);
+      return handlers.requestSafePoint
+        ? handlers.requestSafePoint(request)
+        : missing("requestSafePoint");
+    },
+    async releaseSafePoint(request) {
+      calls.releaseSafePoint.push(request);
+      if (handlers.releaseSafePoint) return handlers.releaseSafePoint(request);
+      return missing("releaseSafePoint");
     },
   };
 }
 
-/**
- * 构造默认能力响应（供 mock 与参考 Runtime 路由复用）。
- *
- * 事实源：11-api-and-event-boundaries.md §4 必需能力集。
- */
-export function defaultRuntimeCapabilities(): RuntimeCapabilitiesResponse {
+export function defaultRuntimeCapabilities(): RuntimeCapabilities {
   return {
-    protocol_versions: ["2"],
+    protocolVersion: PROTOCOL_VERSION,
+    contractDigest: `sha256:${"0".repeat(64)}`,
+    runtimeTargetDigest: `sha256:${"0".repeat(64)}`,
     features: {
-      event_stream: true,
+      heartbeat: true,
+      durableStartIdempotency: true,
+      startedEvent: true,
+      exactReplay: true,
       cancel: true,
       resume: true,
       steer: true,
-      dynamic_tools: false,
-      user_action: true,
-      workspace_types: ["local"],
-      filesystem_checkpoint: true,
+      subjectTypes: ["thread", "job"],
+      workspaceModes: [
+        "NO_PLATFORM_WORKSPACE",
+        "HOST_AFFINE",
+        "SHARED_DURABLE",
+        "CHECKPOINT_RESTORABLE",
+      ],
+      filesystemSemantics: {
+        kind: "portable",
+        caseSensitive: true,
+        symlinks: true,
+        permissions: true,
+        hardlinks: false,
+        specialFiles: false,
+        xattrsAcl: false,
+        mtime: "preserved",
+      },
     },
     limits: {
-      max_invocation_seconds: 600,
-      max_event_bytes: 1_048_576,
+      maxEventBytes: 262_144,
+      maxBatchEvents: 100,
+      maxBatchBytes: 1_048_576,
     },
   };
 }
+
+export type { CallbackEndpoints };

@@ -218,7 +218,7 @@ export async function appendRuntimeConformanceRun(dependencies: {
   if (
     revision.runtimeTargetDigest !== report.runtimeTargetDigest ||
     revision.configHash !== report.runtimeConfigDigest ||
-    revision.protocolContractRevision !== report.protocolContractRevision
+    revision.protocolContractDigest !== report.protocolContractDigest
   ) {
     throw new RuntimeConformanceBindingError("Runner 报告绑定与 RuntimeRevision 当前事实不一致");
   }

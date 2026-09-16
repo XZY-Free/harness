@@ -20,7 +20,6 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { logger } from "@/lib/logger";
-import { threadTable } from "@/lib/persistence/schema/conversation";
 import type { InvocationCommand } from "@/lib/persistence/schema/executions";
 import type { InvocationAttempt } from "@/lib/persistence/schema/executions";
 import { retryDispatchedCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
@@ -34,7 +33,6 @@ import {
   RUNTIME_DISPATCH_RETRY_POLICY,
   realDispatchClock,
 } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
-import { eq } from "drizzle-orm";
 
 /** Worker 依赖（可注入用于测试）。 */
 export interface RuntimeDispatchRetryWorkerDeps {
@@ -88,19 +86,8 @@ export function createRuntimeDispatchRetryWorker(
 
   /** 默认 Command lane：经命令网关 retry 入口（同一 idempotency key + 能力复核）。 */
   const defaultDispatchCommand = async (command: InvocationCommand): Promise<void> => {
-    const [thread] = await db
-      .select({ tenantId: threadTable.tenantId })
-      .from(threadTable)
-      .where(eq(threadTable.id, command.threadId))
-      .limit(1);
-    if (!thread) {
-      logger.warn("[runtime-dispatch-retry-worker] Command 关联 Thread 不存在", {
-        commandId: command.id,
-      });
-      return;
-    }
     await retryDispatchedCommandToRuntime({
-      tenantId: thread.tenantId,
+      tenantId: command.tenantId,
       commandId: command.id,
     });
   };

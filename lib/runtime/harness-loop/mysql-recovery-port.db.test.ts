@@ -14,28 +14,45 @@ const TENANT_ID = DEFAULT_TENANT_ID;
 async function seedActiveInvocation() {
   const threadId = randomUUID();
   const turnId = randomUUID();
+  const triggerItemId = randomUUID();
   const invocationId = randomUUID();
   await db.insert(threadTable).values({
     id: threadId,
     tenantId: TENANT_ID,
     ownerUserId: "recovery-user",
   });
+  await db.insert(threadItemTable).values({
+    id: triggerItemId,
+    threadId,
+    turnId,
+    itemSequence: 1,
+    itemType: "user_message",
+    itemState: "completed",
+    authorType: "user",
+    authorId: "recovery-user",
+    contentJson: { text: "继续执行" },
+    contentHash: "sha256:recovery-trigger",
+  });
   await db.insert(turnTable).values({
     id: turnId,
     threadId,
     turnSequence: 1,
     triggerType: "user_message",
+    triggerItemId,
     turnState: "running",
   });
   await db.insert(invocationTable).values({
     id: invocationId,
     tenantId: TENANT_ID,
+    subjectType: "thread",
     threadId,
     turnId,
+    triggerItemId,
     jobId: null,
     invocationSequence: 1,
     invocationKind: "initial",
     executionState: "running",
+    inputDigest: `sha256:${"0".repeat(64)}`,
     startedAt: new Date(),
   });
   return { threadId, turnId, invocationId };
@@ -93,7 +110,7 @@ describe("MySQL Harness recovery durable input", () => {
       threadId: seeded.threadId,
       turnId: seeded.turnId,
       invocationId: seeded.invocationId,
-      itemSequence: 1,
+      itemSequence: 2,
       itemType: "user_guidance",
       itemState: "completed",
       authorType: "user",
@@ -106,7 +123,7 @@ describe("MySQL Harness recovery durable input", () => {
       threadId: seeded.threadId,
       turnId: seeded.turnId,
       invocationId: seeded.invocationId,
-      itemSequence: 2,
+      itemSequence: 3,
       itemType: "user_guidance",
       itemState: "completed",
       authorType: "assistant",

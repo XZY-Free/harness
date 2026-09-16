@@ -30,10 +30,12 @@ export function createToolActionExecutor(params: {
     }
     const { tool } = validateHarnessActionAgainstCatalog(action, params.capabilityCatalog);
     if (!tool) throw new Error("TOOL_ACTION_NOT_ALLOWED");
+    if (!context.authority) throw new Error("NotCurrentExecutor");
     const result = await executeToolCall({
       tenantId: params.tenantId,
       executionSubject: params.executionSubject,
       invocationId: context.invocationId,
+      authority: context.authority,
       threadId: context.threadId,
       turnId: context.turnId,
       toolId: tool.toolId,

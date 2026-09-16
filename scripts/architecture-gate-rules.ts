@@ -1326,11 +1326,11 @@ export function checkFinalClosureBoundaryGate(
     "export interface StartInvocationResponse",
     requestStart,
   );
-  const requestBody =
+  const request =
     requestStart >= 0 && requestEnd > requestStart
       ? runtimeClient.slice(requestStart, requestEnd)
       : "";
-  if (/\b(?:subjectId|subject_id|executionSubject|execution_subject)\s*[?:]/.test(requestBody)) {
+  if (/\b(?:subjectId|subject_id|executionSubject|execution_subject)\s*[?:]/.test(request)) {
     failures.push("Runtime Start 请求体重新成为 Subject Authority");
   }
 
@@ -1361,16 +1361,17 @@ export function checkFinalClosureBoundaryGate(
   const resumeEnd = hosted.indexOf("async handleSteer(", resumeStart);
   const resumeBlock =
     resumeStart >= 0 && resumeEnd > resumeStart ? hosted.slice(resumeStart, resumeEnd) : "";
-  const hostedApplication = stripComments(
-    source("lib/runtime/application/production-resume-harness-invocation.ts"),
-  );
+  // 冻结 file-plan：production-resume-harness-invocation.ts / resume-harness-invocation.ts
+  // 已按 MERGE_AND_REPLACE 合并为唯一生产 Resume（lib/runtime/application/runtime-resume.ts），
+  // 真实 Hosted resume 模式断言落在合并后的目标文件。
+  const runtimeResume = stripComments(source("lib/runtime/application/runtime-resume.ts"));
   if (
     !resumeBlock.includes("applicationService.resume(") ||
-    !hostedApplication.includes("new HostedHarnessLoop(") ||
-    !hostedApplication.includes("const running = loop.run()") ||
-    !hostedApplication.includes("return await running") ||
-    !hostedApplication.includes("acquireLease: tryAcquireInvocationExecutionLease") ||
-    !hostedApplication.includes("cancelActiveAgentCalls(")
+    !runtimeResume.includes("new HostedHarnessLoop(") ||
+    !runtimeResume.includes("const running = loop.run()") ||
+    !runtimeResume.includes("return await running") ||
+    !runtimeResume.includes("getActiveExecutionOwnership(") ||
+    !runtimeResume.includes("cancelActiveAgentCalls(")
   ) {
     failures.push("Hosted Resume 退化为只 ACK");
   }

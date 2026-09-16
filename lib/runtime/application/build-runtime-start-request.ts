@@ -1,216 +1,188 @@
-/**
- * StartInvocationRequestBody 唯一正式 builder（初始 dispatch 与 retry Attempt 共用）。
- *
- * 事实源：
- * - docs/architecture/runtime-control-plane.md
- *
- * 职责：
- * - 从 exact Invocation + immutable ExecutionBinding + RuntimeRevision 构建
- *   完整 StartInvocationRequestBody：capability_directives / input_items / context_handle /
- *   invocation_context / workspace / gateway / governance / trace / execution_limits。
- * - 顶层 Invocation 恒属于 Harness（Agent 与 Runtime Authority 分离）：不携带 Agent 执行目标，
- *   只携带 capability_directives 表达本 Turn 的 Agent 使用偏好（由 Harness 决策是否调用）。
- * - Base Harness 路径不执行 Agent Contract Context Enrichment（该职责属 AgentCall，后续批次）。
- * - Attempt 维度差异只体现在 attempt 字段（attempt_no/attempt_id/retry_reason/checkpoint_ref/
- *   producer_sequence_start），由入参 attempt 提供。
- *
- * 关键约束：
- * - 只此一份 Start request builder；dispatcher 初始调度、redispatch、Durable Retry Worker
- *   全部调用本函数。
- */
-import { issueContextHandle } from "@/lib/context/context-handle";
-import { getItemById } from "@/lib/conversations/thread-item-queries";
-import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
-import {
-  type CapabilityCatalogSnapshot,
-  verifyCapabilityCatalogSnapshot,
-} from "@/lib/runtime/harness-loop/capability-catalog";
-import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
+/** Builds the one canonical Start/Resume request from frozen execution facts. */
+import { issueContextHandle, resolveContextHandle } from "@/lib/context/context-handle";
 import type {
-  GatewayAccess,
-  GatewayEndpoints,
-  GovernanceConfigRef,
-  StartInvocationRequestBody,
-} from "@/lib/runtime/runtime-client";
+  Invocation,
+  ExecutionBinding as PersistedExecutionBinding,
+} from "@/lib/persistence/schema/executions";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import {
+  type AuthorityIdentity,
+  type CallbackEndpoints,
+  type Credentials,
+  type Recovery,
+  type RuntimeStartRequest,
+  RuntimeStartRequestSchema,
+  computeSemanticRequestDigest,
+  protocolDigest,
+} from "@/lib/runtime/runtime-protocol";
+import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 
-/** builder 入参。 */
 export interface BuildRuntimeStartRequestInput {
   tenantId: string;
   invocation: Invocation;
-  binding: ExecutionBinding;
-  /** 本 Turn 的能力使用提示；省略/空数组表示没有提示。 */
-  capabilityDirectives?: Array<{
-    capability_type: "agent";
-    capability_id: string;
-    mode: "preferred";
-  }>;
-  /** Binding 冻结的 RuntimeRevision（读取 capabilities/execution_limits）。 */
-  runtimeRevisionId: string;
-  gatewayEndpoints: GatewayEndpoints;
-  governanceConfig: GovernanceConfigRef;
-  gatewayAccess: GatewayAccess;
-  correlationId?: string | null;
-  /** Attempt 维度信息（attempt_no=1 且无 retry_reason 时即初始调度形态）。 */
-  attempt: {
-    attemptNo: number;
-    attemptId?: string;
-    retryReason?: string | null;
-    checkpointRef?: string | null;
+  binding: PersistedExecutionBinding;
+  authority: AuthorityIdentity;
+  credentials: Credentials;
+  runtimeEndpoint: string;
+  callbackEndpoints: CallbackEndpoints;
+  intentType?: "start" | "resume";
+  recovery?: Recovery;
+  activationEvidenceRef: string;
+  attempt?: {
     producerSequenceStart?: number;
+    checkpointId?: string;
+    anchor?: string;
+    anchorDigest?: string;
   };
-  /** 初始调度要求 trigger Item 必须存在（缺失抛错）；retry/redispatch 容忍缺失（Job 模式）。 */
-  requireTriggerItem?: boolean;
-  /** 可注入时钟（current_datetime 每次 dispatch 刷新；测试用 fake clock）。 */
   now?: Date;
 }
 
-/** 构建结果。 */
 export interface BuildRuntimeStartRequestResult {
-  requestBody: StartInvocationRequestBody;
-  /** 触发 user_message 的 Item id（无触发 Item 时为 null）。 */
-  triggerItemId: string | null;
+  request: RuntimeStartRequest;
+  serializedContext: string;
 }
 
-/**
- * 构建 StartInvocationRequestBody（唯一正式实现）。
- *
- * @throws Error requireTriggerItem=true 且触发 Item 不存在
- * @throws Error RuntimeRevision 不存在（binding 冻结的 revision 必须存在）
- */
+function inputDigest(value: unknown): string {
+  return protocolDigest(value);
+}
+
 export async function buildRuntimeStartRequestForInvocation(
   input: BuildRuntimeStartRequestInput,
 ): Promise<BuildRuntimeStartRequestResult> {
   const { invocation, binding } = input;
-  const now = input.now ?? new Date();
+  if (input.authority.invocationId !== invocation.id)
+    throw new Error("Authority Invocation 不匹配");
+  if (input.authority.runtimeRevisionId !== binding.runtimeRevisionId)
+    throw new Error("RuntimeRevision 与 Binding 不匹配");
+  const runtimeRevision = await getRuntimeRevisionById(binding.runtimeRevisionId);
+  if (!runtimeRevision) throw new Error(`RuntimeRevision 不存在: ${binding.runtimeRevisionId}`);
 
-  // 读取 RuntimeRevision capabilities（execution_limits）
-  const runtimeRevision = await getRuntimeRevisionById(input.runtimeRevisionId);
-  if (!runtimeRevision) {
-    throw new Error(
-      `buildRuntimeStartRequestForInvocation: RuntimeRevision 不存在（id=${input.runtimeRevisionId}）`,
-    );
-  }
-  const caps = runtimeRevision.runtimeCapabilitiesJson as {
-    limits?: { max_invocation_seconds?: number; max_event_bytes?: number };
-  } | null;
-  const maxInvocationSeconds = caps?.limits?.max_invocation_seconds ?? 600;
-  const maxEventBytes = caps?.limits?.max_event_bytes ?? 1_048_576;
-  const governanceLoopLimits = input.governanceConfig.config.harnessLoopLimits as
-    | Record<string, unknown>
-    | undefined;
-  const positiveLimit = (key: string, fallback: number): number => {
-    const value = governanceLoopLimits?.[key];
-    return Number.isInteger(value) && (value as number) > 0 ? (value as number) : fallback;
-  };
-
-  // context_handle（每次 dispatch 重新签发）
-  const contextHandle = await issueContextHandle({
+  const serializedContext = await issueContextHandle({
     tenantId: input.tenantId,
     invocationId: invocation.id,
   });
-
-  // input_items：platform_rule + user_message（如有）+ resource_index
-  const inputItems: unknown[] = [
-    {
-      type: "platform_rule",
-      content: "仅使用当前 Invocation 授权的 Context Gateway 与 Workspace 资源。",
-    },
-  ];
-  let triggerItemId: string | null = null;
-  if (invocation.triggerItemId) {
-    const triggerItem = await getItemById(input.tenantId, invocation.triggerItemId);
-    if (triggerItem) {
-      triggerItemId = triggerItem.id;
-      inputItems.push({
-        type: "user_message",
-        item_id: triggerItem.id,
-        content: triggerItem.contentJson,
-      });
-    } else if (input.requireTriggerItem) {
-      throw new Error(
-        `buildRuntimeStartRequestForInvocation: 当前输入 Item 不存在（invocationId=${invocation.id}）`,
-      );
-    }
-  } else if (input.requireTriggerItem) {
-    throw new Error(
-      `buildRuntimeStartRequestForInvocation: Invocation 缺少 triggerItemId（invocationId=${invocation.id}）`,
-    );
-  }
-  inputItems.push({
-    type: "resource_index",
-    sources: ["recent_items", "skill", "workspace_map", "memory", "knowledge"],
+  const context = await resolveContextHandle(serializedContext, {
+    tenantId: input.tenantId,
+    invocationId: invocation.id,
   });
+  const inputs =
+    invocation.subjectType === "thread"
+      ? [
+          {
+            kind: "persistent_ref" as const,
+            ref: invocation.triggerItemId ?? invocation.id,
+            digest:
+              context.subject.type === "thread"
+                ? context.subject.triggerItemDigest
+                : inputDigest({
+                    invocationId: invocation.id,
+                    triggerItemId: invocation.triggerItemId,
+                  }),
+          },
+        ]
+      : [
+          {
+            kind: "persistent_ref" as const,
+            ref: `job:${invocation.jobId ?? invocation.id}`,
+            digest:
+              context.subject.type === "job"
+                ? context.subject.inputHash
+                : inputDigest({ invocationId: invocation.id, jobId: invocation.jobId }),
+          },
+        ];
 
-  const requestBody: StartInvocationRequestBody = {
-    protocol_version: RUNTIME_PROTOCOL_VERSION,
-    invocation_id: invocation.id,
-    turn_context: invocation.threadId
-      ? {
-          thread_id: invocation.threadId,
-          turn_id: invocation.turnId ?? "",
-          trigger_item_id: invocation.triggerItemId ?? null,
-        }
-      : null,
-    job_context: invocation.jobId
-      ? {
-          job_id: invocation.jobId,
-          trigger_item_id: invocation.triggerItemId ?? null,
-        }
-      : null,
-    ...(input.capabilityDirectives && input.capabilityDirectives.length > 0
-      ? { capability_directives: input.capabilityDirectives }
-      : {}),
-    capability_catalog: verifyCapabilityCatalogSnapshot(
-      binding.capabilityCatalogJson,
-      binding.capabilityCatalogDigest,
-    ) as CapabilityCatalogSnapshot,
-    input_items: inputItems,
-    context_handle: contextHandle,
-    gateway_endpoints: input.gatewayEndpoints,
-    governance_config: input.governanceConfig,
-    gateway_access: input.gatewayAccess,
-    workspace: {
-      workspace_binding_id: binding.workspaceBindingId,
-      workspace_type: binding.workspaceBindingId ? "managed" : "none",
-    },
-    execution_limits: {
-      max_invocation_seconds: maxInvocationSeconds,
-      max_event_bytes: maxEventBytes,
-      max_loop_steps: positiveLimit("maxLoopSteps", 12),
-      max_agent_calls: positiveLimit("maxAgentCalls", 3),
-      max_tool_calls: positiveLimit("maxToolCalls", 8),
-      max_knowledge_searches: positiveLimit("maxKnowledgeSearches", 6),
-      max_consecutive_same_action: positiveLimit("maxConsecutiveSameAction", 2),
-    },
-    trace_context: {
-      trace_id: input.correlationId ?? invocation.id,
-      span_id: invocation.id,
-    },
-    attempt: {
-      attempt_no: input.attempt.attemptNo,
-      ...(input.attempt.attemptId !== undefined ? { attempt_id: input.attempt.attemptId } : {}),
-      ...(input.attempt.retryReason ? { retry_reason: input.attempt.retryReason } : {}),
-      ...(input.attempt.checkpointRef !== null && input.attempt.checkpointRef !== undefined
-        ? { checkpoint_ref: input.attempt.checkpointRef }
-        : {}),
-      ...(input.attempt.producerSequenceStart !== undefined
-        ? { producer_sequence_start: input.attempt.producerSequenceStart }
-        : {}),
-    },
+  const capabilities = runtimeRevision.runtimeCapabilitiesJson as {
+    limits?: {
+      maxEventBytes?: number;
+      maxBatchEvents?: number;
+      maxBatchBytes?: number;
+      executionTimeoutMs?: number;
+    };
+  } | null;
+  const maxEventBytes = Math.min(capabilities?.limits?.maxEventBytes ?? 262_144, 262_144);
+  const maxBatchEvents = Math.min(capabilities?.limits?.maxBatchEvents ?? 100, 100);
+  const maxBatchBytes = Math.min(capabilities?.limits?.maxBatchBytes ?? 1_048_576, 1_048_576);
+  const environment =
+    binding.environmentMode === "MANAGED"
+      ? (() => {
+          if (!binding.environmentDefinitionRevisionId)
+            throw new Error("MANAGED Binding 缺少 EnvironmentDefinitionRevision");
+          const subject = context.common.environment;
+          if (
+            subject.mode !== "MANAGED" ||
+            subject.revisionId !== binding.environmentDefinitionRevisionId
+          )
+            throw new Error("EnvironmentRevision 与 ContextHandle 不一致");
+          return subject;
+        })()
+      : { mode: "NO_PLATFORM_ENVIRONMENT" as const };
+  const workspaceBinding = await getWorkspaceBindingById(
+    input.tenantId,
+    binding.workspaceBindingId,
+  );
+  if (!workspaceBinding) throw new Error(`WorkspaceBinding 不存在: ${binding.workspaceBindingId}`);
+  if (
+    context.common.workspace.bindingId !== workspaceBinding.id ||
+    context.common.workspace.contractDigest !== workspaceBinding.contractDigest
+  ) {
+    throw new Error("WorkspaceBinding 与 ContextHandle 不一致");
+  }
+  const workspace =
+    workspaceBinding.continuityMode === "NO_PLATFORM_WORKSPACE"
+      ? { mode: "NONE" as const }
+      : {
+          mode: "BOUND" as const,
+          bindingId: workspaceBinding.id,
+          contractDigest: workspaceBinding.contractDigest,
+          continuityMode: workspaceBinding.continuityMode,
+          activationEvidenceRef: input.activationEvidenceRef,
+        };
+  const executionBinding = {
+    bindingDigest: context.common.bindingDigest,
+    runtimeRevisionId: binding.runtimeRevisionId,
+    policyRefs: [binding.policyRevisionId],
+    governanceRefs: [binding.governanceConfigRevisionId],
+    capabilityRefs: [binding.capabilityCatalogVersion].filter((value) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value),
+    ),
+    modelRefs: [],
+    allowedEgress: [],
   };
-
-  // Agent 与 Runtime Authority 分离：Base Harness 路径不执行 Agent Contract Context Enrichment。
-  // invocation_context（Allowed Bundle）构建属于 AgentCall 专属（后续批次），
-  // 顶层 Harness Start Request 不再携带 Agent Contract Context。
-
-  return { requestBody, triggerItemId };
-}
-
-/**
- * 稳定 Runtime Idempotency Key：同一个 Attempt 的所有 retry 不得换 key。
- * 固定格式 invocation-attempt:<attemptId>。
- */
-export function invocationAttemptIdempotencyKey(attemptId: string): string {
-  return `invocation-attempt:${attemptId}`;
+  const recovery = input.recovery ?? { kind: "initial" as const };
+  const authorityForRequest = input.authority;
+  const requestWithoutDigest = {
+    protocolVersion: 3 as const,
+    authority: authorityForRequest,
+    intentType: input.intentType ?? (recovery.kind === "resume" ? "resume" : "start"),
+    semanticRequestDigest: `sha256:${"0".repeat(64)}`,
+    executionBinding,
+    context,
+    inputs,
+    environment,
+    workspace,
+    activationDigest: protocolDigest({
+      invocationId: invocation.id,
+      authority: authorityForRequest,
+      activationEvidenceRef: input.activationEvidenceRef,
+    }),
+    recovery,
+    producerSequenceStart: String(
+      input.attempt?.producerSequenceStart ?? invocation.lastProducerSequence + 1,
+    ),
+    callbackEndpoints: input.callbackEndpoints,
+    credentials: input.credentials,
+    executionLimits: {
+      maxEventBytes,
+      maxBatchEvents,
+      maxBatchBytes,
+      dispatchDeadlineMs: 120_000,
+      executionTimeoutMs: capabilities?.limits?.executionTimeoutMs ?? 600_000,
+    },
+  } satisfies RuntimeStartRequest;
+  const request: RuntimeStartRequest = {
+    ...requestWithoutDigest,
+    semanticRequestDigest: computeSemanticRequestDigest(requestWithoutDigest),
+  };
+  RuntimeStartRequestSchema.parse(request);
+  return { request, serializedContext };
 }

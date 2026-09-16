@@ -168,9 +168,21 @@ function checkExternalRuntimeTransport(): void {
   else fail(`External Runtime Transport 违规：\n  ${result.failures.join("\n  ")}`);
 }
 
+/**
+ * 已退役命名检查的精确例外（CLEAN-08）：
+ * 1. 冻结工程包自身——退役命名清单的定义源，必须能引用历史命名；
+ * 2. 测试 fixture 中的负向字符串（对已退役模块的依赖仍由
+ *    collectRetiredModuleDependencyViolations 单独把关，不放行真实 import）。
+ */
+const RETIRED_NAMING_EXCEPTIONS = [
+  /^docs\/V12\/02\/snowharness-execution-design\//,
+  /\.test\.tsx?$/,
+];
+
 function checkRetiredNaming(): void {
   const violations = sourceFiles().flatMap((file) => {
     const repositoryPath = relative(ROOT, file);
+    if (RETIRED_NAMING_EXCEPTIONS.some((pattern) => pattern.test(repositoryPath))) return [];
     const source = readFileSync(file, "utf8");
     return RETIRED_PATTERNS.some(
       (pattern) => pattern.test(`/${repositoryPath}`) || pattern.test(source),

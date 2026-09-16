@@ -50,7 +50,7 @@ function makeExpected(
     runtimeRevisionId: RUNTIME_REVISION_ID,
     runtimeTargetDigest: ARTIFACT_DIGEST,
     runtimeConfigDigest: CONFIG_DIGEST,
-    protocolContractRevision: PROTOCOL,
+    protocolContractDigest: PROTOCOL,
     allowedFormats: ["standard_dsse"],
     ...overrides,
   };
@@ -75,7 +75,7 @@ function makeEvidence(
       overallResult: "passed",
       runtimeTargetDigest: ARTIFACT_DIGEST,
       runtimeConfigDigest: CONFIG_DIGEST,
-      protocolContractRevision: PROTOCOL,
+      protocolContractDigest: PROTOCOL,
       suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
       conformanceFormat: "standard_dsse",
       ...overrides.run,
@@ -150,7 +150,7 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
 
   it("protocol contract 漂移 → conformance_protocol_mismatch", () => {
     const result = validateRuntimePublicationConformanceEvidence(
-      makeEvidence({ run: { protocolContractRevision: "harness-runtime-protocol@1" } }),
+      makeEvidence({ run: { protocolContractDigest: "harness-runtime-protocol@1" } }),
     );
     expect(result.valid).toBe(false);
     expect(codes(result)).toContain("conformance_protocol_mismatch");
@@ -233,7 +233,7 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
 
   it("expected protocol contract revision 为 null → fail closed → conformance_protocol_mismatch", () => {
     const result = validateRuntimePublicationConformanceEvidence(
-      makeEvidence({ expected: { protocolContractRevision: null } }),
+      makeEvidence({ expected: { protocolContractDigest: null } }),
     );
     expect(result.valid).toBe(false);
     expect(codes(result)).toContain("conformance_protocol_mismatch");

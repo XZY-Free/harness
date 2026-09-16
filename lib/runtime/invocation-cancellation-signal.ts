@@ -1,4 +1,4 @@
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 
 const DEFAULT_POLL_INTERVAL_MS = 250;
 

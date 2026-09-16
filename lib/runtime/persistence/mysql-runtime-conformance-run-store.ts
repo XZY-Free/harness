@@ -88,7 +88,7 @@ export function createMysqlRuntimeConformanceRunSession(
         runtimeRevisionId: report.runtimeRevisionId,
         runtimeTargetDigest: report.runtimeTargetDigest,
         runtimeConfigDigest: report.runtimeConfigDigest,
-        protocolContractRevision: report.protocolContractRevision,
+        protocolContractDigest: report.protocolContractDigest,
         suiteRevision: report.suiteRevision,
         runnerArtifactDigest: report.runnerArtifactDigest,
         runnerIdentity: report.runnerIdentity,
@@ -108,6 +108,7 @@ export function createMysqlRuntimeConformanceRunSession(
         idempotencyKey: params.idempotencyKey,
         requestId: params.requestId,
         recordedAt: params.recordedAt,
+        protocolVersion: 3,
       });
       const [run] = await tx
         .select()
@@ -118,9 +119,16 @@ export function createMysqlRuntimeConformanceRunSession(
       return run;
     },
     async appendCaseResults(report) {
+      const [run] = await tx
+        .select({ tenantId: runtimeConformanceRun.tenantId })
+        .from(runtimeConformanceRun)
+        .where(eq(runtimeConformanceRun.id, report.runId))
+        .limit(1);
+      if (!run) throw new Error("RuntimeConformanceRun 不存在");
       await tx.insert(runtimeConformanceCaseResult).values(
         report.caseResults.map((result) => ({
           id: randomUUID(),
+          tenantId: run.tenantId,
           runId: report.runId,
           caseId: result.caseId,
           passed: result.passed,

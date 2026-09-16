@@ -1,23 +1,5 @@
-/**
- * POST /runtime/invocations/{invocationId}/resume — Hosted Runtime 恢复 waiting_user Invocation（ +  参考实现）。
- *
- * 事实源：
- * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
- * - docs/architecture/agent-control-plane.md §3.10（Resume）
- * - docs/architecture/runtime-control-plane.md
- *
- * 行为：
- * - 解析 Bearer Token（Workload Token，audience=runtime + invocation 绑定校验）。
- * - 校验 Idempotency-Key（必填）。
- * - 校验请求体（resume_payload 必填）。
- * -  扩展：调用 RuntimeAdapter.handleResume，返回 resume ack。
- * - 返回 resumed=true（Runtime ack，平台标记命令 acknowledged + Invocation waiting_user → running）。
- *
- * 错误映射：
- * - 缺少/非法 Token → 401 AUTHENTICATION_REQUIRED
- * - 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID
- * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
- */
+import { db } from "@/lib/db/client";
+import { requireCurrentExecutionAuthority } from "@/lib/executions/application/require-current-execution-authority";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -25,90 +7,127 @@ import {
   apiSuccess,
   getRequestId,
 } from "@/lib/http";
-import { extractBearerToken } from "@/lib/identity/workload-token";
-import { getRouteHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
 import {
-  resolveRuntimePrincipal,
-  runtimeAuthErrorResponse,
-  runtimeSchemaInvalidTable,
-} from "@/lib/runtime/route-helpers";
-import type {
-  ResumeInvocationRequestBody,
-  ResumeInvocationResponse,
-} from "@/lib/runtime/runtime-client";
+  type WorkloadTokenClaims,
+  assertAudienceMatch,
+  decodeWorkloadToken,
+  extractBearerToken,
+  workloadTokenErrorResponse,
+} from "@/lib/identity/workload-token";
+import type { RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
+import {
+  getRuntimeSessionBindingByStartIntent,
+  updateRuntimeSessionDispatch,
+} from "@/lib/runtime/persistence/runtime-session-store";
+import {
+  RuntimeStartRequestSchema,
+  type RuntimeStartResponse,
+  buildStartSemanticDigestInput,
+  computeSemanticRequestDigest,
+} from "@/lib/runtime/runtime-protocol";
 
 export const dynamic = "force-dynamic";
+type RouteContext = { params: Promise<{ invocationId: string }> };
 
-/**
- * 路径参数上下文（Next.js App Router 原生动态段）。
- * 命令作为资源子路径（`/{id}/command`），动态参数直接从 params 解构。
- */
-interface RouteContext {
-  params: Promise<Record<string, string | string[]>>;
-}
-
-/** 校验请求体结构。 */
-function validateBody(body: unknown): body is ResumeInvocationRequestBody {
-  if (!body || typeof body !== "object") return false;
-  const b = body as Record<string, unknown>;
-  if (b.resume_payload === undefined || b.resume_payload === null) return false;
-  return true;
-}
-
+/** Resume is a new ownership-generation delivery of the persisted resume intent. */
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
   const requestId = getRequestId(request);
-  const params = await context.params;
-  const rawValue = params.invocationId;
-  const invocationId = typeof rawValue === "string" ? rawValue : "";
-
-  if (!invocationId) {
-    return runtimeSchemaInvalidTable(requestId, "路径参数 invocationId 缺失");
-  }
-
-  // 1. 解析 Bearer Token（audience=runtime + invocation 绑定校验）
+  const { invocationId } = await context.params;
+  const token = extractBearerToken(request.headers);
+  if (!token)
+    return apiError("AUTHENTICATION_REQUIRED", "缺少 Authorization Bearer Token", { requestId });
+  let claims: WorkloadTokenClaims;
   try {
-    await resolveRuntimePrincipal(request.headers, invocationId);
-  } catch (err) {
-    const authResp = runtimeAuthErrorResponse(err, requestId);
-    if (authResp) return authResp;
-    throw err;
+    claims = decodeWorkloadToken(token);
+    assertAudienceMatch(claims, "runtime");
+  } catch (error) {
+    const response = workloadTokenErrorResponse(error, requestId);
+    if (response) return response;
+    throw error;
   }
-
-  // 2. 校验 Idempotency-Key（必填）
-  if (!request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim()) {
-    return runtimeSchemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
+  if (claims.invocationId !== invocationId)
+    return apiError("ACCESS_DENIED", "Runtime Resume Invocation 不一致", { requestId });
+  if (request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim() !== `start:${claims.ownershipId}`)
+    return apiError("REQUEST_SCHEMA_INVALID", "Idempotency-Key 必须为 start:{ownershipId}", {
+      requestId,
+    });
+  const parsed = RuntimeStartRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success)
+    return apiError("REQUEST_SCHEMA_INVALID", "RuntimeStartRequest 非法", { requestId });
+  const resume = parsed.data;
+  if (
+    resume.intentType !== "resume" ||
+    resume.authority.invocationId !== claims.invocationId ||
+    resume.authority.runtimeRevisionId !== claims.runtimeRevisionId ||
+    resume.authority.attemptId !== claims.attemptId ||
+    resume.authority.ownershipId !== claims.ownershipId ||
+    resume.authority.leaseEpoch !== claims.leaseEpoch ||
+    resume.authority.sessionBindingId !== claims.sessionBindingId
+  )
+    return apiError("ACCESS_DENIED", "Runtime Resume Authority 不一致", { requestId });
+  if (computeSemanticRequestDigest(resume) !== resume.semanticRequestDigest)
+    return apiError("REQUEST_SCHEMA_INVALID", "semanticRequestDigest 不匹配", { requestId });
+  const acceptedAt = Date.now();
+  let session: RuntimeSessionBinding;
+  try {
+    session = await db.transaction(async (tx) => {
+      await requireCurrentExecutionAuthority({
+        tenantId: claims.tenantId,
+        authority: claims,
+        executor: tx,
+        requiredPhase: "dispatching",
+      });
+      const current = await getRuntimeSessionBindingByStartIntent(
+        claims.tenantId,
+        `start:${claims.ownershipId}`,
+        tx,
+      );
+      if (!current || current.invocationId !== invocationId || current.intentType !== "resume") {
+        throw new Error("RuntimeSessionMismatch");
+      }
+      if (
+        current.semanticRequestDigest &&
+        current.semanticRequestDigest !== resume.semanticRequestDigest
+      ) {
+        throw new Error("StartIntentConflict");
+      }
+      if (current.bindingState === "active") return current;
+      const remoteSessionRef = current.remoteSessionRef ?? `runtime-session:${current.id}`;
+      const remoteExecutionRef = current.remoteExecutionRef ?? `runtime-execution:${current.id}`;
+      return updateRuntimeSessionDispatch(
+        claims.tenantId,
+        current.id,
+        {
+          bindingState: "dispatching",
+          semanticRequestJson: buildStartSemanticDigestInput(resume),
+          semanticRequestDigest: resume.semanticRequestDigest,
+          remoteSessionRef,
+          remoteExecutionRef,
+          transportAcknowledgement: { protocolVersion: 3, acceptedAt },
+          acknowledgedAt: new Date(acceptedAt),
+        },
+        tx,
+      );
+    });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "NotCurrentExecutor";
+    return apiError(
+      code === "StartIntentConflict" ? "IDEMPOTENCY_CONFLICT" : "ACCESS_DENIED",
+      code,
+      { requestId },
+    );
   }
-
-  // 3. 解析请求体
-  const body = await request.json().catch(() => null);
-  if (!validateBody(body)) {
-    return runtimeSchemaInvalidTable(requestId, "请求体非法：resume_payload 必填");
-  }
-
-  // 4.  扩展：调用 RuntimeAdapter.handleResume，返回 resume ack
-  //
-  // adapter.handleResume 返回 resume_state="accepted" + runtime_execution_ref + requires_redispatch。
-  // 路由层把 adapter 响应翻译为 ResumeInvocationResponse（保持外部 API 契约不变）。
-  const authToken = extractBearerToken(request.headers) ?? undefined;
-  const adapter = getRouteHostedAdapter();
-  if (!adapter) {
-    return apiError("RUNTIME_UNAVAILABLE", "Hosted Runtime 尚未配置模型执行器", { requestId });
-  }
-  await adapter.handleResume({
-    invocationId,
-    resumePayload: body.resume_payload,
-    authToken,
-  });
-
-  // 5. 返回 resumed=true（Runtime ack）
-  const response: ResumeInvocationResponse = {
-    invocation_id: invocationId,
-    resumed: true,
-    attempt_no: 1,
+  const remoteSessionRef = session.remoteSessionRef ?? `runtime-session:${session.id}`;
+  const remoteExecutionRef = session.remoteExecutionRef ?? `runtime-execution:${session.id}`;
+  const response: RuntimeStartResponse = {
+    protocolVersion: 3,
+    authority: resume.authority,
+    semanticRequestDigest: resume.semanticRequestDigest,
+    accepted: true,
+    remoteSessionRef,
+    remoteExecutionRef,
+    capabilitiesDigest: `sha256:${"0".repeat(64)}`,
+    acceptedAt,
   };
-
-  return apiSuccess(response, {
-    status: 200,
-    headers: { [REQUEST_ID_HEADER]: requestId },
-  });
+  return apiSuccess(response, { status: 202, headers: { [REQUEST_ID_HEADER]: requestId } });
 }

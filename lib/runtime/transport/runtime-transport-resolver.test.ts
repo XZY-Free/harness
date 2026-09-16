@@ -1,13 +1,5 @@
+import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import type { RuntimeTransport } from "@/lib/runtime/transport/runtime-transport";
-/**
- * RuntimeTransport Resolver 测试 — Batch 6 Gate（04 §3/§10）。
- *
- * 覆盖：protocolType 真正决定 Transport；未知 protocolType fail-closed；
- * Resolver 输入不含 framework/业务分支。
- *
- * 专题01 冻结架构：Runtime 仅 harness_runtime_protocol；a2a 不再作为
- * Runtime 协议注册（A2A 属后续 AgentCall 批次）。
- */
 import {
   UnsupportedRuntimeProtocolError,
   createRuntimeTransportResolver,
@@ -16,17 +8,59 @@ import { describe, expect, it } from "vitest";
 
 function fakeTransport(name: string): RuntimeTransport {
   return {
-    probeCapabilities: async () =>
-      ({ protocol_versions: ["2"], features: {} as never, limits: {} as never }) as never,
-    startInvocation: async () => ({ invocation_id: name }) as never,
-    cancelInvocation: async () => ({ invocation_id: name }) as never,
-    resumeInvocation: async () => ({ invocation_id: name }) as never,
-    steerInvocation: async () => ({ invocation_id: name }) as never,
+    probeCapabilities: async () => defaultRuntimeCapabilities(),
+    startInvocation: async (request) => ({
+      protocolVersion: 3,
+      authority: request.request.authority,
+      semanticRequestDigest: request.request.semanticRequestDigest,
+      accepted: true,
+      remoteSessionRef: `${name}-session`,
+      remoteExecutionRef: `${name}-execution`,
+      capabilitiesDigest: defaultRuntimeCapabilities().contractDigest,
+      acceptedAt: Date.now(),
+    }),
+    resumeInvocation: async (request) => ({
+      protocolVersion: 3,
+      authority: request.request.authority,
+      semanticRequestDigest: request.request.semanticRequestDigest,
+      accepted: true,
+      remoteSessionRef: `${name}-session`,
+      remoteExecutionRef: `${name}-execution`,
+      capabilitiesDigest: defaultRuntimeCapabilities().contractDigest,
+      acceptedAt: Date.now(),
+    }),
+    postEventBatch: async () => ({}),
+    heartbeat: async (request) => ({
+      protocolVersion: 3,
+      authority: request.request.authority,
+      serverTime: Date.now(),
+      leaseExpiresAt: Date.now() + 30_000,
+      acceptedThroughProducerSequence: "0",
+      continueExecution: true,
+    }),
+    cancelInvocation: async (request) => ({
+      accepted: true,
+      targetAuthority: request.request.targetAuthority,
+      stopState: "requested",
+    }),
+    steerInvocation: async (request) => ({
+      accepted: true,
+      commandId: request.request.commandId,
+      targetAuthority: request.request.targetAuthority,
+      inputDigest: request.request.inputDigest,
+    }),
+    requestSafePoint: async (request) => ({
+      accepted: true,
+      checkpointIntentId: request.request.checkpointIntentId,
+      safePointEvidenceDigest: `sha256:${"0".repeat(64)}`,
+      writerQuiescenceAchievedAt: Date.now(),
+    }),
+    releaseSafePoint: async () => undefined,
   };
 }
 
-describe("createRuntimeTransportResolver（04 §3）", () => {
-  it("同一 harness_runtime_protocol 按 runtimeEvidenceKind 分流 Hosted 与 External", async () => {
+describe("createRuntimeTransportResolver", () => {
+  it("按 RuntimeRevision evidence kind 解析受管和外部 transport", async () => {
     const created: string[] = [];
     const resolve = createRuntimeTransportResolver({
       factories: {
@@ -42,6 +76,7 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
         },
       },
     });
+
     const hosted = await resolve({
       protocolType: "harness_runtime_protocol",
       runtimeEvidenceKind: "hosted_artifact",
@@ -54,20 +89,26 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
       endpoint: "https://runtime.example",
       auth: { mode: "none" },
     });
+
     expect(created).toEqual(["hosted", "external"]);
-    expect(await hosted.probeCapabilities("", { mode: "none" })).toBeDefined();
-    expect((await external.startInvocation({} as never)).invocation_id).toBe("external");
+    expect(await hosted.probeCapabilities("", { mode: "none" })).toMatchObject({
+      protocolVersion: 3,
+    });
+    expect(await external.probeCapabilities("", { mode: "none" })).toMatchObject({
+      protocolVersion: 3,
+    });
   });
 
-  it("未知 protocolType → fail-closed（无回退默认 Transport）", async () => {
+  it("未知协议或未注册的 evidence kind 失败关闭", async () => {
     const resolve = createRuntimeTransportResolver({
       factories: {
         harness_runtime_protocol: { hosted_artifact: () => fakeTransport("hosted") },
       },
     });
+
     await expect(
       resolve({
-        protocolType: "agentkit",
+        protocolType: "unknown_protocol",
         runtimeEvidenceKind: "external_endpoint",
         endpoint: "https://x",
         auth: { mode: "none" },
@@ -83,7 +124,7 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
     ).rejects.toThrow(UnsupportedRuntimeProtocolError);
   });
 
-  it("工厂接收 managed endpoint/identity configuration（无 framework name/project path 输入）", async () => {
+  it("工厂只接收受管 endpoint 和身份配置", async () => {
     const seen: Array<{ endpoint: string; auth: { mode: string; token?: string } }> = [];
     const resolve = createRuntimeTransportResolver({
       factories: {
@@ -95,6 +136,7 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
         },
       },
     });
+
     await resolve({
       protocolType: "harness_runtime_protocol",
       runtimeEvidenceKind: "hosted_artifact",

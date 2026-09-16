@@ -1,113 +1,186 @@
-import { randomUUID } from "node:crypto";
-import { hostedAdapterCapabilities } from "@/lib/runtime/adapters/hosted-adapter";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
-import type {
-  CancelInvocationRequest,
-  CancelInvocationResponse,
-  ResumeInvocationRequest,
-  ResumeInvocationResponse,
-  RuntimeCapabilitiesResponse,
-  RuntimeHttpClient,
-  StartInvocationRequest,
-  StartInvocationResponse,
-  SteerInvocationRequest,
-  SteerInvocationResponse,
+import { RuntimeHttpClientError } from "@/lib/runtime/errors";
+import {
+  type RuntimeCancelTransportRequest,
+  type RuntimeEventTransportRequest,
+  type RuntimeHeartbeatTransportRequest,
+  type RuntimeHttpClient,
+  type RuntimeSafePointReleaseTransportRequest,
+  type RuntimeSafePointTransportRequest,
+  type RuntimeStartTransportRequest,
+  type RuntimeSteerTransportRequest,
+  defaultRuntimeCapabilities,
 } from "@/lib/runtime/runtime-client";
+import type {
+  CancelResponse,
+  HeartbeatResponse,
+  RuntimeCapabilities,
+  RuntimeStartResponse,
+  SteerResponse,
+} from "@/lib/runtime/runtime-protocol";
 
 export interface InProcessHostedRuntimeClient extends RuntimeHttpClient {
-  /** 平台已把 Invocation 持久化为 running 后，仅凭 id 从 DB 重建并启动。 */
   launchAcceptedInvocation(invocationId: string): Promise<void>;
-  /** 最近一次启动任务，供集成测试等待异步 Agent Loop 完成。 */
   getLastLaunchPromise(): Promise<void> | null;
 }
 
-/** Hosted local transport。请求内容不作为 restart/recovery Authority。 */
+/** Hosted Runtime adapter. It receives only durable invocation identity and immutable request facts. */
 export function createInProcessHostedRuntimeClient(params: {
   tenantId: string;
   applicationService: HostedRuntimeApplicationService;
+  eventSink?: (request: RuntimeEventTransportRequest) => Promise<unknown>;
 }): InProcessHostedRuntimeClient {
   let lastLaunchPromise: Promise<void> | null = null;
+  const defaults = defaultRuntimeCapabilities();
+  const capabilities: RuntimeCapabilities = {
+    ...defaults,
+    features: {
+      ...defaults.features,
+      // The in-process reference does not implement a managed WorkspaceHost
+      // safe-point handshake, so it must not advertise checkpoint recovery.
+      workspaceModes: ["NO_PLATFORM_WORKSPACE"],
+    },
+  };
+
+  function assertWorkloadAuth(request: { auth: { mode: string } }): void {
+    if (request.auth.mode !== "workload_token")
+      throw new Error("InProcessHostedRuntime 只接受 workload_token");
+  }
+
+  function startResult(request: RuntimeStartTransportRequest): RuntimeStartResponse {
+    return {
+      protocolVersion: 3,
+      authority: request.request.authority,
+      semanticRequestDigest: request.request.semanticRequestDigest,
+      accepted: true,
+      remoteSessionRef: `hosted-session:${request.request.authority.sessionBindingId}`,
+      remoteExecutionRef: `hosted-execution:${request.request.authority.invocationId}:${request.request.authority.ownershipId}`,
+      capabilitiesDigest: capabilities.contractDigest,
+      acceptedAt: Date.now(),
+    };
+  }
+
+  function launch(input: {
+    invocationId: string;
+    idempotencyKey: string;
+    mode: "start" | "resume";
+    resumePayload?: unknown;
+  }): Promise<void> {
+    const operation =
+      input.mode === "start"
+        ? params.applicationService.start({
+            tenantId: params.tenantId,
+            invocationId: input.invocationId,
+            idempotencyKey: input.idempotencyKey,
+          })
+        : params.applicationService.resume({
+            tenantId: params.tenantId,
+            invocationId: input.invocationId,
+            idempotencyKey: input.idempotencyKey,
+            resumePayload: input.resumePayload,
+          });
+    lastLaunchPromise = operation.then(() => undefined);
+    return lastLaunchPromise;
+  }
 
   return {
-    async probeCapabilities(): Promise<RuntimeCapabilitiesResponse> {
-      return hostedAdapterCapabilities();
+    async probeCapabilities(): Promise<RuntimeCapabilities> {
+      return capabilities;
     },
-
-    async startInvocation(request: StartInvocationRequest): Promise<StartInvocationResponse> {
-      if (request.auth.mode !== "workload_token") {
-        throw new Error(`InProcessHostedRuntime 收到非法 auth mode（${request.auth.mode}）`);
-      }
-      return {
-        invocation_id: request.requestBody.invocation_id,
-        accepted: true,
-        attempt_no: request.requestBody.attempt?.attempt_no ?? 1,
-        runtime_session_ref: `hosted-${randomUUID()}`,
-        runtime_execution_ref: `hosted-exec-${randomUUID()}`,
-        capabilities: hostedAdapterCapabilities(),
-      };
+    async startInvocation(request) {
+      assertWorkloadAuth(request);
+      const result = startResult(request);
+      void launch({
+        invocationId: request.request.authority.invocationId,
+        idempotencyKey: request.idempotencyKey,
+        mode: "start",
+      });
+      return result;
     },
-
-    launchAcceptedInvocation(invocationId: string): Promise<void> {
-      lastLaunchPromise = params.applicationService
-        .start({
-          tenantId: params.tenantId,
-          invocationId,
-          idempotencyKey: `hosted-start:${invocationId}`,
-        })
-        .then(() => undefined);
-      return lastLaunchPromise;
+    async resumeInvocation(request) {
+      assertWorkloadAuth(request);
+      const result = startResult(request);
+      void launch({
+        invocationId: request.request.authority.invocationId,
+        idempotencyKey: request.idempotencyKey,
+        mode: "resume",
+        resumePayload: request.request.inputs,
+      });
+      return result;
     },
-
-    getLastLaunchPromise(): Promise<void> | null {
-      return lastLaunchPromise;
+    async postEventBatch(request) {
+      assertWorkloadAuth(request);
+      if (!params.eventSink)
+        throw new RuntimeHttpClientError("protocol", "Hosted Runtime 未配置 RuntimeEvent sink");
+      return params.eventSink(request);
     },
-
-    async cancelInvocation(request: CancelInvocationRequest): Promise<CancelInvocationResponse> {
+    async heartbeat(_request: RuntimeHeartbeatTransportRequest): Promise<HeartbeatResponse> {
+      throw new RuntimeHttpClientError(
+        "protocol",
+        "Hosted Runtime heartbeat 由平台 Runtime Ingress 处理",
+      );
+    },
+    async cancelInvocation(request: RuntimeCancelTransportRequest): Promise<CancelResponse> {
+      assertWorkloadAuth(request);
       await params.applicationService.cancel({
         tenantId: params.tenantId,
         invocationId: request.invocationId,
         idempotencyKey: request.idempotencyKey,
-        reason: request.requestBody.reason,
+        reason: request.request.reasonCode,
       });
       return {
-        invocation_id: request.invocationId,
-        cancelled: true,
-        attempt_no: 1,
+        accepted: true,
+        targetAuthority: request.request.targetAuthority,
+        stopState: "requested",
       };
     },
-
-    async resumeInvocation(request: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
-      // Runtime 协议的 resume 响应是“已接受恢复”，不是“本次执行已经完成”。
-      // 先把后台 Promise 暴露给测试/观测，再立即 ack，让平台把 durable 状态推进到
-      // running；随后 Loop 的 execution.completed 才能按正常状态机收口。
-      lastLaunchPromise = params.applicationService
-        .resume({
-          tenantId: params.tenantId,
-          invocationId: request.invocationId,
-          idempotencyKey: request.idempotencyKey,
-          resumePayload: request.requestBody.resume_payload,
-        })
-        .then(() => undefined);
-      return {
-        invocation_id: request.invocationId,
-        resumed: true,
-        attempt_no: 1,
-        requires_redispatch: false,
-      };
-    },
-
-    async steerInvocation(request: SteerInvocationRequest): Promise<SteerInvocationResponse> {
+    async steerInvocation(request: RuntimeSteerTransportRequest): Promise<SteerResponse> {
+      assertWorkloadAuth(request);
       await params.applicationService.steer({
         tenantId: params.tenantId,
         invocationId: request.invocationId,
         idempotencyKey: request.idempotencyKey,
-        steerPayload: request.requestBody.steer_payload,
+        steerPayload: {
+          inputRef: request.request.inputRef,
+          inputDigest: request.request.inputDigest,
+        },
       });
       return {
-        invocation_id: request.invocationId,
-        steered: true,
-        attempt_no: 1,
+        accepted: true,
+        commandId: request.request.commandId,
+        targetAuthority: request.request.targetAuthority,
+        inputDigest: request.request.inputDigest,
       };
+    },
+    async requestSafePoint(_request: RuntimeSafePointTransportRequest) {
+      throw new RuntimeHttpClientError(
+        "protocol",
+        "Hosted Runtime 未声明 Checkpoint capability",
+        undefined,
+        undefined,
+        {
+          stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+          retryable: false,
+        },
+      );
+    },
+    async releaseSafePoint(_request: RuntimeSafePointReleaseTransportRequest): Promise<void> {
+      throw new RuntimeHttpClientError(
+        "protocol",
+        "Hosted Runtime 未声明 Checkpoint capability",
+        undefined,
+        undefined,
+        {
+          stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+          retryable: false,
+        },
+      );
+    },
+    launchAcceptedInvocation(invocationId) {
+      return launch({ invocationId, idempotencyKey: `start:${invocationId}`, mode: "start" });
+    },
+    getLastLaunchPromise() {
+      return lastLaunchPromise;
     },
   };
 }

@@ -9,10 +9,20 @@ import { randomUUID } from "node:crypto";
 import { computeToolExecutionContractDigest } from "@/lib/capability/tool-execution-contract";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import {
+  createAttempt,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
-import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
+import { issueTestExecutionToken } from "@/lib/identity/test-support/execution-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
-import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
+import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import {
+  executionBindingTable,
+  executionOwnershipTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
 import { permissionDecisionTable } from "@/lib/persistence/schema/permission";
 import {
   type ToolProvider,
@@ -24,7 +34,13 @@ import {
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
-import { eq } from "drizzle-orm";
+import {
+  createRuntimeSessionBinding,
+  updateRuntimeSessionDispatch,
+} from "@/lib/runtime/persistence/runtime-session-store";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
@@ -174,24 +190,69 @@ async function seedToolchain(): Promise<{ toolId: string; schemaHash: string }> 
 
 async function seedInvocation(): Promise<string> {
   const invocationId = randomUUID();
+  // canonical 约束：Invocation.threadId/turnId/triggerItemId 是真实外键，
+  // 且 Invocation_subject_shape 要求 thread 主体 triggerItemId 非空。
+  const threadId = "t-1";
+  const turnId = "turn-1";
+  await db.insert(threadTable).values({
+    id: threadId,
+    tenantId: TENANT,
+    ownerUserId: "user-1",
+    defaultWorkspaceId: null,
+    activeGoalId: null,
+    title: null,
+    defaultModelRef: null,
+    defaultEnvironmentDefinitionId: null,
+    lastActivityAt: new Date(),
+    lastTurnSequence: 1,
+    lastItemSequence: 1,
+    lastEventSequence: 0,
+    pendingQueueVersionNo: 1,
+    versionNo: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+  });
+  await db.insert(turnTable).values({
+    id: turnId,
+    threadId,
+    turnSequence: 1,
+    triggerType: "user_message",
+    turnState: "running",
+    activeInvocationId: invocationId,
+    latestInvocationId: invocationId,
+    regenerationNo: 0,
+    versionNo: 1,
+  });
+  const triggerItemId = randomUUID();
+  await db.insert(threadItemTable).values({
+    id: triggerItemId,
+    threadId,
+    turnId,
+    itemSequence: 1,
+    itemType: "user_message",
+    itemState: "completed",
+    authorType: "user",
+    contentJson: { text: "trigger" },
+    contentHash: "test-trigger-item",
+  });
   await db.insert(invocationTable).values({
     id: invocationId,
     tenantId: TENANT,
-    threadId: "t-1",
-    turnId: "turn-1",
+    subjectType: "thread",
+    threadId,
+    turnId,
     jobId: null,
     invocationSequence: 1,
     invocationKind: "initial",
     executionState: "running",
-    triggerItemId: null,
+    inputDigest: `sha256:${"0".repeat(64)}`,
+    triggerItemId,
     replacesInvocationId: null,
     outputItemId: null,
     resultRef: null,
-    runtimeSessionBindingId: null,
-    runtimeExecutionRef: null,
     startedAt: new Date(),
     finishedAt: null,
-    lastHeartbeatAt: new Date(),
     errorCode: null,
     errorSummary: null,
     versionNo: 1,
@@ -204,7 +265,13 @@ async function seedInvocation(): Promise<string> {
 async function seedBinding(
   invocationId: string,
   frozen: { policyRevisionId: string; policyRulesDigest: string },
-): Promise<void> {
+): Promise<{
+  runtimeRevisionId: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: string;
+  sessionBindingId: string;
+}> {
   if (!catalogTool) throw new Error("seedToolchain must run first");
   const catalog = buildCapabilityCatalogSnapshot({
     invocationId,
@@ -214,16 +281,19 @@ async function seedBinding(
     knowledgeSources: [],
     sourceRefs: ["test-fixture:tool-capability-catalog"],
   });
+  // canonical：Binding.workspaceBindingId 必须指向真实 WorkspaceBinding 行
+  //（authority guard 按 id 加载，缺失 = WorkspaceNotReady fail-closed）。
+  const workspace = await createNoPlatformWorkspaceBinding(TENANT, "test-service");
   await db.insert(executionBindingTable).values({
     capabilityCatalogJson: catalog.snapshot,
     capabilityCatalogDigest: catalog.digest,
     capabilityCatalogVersion: catalog.version,
     capabilityCatalogSourceRefs: catalog.sourceRefs,
     capabilityCatalogCreatedAt: catalog.createdAt,
-    executionSubjectType: "user",
-    executionSubjectId: "test-user",
-    executionSubjectSource: "authenticated_user",
-    executionSubjectFrozenAt: new Date(),
+    principalType: "user",
+    principalId: "test-user",
+    principalSource: "authenticated_user",
+    principalFrozenAt: new Date(),
     invocationId,
     tenantId: TENANT,
     runtimeRevisionId: "runtime-rev-fake",
@@ -231,13 +301,11 @@ async function seedBinding(
     modelProvider: "provider",
     modelId: "model",
     modelRevisionRef: null,
-    initialEnvironmentLeaseId: null,
-    workspaceBindingId: null,
+    workspaceBindingId: workspace.id,
     policyRevisionId: frozen.policyRevisionId,
     policyRulesDigest: frozen.policyRulesDigest,
     governanceConfigRevisionId: "governance-rev-fake",
     governanceConfigDigest: hash("9"),
-    contextCheckpointId: null,
     routeRevisionId: "route-rev-fake",
     routeActivationId: "route-act-fake",
     routeContentDigest: hash("1"),
@@ -252,18 +320,88 @@ async function seedBinding(
     conformanceRunId: "conformance-fake",
     resolutionInputDigest: hash("6"),
     projectionVersionNo: 0,
+    environmentMode: "NO_PLATFORM_ENVIRONMENT",
     environmentDefinitionRevisionId: null,
     configHash: hash("7"),
   });
+  // canonical 权威链：Attempt(prepared) → ExecutionOwnership → SessionBinding(active)，
+  // gateway route 的 Current Execution Authority guard 依赖该链（缺失 = NotCurrentExecutor）。
+  const attempt = await createAttempt({ tenantId: TENANT, invocationId });
+  const evidence = { kind: "rollback-test-candidate", invocationId, attemptId: attempt.id };
+  await db.transaction((tx) =>
+    markAttemptPreparedInTransaction(tx, {
+      attemptId: attempt.id,
+      evidence,
+      digest: protocolDigest(evidence),
+    }),
+  );
+  const acquired = await acquireExecutionOwnership({
+    tenantId: TENANT,
+    invocationId,
+    attemptId: attempt.id,
+    runtimeRevisionId: "runtime-rev-fake",
+    acquiredByType: "service",
+    acquiredById: "tool-gateway-rollback-test",
+  });
+  const session = await createRuntimeSessionBinding({
+    tenantId: TENANT,
+    invocationId,
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    runtimeRevisionId: "runtime-rev-fake",
+    leaseEpoch: acquired.ownership.leaseEpoch,
+    intentType: "start",
+    startIntentKey: `start:${acquired.ownership.id}`,
+  });
+  // bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
+  await updateRuntimeSessionDispatch(TENANT, session.id, {
+    bindingState: "active",
+    semanticRequestJson: { kind: "tool-gateway-rollback-test" },
+    semanticRequestDigest: `sha256:${"0".repeat(64)}`,
+    remoteSessionRef: "rollback-test-session",
+    remoteExecutionRef: "rollback-test-execution",
+    startedEventId: randomUUID(),
+  });
+  // canonical ExecutionOwnership_executing_activation_shape：executing 阶段必须携带
+  // activatedAt + activationDigest，authority guard 才承认 executing 请求。
+  await db
+    .update(executionOwnershipTable)
+    .set({
+      executionPhase: "executing",
+      activatedAt: new Date(),
+      activationDigest: `sha256:${"0".repeat(64)}`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, TENANT),
+        eq(executionOwnershipTable.id, acquired.ownership.id),
+      ),
+    );
+  return {
+    runtimeRevisionId: "runtime-rev-fake",
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    leaseEpoch: String(acquired.ownership.leaseEpoch),
+    sessionBindingId: session.id,
+  };
 }
 
-function gatewayToken(invocationId: string): string {
-  return issueWorkloadToken({
-    type: "gateway",
+function gatewayToken(
+  invocationId: string,
+  authority: {
+    runtimeRevisionId: string;
+    attemptId: string;
+    ownershipId: string;
+    leaseEpoch: string;
+    sessionBindingId: string;
+  },
+): string {
+  return issueTestExecutionToken({
     tenantId: TENANT,
     invocationId,
     audience: "gateway",
-    expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
+    ...authority,
   });
 }
 
@@ -308,14 +446,13 @@ describe("POST /gateway/tool-calls 事务原子性（02-6 P7 §55.7 故障注入
     const { toolId, schemaHash } = await seedToolchain();
     const { policyRevisionId, policyRulesDigest } = await seedPolicy("pause", []);
     const invocationId = await seedInvocation();
-    await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
-
+    const authority = await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
     // 注入失败：§16.3 事务回滚；route 对未知错误 fail-closed 向上抛（Next 渲染 500），POST reject。
     await expect(
       POST(
         gatewayRequest(
-          gatewayToken(invocationId),
-          toolCallBody({ invocationId, toolId, schema_hash: schemaHash }),
+          gatewayToken(invocationId, authority),
+          toolCallBody({ invocation_id: invocationId, tool_id: toolId, schema_hash: schemaHash }),
         ),
       ),
     ).rejects.toThrow("injected UAR failure");

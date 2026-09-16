@@ -14,7 +14,7 @@ export interface RuntimeConformanceReport {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   suiteRevision: string;
   runnerArtifactDigest: string;
   runnerIdentity: string;
@@ -58,7 +58,7 @@ export function computeCaseEvidenceDigest(evidence: Record<string, unknown>): st
  * 计算 evidenceManifestDigest 的权威函数。
  *
  * Manifest canonical 绑定 suiteRevision、testEnvironmentRevision、runtimeRevisionId、
- * runtimeTargetDigest、runtimeConfigDigest、protocolContractRevision、
+ * runtimeTargetDigest、runtimeConfigDigest、protocolContractDigest、
  * runnerArtifactDigest 与按 caseId 升序的 (caseId, passed, evidenceDigest)。
  * runner / helper / validator 全部复用本函数。
  */
@@ -68,7 +68,7 @@ export function computeEvidenceManifestDigest(params: {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   runnerArtifactDigest: string;
   cases: Array<{ caseId: string; passed: boolean; evidenceDigest: string }>;
 }): string {
@@ -78,7 +78,7 @@ export function computeEvidenceManifestDigest(params: {
     runtimeRevisionId: params.runtimeRevisionId,
     runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
-    protocolContractRevision: params.protocolContractRevision,
+    protocolContractDigest: params.protocolContractDigest,
     runnerArtifactDigest: params.runnerArtifactDigest,
     cases: [...params.cases].sort((a, b) => a.caseId.localeCompare(b.caseId)),
   };
@@ -155,7 +155,7 @@ export function validateRuntimeConformanceReport(report: RuntimeConformanceRepor
       runtimeRevisionId: report.runtimeRevisionId,
       runtimeTargetDigest: report.runtimeTargetDigest,
       runtimeConfigDigest: report.runtimeConfigDigest,
-      protocolContractRevision: report.protocolContractRevision,
+      protocolContractDigest: report.protocolContractDigest,
       runnerArtifactDigest: report.runnerArtifactDigest,
       cases: report.caseResults.map((result) => ({
         caseId: result.caseId,

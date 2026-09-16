@@ -22,10 +22,10 @@ describe("trusted execution subject", () => {
           frozenAt,
         ),
       ).toEqual({
-        executionSubjectType: subjectType,
-        executionSubjectId: subjectId,
-        executionSubjectSource: source,
-        executionSubjectFrozenAt: frozenAt,
+        principalType: subjectType,
+        principalId: subjectId,
+        principalSource: source,
+        principalFrozenAt: frozenAt,
       });
     },
   );
@@ -42,10 +42,10 @@ describe("trusted execution subject", () => {
       recoverTrustedExecutionSubject(
         {
           tenantId: "tenant-a",
-          executionSubjectType: "user",
-          executionSubjectId: "",
-          executionSubjectSource: "authenticated_user",
-          executionSubjectFrozenAt: frozenAt,
+          principalType: "user",
+          principalId: "",
+          principalSource: "authenticated_user",
+          principalFrozenAt: frozenAt,
         },
         "tenant-a",
       ),
@@ -54,10 +54,10 @@ describe("trusted execution subject", () => {
       recoverTrustedExecutionSubject(
         {
           tenantId: "tenant-a",
-          executionSubjectType: "user",
-          executionSubjectId: "employee-42",
-          executionSubjectSource: "trusted_service",
-          executionSubjectFrozenAt: frozenAt,
+          principalType: "user",
+          principalId: "employee-42",
+          principalSource: "trusted_service",
+          principalFrozenAt: frozenAt,
         },
         "tenant-a",
       ),

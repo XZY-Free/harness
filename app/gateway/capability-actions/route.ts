@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { API_ERROR_CODES, type ApiErrorCode } from "@/lib/error-codes";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
@@ -14,7 +16,7 @@ import { recordAuditEvent } from "@/lib/identity/audit";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
-import { type RuntimeCandidateEvent, ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { HARNESS_NEXT_ACTION_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
 import {
   CapabilityActionValidationError,
@@ -31,7 +33,7 @@ import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/m
 import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
 import type { HarnessNextAction } from "@/lib/runtime/harness-loop/types";
 import { observeInvocationCancellation } from "@/lib/runtime/invocation-cancellation-signal";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import type { AuthorityIdentity, RuntimeEvent } from "@/lib/runtime/runtime-protocol";
 import {
   type ExecutionSubject,
   recoverTrustedExecutionSubject,
@@ -379,13 +381,7 @@ export async function POST(request: Request): Promise<Response> {
     | undefined;
   const start = existing ? snapshot.nextProducerSequence : body.producerSequenceStart;
   if (!existing) {
-    await ingressEventBatch({
-      tenantId: principal.tenantId,
-      invocationId: principal.invocationId,
-      producerSequenceStart: start,
-      correlationId: requestId,
-      events: [actionEvent(body.action, digest, "proposed", start)],
-    });
+    await ingressActionEvent(principal, body.action, digest, "proposed", start);
   }
   if (!executor) {
     const errorCode =
@@ -393,14 +389,8 @@ export async function POST(request: Request): Promise<Response> {
         ? "AGENT_CALL_EXECUTOR_UNAVAILABLE"
         : "HARNESS_ACTION_EXECUTOR_UNAVAILABLE";
     const failedSequence = existing ? snapshot.nextProducerSequence : start + 1;
-    await ingressEventBatch({
-      tenantId: principal.tenantId,
-      invocationId: principal.invocationId,
-      producerSequenceStart: failedSequence,
-      correlationId: requestId,
-      events: [
-        actionEvent(body.action, digest, "failed", failedSequence, { error_code: errorCode }),
-      ],
+    await ingressActionEvent(principal, body.action, digest, "failed", failedSequence, {
+      error_code: errorCode,
     });
     await auditCapabilityAction({
       principal,
@@ -415,13 +405,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const startedSequence = existing ? snapshot.nextProducerSequence : start + 1;
   if (existing?.state !== "started") {
-    await ingressEventBatch({
-      tenantId: principal.tenantId,
-      invocationId: principal.invocationId,
-      producerSequenceStart: startedSequence,
-      correlationId: requestId,
-      events: [actionEvent(body.action, digest, "started", startedSequence)],
-    });
+    await ingressActionEvent(principal, body.action, digest, "started", startedSequence);
   }
   let execution: HarnessActionExecutionResult;
   const invocationCancellation = observeInvocationCancellation({
@@ -433,6 +417,14 @@ export async function POST(request: Request): Promise<Response> {
     execution = await executor(body.action as never, {
       invocationId: principal.invocationId,
       tenantId: principal.tenantId,
+      authority: {
+        invocationId: principal.invocationId,
+        runtimeRevisionId: principal.runtimeRevisionId,
+        attemptId: principal.attemptId,
+        ownershipId: principal.ownershipId,
+        leaseEpoch: principal.leaseEpoch,
+        sessionBindingId: principal.sessionBindingId,
+      },
       threadId: invocation.threadId ?? "",
       turnId: invocation.turnId,
       actionDigest: digest,
@@ -450,16 +442,8 @@ export async function POST(request: Request): Promise<Response> {
             ? (reportedCode as ApiErrorCode)
             : "AGENT_CALL_FAILED";
     const failedSequence = startedSequence + (existing?.state === "started" ? 0 : 1);
-    await ingressEventBatch({
-      tenantId: principal.tenantId,
-      invocationId: principal.invocationId,
-      producerSequenceStart: failedSequence,
-      correlationId: requestId,
-      events: [
-        actionEvent(body.action, digest, "failed", failedSequence, {
-          error_code: errorCode,
-        }),
-      ],
+    await ingressActionEvent(principal, body.action, digest, "failed", failedSequence, {
+      error_code: errorCode,
     });
     await auditCapabilityAction({
       principal,
@@ -494,17 +478,9 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
   const completedSequence = startedSequence + (existing?.state === "started" ? 0 : 1);
-  await ingressEventBatch({
-    tenantId: principal.tenantId,
-    invocationId: principal.invocationId,
-    producerSequenceStart: completedSequence,
-    correlationId: requestId,
-    events: [
-      actionEvent(body.action, digest, "completed", completedSequence, {
-        ...(execution.authorityRef ? { authority_ref: execution.authorityRef } : {}),
-        observation: execution.observation,
-      }),
-    ],
+  await ingressActionEvent(principal, body.action, digest, "completed", completedSequence, {
+    ...(execution.authorityRef ? { authority_ref: execution.authorityRef } : {}),
+    observation: execution.observation,
   });
   await auditCapabilityAction({
     principal,
@@ -568,18 +544,26 @@ function getErrorCode(error: unknown): string | null {
   return typeof error.code === "string" && error.code ? error.code : null;
 }
 
-function actionEvent(
+async function ingressActionEvent(
+  principal: GatewayPrincipal,
   action: HarnessNextAction,
   digest: string,
   state: "proposed" | "started" | "completed" | "failed",
   sequence: number,
   extra: Record<string, unknown> = {},
-): RuntimeCandidateEvent {
-  return {
-    producer_event_id: `gateway-action-${action.actionId}-${state}`,
-    producer_sequence: sequence,
-    schema_version: 1,
-    occurred_at: new Date().toISOString(),
+): Promise<void> {
+  const authority: AuthorityIdentity = {
+    invocationId: principal.invocationId,
+    runtimeRevisionId: principal.runtimeRevisionId,
+    attemptId: principal.attemptId,
+    ownershipId: principal.ownershipId,
+    leaseEpoch: principal.leaseEpoch,
+    sessionBindingId: principal.sessionBindingId,
+  };
+  const event: RuntimeEvent = {
+    eventId: randomUUID(),
+    producerSequence: String(sequence),
+    schemaVersion: 1,
     type: `harness.action.${state}`,
     payload: {
       action_id: action.actionId,
@@ -594,6 +578,11 @@ function actionEvent(
       ...extra,
     },
   };
+  await ingressRuntimeEvents({
+    tenantId: principal.tenantId,
+    invocationId: principal.invocationId,
+    batch: { protocolVersion: 3, authority, events: [event] },
+  });
 }
 
 function targetRef(action: HarnessNextAction): string | null {

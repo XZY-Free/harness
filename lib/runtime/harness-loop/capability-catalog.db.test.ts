@@ -7,6 +7,7 @@ import { resolveBindingGovernance } from "@/lib/executions/application/resolve-b
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentTable } from "@/lib/persistence/schema/agents";
+import { threadTable } from "@/lib/persistence/schema/conversation";
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildProductionCapabilityCatalog } from "./build-production-capability-catalog";
@@ -65,6 +66,19 @@ describe("ExecutionBinding capability catalog persistence", () => {
       .set({ displayName: "财务 Agent" })
       .where(eq(agentTable.id, agent.id));
     const governance = await resolveBindingGovernance(db, tenant.id, null);
+    const threadId = crypto.randomUUID();
+    await db.insert(threadTable).values({
+      id: threadId,
+      tenantId: tenant.id,
+      ownerUserId: owner.id,
+      lifecycleState: "active",
+      lastActivityAt: new Date(),
+      lastTurnSequence: 0,
+      lastItemSequence: 0,
+      lastEventSequence: 0,
+      pendingQueueVersionNo: 1,
+      versionNo: 1,
+    });
     const baseResolution = validAgentRouteResolution();
     const resolution = validAgentRouteResolution({
       policyRevisionId: governance.policyRevisionId,
@@ -82,8 +96,8 @@ describe("ExecutionBinding capability catalog persistence", () => {
     });
     const result = await buildProductionCapabilityCatalog({
       tenantId: tenant.id,
-      invocationId: "invocation-scenario",
-      threadId: "thread-scenario",
+      invocationId: crypto.randomUUID(),
+      threadId,
       preferredAgentId: agent.id,
       runtimeRevisionId: "runtime-revision-scenario",
       policyRevisionId: governance.policyRevisionId,

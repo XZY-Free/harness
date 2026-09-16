@@ -71,7 +71,7 @@ async function seedRuntimePublicationFixture(
     tenantId: tenant.id,
     runtimeId: runtime.id,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: evidenceKind,
     endpointRef: "managed://runtime/publication",
     runtimeArtifactRef:
@@ -106,7 +106,7 @@ async function seedRuntimePublicationFixture(
     runtimeRevisionId: revision.id,
     runtimeTargetDigest: revision.runtimeTargetDigest,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-    protocolContractRevision: revision.protocolContractRevision,
+    protocolContractDigest: revision.protocolContractDigest,
     suiteRevision: "runtime-conformance@1",
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: "ci/runtime-conformance",
@@ -120,7 +120,7 @@ async function seedRuntimePublicationFixture(
       runtimeRevisionId: revision.id,
       runtimeTargetDigest: revision.runtimeTargetDigest,
       runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-      protocolContractRevision: revision.protocolContractRevision,
+      protocolContractDigest: revision.protocolContractDigest,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
       cases: caseResults.map((result) => ({
         caseId: result.caseId,

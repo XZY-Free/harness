@@ -1,6 +1,7 @@
 import { ToolApplicationError, applyToolCall } from "@/lib/capability/application/apply-tool-call";
 import { getEffectRecordByToolCall } from "@/lib/capability/effect-queries";
 import { ToolCallConflictError } from "@/lib/capability/tool-call-queries";
+import { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   type GatewayPrincipal,
@@ -83,6 +84,14 @@ export async function POST(request: Request): Promise<Response> {
     const outcome = await applyToolCall({
       tenantId: principal.tenantId,
       invocationId: principal.invocationId,
+      authority: {
+        invocationId: principal.invocationId,
+        runtimeRevisionId: principal.runtimeRevisionId,
+        attemptId: principal.attemptId,
+        ownershipId: principal.ownershipId,
+        leaseEpoch: principal.leaseEpoch,
+        sessionBindingId: principal.sessionBindingId,
+      },
       executionSubject: recoverTrustedExecutionSubject(binding, principal.tenantId),
       toolId: body.tool_id,
       toolSchemaRevisionId: exactTool.schemaRevisionId,
@@ -122,6 +131,12 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 function mapApplicationError(error: unknown, requestId: string): Response {
+  if (error instanceof ExecutionAuthorityError) {
+    return apiError("ACCESS_DENIED", error.message, {
+      requestId,
+      details: { code: error.code },
+    });
+  }
   if (error instanceof ToolCallConflictError) {
     return apiError("OPERATION_PAYLOAD_CONFLICT", "同 operation_id 已存在但 arguments 不同", {
       requestId,

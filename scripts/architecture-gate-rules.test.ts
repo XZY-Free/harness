@@ -217,8 +217,8 @@ describe("Topic 01 final closure boundary gate", () => {
       "async handleResume() { await applicationService.resume({ invocationId }); } async handleSteer() {}",
     ),
     doc(
-      "lib/runtime/application/production-resume-harness-invocation.ts",
-      "acquireLease: tryAcquireInvocationExecutionLease; const loop = new HostedHarnessLoop({}); const running = loop.run(); return await running; cancelActiveAgentCalls({});",
+      "lib/runtime/application/runtime-resume.ts",
+      "getActiveExecutionOwnership({}); const loop = new HostedHarnessLoop({}); const running = loop.run(); return await running; cancelActiveAgentCalls({});",
     ),
   ];
 
@@ -484,14 +484,14 @@ describe("checkAgentInvokeAuthorizationGate", () => {
     doc("lib/agents/application/agent-admin-projection.ts", "export function projectAgent() {}"),
     doc("lib/control-plane-client/contracts/agent.ts", "export interface AgentDTO {}"),
     doc(
-      "app/api/v1/threads/[thread_id]/turns/route.ts",
+      "app/api/threads/[threadId]/turns/route.ts",
       "requireAgentInvokeScope(); enforceIdempotency();",
     ),
     doc(
-      "app/api/v1/catalog/options/route.ts",
+      "app/api/catalog/options/route.ts",
       "resolveActionScopeCoverage(); agentInvokeAuthorization; buildEmployeeCatalogEtag();",
     ),
-    doc("components/hooks/use-catalog.ts", 'fetch("/api/v1/catalog/options?resource_type=agent")'),
+    doc("components/hooks/use-catalog.ts", 'fetch("/api/catalog/options?resource_type=agent")'),
   ];
 
   it("正式 agent.invoke/Catalog/Turn 单一路径通过", () => {
@@ -503,7 +503,7 @@ describe("checkAgentInvokeAuthorizationGate", () => {
 
   it("旧员工 Agent endpoint 与 visibility Authority 被拦截", () => {
     const documents = validDocuments();
-    documents.push(doc("app/api/v1/agents/route.ts", "export function GET() {}"));
+    documents.push(doc("app/api/agents/route.ts", "export function GET() {}"));
     documents.push(doc("components/selector.tsx", 'fetch("/api/v1/agents")'));
     documents[1] = doc("lib/persistence/schema/agents.ts", "const visibilityPolicyId = null");
     const result = checkAgentInvokeAuthorizationGate(documents);
@@ -516,7 +516,7 @@ describe("checkAgentInvokeAuthorizationGate", () => {
   it("Turn 授权晚于幂等写入时失败", () => {
     const documents = validDocuments();
     documents[5] = doc(
-      "app/api/v1/threads/[thread_id]/turns/route.ts",
+      "app/api/threads/[threadId]/turns/route.ts",
       "enforceIdempotency(); requireAgentInvokeScope();",
     );
     expect(checkAgentInvokeAuthorizationGate(documents).failures).toContain(
@@ -610,23 +610,19 @@ describe("collectHarnessAgentBoundaryViolations", () => {
     expect(violations).toContain("lib/runtime/thread-snake.ts");
   });
 
-  it("app/api/v1/threads/route.ts 可执行代码出现 agent_id 字段即违规（required）", () => {
+  it("app/api/threads/route.ts 可执行代码出现 agent_id 字段即违规（required）", () => {
     const documents = [
-      doc("app/api/v1/threads/route.ts", "type Body = { agent_id: string; title: string };"),
+      doc("app/api/threads/route.ts", "type Body = { agent_id: string; title: string };"),
     ];
-    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
-      "app/api/v1/threads/route.ts",
-    );
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("app/api/threads/route.ts");
   });
 
-  it("app/api/v1/threads/route.ts 可执行代码出现 agent_id 字段即违规（optional 不豁免）", () => {
-    const documents = [doc("app/api/v1/threads/route.ts", "type Body = { agent_id?: string };")];
-    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
-      "app/api/v1/threads/route.ts",
-    );
+  it("app/api/threads/route.ts 可执行代码出现 agent_id 字段即违规（optional 不豁免）", () => {
+    const documents = [doc("app/api/threads/route.ts", "type Body = { agent_id?: string };")];
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("app/api/threads/route.ts");
   });
 
-  it("agent_id 规则仅针对 app/api/v1/threads/route.ts，不扩大到其他文件", () => {
+  it("agent_id 规则仅针对 CreateThread 正式 route，不扩大到其他文件", () => {
     const documents = [doc("app/api/v1/agents/route.ts", "type Body = { agent_id?: string };")];
     expect(collectHarnessAgentBoundaryViolations(documents)).not.toContain(
       "app/api/v1/agents/route.ts",
@@ -1126,7 +1122,7 @@ describe("collectExecutionBoundaryViolations", () => {
 });
 
 describe("checkResumeTruthfulnessGate", () => {
-  const RESOLVE_ROUTE = "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
+  const RESOLVE_ROUTE = "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts";
   const A2A = "lib/agents/calls/transport/a2a/a2a-client.ts";
 
   it("catch 吞错 + 无 resume_dispatch → 失败", () => {
@@ -1149,7 +1145,7 @@ describe("checkResumeTruthfulnessGate", () => {
       ),
       doc(
         A2A,
-        "async resumeCall(req) { const m = buildA2APublicMessageMetadata(req.requestBody.invocation_context); }",
+        "async resumeCall(req) { const m = buildA2APublicMessageMetadata(req.request.invocation_context); }",
       ),
     ]);
     expect(result).toEqual({ passed: true, failures: [] });
@@ -1164,7 +1160,7 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
     dispatcher: "lib/runtime/dispatcher.ts",
     attemptService: "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
     recovery: "lib/runtime/recovery-queries.ts",
-    resolveRoute: "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+    resolveRoute: "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts",
     commandGateway: "lib/runtime/command-dispatch-gateway.ts",
     inProcess: "lib/runtime/in-process-hosted-runtime.ts",
     hostedAdapter: "lib/runtime/adapters/hosted-adapter.ts",
@@ -1180,7 +1176,7 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
       doc(PATHS.attemptService, "recordAttemptDispatchTransientFailure({});"),
       doc(
         PATHS.recovery,
-        'import { markSessionBindingLostInSession } from "@/lib/runtime/session-binding-queries"; markSessionBindingLostInSession(tx, id);',
+        'import { markSessionBindingLostInSession } from "@/lib/runtime/persistence/runtime-session-store"; markSessionBindingLostInSession(tx, id);',
       ),
       doc(
         PATHS.resolveRoute,
@@ -1226,7 +1222,7 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
       d.path === PATHS.recovery
         ? doc(
             d.path,
-            'import { markSessionBindingLost } from "@/lib/runtime/session-binding-queries";',
+            'import { markSessionBindingLost } from "@/lib/runtime/persistence/runtime-session-store";',
           )
         : d,
     );

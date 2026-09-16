@@ -1,0 +1,1126 @@
+/** The only transaction that turns a Runtime event into platform facts. */
+import { randomUUID } from "node:crypto";
+import { handleChildThreadTerminal } from "@/lib/conversations/child-thread-queries";
+import { createThreadItem } from "@/lib/conversations/thread-item-queries";
+import {
+  allocateEventSequences,
+  allocateItemSequence,
+  insertThreadEvent,
+} from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
+import { requireCurrentExecutionAuthority } from "@/lib/executions/application/require-current-execution-authority";
+import { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
+import { bridgeInvocationTerminalToJob } from "@/lib/job/job-terminal-bridge";
+import { createUserActionRequest } from "@/lib/permission/user-action-queries";
+import { turnTable } from "@/lib/persistence/schema/conversation";
+import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
+import {
+  INVOCATION_TERMINAL_STATES,
+  type Invocation,
+  executionBindingTable,
+  executionOwnershipTable,
+  invocationAttemptTable,
+  invocationTable,
+  runtimeEventIngressTable,
+  runtimeSessionBindingTable,
+} from "@/lib/persistence/schema/executions";
+import { filesystemCheckpointTable } from "@/lib/persistence/schema/filesystem-checkpoint";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { workspaceBinding } from "@/lib/persistence/schema/workspace";
+import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
+import {
+  type AuthorityIdentity,
+  type EventReceipt,
+  type RuntimeEvent,
+  RuntimeEventBatchSchema,
+  computeEventPayloadHash,
+} from "@/lib/runtime/runtime-protocol";
+import {
+  getActiveLocksByInvocation,
+  releaseWorkspaceWriteLock,
+} from "@/lib/workspace/workspace-write-lock-queries";
+import { and, asc, eq, sql } from "drizzle-orm";
+
+export type IngressTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export class IngressInvocationNotFoundError extends Error {
+  constructor(public readonly invocationId: string) {
+    super(`Invocation 不存在或不可见：${invocationId}`);
+    this.name = "IngressInvocationNotFoundError";
+  }
+}
+
+export class IngressInvocationTerminalError extends Error {
+  constructor(
+    public readonly invocationId: string,
+    public readonly currentState: string,
+  ) {
+    super(`Invocation 已处于终态：${invocationId}/${currentState}`);
+    this.name = "IngressInvocationTerminalError";
+  }
+}
+
+export class IngressBatchEmptyError extends Error {
+  constructor(public readonly invocationId: string) {
+    super(`Runtime Event batch 不能为空：${invocationId}`);
+    this.name = "IngressBatchEmptyError";
+  }
+}
+
+export class IngressAuthorityMismatchError extends Error {
+  constructor(public readonly invocationId: string) {
+    super(`Runtime Event 不属于当前 ExecutionOwnership：${invocationId}`);
+    this.name = "IngressAuthorityMismatchError";
+  }
+}
+
+export class EventPayloadHashConflictError extends Error {
+  constructor(
+    public readonly invocationId: string,
+    public readonly eventId: string,
+    public readonly producerSequence: string,
+    public readonly expectedHash: string,
+    public readonly actualHash: string,
+  ) {
+    super(`Runtime Event payloadHash 冲突：${invocationId}/${eventId}/${producerSequence}`);
+    this.name = "EventPayloadHashConflictError";
+  }
+}
+
+export class ProducerSequenceGapError extends Error {
+  constructor(
+    public readonly invocationId: string,
+    public readonly expected: string,
+    public readonly actual: string,
+  ) {
+    super(
+      `Runtime Event producerSequence 不连续：${invocationId} expected=${expected} actual=${actual}`,
+    );
+    this.name = "ProducerSequenceGapError";
+  }
+}
+
+export class IngressCandidateTypeUnsupportedError extends Error {
+  constructor(
+    public readonly invocationId: string,
+    public readonly candidateType: string,
+  ) {
+    super(`Runtime Event type 不支持：${invocationId}/${candidateType}`);
+    this.name = "IngressCandidateTypeUnsupportedError";
+  }
+}
+
+export interface IngressRuntimeEventsInput {
+  tenantId: string;
+  invocationId: string;
+  batch: unknown;
+  receivedAt?: Date;
+}
+
+export interface IngressRuntimeEventsResult {
+  invocationId: string;
+  receipts: EventReceipt[];
+  replayedEventIds: string[];
+  acceptedThroughProducerSequence: string;
+}
+
+function sameAuthority(left: AuthorityIdentity, right: AuthorityIdentity): boolean {
+  return (
+    left.invocationId === right.invocationId &&
+    left.runtimeRevisionId === right.runtimeRevisionId &&
+    left.attemptId === right.attemptId &&
+    left.ownershipId === right.ownershipId &&
+    left.leaseEpoch === right.leaseEpoch &&
+    left.sessionBindingId === right.sessionBindingId
+  );
+}
+
+function toNumber(value: string): number {
+  const result = Number(value);
+  if (!Number.isSafeInteger(result))
+    throw new RangeError(`decimal value exceeds local safe integer boundary: ${value}`);
+  return result;
+}
+
+async function lockInvocation(
+  tx: IngressTx,
+  tenantId: string,
+  invocationId: string,
+): Promise<Invocation> {
+  const [row] = await tx
+    .select()
+    .from(invocationTable)
+    .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)))
+    .for("update")
+    .limit(1);
+  if (!row) throw new IngressInvocationNotFoundError(invocationId);
+  return row;
+}
+
+async function requireIngressAuthority(
+  tx: IngressTx,
+  tenantId: string,
+  authority: AuthorityIdentity,
+  requiredPhase: "dispatching" | "executing",
+) {
+  const owner = await requireCurrentExecutionAuthority({
+    tenantId,
+    authority,
+    executor: tx,
+    requiredPhase,
+  });
+  const [attempt] = await tx
+    .select()
+    .from(invocationAttemptTable)
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, tenantId),
+        eq(invocationAttemptTable.id, authority.attemptId),
+        eq(invocationAttemptTable.invocationId, authority.invocationId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  const [session] = await tx
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, tenantId),
+        eq(runtimeSessionBindingTable.id, authority.sessionBindingId),
+        eq(runtimeSessionBindingTable.invocationId, authority.invocationId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  const [binding] = await tx
+    .select()
+    .from(executionBindingTable)
+    .where(
+      and(
+        eq(executionBindingTable.tenantId, tenantId),
+        eq(executionBindingTable.invocationId, authority.invocationId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (
+    !attempt ||
+    !session ||
+    !binding ||
+    attempt.id !== owner.attemptId ||
+    session.attemptId !== authority.attemptId ||
+    session.ownershipId !== authority.ownershipId ||
+    session.leaseEpoch !== toNumber(authority.leaseEpoch) ||
+    session.runtimeRevisionId !== authority.runtimeRevisionId ||
+    binding.runtimeRevisionId !== authority.runtimeRevisionId ||
+    ["closed", "lost"].includes(session.bindingState)
+  ) {
+    throw new IngressAuthorityMismatchError(authority.invocationId);
+  }
+  if (binding.environmentMode === "MANAGED") {
+    if (!binding.environmentDefinitionRevisionId || !owner.environmentLeaseId) {
+      throw new IngressAuthorityMismatchError(authority.invocationId);
+    }
+    const [lease] = await tx
+      .select()
+      .from(environmentLeaseTable)
+      .where(
+        and(
+          eq(environmentLeaseTable.tenantId, tenantId),
+          eq(environmentLeaseTable.id, owner.environmentLeaseId),
+          eq(environmentLeaseTable.invocationId, authority.invocationId),
+          eq(environmentLeaseTable.attemptId, authority.attemptId),
+          eq(
+            environmentLeaseTable.environmentDefinitionRevisionId,
+            binding.environmentDefinitionRevisionId,
+          ),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (
+      !lease ||
+      lease.leaseState !== "active" ||
+      lease.readinessState !== "ready" ||
+      lease.activationOwnershipId !== authority.ownershipId
+    ) {
+      throw new IngressAuthorityMismatchError(authority.invocationId);
+    }
+  }
+  if (binding.environmentMode === "MANAGED" || binding.workspaceBindingId) {
+    const [workspace] = await tx
+      .select()
+      .from(workspaceBinding)
+      .where(
+        and(
+          eq(workspaceBinding.tenantId, tenantId),
+          eq(workspaceBinding.id, binding.workspaceBindingId),
+        ),
+      )
+      .limit(1);
+    if (!workspace) throw new IngressAuthorityMismatchError(authority.invocationId);
+    if (workspace.continuityMode !== "NO_PLATFORM_WORKSPACE") {
+      if (
+        owner.workspaceWriterGeneration === null ||
+        owner.workspaceWriterGeneration === undefined ||
+        !workspace.storageScopeDigest
+      ) {
+        throw new IngressAuthorityMismatchError(authority.invocationId);
+      }
+      const locks = await getActiveLocksByInvocation(tenantId, authority.invocationId, tx);
+      const writer = locks.find(
+        (lock) =>
+          lock.storageScopeDigest === workspace.storageScopeDigest &&
+          lock.workspaceBindingId === workspace.id &&
+          lock.holderAttemptId === authority.attemptId &&
+          lock.holderOwnershipId === authority.ownershipId &&
+          lock.writerGeneration === owner.workspaceWriterGeneration,
+      );
+      if (!writer) throw new IngressAuthorityMismatchError(authority.invocationId);
+    }
+  }
+  return { owner, attempt, session, binding };
+}
+
+async function findExisting(
+  tx: IngressTx,
+  tenantId: string,
+  invocationId: string,
+  event: RuntimeEvent,
+) {
+  const [byId] = await tx
+    .select()
+    .from(runtimeEventIngressTable)
+    .where(
+      and(
+        eq(runtimeEventIngressTable.tenantId, tenantId),
+        eq(runtimeEventIngressTable.invocationId, invocationId),
+        eq(runtimeEventIngressTable.producerEventId, event.eventId),
+      ),
+    )
+    .limit(1);
+  if (byId) return byId;
+  const [bySequence] = await tx
+    .select()
+    .from(runtimeEventIngressTable)
+    .where(
+      and(
+        eq(runtimeEventIngressTable.tenantId, tenantId),
+        eq(runtimeEventIngressTable.invocationId, invocationId),
+        eq(runtimeEventIngressTable.producerSequence, toNumber(event.producerSequence)),
+      ),
+    )
+    .limit(1);
+  return bySequence;
+}
+
+function receiptFromRow(row: typeof runtimeEventIngressTable.$inferSelect): EventReceipt {
+  const parsed = row.receiptJson as EventReceipt;
+  if (!parsed || parsed.eventId !== row.producerEventId)
+    throw new IngressAuthorityMismatchError(row.invocationId);
+  return parsed;
+}
+
+function requireStartedPayloadString(
+  payload: Record<string, unknown>,
+  field:
+    | "intentKey"
+    | "semanticRequestDigest"
+    | "remoteSessionRef"
+    | "remoteExecutionRef"
+    | "capabilitiesDigest",
+): string {
+  const value = payload[field];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new IngressAuthorityMismatchError("execution.started");
+  }
+  return value;
+}
+
+function validateExecutionStarted(
+  event: RuntimeEvent,
+  session: typeof runtimeSessionBindingTable.$inferSelect,
+): void {
+  if (event.type !== "execution.started") return;
+  if (session.bindingState !== "dispatching" || !session.semanticRequestDigest) {
+    throw new IngressAuthorityMismatchError(session.invocationId);
+  }
+  const payload = event.payload;
+  const intentKey = requireStartedPayloadString(payload, "intentKey");
+  const semanticRequestDigest = requireStartedPayloadString(payload, "semanticRequestDigest");
+  const remoteSessionRef = requireStartedPayloadString(payload, "remoteSessionRef");
+  const remoteExecutionRef = requireStartedPayloadString(payload, "remoteExecutionRef");
+  const capabilitiesDigest = requireStartedPayloadString(payload, "capabilitiesDigest");
+  if (
+    !/^sha256:[0-9a-f]{64}$/.test(semanticRequestDigest) ||
+    !/^sha256:[0-9a-f]{64}$/.test(capabilitiesDigest) ||
+    intentKey !== session.startIntentKey ||
+    semanticRequestDigest !== session.semanticRequestDigest ||
+    (session.remoteSessionRef !== null && remoteSessionRef !== session.remoteSessionRef) ||
+    (session.remoteExecutionRef !== null && remoteExecutionRef !== session.remoteExecutionRef)
+  ) {
+    throw new IngressAuthorityMismatchError(session.invocationId);
+  }
+  const acknowledgedCapabilities =
+    session.transportAcknowledgement &&
+    typeof session.transportAcknowledgement === "object" &&
+    !Array.isArray(session.transportAcknowledgement)
+      ? (session.transportAcknowledgement as Record<string, unknown>).capabilitiesDigest
+      : null;
+  if (acknowledgedCapabilities !== null && acknowledgedCapabilities !== capabilitiesDigest) {
+    throw new IngressAuthorityMismatchError(session.invocationId);
+  }
+}
+
+async function mapEvent(
+  tx: IngressTx,
+  invocation: Invocation,
+  event: RuntimeEvent,
+): Promise<{ itemId?: string; threadEventId?: string; jobEventId?: string }> {
+  if (event.type === "execution.started") return {};
+  if (invocation.subjectType === "job") return {};
+  if (!invocation.threadId || !invocation.turnId)
+    throw new IngressInvocationNotFoundError(invocation.id);
+
+  if (
+    event.type === "progress" ||
+    event.type === "response.completed" ||
+    event.type === "user-action"
+  ) {
+    const itemType =
+      event.type === "response.completed"
+        ? "assistant_message"
+        : event.type === "user-action"
+          ? "user_action"
+          : "user_guidance";
+    const item = await createThreadItem(tx, {
+      threadId: invocation.threadId,
+      turnId: invocation.turnId,
+      itemSequence: await allocateItemSequence(tx, invocation.threadId),
+      itemType,
+      itemState: event.type === "user-action" ? "pending" : "completed",
+      authorType: "assistant",
+      authorId: null,
+      content: { type: event.type, ...event.payload },
+      contextPolicy: event.type === "progress" ? "exclude" : undefined,
+      invocationId: invocation.id,
+    });
+    let userActionRequestId: string | null = null;
+    if (event.type === "user-action") {
+      // user-action Runtime 事件是 Parent UserActionRequest 的事实源：同事务原子创建
+      // UAR 并关联员工可见投影 Item；promptJson 携带 agent_call_* 引用，resolve 链路
+      // 据此恢复原 AgentCall/task/context（agentCallResumeRefs）。
+      const payload = event.payload as Record<string, unknown>;
+      const requestType =
+        payload.request_type === "confirmation" || payload.request_type === "input"
+          ? payload.request_type
+          : null;
+      if (requestType) {
+        // UAR 幂等键取 payload.action_id（input 按 input event、confirmation 按外部
+        // 业务提议的稳定键）；payload.harness_action_id 只是 Parent Harness action
+        // 的关联引用，绝不作为 UAR 幂等键（同 action 可连续产生多次 confirmation）。
+        const uarIdempotencyKey =
+          typeof payload.action_id === "string" && payload.action_id
+            ? payload.action_id
+            : typeof payload.harness_action_id === "string" && payload.harness_action_id
+              ? payload.harness_action_id
+              : null;
+        // (invocationId, harnessActionId) 唯一索引：同一幂等键的重复 user-action
+        // 事件以首个 UAR 为准（事件本身已按 producerEventId 幂等）。
+        const [existingUar] = uarIdempotencyKey
+          ? await tx
+              .select({ id: userActionRequestTable.id })
+              .from(userActionRequestTable)
+              .where(
+                and(
+                  eq(userActionRequestTable.tenantId, invocation.tenantId),
+                  eq(userActionRequestTable.invocationId, invocation.id),
+                  eq(userActionRequestTable.harnessActionId, uarIdempotencyKey),
+                ),
+              )
+              .limit(1)
+          : [];
+        if (!existingUar) {
+          const expiresAt =
+            typeof payload.expires_at === "string" ? new Date(payload.expires_at) : null;
+          const asString = (value: unknown): string | null =>
+            typeof value === "string" && value ? value : null;
+          const created = await createUserActionRequest(
+            {
+              tenantId: invocation.tenantId,
+              threadId: invocation.threadId,
+              turnId: invocation.turnId,
+              invocationId: invocation.id,
+              harnessActionId: uarIdempotencyKey,
+              itemId: item.id,
+              requestType,
+              purpose: asString(payload.purpose),
+              promptJson: {
+                prompt: asString(payload.prompt),
+                title: asString(payload.title),
+                summary: asString(payload.summary),
+                impact: asString(payload.impact),
+                preview: payload.preview ?? null,
+                action_id: asString(payload.action_id),
+                action_key: asString(payload.action_key),
+                proposal_id: asString(payload.proposal_id),
+                harness_action_id: asString(payload.harness_action_id),
+                agent_call_id: asString(payload.agent_call_id),
+                agent_call_event_id: asString(payload.agent_call_event_id),
+                task_id: asString(payload.task_id),
+                context_id: asString(payload.context_id),
+                agent_display_name: asString(payload.agent_display_name),
+              },
+              ...(requestType === "input" ? { inputSchemaJson: payload.input_schema } : {}),
+              ...(expiresAt && !Number.isNaN(expiresAt.getTime()) ? { expiresAt } : {}),
+            },
+            { tx },
+          );
+          userActionRequestId = created.request.id;
+        } else {
+          userActionRequestId = existingUar.id;
+        }
+      }
+    }
+    const sequence = await allocateEventSequences(tx, invocation.threadId);
+    const threadEvent = await insertThreadEvent(tx, invocation.threadId, sequence, {
+      eventType: event.type === "user-action" ? "user_action.requested" : "item.created",
+      turnId: invocation.turnId,
+      itemId: item.id,
+      invocationId: invocation.id,
+      actorType: "service",
+      payload: {
+        source: event.type,
+        itemId: item.id,
+        contentHash: item.contentHash,
+        ...event.payload,
+        ...(userActionRequestId ? { request_id: userActionRequestId } : {}),
+      },
+      idempotencyKey: `runtime-event:${event.eventId}`,
+    });
+    return { itemId: item.id, threadEventId: threadEvent.id };
+  }
+
+  const sequence = await allocateEventSequences(tx, invocation.threadId);
+  const threadEvent = await insertThreadEvent(tx, invocation.threadId, sequence, {
+    eventType: event.type,
+    turnId: invocation.turnId,
+    invocationId: invocation.id,
+    actorType: "service",
+    payload: event.payload,
+    idempotencyKey: `runtime-event:${event.eventId}`,
+  });
+  return { threadEventId: threadEvent.id };
+}
+
+async function applyLifecycle(
+  tx: IngressTx,
+  invocation: Invocation,
+  event: RuntimeEvent,
+  now: Date,
+  attemptId: string,
+  ownershipId: string,
+  sessionBindingId: string,
+  binding: typeof executionBindingTable.$inferSelect,
+): Promise<Invocation> {
+  if (event.type === "execution.started") {
+    const started = event.payload;
+    if (invocation.executionState === "queued") {
+      await tx
+        .update(invocationTable)
+        .set({
+          executionState: "running",
+          startedAt: now,
+          versionNo: invocation.versionNo + 1,
+          updatedAt: now,
+        })
+        .where(eq(invocationTable.id, invocation.id));
+      if (invocation.turnId)
+        await tx
+          .update(turnTable)
+          .set({ turnState: "running" })
+          .where(eq(turnTable.id, invocation.turnId));
+    }
+    await tx
+      .update(executionOwnershipTable)
+      .set({ executionPhase: "executing", updatedAt: now })
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, invocation.tenantId),
+          eq(executionOwnershipTable.id, ownershipId),
+          eq(executionOwnershipTable.invocationId, invocation.id),
+        ),
+      );
+    await tx
+      .update(invocationAttemptTable)
+      .set({ attemptState: "running", startedAt: now, updatedAt: now })
+      .where(eq(invocationAttemptTable.id, attemptId));
+    await tx
+      .update(runtimeSessionBindingTable)
+      .set({
+        bindingState: "active",
+        remoteSessionRef:
+          typeof started.remoteSessionRef === "string" ? started.remoteSessionRef : undefined,
+        remoteExecutionRef:
+          typeof started.remoteExecutionRef === "string" ? started.remoteExecutionRef : undefined,
+        startedEventId: event.eventId,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(runtimeSessionBindingTable.tenantId, invocation.tenantId),
+          eq(runtimeSessionBindingTable.id, sessionBindingId),
+          eq(runtimeSessionBindingTable.invocationId, invocation.id),
+        ),
+      );
+    const [updated] = await tx
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, invocation.id))
+      .limit(1);
+    if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
+    return updated;
+  }
+  if (event.type === "user-action") {
+    if (!["completed", "failed", "cancelled", "lost"].includes(invocation.executionState)) {
+      await tx
+        .update(invocationTable)
+        .set({
+          executionState: "waiting_user",
+          recoveryVersion: invocation.recoveryVersion + 1,
+          versionNo: invocation.versionNo + 1,
+          updatedAt: now,
+        })
+        .where(eq(invocationTable.id, invocation.id));
+      if (invocation.turnId)
+        await tx
+          .update(turnTable)
+          .set({ turnState: "waiting_user" })
+          .where(eq(turnTable.id, invocation.turnId));
+    }
+    const [updated] = await tx
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, invocation.id))
+      .limit(1);
+    if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
+    return updated;
+  }
+  if (event.type === "execution.suspended") {
+    if (!INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
+      const recovery = await resolveSuspensionRecovery({
+        tx,
+        invocation,
+        event,
+        binding,
+        attemptId,
+        ownershipId,
+      });
+      await tx
+        .update(invocationTable)
+        .set({
+          executionState: "waiting_user",
+          recoveryVersion: invocation.recoveryVersion + 1,
+          versionNo: invocation.versionNo + 1,
+          updatedAt: now,
+        })
+        .where(eq(invocationTable.id, invocation.id));
+      await tx
+        .update(invocationAttemptTable)
+        .set({
+          attemptState: "suspended",
+          preparationState: "pending",
+          preparationEvidence: null,
+          preparationDigest: null,
+          preparedAt: null,
+          filesystemCheckpointId: recovery.checkpointId,
+          resumeAnchor: recovery.anchor,
+          resumeAnchorDigest: recovery.anchorDigest,
+          versionNo: sql`${invocationAttemptTable.versionNo} + 1`,
+          updatedAt: now,
+        })
+        .where(eq(invocationAttemptTable.id, attemptId));
+      if (invocation.turnId)
+        await tx
+          .update(turnTable)
+          .set({ turnState: "waiting_user" })
+          .where(eq(turnTable.id, invocation.turnId));
+      const locks = await getActiveLocksByInvocation(invocation.tenantId, invocation.id, tx);
+      for (const lock of locks) {
+        await releaseWorkspaceWriteLock(
+          {
+            tenantId: invocation.tenantId,
+            lockId: lock.id,
+            ownershipId,
+            reasonCode: "execution_suspended",
+          },
+          tx,
+        );
+      }
+      await tx
+        .update(executionOwnershipTable)
+        .set({
+          ownershipState: "released",
+          executionPhase: "suspending",
+          releasedAt: now,
+          reasonCode: "execution_suspended",
+          versionNo: sql`${executionOwnershipTable.versionNo} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(executionOwnershipTable.tenantId, invocation.tenantId),
+            eq(executionOwnershipTable.id, ownershipId),
+            eq(executionOwnershipTable.invocationId, invocation.id),
+          ),
+        );
+      await tx
+        .update(runtimeSessionBindingTable)
+        .set({
+          bindingState: "closed",
+          closedAt: now,
+          versionNo: sql`${runtimeSessionBindingTable.versionNo} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(runtimeSessionBindingTable.tenantId, invocation.tenantId),
+            eq(runtimeSessionBindingTable.id, sessionBindingId),
+            eq(runtimeSessionBindingTable.invocationId, invocation.id),
+          ),
+        );
+      const [owner] = await tx
+        .select({ environmentLeaseId: executionOwnershipTable.environmentLeaseId })
+        .from(executionOwnershipTable)
+        .where(
+          and(
+            eq(executionOwnershipTable.tenantId, invocation.tenantId),
+            eq(executionOwnershipTable.id, ownershipId),
+          ),
+        )
+        .limit(1);
+      if (owner?.environmentLeaseId) {
+        await tx
+          .update(environmentLeaseTable)
+          .set({
+            leaseState: "active",
+            readinessState: "preparing",
+            activationOwnershipId: null,
+            versionNo: sql`${environmentLeaseTable.versionNo} + 1`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(environmentLeaseTable.tenantId, invocation.tenantId),
+              eq(environmentLeaseTable.id, owner.environmentLeaseId),
+              eq(environmentLeaseTable.activationOwnershipId, ownershipId),
+            ),
+          );
+      }
+    }
+    const [updated] = await tx
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, invocation.id))
+      .limit(1);
+    if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
+    return updated;
+  }
+  if (
+    event.type === "execution.completed" ||
+    event.type === "execution.failed" ||
+    event.type === "execution.cancelled"
+  ) {
+    const state =
+      event.type === "execution.completed"
+        ? "completed"
+        : event.type === "execution.failed"
+          ? "failed"
+          : "cancelled";
+    if (!INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
+      const resultRef =
+        typeof event.payload.resultRef === "string" ? event.payload.resultRef : null;
+      const resultDigest =
+        typeof event.payload.resultDigest === "string" ? event.payload.resultDigest : null;
+      const errorCode =
+        typeof event.payload.errorCode === "string" ? event.payload.errorCode : null;
+      await tx
+        .update(invocationTable)
+        .set({
+          executionState: state,
+          finishedAt: now,
+          resultRef,
+          resultDigest,
+          errorCode,
+          recoveryVersion: invocation.recoveryVersion + 1,
+          versionNo: invocation.versionNo + 1,
+          updatedAt: now,
+        })
+        .where(eq(invocationTable.id, invocation.id));
+      await tx
+        .update(invocationAttemptTable)
+        .set({ attemptState: state, finishedAt: now, updatedAt: now })
+        .where(eq(invocationAttemptTable.id, attemptId));
+      if (invocation.turnId)
+        await tx
+          .update(turnTable)
+          .set({
+            turnState:
+              state === "completed" ? "completed" : state === "cancelled" ? "cancelled" : "failed",
+            finishedAt: now,
+          })
+          .where(eq(turnTable.id, invocation.turnId));
+      const locks = await getActiveLocksByInvocation(invocation.tenantId, invocation.id, tx);
+      for (const lock of locks) {
+        await releaseWorkspaceWriteLock(
+          {
+            tenantId: invocation.tenantId,
+            lockId: lock.id,
+            ownershipId,
+            reasonCode: "execution_terminal",
+          },
+          tx,
+        );
+      }
+      await tx
+        .update(executionOwnershipTable)
+        .set({
+          ownershipState: "released",
+          releasedAt: now,
+          reasonCode: "execution_terminal",
+          versionNo: sql`${executionOwnershipTable.versionNo} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(executionOwnershipTable.tenantId, invocation.tenantId),
+            eq(executionOwnershipTable.id, ownershipId),
+            eq(executionOwnershipTable.invocationId, invocation.id),
+          ),
+        );
+      await tx
+        .update(runtimeSessionBindingTable)
+        .set({ bindingState: "closed", closedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(runtimeSessionBindingTable.tenantId, invocation.tenantId),
+            eq(runtimeSessionBindingTable.id, sessionBindingId),
+            eq(runtimeSessionBindingTable.invocationId, invocation.id),
+          ),
+        );
+    }
+  }
+  const [updated] = await tx
+    .select()
+    .from(invocationTable)
+    .where(eq(invocationTable.id, invocation.id))
+    .limit(1);
+  if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
+  if (INVOCATION_TERMINAL_STATES.includes(updated.executionState))
+    await bridgeInvocationTerminalToJob(tx, updated, now);
+  return updated;
+}
+
+async function resolveSuspensionRecovery(input: {
+  tx: IngressTx;
+  invocation: Invocation;
+  event: RuntimeEvent;
+  binding: typeof executionBindingTable.$inferSelect;
+  attemptId: string;
+  ownershipId: string;
+}): Promise<{ checkpointId: string | null; anchor: unknown; anchorDigest: string }> {
+  const checkpointId =
+    typeof input.event.payload.checkpointId === "string" ? input.event.payload.checkpointId : null;
+  const anchorDigest =
+    typeof input.event.payload.resumeAnchorDigest === "string"
+      ? input.event.payload.resumeAnchorDigest
+      : null;
+  if (!anchorDigest || !/^sha256:[0-9a-f]{64}$/.test(anchorDigest))
+    throw new Error("CheckpointStale");
+  const [workspace] = await input.tx
+    .select()
+    .from(workspaceBinding)
+    .where(
+      and(
+        eq(workspaceBinding.tenantId, input.invocation.tenantId),
+        eq(workspaceBinding.id, input.binding.workspaceBindingId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!workspace) throw new Error("WorkspaceNotReady");
+  if (!checkpointId) {
+    if (workspace.continuityMode === "CHECKPOINT_RESTORABLE") throw new Error("CheckpointStale");
+    return {
+      checkpointId: null,
+      anchor: {
+        kind: "runtime-suspension",
+        invocationId: input.invocation.id,
+        producerEventId: input.event.eventId,
+        producerSequence: input.event.producerSequence,
+      },
+      anchorDigest,
+    };
+  }
+  if (!input.binding.environmentDefinitionRevisionId)
+    throw new Error("EnvironmentRevisionMismatch");
+  const [checkpoint] = await input.tx
+    .select()
+    .from(filesystemCheckpointTable)
+    .where(
+      and(
+        eq(filesystemCheckpointTable.tenantId, input.invocation.tenantId),
+        eq(filesystemCheckpointTable.id, checkpointId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (
+    !checkpoint ||
+    checkpoint.invocationId !== input.invocation.id ||
+    checkpoint.attemptId !== input.attemptId ||
+    checkpoint.ownershipId !== input.ownershipId ||
+    checkpoint.workspaceBindingId !== input.binding.workspaceBindingId ||
+    checkpoint.environmentDefinitionRevisionId !== input.binding.environmentDefinitionRevisionId ||
+    checkpoint.recoveryAnchorDigest !== anchorDigest ||
+    checkpoint.recoveryVersion !== input.invocation.checkpointRecoveryVersion ||
+    checkpoint.producerSequence !== input.invocation.checkpointProducerSequence
+  ) {
+    throw new Error("CheckpointStale");
+  }
+  return {
+    checkpointId: checkpoint.id,
+    anchor: checkpoint.recoveryAnchor,
+    anchorDigest: checkpoint.recoveryAnchorDigest,
+  };
+}
+
+export async function ingressRuntimeEvents(
+  input: IngressRuntimeEventsInput,
+): Promise<IngressRuntimeEventsResult> {
+  const parsed = RuntimeEventBatchSchema.parse(input.batch);
+  if (parsed.authority.invocationId !== input.invocationId)
+    throw new IngressAuthorityMismatchError(input.invocationId);
+  if (parsed.events.length === 0) throw new IngressBatchEmptyError(input.invocationId);
+  const now = input.receivedAt ?? new Date();
+  const result = await db.transaction(async (tx) => {
+    const invocation = await lockInvocation(tx, input.tenantId, input.invocationId);
+    const newEvents: Array<{ event: RuntimeEvent; payloadHash: string }> = [];
+    const receipts: EventReceipt[] = [];
+    const replayedEventIds: string[] = [];
+    let expected = invocation.lastProducerSequence + 1;
+    for (const event of parsed.events) {
+      const payloadHash = computeEventPayloadHash(event);
+      const existing = await findExisting(tx, input.tenantId, input.invocationId, event);
+      if (existing) {
+        if (existing.payloadHash !== payloadHash)
+          throw new EventPayloadHashConflictError(
+            input.invocationId,
+            event.eventId,
+            event.producerSequence,
+            existing.payloadHash,
+            payloadHash,
+          );
+        const receipt = receiptFromRow(existing);
+        if (!sameAuthority(receipt.acceptedAuthority, parsed.authority))
+          throw new IngressAuthorityMismatchError(input.invocationId);
+        receipts.push(receipt);
+        replayedEventIds.push(event.eventId);
+        continue;
+      }
+      const sequence = toNumber(event.producerSequence);
+      if (sequence !== expected)
+        throw new ProducerSequenceGapError(
+          input.invocationId,
+          String(expected),
+          event.producerSequence,
+        );
+      expected += 1;
+      newEvents.push({ event, payloadHash });
+    }
+    if (newEvents.length === 0) {
+      return {
+        invocationId: input.invocationId,
+        receipts,
+        replayedEventIds,
+        acceptedThroughProducerSequence: String(invocation.lastProducerSequence),
+      };
+    }
+    if (INVOCATION_TERMINAL_STATES.includes(invocation.executionState))
+      throw new IngressInvocationTerminalError(input.invocationId, invocation.executionState);
+    const newReceipts: EventReceipt[] = [];
+    let lifecycleInvocation = invocation;
+    for (const { event, payloadHash } of newEvents) {
+      if (INVOCATION_TERMINAL_STATES.includes(lifecycleInvocation.executionState))
+        throw new IngressInvocationTerminalError(
+          input.invocationId,
+          lifecycleInvocation.executionState,
+        );
+      const requiredPhase = event.type === "execution.started" ? "dispatching" : "executing";
+      const authority = await requireIngressAuthority(
+        tx,
+        input.tenantId,
+        parsed.authority,
+        requiredPhase,
+      );
+      if (event.type === "action" && lifecycleInvocation.checkpointGate !== "open") {
+        throw new ExecutionAuthorityError(
+          "CheckpointStale",
+          "Checkpoint Gate 未解除，禁止接纳新的 Runtime Action",
+        );
+      }
+      validateExecutionStarted(event, authority.session);
+      const mapped = await mapEvent(tx, lifecycleInvocation, event);
+      const ingressId = randomUUID();
+      const recoveryVersionAfter =
+        lifecycleInvocation.recoveryVersion +
+        (event.type === "execution.suspended" ||
+        (event.type.startsWith("execution.") && event.type !== "execution.started") ||
+        event.type === "user-action"
+          ? 1
+          : 0);
+      const receipt: EventReceipt = {
+        eventId: event.eventId,
+        producerSequence: event.producerSequence,
+        ingressId,
+        acceptedAt: now.getTime(),
+        acceptedAuthority: parsed.authority,
+        mappedReferences: { itemId: mapped.itemId, threadEventId: mapped.threadEventId },
+        recoveryVersionAfter: String(recoveryVersionAfter),
+      };
+      await tx.insert(runtimeEventIngressTable).values({
+        id: ingressId,
+        tenantId: input.tenantId,
+        invocationId: input.invocationId,
+        acceptedAttemptId: parsed.authority.attemptId,
+        acceptedOwnershipId: parsed.authority.ownershipId,
+        acceptedSessionId: parsed.authority.sessionBindingId,
+        acceptedEpoch: toNumber(parsed.authority.leaseEpoch),
+        producerEventId: event.eventId,
+        producerSequence: toNumber(event.producerSequence),
+        candidateType: event.type,
+        schemaVersion: event.schemaVersion,
+        payloadHash,
+        payloadJson: event.payload,
+        receiptJson: receipt,
+        recoveryVersionAfter,
+        receivedAt: now,
+        acceptedAt: now,
+      });
+      newReceipts.push(receipt);
+      lifecycleInvocation = await applyLifecycle(
+        tx,
+        lifecycleInvocation,
+        event,
+        now,
+        authority.attempt.id,
+        authority.owner.id,
+        parsed.authority.sessionBindingId,
+        authority.binding,
+      );
+    }
+    // newEvents 至少含一条已接纳事件（batch 校验 min(1)）。
+    const lastEvent = newEvents[newEvents.length - 1];
+    if (!lastEvent) throw new Error("已接纳事件批次不能为空");
+    const lastSequence = toNumber(lastEvent.event.producerSequence);
+    await tx
+      .update(invocationTable)
+      .set({
+        lastProducerSequence: lastSequence,
+        versionNo: sql`${invocationTable.versionNo} + 1`,
+        updatedAt: now,
+      })
+      .where(eq(invocationTable.id, invocation.id));
+    return {
+      invocationId: input.invocationId,
+      receipts: [...receipts, ...newReceipts].sort(
+        (a, b) => toNumber(a.producerSequence) - toNumber(b.producerSequence),
+      ),
+      replayedEventIds,
+      acceptedThroughProducerSequence: String(lastSequence),
+    };
+  });
+  // ─── Post-commit：子线程终态协调 ────────────────────────────
+  // Runtime 终态事件经正式 ingress 落库后（事务已提交），若该 Invocation 属于某个
+  // delegate 子 Thread 且已进入终态，自动调用 handleChildThreadTerminal：
+  // - completed/failed → projectChildThreadResult（父线程结构化结果投影）
+  // - cancelled → finalizeChildThreadCancellation（取消 ack 落库）
+  // 这使 child-thread-isolation / child-cancel-requires-ack 的"终态自动接线"真正成立。
+  await coordinateChildThreadTerminal(input.tenantId, input.invocationId);
+  return result;
+}
+
+/**
+ * 子线程终态协调（post-commit）。
+ *
+ * ingress 事务把子 Invocation 推向终态后调用；`handleChildThreadTerminal` 内部按
+ * childThreadId 查 delegate ThreadRelation——非 delegate 线程返回 skipped（无副作用），
+ * delegate 线程按其终态投影结果/终结取消。子线程终态事件顺序稳定，由 ingress 事务
+ * 与 handleChildThreadTerminal 各自独立事务（父/子线程行锁不重叠）保证。
+ */
+async function coordinateChildThreadTerminal(
+  tenantId: string,
+  invocationId: string,
+): Promise<void> {
+  const invocation = await getInvocationById(tenantId, invocationId);
+  if (!invocation) return;
+  if (!invocation.threadId) return;
+  const terminalState = invocation.executionState;
+  if (
+    terminalState !== "completed" &&
+    terminalState !== "failed" &&
+    terminalState !== "cancelled"
+  ) {
+    // lost 等其他终态不触发 child 投影/取消终结（保持 fail-closed）。
+    return;
+  }
+  await handleChildThreadTerminal({
+    tenantId,
+    childThreadId: invocation.threadId,
+    terminalState,
+  });
+}
+
+export async function getIngressByInvocation(
+  tenantId: string,
+  invocationId: string,
+  options?: { afterSequence?: number; limit?: number },
+) {
+  const query = db
+    .select()
+    .from(runtimeEventIngressTable)
+    .where(
+      and(
+        eq(runtimeEventIngressTable.tenantId, tenantId),
+        eq(runtimeEventIngressTable.invocationId, invocationId),
+        options?.afterSequence === undefined
+          ? sql`1=1`
+          : sql`${runtimeEventIngressTable.producerSequence} > ${options.afterSequence}`,
+      ),
+    )
+    .orderBy(asc(runtimeEventIngressTable.producerSequence));
+  return options?.limit === undefined
+    ? query
+    : query.limit(Math.min(Math.max(options.limit, 1), 500));
+}
+
+export async function getIngressByProducerEventId(
+  tenantId: string,
+  invocationId: string,
+  producerEventId: string,
+) {
+  const [row] = await db
+    .select()
+    .from(runtimeEventIngressTable)
+    .where(
+      and(
+        eq(runtimeEventIngressTable.tenantId, tenantId),
+        eq(runtimeEventIngressTable.invocationId, invocationId),
+        eq(runtimeEventIngressTable.producerEventId, producerEventId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}

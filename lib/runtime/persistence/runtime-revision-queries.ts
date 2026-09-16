@@ -32,6 +32,7 @@ import {
   type RuntimeTargetFacts,
   computeRuntimeTargetDigest,
 } from "@/lib/runtime/domain/runtime-target-digest";
+import { PROTOCOL_VERSION } from "@/lib/runtime/runtime-protocol";
 import { and, desc, eq, max } from "drizzle-orm";
 
 /** 创建 draft RuntimeRevision 的入参。 */
@@ -40,7 +41,8 @@ export interface CreateDraftRuntimeRevisionParams {
   runtimeId: string;
   protocolType: string;
   /** 协议契约版本（显式传入；禁止按 protocolType 自动推导 — ）。 */
-  protocolContractRevision: string;
+  protocolContractDigest: string;
+  protocolVersion?: 3;
   /** 证据种类（hosted_artifact | external_endpoint）。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   endpointRef: string;
@@ -62,7 +64,7 @@ function computeTargetDigestOrFail(params: {
   runtimeArtifactRef: string | null;
   artifactDigest: string | null;
   configHash: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   endpointRef: string;
   protocolType: string;
   identityMode: string;
@@ -79,7 +81,7 @@ function computeTargetDigestOrFail(params: {
       runtimeEvidenceKind: "hosted_artifact",
       runtimeArtifactDigest: params.artifactDigest,
       runtimeConfigDigest: params.configHash,
-      protocolContractRevision: params.protocolContractRevision,
+      protocolContractDigest: params.protocolContractDigest,
     };
   } else {
     if (params.runtimeArtifactRef) {
@@ -95,7 +97,7 @@ function computeTargetDigestOrFail(params: {
       endpointRef: params.endpointRef,
       runtimeConfigDigest: params.configHash,
       protocolType: params.protocolType,
-      protocolContractRevision: params.protocolContractRevision,
+      protocolContractDigest: params.protocolContractDigest,
       identityMode: params.identityMode,
       networkZone: params.networkZone,
     };
@@ -122,8 +124,8 @@ export async function createDraftRuntimeRevision(
 ): Promise<RuntimeRevisionRow> {
   const revisionNo = await nextRevisionNo(params.runtimeId);
   const id = randomUUID();
-  if (!params.protocolContractRevision.trim()) {
-    throw new RuntimeRevisionEvidenceError("protocolContractRevision 必须显式传入（禁止默认值）");
+  if (!params.protocolContractDigest.trim()) {
+    throw new RuntimeRevisionEvidenceError("protocolContractDigest 必须显式传入（禁止默认值）");
   }
   const runtimeArtifactRef = params.runtimeArtifactRef ?? null;
   const artifactDigest = runtimeArtifactRef ? extractArtifactDigest(runtimeArtifactRef) : null;
@@ -132,7 +134,7 @@ export async function createDraftRuntimeRevision(
     runtimeArtifactRef,
     artifactDigest,
     configHash: params.configHash,
-    protocolContractRevision: params.protocolContractRevision,
+    protocolContractDigest: params.protocolContractDigest,
     endpointRef: params.endpointRef,
     protocolType: params.protocolType,
     identityMode: params.identityMode,
@@ -140,10 +142,12 @@ export async function createDraftRuntimeRevision(
   });
   await db.insert(runtimeRevisionTable).values({
     id,
+    tenantId: params.tenantId,
     runtimeId: params.runtimeId,
     revisionNo,
     protocolType: params.protocolType,
-    protocolContractRevision: params.protocolContractRevision,
+    protocolVersion: params.protocolVersion ?? PROTOCOL_VERSION,
+    protocolContractDigest: params.protocolContractDigest,
     runtimeEvidenceKind: params.runtimeEvidenceKind,
     runtimeTargetDigest,
     endpointRef: params.endpointRef,
@@ -173,7 +177,7 @@ export async function updateDraftRuntimeRevisionContent(
   revisionId: string,
   patch: {
     protocolType?: string;
-    protocolContractRevision?: string;
+    protocolContractDigest?: string;
     endpointRef?: string;
     runtimeArtifactRef?: string | null;
     runtimeCapabilitiesJson?: unknown;
@@ -192,11 +196,11 @@ export async function updateDraftRuntimeRevisionContent(
 
   const updates: Record<string, unknown> = {};
   if (patch.protocolType !== undefined) updates.protocolType = patch.protocolType;
-  if (patch.protocolContractRevision !== undefined) {
-    if (!patch.protocolContractRevision.trim()) {
-      throw new RuntimeRevisionEvidenceError("protocolContractRevision 不可为空");
+  if (patch.protocolContractDigest !== undefined) {
+    if (!patch.protocolContractDigest.trim()) {
+      throw new RuntimeRevisionEvidenceError("protocolContractDigest 不可为空");
     }
-    updates.protocolContractRevision = patch.protocolContractRevision;
+    updates.protocolContractDigest = patch.protocolContractDigest;
   }
   if (patch.endpointRef !== undefined) updates.endpointRef = patch.endpointRef;
   if (patch.runtimeArtifactRef !== undefined) {
@@ -216,7 +220,7 @@ export async function updateDraftRuntimeRevisionContent(
   // 任一证据事实变化时重算 runtimeTargetDigest（fail-closed 校验证据完整性）。
   const evidenceTouched =
     updates.protocolType !== undefined ||
-    updates.protocolContractRevision !== undefined ||
+    updates.protocolContractDigest !== undefined ||
     updates.endpointRef !== undefined ||
     updates.runtimeArtifactRef !== undefined ||
     updates.identityMode !== undefined ||
@@ -235,10 +239,10 @@ export async function updateDraftRuntimeRevisionContent(
           : current.artifactDigest,
       configHash:
         updates.configHash !== undefined ? (updates.configHash as string) : current.configHash,
-      protocolContractRevision:
-        updates.protocolContractRevision !== undefined
-          ? (updates.protocolContractRevision as string)
-          : current.protocolContractRevision,
+      protocolContractDigest:
+        updates.protocolContractDigest !== undefined
+          ? (updates.protocolContractDigest as string)
+          : current.protocolContractDigest,
       endpointRef:
         updates.endpointRef !== undefined ? (updates.endpointRef as string) : current.endpointRef,
       protocolType:

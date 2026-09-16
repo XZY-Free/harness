@@ -94,7 +94,7 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
         idempotencyKey: "hosted-run:revision-1",
         runtimeTargetDigest: `sha256:${"b".repeat(64)}`,
         runtimeConfigDigest: `sha256:${"c".repeat(64)}`,
-        protocolContractRevision: "agent-runtime-protocol@1",
+        protocolContractDigest: "agent-runtime-protocol@1",
       }),
     ).resolves.toEqual({ dsseEnvelope });
   });
