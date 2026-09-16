@@ -6,6 +6,7 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { updateInvocationState } from "@/lib/executions/persistence/invocation-store";
 import { classifyUserActionExpiry } from "@/lib/permission/user-action-expiry-policy";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
@@ -15,7 +16,6 @@ import {
   type UserActionRequest,
   userActionRequestTable,
 } from "@/lib/persistence/schema/user-action-request";
-import { updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { and, asc, eq, isNotNull, lte } from "drizzle-orm";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];

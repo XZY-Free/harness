@@ -1,7 +1,18 @@
+/** ContextHandle is the only signed context contract for Thread and Job subjects. */
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { db } from "@/lib/db/client";
+import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
+import { getJobById } from "@/lib/job/job-queries";
 import { threadTable } from "@/lib/persistence/schema/conversation";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  type ContextHandle,
+  ContextHandleSchema,
+  canonicalizeJson,
+  protocolDigest,
+} from "@/lib/runtime/runtime-protocol";
+import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { and, eq } from "drizzle-orm";
 
 export const CONTEXT_SOURCE_TYPES = [
@@ -12,50 +23,18 @@ export const CONTEXT_SOURCE_TYPES = [
   "knowledge",
 ] as const;
 export type ContextSourceType = (typeof CONTEXT_SOURCE_TYPES)[number];
-
-export const CONTEXT_CLASSIFICATIONS = [
-  "public",
-  "internal",
-  "confidential",
-  "restricted",
-] as const;
-export type ContextClassification = (typeof CONTEXT_CLASSIFICATIONS)[number];
-
-/**
- * 基础 Harness Route 的 Context 策略默认值。
- *
- * 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent Context
- * Contract（原 classification/allowedSources/allowedSkillIds 由 AgentRevision
- * permissionRequirementsJson 派生）。无 Agent Contract 时按基础 Harness 默认：
- * 允许全部已声明的上下文来源、无额外 skill 白名单、敏感级别 internal。
- * （A2A 的 AgentSessionBinding Context Contract 属后续批次。）
- */
-export const BASE_HARNESS_CONTEXT_POLICY = {
-  classification: "internal" as ContextClassification,
-  allowedSources: [...CONTEXT_SOURCE_TYPES],
-  allowedSkillIds: [] as string[],
-};
-
-export interface ContextHandleBinding {
-  tenantId: string;
-  invocationId: string;
-  threadId: string;
-  triggerItemId: string;
-  userId: string;
-  workspaceId: string | null;
-  workspaceBindingId: string | null;
-  policyRevisionId: string | null;
-  classification: ContextClassification;
-  allowedSources: ContextSourceType[];
-  allowedSkillIds: string[];
-  issuedAt: number;
-  expiresAt: number;
-  nonce: string;
-}
+export const BASE_CONTEXT_SOURCES = [...CONTEXT_SOURCE_TYPES] as ContextSourceType[];
+export const CONTEXT_SOURCE_DIGEST = protocolDigest(BASE_CONTEXT_SOURCES);
+const HANDLE_TTL_MS = 5 * 60 * 1000;
 
 export class ContextHandleError extends Error {
   constructor(
-    readonly code: "invalid" | "expired" | "binding_not_found" | "binding_mismatch",
+    readonly code:
+      | "invalid"
+      | "expired"
+      | "binding_not_found"
+      | "binding_mismatch"
+      | "input_unavailable",
     message: string,
   ) {
     super(message);
@@ -63,104 +42,169 @@ export class ContextHandleError extends Error {
   }
 }
 
-const HANDLE_TTL_MS = 5 * 60 * 1000;
-
 function signingSecret(): string {
-  const configured = process.env.SNOW_CONTEXT_HANDLE_SECRET?.trim();
-  if (configured && configured.length >= 32) return configured;
+  const secret = process.env.SNOW_CONTEXT_HANDLE_SECRET?.trim();
+  if (secret && Buffer.byteLength(secret, "utf8") >= 32) return secret;
   if (process.env.NODE_ENV === "test" || process.env.APP_ENV === "test") {
     return "snow-context-handle-test-secret-32-bytes";
   }
   throw new ContextHandleError("invalid", "未配置 SNOW_CONTEXT_HANDLE_SECRET");
 }
 
-function sign(encodedPayload: string): string {
-  return createHmac("sha256", signingSecret()).update(encodedPayload).digest("base64url");
+function signingKeyId(): string {
+  return process.env.CONTEXT_SIGNING_KEY_ID?.trim() || "context-primary";
 }
 
-function encode(binding: ContextHandleBinding): string {
-  const payload = Buffer.from(JSON.stringify(binding), "utf8").toString("base64url");
-  return `${payload}.${sign(payload)}`;
+function sign(header: string, payload: string): string {
+  return createHmac("sha256", signingSecret())
+    .update(`snowharness.context\0${header}.${payload}`, "utf8")
+    .digest("base64url");
 }
 
-function decode(handle: string): ContextHandleBinding {
-  const [payload, signature, extra] = handle.split(".");
-  if (!payload || !signature || extra) {
-    throw new ContextHandleError("invalid", "context_handle 格式非法");
+function encode(handle: ContextHandle): string {
+  const header = Buffer.from(
+    canonicalizeJson({ formatVersion: 1, algorithm: "HS256", keyId: signingKeyId() }),
+    "utf8",
+  ).toString("base64url");
+  const payload = Buffer.from(canonicalizeJson(handle), "utf8").toString("base64url");
+  return `ch.${header}.${payload}.${sign(header, payload)}`;
+}
+
+function decode(value: string): ContextHandle {
+  const parts = value.split(".");
+  if (parts.length !== 4 || parts[0] !== "ch") {
+    throw new ContextHandleError("invalid", "ContextHandle 格式非法");
   }
-  const expected = Buffer.from(sign(payload));
-  const actual = Buffer.from(signature);
+  const [prefix, header, payload, mac] = parts;
+  if (!prefix || !header || !payload || !mac) {
+    throw new ContextHandleError("invalid", "ContextHandle 格式非法");
+  }
+  const expected = Buffer.from(sign(header, payload), "utf8");
+  const actual = Buffer.from(mac, "utf8");
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-    throw new ContextHandleError("invalid", "context_handle 签名无效");
+    throw new ContextHandleError("invalid", "ContextHandle 签名无效");
   }
-  let value: unknown;
+  let parsedHeader: unknown;
+  let parsedPayload: unknown;
   try {
-    value = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    parsedHeader = JSON.parse(Buffer.from(header, "base64url").toString("utf8"));
+    parsedPayload = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
-    throw new ContextHandleError("invalid", "context_handle payload 非法");
+    throw new ContextHandleError("invalid", "ContextHandle 编码非法");
   }
-  if (!value || typeof value !== "object") {
-    throw new ContextHandleError("invalid", "context_handle payload 非法");
+  const expectedHeader = { formatVersion: 1, algorithm: "HS256", keyId: signingKeyId() };
+  if (canonicalizeJson(parsedHeader) !== canonicalizeJson(expectedHeader)) {
+    throw new ContextHandleError("invalid", "ContextHandle header 非法");
   }
-  const binding = value as ContextHandleBinding;
-  if (
-    typeof binding.tenantId !== "string" ||
-    typeof binding.invocationId !== "string" ||
-    typeof binding.threadId !== "string" ||
-    typeof binding.triggerItemId !== "string" ||
-    typeof binding.userId !== "string" ||
-    typeof binding.nonce !== "string" ||
-    typeof binding.issuedAt !== "number" ||
-    typeof binding.expiresAt !== "number" ||
-    !Array.isArray(binding.allowedSources) ||
-    !Array.isArray(binding.allowedSkillIds) ||
-    !CONTEXT_CLASSIFICATIONS.includes(binding.classification) ||
-    binding.allowedSources.some(
-      (source) => !CONTEXT_SOURCE_TYPES.includes(source as ContextSourceType),
-    ) ||
-    binding.allowedSkillIds.some((skillId) => typeof skillId !== "string")
-  ) {
-    throw new ContextHandleError("invalid", "context_handle 缺少绑定字段");
+  const result = ContextHandleSchema.safeParse(parsedPayload);
+  if (!result.success) throw new ContextHandleError("invalid", "ContextHandle payload 非法");
+  if (Date.now() >= result.data.common.expiresAt) {
+    throw new ContextHandleError("expired", "ContextHandle 已过期");
   }
-  if (Date.now() >= binding.expiresAt) {
-    throw new ContextHandleError("expired", "context_handle 已过期");
-  }
-  return binding;
+  return result.data;
 }
 
-async function loadPersistedBinding(tenantId: string, invocationId: string) {
+type PersistedContext = { handle: ContextHandle; bindingDigest: string };
+
+async function loadPersistedContext(
+  tenantId: string,
+  invocationId: string,
+): Promise<PersistedContext> {
   const [row] = await db
-    .select({
-      invocationId: invocationTable.id,
-      threadId: invocationTable.threadId,
-      triggerItemId: invocationTable.triggerItemId,
-      userId: threadTable.ownerUserId,
-      workspaceId: threadTable.defaultWorkspaceId,
-      workspaceBindingId: executionBindingTable.workspaceBindingId,
-      policyRevisionId: executionBindingTable.policyRevisionId,
-    })
+    .select({ invocation: invocationTable, binding: executionBindingTable, thread: threadTable })
     .from(invocationTable)
     .innerJoin(executionBindingTable, eq(executionBindingTable.invocationId, invocationTable.id))
-    .innerJoin(threadTable, eq(threadTable.id, invocationTable.threadId))
+    .leftJoin(threadTable, eq(threadTable.id, invocationTable.threadId))
     .where(
       and(
         eq(invocationTable.tenantId, tenantId),
         eq(invocationTable.id, invocationId),
         eq(executionBindingTable.tenantId, tenantId),
-        eq(threadTable.tenantId, tenantId),
       ),
     )
     .limit(1);
-  if (!row?.threadId || !row.triggerItemId) {
-    throw new ContextHandleError("binding_not_found", "Invocation 上下文绑定不存在或不完整");
+  if (!row) throw new ContextHandleError("binding_not_found", "Invocation 上下文绑定不存在");
+  const { invocation, binding, thread } = row;
+  const workspace = await getWorkspaceBindingById(tenantId, binding.workspaceBindingId);
+  if (!workspace) throw new ContextHandleError("binding_not_found", "WorkspaceBinding 不存在");
+  const environment =
+    binding.environmentMode === "MANAGED"
+      ? await getEnvironmentRevisionById(tenantId, binding.environmentDefinitionRevisionId ?? "")
+      : null;
+  if (binding.environmentMode === "MANAGED" && !environment) {
+    throw new ContextHandleError("binding_not_found", "EnvironmentRevision 不存在");
   }
-  // 冻结架构：ExecutionBinding 不再携带 Agent Context Contract，
-  // Context 策略按基础 Harness 默认（无 Agent 读取）。
+  // environment 非 null ⇔ MANAGED（上方已 fail closed）；NO_PLATFORM 恒为 null。
+  const environmentContext = environment
+    ? {
+        mode: "MANAGED" as const,
+        revisionId: environment.id,
+        semanticDigest: environment.semanticDigest,
+      }
+    : ({ mode: "NO_PLATFORM_ENVIRONMENT" as const } as const);
+  const bindingDigest = protocolDigest({
+    tenantId: binding.tenantId,
+    invocationId: binding.invocationId,
+    runtimeRevisionId: binding.runtimeRevisionId,
+    policyRevisionId: binding.policyRevisionId,
+    policyRulesDigest: binding.policyRulesDigest,
+    workspaceBindingId: binding.workspaceBindingId,
+    environmentMode: binding.environmentMode,
+    environmentDefinitionRevisionId: binding.environmentDefinitionRevisionId,
+    configHash: binding.configHash,
+  });
+  const common = {
+    contractVersion: 1 as const,
+    tenantId,
+    invocationId,
+    bindingDigest,
+    principal: {
+      type: binding.principalType as "user" | "service",
+      id: binding.principalId,
+      source: binding.principalSource as "authenticated_user" | "trusted_service",
+    },
+    runtimeRevisionId: binding.runtimeRevisionId,
+    policy: { revisionId: binding.policyRevisionId, digest: binding.policyRulesDigest },
+    workspace: { bindingId: workspace.id, contractDigest: workspace.contractDigest },
+    environment: environmentContext,
+    contextSourceDigest: CONTEXT_SOURCE_DIGEST,
+  };
+
+  let subject: ContextHandle["subject"];
+  if (invocation.subjectType === "thread") {
+    if (!invocation.threadId || !invocation.turnId || !invocation.triggerItemId || !thread) {
+      throw new ContextHandleError("binding_not_found", "Thread Invocation 上下文不完整");
+    }
+    const item = await getItemById(tenantId, invocation.triggerItemId);
+    if (!item) throw new ContextHandleError("input_unavailable", "Thread 输入 Item 不可用");
+    subject = {
+      type: "thread",
+      threadId: invocation.threadId,
+      turnId: invocation.turnId,
+      triggerItemId: invocation.triggerItemId,
+      triggerItemDigest: protocolDigest(item.contentJson),
+    };
+  } else {
+    if (!invocation.jobId)
+      throw new ContextHandleError("binding_not_found", "Job Invocation 缺少 jobId");
+    const job = await getJobById(tenantId, invocation.jobId);
+    if (!job) throw new ContextHandleError("binding_not_found", "Job 不存在");
+    subject = {
+      type: "job",
+      jobId: job.id,
+      inputKind: job.inputKind,
+      inputHash: job.inputHash,
+      ...(job.inputRef ? { inputRef: job.inputRef } : {}),
+      triggerRef: job.triggerRef,
+      ...(job.replacesJobId ? { replacesJobId: job.replacesJobId } : {}),
+    };
+  }
   return {
-    ...row,
-    ...BASE_HARNESS_CONTEXT_POLICY,
-    threadId: row.threadId,
-    triggerItemId: row.triggerItemId,
+    bindingDigest,
+    handle: {
+      common: { ...common, issuedAt: 0, expiresAt: 0, jti: randomUUID() },
+      subject,
+    },
   };
 }
 
@@ -169,45 +213,31 @@ export async function issueContextHandle(input: {
   invocationId: string;
   ttlMs?: number;
 }): Promise<string> {
-  const persisted = await loadPersistedBinding(input.tenantId, input.invocationId);
+  const persisted = await loadPersistedContext(input.tenantId, input.invocationId);
   const issuedAt = Date.now();
-  return encode({
-    ...persisted,
-    tenantId: input.tenantId,
-    invocationId: input.invocationId,
-    issuedAt,
-    expiresAt: issuedAt + Math.max(0, Math.min(input.ttlMs ?? HANDLE_TTL_MS, HANDLE_TTL_MS)),
-    nonce: randomUUID(),
-  });
+  const ttl = Math.max(1, Math.min(input.ttlMs ?? HANDLE_TTL_MS, HANDLE_TTL_MS));
+  persisted.handle.common.issuedAt = issuedAt;
+  persisted.handle.common.expiresAt = issuedAt + ttl;
+  return encode(persisted.handle);
 }
 
 export async function resolveContextHandle(
-  handle: string,
+  value: string,
   expected: { tenantId: string; invocationId: string },
-): Promise<ContextHandleBinding> {
-  const binding = decode(handle);
-  if (binding.tenantId !== expected.tenantId || binding.invocationId !== expected.invocationId) {
-    throw new ContextHandleError("binding_mismatch", "context_handle 与调用身份不匹配");
-  }
-  const persisted = await loadPersistedBinding(expected.tenantId, expected.invocationId);
-  for (const key of [
-    "threadId",
-    "triggerItemId",
-    "userId",
-    "workspaceId",
-    "workspaceBindingId",
-    "policyRevisionId",
-    "classification",
-  ] as const) {
-    if (binding[key] !== persisted[key]) {
-      throw new ContextHandleError("binding_mismatch", `context_handle ${key} 绑定已失效`);
-    }
-  }
+): Promise<ContextHandle> {
+  const handle = decode(value);
   if (
-    binding.allowedSources.join("\0") !== persisted.allowedSources.join("\0") ||
-    binding.allowedSkillIds.join("\0") !== persisted.allowedSkillIds.join("\0")
+    handle.common.tenantId !== expected.tenantId ||
+    handle.common.invocationId !== expected.invocationId
   ) {
-    throw new ContextHandleError("binding_mismatch", "context_handle 资源授权已失效");
+    throw new ContextHandleError("binding_mismatch", "ContextHandle 与执行身份不匹配");
   }
-  return binding;
+  const current = await loadPersistedContext(expected.tenantId, expected.invocationId);
+  if (handle.common.bindingDigest !== current.bindingDigest) {
+    throw new ContextHandleError("binding_mismatch", "ContextHandle 的 Binding 已变化");
+  }
+  if (canonicalizeJson(handle.subject) !== canonicalizeJson(current.handle.subject)) {
+    throw new ContextHandleError("binding_mismatch", "ContextHandle 的 Subject 已变化");
+  }
+  return handle;
 }

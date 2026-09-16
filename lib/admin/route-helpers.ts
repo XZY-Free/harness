@@ -5,9 +5,9 @@
  * docs/architecture/security.md §5。
  *
  * 职责：
- * - resolveAdminPrincipalAsync：admin audience 双身份解析（SSO Session 或 Service Identity Workload Token）。
+ * - resolveAdminPrincipalAsync：admin SSO Session 解析；Service Identity 由独立受管入口注入。
  * - requireAdminActionScope：统一 action scope 校验入口（Principal 走 role_action_binding，
- * WorkloadPrincipal callerType=service 走 CICD_SERVICE_ALLOWED_ACTIONS 白名单）。
+ * ServicePrincipal 走 CICD_SERVICE_ALLOWED_ACTIONS 白名单）。
  * - parseRouteSetEtag / parseAgentRevisionEtag：从 ETag 字符串提取版本号。
  *
  * 安全边界：
@@ -19,29 +19,22 @@ import { type ApiErrorCode, errorDefinition } from "@/lib/error-codes";
 import { apiError } from "@/lib/http";
 import type { ActionCode, ResourceScopeType } from "@/lib/identity/action-codes";
 import { requireActionScope } from "@/lib/identity/authorization";
-import {
-  AuthenticationError,
-  type Principal,
-  type WorkloadPrincipal,
-  resolvePrincipal,
-  resolveWorkloadPrincipal,
-} from "@/lib/identity/resolver";
+import { AuthenticationError, type Principal, resolvePrincipal } from "@/lib/identity/resolver";
+import type { ServicePrincipal } from "@/lib/identity/service-identity";
 import { WorkloadTokenError } from "@/lib/identity/workload-token";
 
 // ─── 身份解析 ──────────────────────────────────────────────
 
 /** admin audience 解析后的主体（已登录用户或 Service Identity）。 */
-export type AdminPrincipal = Principal | WorkloadPrincipal;
+export type AdminPrincipal = Principal | ServicePrincipal;
 
 /**
- * 解析 admin audience 主体：优先 Service Identity Bearer Token，否则使用登录会话。
+ * 解析 admin audience 的员工登录主体。
  *
  * 分发规则：
- * - 携带 `Authorization: Bearer <token>` → resolveWorkloadPrincipal(headers, "admin")。
- * - type=service：CI/CD Service Identity（如 cicd）。
- * - type=runtime/gateway：admin audience 不允许，assertAudienceMatch 通过但 callerType=workload，
- * requireActionScope 会拒绝（workload_not_action_scoped）。
- * - 无 Authorization → resolvePrincipal(headers, "admin")（已登录管理员）。
+ * - Execution Workload Token 绝不能访问 admin route。
+ * - Service Identity 不能使用 WorkloadToken 伪装；其受管认证入口另行构造
+ *   ServicePrincipal，再调用 requireAdminActionScope。
  *
  * @throws AuthenticationError 缺少、过期或已撤销的会话
  * @throws WorkloadTokenError Bearer Token 解析/过期/audience 不匹配
@@ -49,7 +42,7 @@ export type AdminPrincipal = Principal | WorkloadPrincipal;
 export async function resolveAdminPrincipalAsync(headers: Headers): Promise<AdminPrincipal> {
   const authHeader = headers.get("authorization");
   if (authHeader?.trim().toLowerCase().startsWith("bearer ")) {
-    return resolveWorkloadPrincipal(headers, "admin");
+    throw new AuthenticationError("authentication_denied", "执行凭据不能访问 Admin API");
   }
   return resolvePrincipal(headers, "admin");
 }
@@ -77,8 +70,7 @@ export function adminAuthErrorResponse(error: unknown, requestId: string): Respo
  *
  * 复用 requireActionScope：
  * - Principal → 查 role_action_binding
- * - WorkloadPrincipal callerType=service → 查 CICD_SERVICE_ALLOWED_ACTIONS
- * - WorkloadPrincipal callerType=workload → 拒绝（workload_not_action_scoped）
+ * - ServicePrincipal → 查 CICD_SERVICE_ALLOWED_ACTIONS
  */
 export async function requireAdminActionScope(
   principal: AdminPrincipal,

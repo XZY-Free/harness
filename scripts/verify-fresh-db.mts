@@ -139,12 +139,7 @@ async function main(): Promise<void> {
       );
       const column = (tableName: string, columnName: string) =>
         columnRows.find((row) => row.TABLE_NAME === tableName && row.COLUMN_NAME === columnName);
-      for (const name of [
-        "executionSubjectType",
-        "executionSubjectId",
-        "executionSubjectSource",
-        "executionSubjectFrozenAt",
-      ]) {
+      for (const name of ["principalType", "principalId", "principalSource", "principalFrozenAt"]) {
         if (column("ExecutionBinding", name)?.IS_NULLABLE !== "NO") {
           throw new Error(`Fresh DB trusted subject 列缺失或可空：ExecutionBinding.${name}`);
         }

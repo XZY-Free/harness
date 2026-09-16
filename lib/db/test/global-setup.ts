@@ -21,6 +21,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const { connectionString, stop } = await startTestMysql();
   process.env.DATABASE_URL = connectionString;
   process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = TEST_WORKLOAD_TOKEN_SIGNING_SECRET;
+  process.env.WORKLOAD_SIGNING_KEY_ID = "snow-harness-test-signing-key-0000";
   console.log("[global-setup] DATABASE_URL =", connectionString);
   return stop;
 }

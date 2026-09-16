@@ -14,11 +14,20 @@ export interface ExecutionBindingDTO {
   model_provider: string;
   model_id: string;
   model_revision_ref: string | null;
-  initial_environment_lease_id: string | null;
-  workspace_binding_id: string | null;
-  policy_revision_id: string | null;
-  context_checkpoint_id: string | null;
+  workspace_binding_id: string;
+  policy_revision_id: string;
+  policy_rules_digest: string;
+  governance_config_revision_id: string;
+  governance_config_digest: string;
   environment_definition_revision_id: string | null;
+  environment_mode: "MANAGED" | "NO_PLATFORM_ENVIRONMENT";
+  principal_type: "user" | "service";
+  principal_id: string;
+  principal_source: "authenticated_user" | "trusted_service";
+  principal_frozen_at: string;
+  capability_catalog_digest: string;
+  capability_catalog_version: string;
+  capability_catalog_source_refs: string[];
   /** 冻结的 Route 证据。 */
   route_revision_id: string;
   route_activation_id: string;

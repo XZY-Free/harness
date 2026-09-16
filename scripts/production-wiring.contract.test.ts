@@ -34,12 +34,20 @@ describe("Topic 01 production wiring", () => {
   });
 
   it("Hosted and External paths use the same catalog-aware production factory", () => {
-    const hosted = source("lib/runtime/application/production-resume-harness-invocation.ts");
+    const factory = source("lib/runtime/harness-loop/platform-action-executors.ts");
+    const hosted = source("lib/runtime/application/runtime-resume.ts");
+    const hostedAdapter = source("lib/runtime/adapters/hosted-adapter.ts");
     const external = source("app/gateway/capability-actions/route.ts");
-    expect(hosted).toContain("createPlatformHarnessActionExecutors");
+    // 唯一 catalog-aware 生产 factory（Hosted 进程内与 Gateway HTTP 共用）。
+    expect(factory).toContain("createPlatformHarnessActionExecutors");
+    expect(factory).toContain("capabilityCatalog");
+    // External Gateway 经共享 factory 构造 executors 并绑定冻结 Catalog。
     expect(external).toContain("createPlatformHarnessActionExecutors");
-    expect(hosted).toContain("capabilityCatalog");
     expect(external).toContain("capabilityCatalog");
+    // Hosted resume 经唯一 application service 把 executors 与 Catalog 接入同一 loop。
+    expect(hosted).toContain("new HostedHarnessLoop");
+    expect(hostedAdapter).toContain("executors: this.params.actionExecutors ?? {}");
+    expect(hostedAdapter).toContain("capabilityCatalog: this.params.capabilityCatalog");
   });
 
   it("Harness validates every action against the frozen catalog before executor dispatch", () => {
@@ -53,14 +61,19 @@ describe("Topic 01 production wiring", () => {
   it("identity wiring freezes once and recovers from ExecutionBinding without gateway fallback", () => {
     const dispatcher = source("lib/runtime/dispatcher.ts");
     const retry = source("lib/runtime/retry/dispatch-queued-invocation-attempt.ts");
-    const hostedResume = source("lib/runtime/application/resume-harness-invocation.ts");
+    const continuationWorker = source(
+      "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+    );
     const external = source("app/gateway/capability-actions/route.ts");
     const startBuilder = source("lib/runtime/application/build-runtime-start-request.ts");
     const agentResume = source("app/gateway/agent-calls/[callId]/resume/route.ts");
 
     expect(dispatcher).toContain("freezeTrustedExecutionSubject");
-    expect(retry).toContain("recoverTrustedExecutionSubject(binding");
-    expect(hostedResume).toContain("recoverTrustedExecutionSubject(binding");
+    // Retry lane 从 durable ExecutionBinding 恢复执行事实，不向 gateway 索要身份。
+    expect(retry).toContain("getExecutionBindingByInvocation");
+    expect(retry).toContain("startRuntimeInvocation({");
+    // Hosted resume 链路（AgentCall user-action continuation）从 Binding 恢复可信 Subject。
+    expect(continuationWorker).toContain("recoverTrustedExecutionSubject(binding");
     expect(external).toContain("recoverTrustedExecutionSubject(binding");
     expect(agentResume).toContain("recoverTrustedExecutionSubject(binding");
     expect(startBuilder).not.toContain("executionSubject");
@@ -86,16 +99,16 @@ describe("Topic 01 production wiring", () => {
     const bootstrap = source("scripts/workers/control-plane-outbox-worker.ts");
     const roleFactory = source("lib/workers/production-worker-role.ts");
     const worker = source("lib/runtime/continuation/production-invocation-continuation-worker.ts");
-    const resume = source("lib/runtime/application/production-resume-harness-invocation.ts");
-    const resumeCore = source("lib/runtime/application/resume-harness-invocation.ts");
+    const resume = source("lib/runtime/application/runtime-resume.ts");
     const adapter = source("lib/runtime/adapters/hosted-adapter.ts");
     expect(bootstrap).toContain('runProductionWorkerProcess("control-plane-outbox-worker")');
     expect(roleFactory).toContain("createProductionInvocationContinuationWorker");
     expect(roleFactory).toContain("continuationWorker.pollOnce()");
     expect(worker).toContain("resumeHarnessInvocation");
-    expect(resume).toContain("createResumeHarnessInvocation");
-    expect(resumeCore).toContain("recoverTrustedExecutionSubject");
-    expect(resume).toContain("createHttpRuntimeClient().resumeInvocation");
+    expect(worker).toContain("recoverTrustedExecutionSubject");
+    // 唯一生产 Resume 能力：runtime-resume.ts 进程内驱动 HostedHarnessLoop。
+    expect(resume).toContain("async function resumeHarnessInvocation");
+    expect(resume).toContain("new HostedHarnessLoop");
     expect(adapter).toContain("new HostedHarnessLoop");
     expect(adapter).not.toContain("Resume 不需要额外事件");
   });

@@ -221,33 +221,22 @@ describe("Canonical Routes Guard (Foundation F3-F6 成果锁定)", () => {
     expect(existsSync(join(ROOT, "app/chat/page.tsx"))).toBe(true);
   });
 
-  // ─── Guard 7: Runtime Event 唯一正式入口（跨 Batch 中间态）───
+  // ─── Guard 7: Runtime Event 唯一正式入口 ──────────────────
 
-  it("Runtime Event 入口收敛检查（app/gateway/runtime-events 在 Runtime Batch DELETE 前允许存在）", () => {
-    // F3-F6 完成后：
-    // - app/runtime/invocations/[invocationId]/events/batch/route.ts 存在
-    //   （Runtime Batch 将合并为 events/route.ts）
-    // - app/gateway/runtime-events/route.ts 存在
-    //   （Runtime Batch DELETE，与 /runtime 唯一入口合并）
-    // 本 Guard 只锁定：不得有第三条 Runtime Event 入口出现
+  it("Runtime Event 入口收敛到 canonical Runtime Ingress", () => {
     const runtimeEventPaths = [
       "app/runtime/invocations/[invocationId]/events/batch/route.ts",
       "app/runtime/invocations/[invocationId]/events/route.ts",
       "app/gateway/runtime-events/route.ts",
     ];
     const existing = runtimeEventPaths.filter((p) => existsSync(join(ROOT, p)));
-    // 当前中间态：events/batch + gateway/runtime-events 共存（Runtime Batch 收口）
-    // 最终态：只剩 events/route.ts
-    // Guard 断言：不得出现其他位置的 Runtime Event 入口
     const allRouteFiles = walkSourceFiles("app").filter((p) => p.endsWith("route.ts"));
     const eventRoutes = allRouteFiles.filter(
       (p) => /\/events?\/(?:batch\/)?route\.ts$/.test(p) || /runtime-events\/route\.ts$/.test(p),
     );
-    // 允许的 event route 集合（Runtime Batch 收口前）
+    // SSE、admin projection 和 Job domain event routes 不是 Runtime Ingress。
     const allowed = new Set([
-      "app/runtime/invocations/[invocationId]/events/batch/route.ts",
-      "app/runtime/invocations/[invocationId]/transient-events/batch/route.ts",
-      "app/gateway/runtime-events/route.ts",
+      "app/runtime/invocations/[invocationId]/events/route.ts",
       "app/api/threads/[threadId]/events/route.ts", // SSE 员工前端事件流，不是 Runtime Ingress
       "app/admin/api/invocations/[invocationId]/ingress/route.ts", // admin 只读投影
       "app/admin/api/event-delivery/[failureId]/route.ts",
@@ -258,6 +247,7 @@ describe("Canonical Routes Guard (Foundation F3-F6 成果锁定)", () => {
     ]);
     const unexpected = eventRoutes.filter((p) => !allowed.has(p));
     expect(unexpected, `不得有白名单外的 Runtime Event 入口: ${unexpected.join(", ")}`).toEqual([]);
-    expect(existing.length).toBeGreaterThan(0);
+    expect(existing).toEqual(["app/runtime/invocations/[invocationId]/events/route.ts"]);
+    expect(eventRoutes).toContain("app/runtime/invocations/[invocationId]/events/route.ts");
   });
 });

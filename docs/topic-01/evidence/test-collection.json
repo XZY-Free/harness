@@ -7,15 +7,15 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 313,
-    "db": 121,
-    "integration": 10,
-    "contract": 30,
+    "unit": 319,
+    "db": 119,
+    "integration": 13,
+    "contract": 31,
     "e2e-web": 4,
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 482,
+  "total": 490,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -3153,11 +3153,33 @@
       ]
     },
     {
+      "file": "lib/environment/__tests__/environment-revision.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/error-codes.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
       "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/executions/__tests__/execution-ownership.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -3626,17 +3648,6 @@
       ]
     },
     {
-      "file": "lib/identity/runtime-identity-chain.test.ts",
-      "group": "unit",
-      "command": "pnpm vitest run --project unit",
-      "needsDB": false,
-      "serial": false,
-      "inFullAcceptance": true,
-      "batchAcceptanceIds": [
-        "topic01-final-acceptance"
-      ]
-    },
-    {
       "file": "lib/identity/security-incident-queries.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -3660,6 +3671,17 @@
     },
     {
       "file": "lib/identity/workload-token-revocation.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/job/__tests__/job-runtime.integration.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -3748,10 +3770,10 @@
     },
     {
       "file": "lib/platform-conformance/publication-conformance.behavior.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4099,6 +4121,39 @@
       ]
     },
     {
+      "file": "lib/runtime/__tests__/runtime-action-authority.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/runtime-ingress.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/runtime-start-recovery.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/adapters/hosted-adapter-resume.integration.test.ts",
       "group": "integration",
       "command": "pnpm vitest run --project integration",
@@ -4111,10 +4166,10 @@
     },
     {
       "file": "lib/runtime/adapters/hosted-adapter.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "integration",
+      "command": "pnpm vitest run --project integration",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4199,10 +4254,10 @@
     },
     {
       "file": "lib/runtime/command-dispatcher.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "integration",
+      "command": "pnpm vitest run --project integration",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4320,10 +4375,10 @@
     },
     {
       "file": "lib/runtime/dispatcher.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "integration",
+      "command": "pnpm vitest run --project integration",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4375,10 +4430,10 @@
     },
     {
       "file": "lib/runtime/event-ingress.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4628,10 +4683,10 @@
     },
     {
       "file": "lib/runtime/recovery-queries.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4639,10 +4694,10 @@
     },
     {
       "file": "lib/runtime/redispatch-queries.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4693,11 +4748,22 @@
       ]
     },
     {
+      "file": "lib/runtime/route-helpers.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/runtime-conformance-runner.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4738,10 +4804,10 @@
     },
     {
       "file": "lib/runtime/runtime-startup.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4793,10 +4859,10 @@
     },
     {
       "file": "lib/runtime/session-binding-lifecycle.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -5039,6 +5105,28 @@
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
       "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/__tests__/filesystem-checkpoint.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/__tests__/workspace-continuity.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"

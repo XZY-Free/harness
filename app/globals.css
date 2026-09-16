@@ -694,7 +694,7 @@ body {
 :root {
   --sidebar-width: clamp(15.5rem, 19vw, 17.25rem);
   --sidebar-overlay-inset: clamp(0.5rem, 1.2vw, 1rem);
-  --conversation-track-max: 50rem;
+  --conversation-track-max: clamp(40rem, 58vw, 50rem);
   --conversation-user-max: 88%;
   --conversation-assistant-max: 100%;
 }

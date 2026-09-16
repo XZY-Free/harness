@@ -5,10 +5,10 @@
   "cleanMigration": "drizzle/0000_initial_schema.sql",
   "inventory": "docs/topic-01/evidence/schema-inventory.json",
   "counts": {
-    "canonical": 129,
-    "runtimeLoaded": 129,
-    "migration": 129,
-    "freshDbPlanned": 129
+    "canonical": 130,
+    "runtimeLoaded": 130,
+    "migration": 130,
+    "freshDbPlanned": 130
   },
   "tables": [
     "Agent",
@@ -47,6 +47,7 @@
     "EnterpriseProfileSyncState",
     "EnvironmentChangeRequest",
     "EnvironmentDefinition",
+    "EnvironmentDefinitionRevision",
     "EnvironmentLease",
     "EventDeliveryFailure",
     "EventStreamFloor",
