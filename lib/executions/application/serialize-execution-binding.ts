@@ -8,10 +8,11 @@ export interface SerializableExecutionBinding {
   modelProvider: string;
   modelId: string;
   modelRevisionRef: string | null;
-  initialEnvironmentLeaseId: string | null;
-  workspaceBindingId: string | null;
-  policyRevisionId: string | null;
-  contextCheckpointId: string | null;
+  workspaceBindingId: string;
+  policyRevisionId: string;
+  policyRulesDigest: string;
+  governanceConfigRevisionId: string;
+  governanceConfigDigest: string;
   routeRevisionId: string;
   routeActivationId: string;
   routeContentDigest: string;
@@ -28,6 +29,14 @@ export interface SerializableExecutionBinding {
   resolutionInputDigest: string;
   projectionVersionNo: number;
   environmentDefinitionRevisionId: string | null;
+  environmentMode: "MANAGED" | "NO_PLATFORM_ENVIRONMENT";
+  principalType: "user" | "service";
+  principalId: string;
+  principalSource: "authenticated_user" | "trusted_service";
+  principalFrozenAt: Date;
+  capabilityCatalogDigest: string;
+  capabilityCatalogVersion: string;
+  capabilityCatalogSourceRefs: string[];
   configHash: string;
   boundAt: Date;
 }
@@ -43,10 +52,11 @@ export function serializeExecutionBinding(
     model_provider: binding.modelProvider,
     model_id: binding.modelId,
     model_revision_ref: binding.modelRevisionRef,
-    initial_environment_lease_id: binding.initialEnvironmentLeaseId,
     workspace_binding_id: binding.workspaceBindingId,
     policy_revision_id: binding.policyRevisionId,
-    context_checkpoint_id: binding.contextCheckpointId,
+    policy_rules_digest: binding.policyRulesDigest,
+    governance_config_revision_id: binding.governanceConfigRevisionId,
+    governance_config_digest: binding.governanceConfigDigest,
     route_revision_id: binding.routeRevisionId,
     route_activation_id: binding.routeActivationId,
     route_content_digest: binding.routeContentDigest,
@@ -62,6 +72,14 @@ export function serializeExecutionBinding(
     resolution_input_digest: binding.resolutionInputDigest,
     projection_version_no: binding.projectionVersionNo,
     environment_definition_revision_id: binding.environmentDefinitionRevisionId,
+    environment_mode: binding.environmentMode,
+    principal_type: binding.principalType,
+    principal_id: binding.principalId,
+    principal_source: binding.principalSource,
+    principal_frozen_at: binding.principalFrozenAt.toISOString(),
+    capability_catalog_digest: binding.capabilityCatalogDigest,
+    capability_catalog_version: binding.capabilityCatalogVersion,
+    capability_catalog_source_refs: [...binding.capabilityCatalogSourceRefs],
     config_hash: binding.configHash,
     bound_at: binding.boundAt.toISOString(),
   };

@@ -145,13 +145,11 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         modelProvider: input.modelProvider,
         modelId: input.modelId,
         modelRevisionRef: input.modelRevisionRef,
-        initialEnvironmentLeaseId: input.initialEnvironmentLeaseId,
         workspaceBindingId: input.workspaceBindingId,
         policyRevisionId: input.policyRevisionId,
         policyRulesDigest: input.policyRulesDigest,
         governanceConfigRevisionId: input.governanceConfigRevisionId,
         governanceConfigDigest: input.governanceConfigDigest,
-        contextCheckpointId: input.contextCheckpointId,
         routeRevisionId: evidence.routeRevisionId,
         routeActivationId: evidence.routeActivationId,
         routeContentDigest: evidence.routeContentDigest,
@@ -172,10 +170,11 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         capabilityCatalogVersion: input.capabilityCatalogVersion,
         capabilityCatalogSourceRefs: input.capabilityCatalogSourceRefs,
         capabilityCatalogCreatedAt: input.capabilityCatalogCreatedAt,
-        executionSubjectType: input.executionSubjectType,
-        executionSubjectId: input.executionSubjectId,
-        executionSubjectSource: input.executionSubjectSource,
-        executionSubjectFrozenAt: input.executionSubjectFrozenAt,
+        principalType: input.principalType,
+        principalId: input.principalId,
+        principalSource: input.principalSource,
+        principalFrozenAt: input.principalFrozenAt,
+        environmentMode: input.environmentMode,
         configHash: input.configHash,
         boundAt: input.boundAt,
       });
@@ -798,7 +797,7 @@ async function lockAndVerifyConformance(
       runtimeRevisionId: runtimeConformanceRun.runtimeRevisionId,
       runtimeTargetDigest: runtimeConformanceRun.runtimeTargetDigest,
       runtimeConfigDigest: runtimeConformanceRun.runtimeConfigDigest,
-      protocolContractRevision: runtimeConformanceRun.protocolContractRevision,
+      protocolContractDigest: runtimeConformanceRun.protocolContractDigest,
       suiteRevision: runtimeConformanceRun.suiteRevision,
       overallResult: runtimeConformanceRun.overallResult,
       conformanceFormat: runtimeConformanceRun.conformanceFormat,
@@ -822,7 +821,7 @@ async function lockAndVerifyConformance(
     .for("update");
 
   validateFrozenConformanceAuthority({
-    run: run ?? null,
+    run: (run as FrozenConformanceRun | undefined) ?? null,
     caseResults,
     expected: {
       conformanceRunId: evidence.conformanceRunId,
@@ -830,11 +829,11 @@ async function lockAndVerifyConformance(
       runtimeRevisionId: input.runtimeRevisionId,
       runtimeTargetDigest: runtimeRevision.runtimeTargetDigest,
       runtimeConfigDigest: evidence.runtimeConfigDigest,
-      protocolContractRevision: runtimeRevision.protocolContractRevision,
+      protocolContractDigest: runtimeRevision.protocolContractDigest,
     },
   });
   if (!run) throw evidenceError("冻结 ConformanceRun 不存在");
-  return run;
+  return run as FrozenConformanceRun;
 }
 
 type FrozenConformanceRun = {
@@ -843,7 +842,7 @@ type FrozenConformanceRun = {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   suiteRevision: string;
   overallResult: "passed" | "failed" | "error" | "cancelled";
   conformanceFormat: "standard_dsse";
@@ -859,7 +858,7 @@ type FrozenConformanceExpectation = {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 };
 
 export function validateFrozenConformanceAuthority(input: {
@@ -890,7 +889,7 @@ export function validateFrozenConformanceAuthority(input: {
       overallResult: run.overallResult,
       runtimeTargetDigest: run.runtimeTargetDigest,
       runtimeConfigDigest: run.runtimeConfigDigest,
-      protocolContractRevision: run.protocolContractRevision,
+      protocolContractDigest: run.protocolContractDigest,
       suiteRevision: run.suiteRevision,
       conformanceFormat: run.conformanceFormat,
     },
@@ -900,7 +899,7 @@ export function validateFrozenConformanceAuthority(input: {
       runtimeRevisionId: expected.runtimeRevisionId,
       runtimeTargetDigest: expected.runtimeTargetDigest,
       runtimeConfigDigest: expected.runtimeConfigDigest,
-      protocolContractRevision: expected.protocolContractRevision,
+      protocolContractDigest: expected.protocolContractDigest,
       allowedFormats: ["standard_dsse"],
     },
   });
@@ -1151,8 +1150,8 @@ export function toExecutionBinding(
     !!row.capabilityCatalogVersion &&
     Array.isArray(row.capabilityCatalogSourceRefs) &&
     !!row.capabilityCatalogCreatedAt &&
-    !!row.executionSubjectId &&
-    !!row.executionSubjectFrozenAt &&
+    !!row.principalId &&
+    !!row.principalFrozenAt &&
     Number.isInteger(row.projectionVersionNo) &&
     row.projectionVersionNo >= 0;
   if (!runtimeFieldsComplete) {
@@ -1166,23 +1165,22 @@ export function toExecutionBinding(
     modelProvider: row.modelProvider,
     modelId: row.modelId,
     modelRevisionRef: row.modelRevisionRef,
-    initialEnvironmentLeaseId: row.initialEnvironmentLeaseId,
     workspaceBindingId: row.workspaceBindingId,
     policyRevisionId: row.policyRevisionId,
     policyRulesDigest: row.policyRulesDigest,
     governanceConfigRevisionId: row.governanceConfigRevisionId,
     governanceConfigDigest: row.governanceConfigDigest,
-    contextCheckpointId: row.contextCheckpointId,
     environmentDefinitionRevisionId: row.environmentDefinitionRevisionId,
     capabilityCatalogJson: row.capabilityCatalogJson,
     capabilityCatalogDigest: row.capabilityCatalogDigest,
     capabilityCatalogVersion: row.capabilityCatalogVersion,
     capabilityCatalogSourceRefs: [...row.capabilityCatalogSourceRefs],
     capabilityCatalogCreatedAt: row.capabilityCatalogCreatedAt,
-    executionSubjectType: row.executionSubjectType,
-    executionSubjectId: row.executionSubjectId,
-    executionSubjectSource: row.executionSubjectSource,
-    executionSubjectFrozenAt: row.executionSubjectFrozenAt,
+    principalType: row.principalType as "user" | "service",
+    principalId: row.principalId,
+    principalSource: row.principalSource as "authenticated_user" | "trusted_service",
+    principalFrozenAt: row.principalFrozenAt,
+    environmentMode: row.environmentMode as "MANAGED" | "NO_PLATFORM_ENVIRONMENT",
     routeRevisionId: row.routeRevisionId,
     routeActivationId: row.routeActivationId,
     routeContentDigest: row.routeContentDigest,
@@ -1190,7 +1188,7 @@ export function toExecutionBinding(
     runtimeArtifactDigest: row.runtimeArtifactDigest,
     runtimeConfigDigest: row.runtimeConfigDigest,
     runtimeTargetDigest: row.runtimeTargetDigest,
-    runtimeEvidenceKind: row.runtimeEvidenceKind,
+    runtimeEvidenceKind: row.runtimeEvidenceKind as "hosted_artifact" | "external_endpoint",
     capabilityManifestDigest: row.capabilityManifestDigest,
     runtimeAttestationIds: [...row.runtimeAttestationIds],
     runtimePublicationRecordId: row.runtimePublicationRecordId,

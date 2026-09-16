@@ -7,7 +7,7 @@
  * - Web 与 Desktop 都使用相同的数据库会话 cookie。
  * - 缺少、过期或已撤销的会话直接 401 AUTHENTICATION_REQUIRED。
  *
- * audience=runtime/gateway/admin 的 Workload Token 验证见 resolveWorkloadPrincipal。
+ * runtime/gateway 执行凭据验证见 resolveWorkloadPrincipal。
  */
 import { type ApiAudience, apiError, generateRequestId } from "@/lib/http";
 import { acceptEnterpriseProfileObservation } from "@/lib/identity/accept-enterprise-profile-observation";
@@ -29,12 +29,13 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { getUserIdentityBySubject, upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
-  type WorkloadCallerType,
   type WorkloadTokenClaims,
   assertAudienceMatch,
   decodeWorkloadToken,
   extractBearerToken,
 } from "@/lib/identity/workload-token";
+
+export type WorkloadCallerType = "workload";
 
 /** 可信主体：四类 API 共用的身份信息。 */
 export interface Principal {
@@ -284,32 +285,28 @@ export async function resolveCurrentUserContext(
   return principal as CurrentUserContext;
 }
 
-// ─── Workload / Service Identity（S02-C02）─────────────────────
+// ─── Execution Workload Identity ───────────────────────────────
 
 /**
- * Workload 主体：runtime/gateway/admin audience 的可信身份。
+ * Workload 主体：runtime/gateway 执行凭据的可信身份。
  *
  * 与 Principal 的区别：
- * - 不映射到 userIdentity（Runtime/Gateway/Service 无员工身份）。
+ * - 不映射到 userIdentity（Runtime/Gateway 无员工身份）。
  * - 携带 WorkloadTokenClaims，供后续 Invocation 校验与幂等账本 caller_type 使用。
  * - callerType 标识身份类型，写入 idempotency_record.caller_type。
  */
 export interface WorkloadPrincipal {
   tenantId: string;
-  audience: ApiAudience;
-  callerType: WorkloadCallerType;
-  /** Workload Token claims（含 invocationId/runtimeRevisionId/serviceId/expiresAt）。 */
+  audience: "runtime" | "gateway";
+  callerType: "workload";
+  /** Workload Token claims，始终是绑定执行权的 execution 凭据。 */
   claims: WorkloadTokenClaims;
-  /** Service Identity 标识（仅 callerType=service）；其他类型为 null。 */
-  serviceId: string | null;
-  /** 绑定 Invocation id（runtime/gateway Token 必填）；service 为 null。 */
-  invocationId: string | null;
-  /** Runtime 修订（仅 runtime Token）；gateway/service 为 null。 */
-  runtimeRevisionId: string | null;
+  invocationId: string;
+  runtimeRevisionId: string;
 }
 
 /**
- * 从 Authorization header 解析 Workload 主体（runtime/gateway/admin audience 用）。
+ * 从 Authorization header 解析 Workload 主体（runtime/gateway 执行接口用）。
  *
  * 流程：
  * 1. extractBearerToken：提取 Bearer token；缺失抛 AuthenticationError missing_identity。
@@ -317,16 +314,16 @@ export interface WorkloadPrincipal {
  * 3. assertAudienceMatch：校验 Token audience 与请求期望 audience 一致。
  *
  * 不做租户 seed（Workload Token 已含 tenantId，由颁发方保证）。
- * 不映射 userIdentity（Runtime/Gateway/Service 无员工身份）。
+ * 不映射 userIdentity（Runtime/Gateway 无员工身份）。
  *
  * @param headers 请求 header
- * @param expectedAudience 请求期望的 audience（runtime/gateway/admin）
+ * @param expectedAudience 请求期望的 audience（runtime/gateway）
  * @throws AuthenticationError 缺少 token
  * @throws WorkloadTokenError Token 解析/过期/audience 不匹配
  */
 export function resolveWorkloadPrincipal(
   headers: Headers,
-  expectedAudience: "runtime" | "gateway" | "admin",
+  expectedAudience: "runtime" | "gateway",
 ): WorkloadPrincipal {
   const token = extractBearerToken(headers);
   if (!token) {
@@ -336,15 +333,12 @@ export function resolveWorkloadPrincipal(
   const claims = decodeWorkloadToken(token);
   assertAudienceMatch(claims, expectedAudience);
 
-  const callerType: WorkloadCallerType = claims.type === "service" ? "service" : "workload";
-
   return {
     tenantId: claims.tenantId,
     audience: claims.audience,
-    callerType,
+    callerType: "workload",
     claims,
-    serviceId: claims.serviceId ?? null,
-    invocationId: claims.invocationId ?? null,
-    runtimeRevisionId: claims.runtimeRevisionId ?? null,
+    invocationId: claims.invocationId,
+    runtimeRevisionId: claims.runtimeRevisionId,
   };
 }

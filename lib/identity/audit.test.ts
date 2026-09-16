@@ -29,6 +29,7 @@ import {
 } from "@/lib/identity/audit-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
+import type { ServicePrincipal } from "@/lib/identity/service-identity";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { AUDIT_ACTION_TYPES } from "@/lib/persistence/schema/audit";
@@ -73,23 +74,12 @@ function buildPrincipal(tenantId: string, userIdentityId: string): Principal {
   };
 }
 
-function buildServicePrincipal(tenantId: string, serviceId: string): WorkloadPrincipal {
+function buildServicePrincipal(tenantId: string, serviceId: string): ServicePrincipal {
   return {
     tenantId,
     audience: "admin",
     callerType: "service",
-    claims: {
-      type: "service",
-      tenantId,
-      jti: "jti-service-audit-001",
-      audience: "admin",
-      serviceId,
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + 60000,
-    },
     serviceId,
-    invocationId: null,
-    runtimeRevisionId: null,
   };
 }
 
@@ -99,16 +89,20 @@ function buildWorkloadPrincipal(tenantId: string, invocationId: string): Workloa
     audience: "runtime",
     callerType: "workload",
     claims: {
-      type: "runtime",
+      contractVersion: 3,
+      type: "execution",
       tenantId,
       jti: "jti-runtime-audit-001",
       audience: "runtime",
       invocationId,
       runtimeRevisionId: "rr_test",
+      attemptId: "attempt-1",
+      ownershipId: "ownership-1",
+      leaseEpoch: "1",
+      sessionBindingId: "session-1",
       issuedAt: Date.now(),
       expiresAt: Date.now() + 60000,
     },
-    serviceId: null,
     invocationId,
     runtimeRevisionId: "rr_test",
   };
@@ -169,8 +163,8 @@ describe("computeContentHash", () => {
 // ─── isKnownAuditActionType / assertAuditActionTypeKnown（纯逻辑）───
 
 describe("isKnownAuditActionType", () => {
-  it("目录中所有动作类型均已知（包含企业用户资料与 continuation dead-letter，共 56 种）", () => {
-    expect(AUDIT_ACTION_TYPES.length).toBe(56);
+  it("目录中所有动作类型均已知（包含企业用户资料与 continuation dead-letter，共 57 种）", () => {
+    expect(AUDIT_ACTION_TYPES.length).toBe(57);
     for (const actionType of AUDIT_ACTION_TYPES) {
       expect(isKnownAuditActionType(actionType)).toBe(true);
     }
@@ -243,8 +237,10 @@ describe("actorFromWorkloadPrincipal", () => {
   });
 
   it("service 缺失 serviceId 抛错", () => {
-    const principal = buildServicePrincipal("tnt_1", "cicd");
-    principal.serviceId = null;
+    const principal = {
+      ...buildServicePrincipal("tnt_1", "cicd"),
+      serviceId: null,
+    } as unknown as ServicePrincipal;
     expect(() => actorFromWorkloadPrincipal(principal)).toThrow(/缺失 serviceId/);
   });
 
@@ -257,8 +253,10 @@ describe("actorFromWorkloadPrincipal", () => {
   });
 
   it("workload 缺失 invocationId 抛错", () => {
-    const principal = buildWorkloadPrincipal("tnt_1", "inv_1");
-    principal.invocationId = null;
+    const principal = {
+      ...buildWorkloadPrincipal("tnt_1", "inv_1"),
+      invocationId: null,
+    } as unknown as WorkloadPrincipal;
     expect(() => actorFromWorkloadPrincipal(principal)).toThrow(/缺失 invocationId/);
   });
 });

@@ -12,8 +12,8 @@
  *
  * 身份分发：
  * - Principal（employee/admin audience）→ 查 role_action_binding。
- * - WorkloadPrincipal callerType=service → 查 CICD_SERVICE_ALLOWED_ACTIONS（无 resource_scope 绑定）。
- * - WorkloadPrincipal callerType=workload（runtime/gateway）→ 不走 action scope（由 ExecutionBinding 约束）→ 拒绝。
+ * - ServicePrincipal → 查 CI/CD 动作白名单（无 resource_scope 绑定）。
+ * - WorkloadPrincipal（runtime/gateway）→ 不走 action scope（由 ExecutionBinding 约束）→ 拒绝。
  */
 import { createHash } from "node:crypto";
 import type { ApiErrorCode } from "@/lib/error-codes";
@@ -31,7 +31,8 @@ import {
   listActiveActionBindingsForUser,
   parseBindingScope,
 } from "@/lib/identity/role-action-queries";
-import { isServiceActionAllowed } from "@/lib/identity/workload-token";
+import { type ServicePrincipal, isServicePrincipal } from "@/lib/identity/service-identity";
+import { isServiceActionAllowed } from "@/lib/identity/service-identity";
 
 /** 授权检查请求：action_code + 目标资源。 */
 export interface ActionScopeRequest {
@@ -173,7 +174,7 @@ export async function checkActionScope(
 
 /** Turn 选择 Agent 的正式服务端授权入口。 */
 export function requireAgentInvokeScope(
-  principal: Principal | WorkloadPrincipal,
+  principal: Principal | WorkloadPrincipal | ServicePrincipal,
   agentId: string,
   requestId?: string,
 ) {
@@ -215,12 +216,12 @@ export function checkServiceActionScope(
  * if (!r.ok) return r.response;
  * ```
  *
- * @param principal Principal（employee/admin）或 WorkloadPrincipal（service/workload）
+ * @param principal Principal、ServicePrincipal 或 WorkloadPrincipal
  * @param request action_code + resource
  * @param requestId 请求 id（来自 getRequestId），缺省自动生成
  */
 export async function requireActionScope(
-  principal: Principal | WorkloadPrincipal,
+  principal: Principal | WorkloadPrincipal | ServicePrincipal,
   request: ActionScopeRequest,
   requestId: string = generateRequestId(),
 ): Promise<{ ok: true } | { ok: false; response: Response }> {
@@ -229,7 +230,7 @@ export async function requireActionScope(
   if ("userIdentityId" in principal) {
     // Principal（employee/admin）
     result = await checkActionScope(principal.tenantId, principal.userIdentityId, request);
-  } else if (principal.callerType === "service") {
+  } else if (isServicePrincipal(principal)) {
     // CI/CD Service Identity
     result = checkServiceActionScope(principal.serviceId ?? "", request);
   } else {

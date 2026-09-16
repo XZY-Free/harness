@@ -51,10 +51,10 @@ export async function isTokenRevoked(tenantId: string, jti: string): Promise<boo
 export async function revokeWorkloadToken(params: {
   tenantId: string;
   jti: string;
-  tokenType: "runtime" | "gateway" | "service";
+  invocationId: string;
   revokedBy: string;
-  reason: string;
-  expiresAt: Date;
+  reasonCode: string;
+  tokenExpiresAt: Date;
   actor: AuditActor;
   requestId?: string;
 }): Promise<WorkloadTokenRevocation> {
@@ -69,10 +69,11 @@ export async function revokeWorkloadToken(params: {
     id,
     tenantId: params.tenantId,
     jti: params.jti,
-    tokenType: params.tokenType,
+    invocationId: params.invocationId,
     revokedBy: params.revokedBy,
-    reason: params.reason,
-    expiresAt: params.expiresAt,
+    reasonCode: params.reasonCode,
+    revokedAt: new Date(),
+    tokenExpiresAt: params.tokenExpiresAt,
   });
 
   const [row] = await db
@@ -92,23 +93,23 @@ export async function revokeWorkloadToken(params: {
     targetId: params.jti,
     after: {
       jti: params.jti,
-      token_type: params.tokenType,
+      invocation_id: params.invocationId,
       revoked_by: params.revokedBy,
-      reason: params.reason,
-      expires_at: params.expiresAt.toISOString(),
+      reason_code: params.reasonCode,
+      token_expires_at: params.tokenExpiresAt.toISOString(),
     },
-    reason: params.reason,
+    reason: params.reasonCode,
     requestId: params.requestId,
   });
 
   return row;
 }
 
-/** 清理过期撤销记录（expiresAt < now）。返回删除行数。 */
+/** 清理过期撤销记录（tokenExpiresAt < now）。返回删除行数。 */
 export async function deleteExpiredRevocations(now: Date = new Date()): Promise<number> {
   const result = await db
     .delete(workloadTokenRevocationTable)
-    .where(lt(workloadTokenRevocationTable.expiresAt, now));
+    .where(lt(workloadTokenRevocationTable.tokenExpiresAt, now));
   // MySQL 返回 affected rows
   return (result as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 0;
 }

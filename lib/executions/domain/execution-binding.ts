@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { RouteEvidence } from "@/lib/routes/domain/route-resolution-policy";
-import type { FrozenExecutionSubjectFields } from "@/lib/runtime/transport/execution-subject";
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 
@@ -23,14 +22,13 @@ export interface ExecutionBindingControlPlaneEvidence extends ExecutionBindingRu
   resolutionInputDigest: string;
 }
 
-export interface ExecutionBindingConfigInput extends FrozenExecutionSubjectFields {
+export interface ExecutionBindingConfigInput {
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;
   modelId: string;
   modelRevisionRef: string | null;
-  initialEnvironmentLeaseId: string | null;
-  workspaceBindingId: string | null;
+  workspaceBindingId: string;
   /**
    * 冻结的 Permission Policy Revision id（有效 Binding 永远非空，§10）。
    * Binding 时由 Route 显式指定；Route 未指定 → Tenant PolicySet("tool-execution").currentRevisionId。
@@ -42,8 +40,8 @@ export interface ExecutionBindingConfigInput extends FrozenExecutionSubjectField
   governanceConfigRevisionId: string;
   /** 冻结的 Governance Config digest（sha256: 前缀；必须与该 Revision configDigest 一致，§9）。 */
   governanceConfigDigest: string;
-  contextCheckpointId: string | null;
   environmentDefinitionRevisionId: string | null;
+  environmentMode: "MANAGED" | "NO_PLATFORM_ENVIRONMENT";
   capabilityCatalogJson: unknown;
   capabilityCatalogDigest: string;
   capabilityCatalogVersion: string;
@@ -52,6 +50,10 @@ export interface ExecutionBindingConfigInput extends FrozenExecutionSubjectField
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
   /** Projection 版本号 — Binding 用此检测 Projection 滞后。第三批新增。 */
   projectionVersionNo: number;
+  principalType: "user" | "service";
+  principalId: string;
+  principalSource: "authenticated_user" | "trusted_service";
+  principalFrozenAt: Date;
 }
 
 export interface ExecutionBinding
@@ -94,15 +96,13 @@ export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigI
     throw new ExecutionBindingEvidenceError("能力目录冻结字段不完整");
   }
   if (
-    !input.executionSubjectId ||
-    (input.executionSubjectType === "user" &&
-      input.executionSubjectSource !== "authenticated_user") ||
-    (input.executionSubjectType === "service" &&
-      input.executionSubjectSource !== "trusted_service") ||
-    !(input.executionSubjectFrozenAt instanceof Date) ||
-    Number.isNaN(input.executionSubjectFrozenAt.getTime())
+    !input.principalId ||
+    (input.principalType === "user" && input.principalSource !== "authenticated_user") ||
+    (input.principalType === "service" && input.principalSource !== "trusted_service") ||
+    !(input.principalFrozenAt instanceof Date) ||
+    Number.isNaN(input.principalFrozenAt.getTime())
   ) {
-    throw new ExecutionBindingEvidenceError("可信执行主体冻结字段不完整或不一致");
+    throw new ExecutionBindingEvidenceError("可信 principal 冻结字段不完整或不一致");
   }
   const canonical = JSON.stringify(
     sortKeys({

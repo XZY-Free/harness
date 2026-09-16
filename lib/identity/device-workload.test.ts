@@ -35,26 +35,49 @@ import {
   verifyDeviceSignature,
 } from "@/lib/identity/device-signature";
 import { AuthenticationError, resolveWorkloadPrincipal } from "@/lib/identity/resolver";
+import { isServiceActionAllowed } from "@/lib/identity/service-identity";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
-  CICD_SERVICE_ALLOWED_ACTIONS,
   WorkloadTokenError,
   assertAudienceMatch,
   assertInvocationMatch,
   decodeWorkloadToken,
   extractBearerToken,
-  isServiceActionAllowed,
   issueWorkloadToken,
   signWorkloadTokenPayload,
   workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
+import type { WorkloadTokenClaims } from "@/lib/identity/workload-token";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
   await resetDatabase(db);
 });
+
+function executionClaims(
+  audience: "runtime" | "gateway" = "runtime",
+  overrides: Partial<WorkloadTokenClaims> = {},
+): WorkloadTokenClaims {
+  const now = Date.now();
+  return {
+    contractVersion: 3,
+    type: "execution",
+    tenantId: DEFAULT_TENANT_ID,
+    invocationId: "inv-001",
+    runtimeRevisionId: "rt-rev-001",
+    attemptId: "attempt-001",
+    ownershipId: "ownership-001",
+    leaseEpoch: "1",
+    sessionBindingId: "session-001",
+    audience,
+    jti: "jti-device-workload-001",
+    issuedAt: now,
+    expiresAt: now + 60_000,
+    ...overrides,
+  };
+}
 
 // ─── device-queries ──────────────────────────────────────────
 
@@ -308,16 +331,9 @@ describe("device-queries", () => {
 describe("workload-token", () => {
   it("issueWorkloadToken + decodeWorkloadToken 往返一致", () => {
     const now = Date.now();
-    const token = issueWorkloadToken({
-      type: "runtime",
-      tenantId: DEFAULT_TENANT_ID,
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime",
-      expiresAt: now + 60000,
-    });
+    const token = issueWorkloadToken(executionClaims("runtime", { expiresAt: now + 60_000 }));
     const claims = decodeWorkloadToken(token);
-    expect(claims.type).toBe("runtime");
+    expect(claims.type).toBe("execution");
     expect(claims.tenantId).toBe(DEFAULT_TENANT_ID);
     expect(claims.invocationId).toBe("inv-001");
     expect(claims.runtimeRevisionId).toBe("rt-rev-001");
@@ -335,13 +351,15 @@ describe("workload-token", () => {
   });
 
   it("decodeWorkloadToken 过期抛 expired_token", () => {
-    const token = issueWorkloadToken({
-      type: "gateway",
-      tenantId: DEFAULT_TENANT_ID,
-      invocationId: "inv-002",
-      audience: "gateway",
-      expiresAt: Date.now() - 1000, // 已过期
-    });
+    // canonical 签发器固定 issuedAt=now 且要求 expiresAt > issuedAt，
+    // 过期 token 需用 signWorkloadTokenPayload 构造"过去签发、已过期"的合法 claims。
+    const token = signWorkloadTokenPayload(
+      executionClaims("gateway", {
+        invocationId: "inv-002",
+        issuedAt: Date.now() - 60_000,
+        expiresAt: Date.now() - 1_000,
+      }),
+    );
     expect(() => decodeWorkloadToken(token)).toThrow(WorkloadTokenError);
     try {
       decodeWorkloadToken(token);
@@ -350,49 +368,25 @@ describe("workload-token", () => {
     }
   });
 
-  it("decodeWorkloadToken service 缺 serviceId 抛 malformed_token", () => {
-    const now = Date.now();
-    // 已签名但缺 serviceId 的 service token（§26：签名通过后仍做 claim 校验）
-    const claims = {
-      type: "service",
-      tenantId: DEFAULT_TENANT_ID,
-      jti: "jti-1",
-      audience: "admin",
-      issuedAt: now,
-      expiresAt: now + 60000,
-    };
-    const token = signWorkloadTokenPayload(claims);
-    expect(() => decodeWorkloadToken(token)).toThrow(WorkloadTokenError);
+  it("签发器拒绝伪装成服务身份的旧 token claims", () => {
+    const claims = { ...executionClaims(), type: "service", audience: "admin" };
+    expect(() => signWorkloadTokenPayload(claims as unknown as WorkloadTokenClaims)).toThrow(
+      WorkloadTokenError,
+    );
   });
 
   it("decodeWorkloadToken runtime 缺 invocationId 抛 malformed_token", () => {
-    const now = Date.now();
-    const claims = {
-      type: "runtime",
-      tenantId: DEFAULT_TENANT_ID,
-      jti: "jti-2",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime",
-      issuedAt: now,
-      expiresAt: now + 60000,
-    };
-    const token = signWorkloadTokenPayload(claims);
-    expect(() => decodeWorkloadToken(token)).toThrow(WorkloadTokenError);
+    const { invocationId: _invocationId, ...claims } = executionClaims();
+    expect(() => signWorkloadTokenPayload(claims as unknown as WorkloadTokenClaims)).toThrow(
+      WorkloadTokenError,
+    );
   });
 
   it("decodeWorkloadToken runtime 缺 runtimeRevisionId 抛 malformed_token", () => {
-    const now = Date.now();
-    const claims = {
-      type: "runtime",
-      tenantId: DEFAULT_TENANT_ID,
-      jti: "jti-3",
-      invocationId: "inv-001",
-      audience: "runtime",
-      issuedAt: now,
-      expiresAt: now + 60000,
-    };
-    const token = signWorkloadTokenPayload(claims);
-    expect(() => decodeWorkloadToken(token)).toThrow(WorkloadTokenError);
+    const { runtimeRevisionId: _runtimeRevisionId, ...claims } = executionClaims();
+    expect(() => signWorkloadTokenPayload(claims as unknown as WorkloadTokenClaims)).toThrow(
+      WorkloadTokenError,
+    );
   });
 
   it("decodeWorkloadToken 旧未签名 base64url token 一律拒绝（§26 无 unsigned fallback）", () => {
@@ -417,14 +411,7 @@ describe("workload-token", () => {
   });
 
   it("decodeWorkloadToken 篡改 payload 后签名不匹配抛 malformed_token", () => {
-    const token = issueWorkloadToken({
-      type: "runtime",
-      tenantId: DEFAULT_TENANT_ID,
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime",
-      expiresAt: Date.now() + 60000,
-    });
+    const token = issueWorkloadToken(executionClaims());
     const [, payloadB64, sigB64] = token.split(".");
     if (!payloadB64 || !sigB64) {
       throw new Error("test setup: token 格式非法");
@@ -458,61 +445,41 @@ describe("workload-token", () => {
 
   it("assertAudienceMatch 一致时不抛错", () => {
     const now = Date.now();
-    const claims = {
-      type: "runtime" as const,
-      tenantId: DEFAULT_TENANT_ID,
+    const claims = executionClaims("runtime", {
       jti: "jti-device-aud-ok-001",
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime" as const,
       issuedAt: now,
-      expiresAt: now + 60000,
-    };
+      expiresAt: now + 60_000,
+    });
     expect(() => assertAudienceMatch(claims, "runtime")).not.toThrow();
   });
 
   it("assertAudienceMatch 不一致抛 audience_mismatch", () => {
     const now = Date.now();
-    const claims = {
-      type: "runtime" as const,
-      tenantId: DEFAULT_TENANT_ID,
+    const claims = executionClaims("runtime", {
       jti: "jti-device-aud-mismatch-001",
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime" as const,
       issuedAt: now,
-      expiresAt: now + 60000,
-    };
+      expiresAt: now + 60_000,
+    });
     expect(() => assertAudienceMatch(claims, "gateway")).toThrow(WorkloadTokenError);
   });
 
   it("assertInvocationMatch 一致时不抛错", () => {
     const now = Date.now();
-    const claims = {
-      type: "runtime" as const,
-      tenantId: DEFAULT_TENANT_ID,
+    const claims = executionClaims("runtime", {
       jti: "jti-device-inv-ok-001",
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime" as const,
       issuedAt: now,
-      expiresAt: now + 60000,
-    };
+      expiresAt: now + 60_000,
+    });
     expect(() => assertInvocationMatch(claims, "inv-001")).not.toThrow();
   });
 
   it("assertInvocationMatch 不一致抛 invocation_mismatch", () => {
     const now = Date.now();
-    const claims = {
-      type: "runtime" as const,
-      tenantId: DEFAULT_TENANT_ID,
+    const claims = executionClaims("runtime", {
       jti: "jti-device-inv-mismatch-001",
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime" as const,
       issuedAt: now,
-      expiresAt: now + 60000,
-    };
+      expiresAt: now + 60_000,
+    });
     expect(() => assertInvocationMatch(claims, "inv-other")).toThrow(WorkloadTokenError);
   });
 
@@ -524,15 +491,20 @@ describe("workload-token", () => {
 
   it("isServiceActionAllowed cicd 拒绝未授权动作", () => {
     expect(isServiceActionAllowed("cicd", "agent.publish")).toBe(false);
-    expect(isServiceActionAllowed("cicd", "thread.create")).toBe(false);
+    expect(isServiceActionAllowed("cicd", "runtime.publish")).toBe(false);
   });
 
   it("isServiceActionAllowed 未知 service 拒绝", () => {
     expect(isServiceActionAllowed("unknown", "artifact.attestation.verify")).toBe(false);
   });
 
-  it("CICD_SERVICE_ALLOWED_ACTIONS 不含 agent.publish（CI/CD 不能发布）", () => {
-    expect(CICD_SERVICE_ALLOWED_ACTIONS).not.toContain("agent.publish");
+  it("Service Identity 不能通过执行凭据认证", () => {
+    expect(() =>
+      signWorkloadTokenPayload({
+        ...executionClaims(),
+        type: "service",
+      } as unknown as WorkloadTokenClaims),
+    ).toThrow(WorkloadTokenError);
   });
 
   it("workloadTokenErrorResponse 把 WorkloadTokenError 转 401", async () => {
@@ -825,14 +797,7 @@ describe("device-signature", () => {
 describe("resolver（workload）", () => {
   it("resolveWorkloadPrincipal runtime token 解析成功", () => {
     const now = Date.now();
-    const token = issueWorkloadToken({
-      type: "runtime",
-      tenantId: DEFAULT_TENANT_ID,
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime",
-      expiresAt: now + 60000,
-    });
+    const token = issueWorkloadToken(executionClaims("runtime", { expiresAt: now + 60_000 }));
     const headers = new Headers();
     headers.set("authorization", `Bearer ${token}`);
 
@@ -842,44 +807,25 @@ describe("resolver（workload）", () => {
     expect(principal.callerType).toBe("workload");
     expect(principal.invocationId).toBe("inv-001");
     expect(principal.runtimeRevisionId).toBe("rt-rev-001");
-    expect(principal.serviceId).toBeNull();
   });
 
   it("resolveWorkloadPrincipal gateway token 解析成功", () => {
     const now = Date.now();
-    const token = issueWorkloadToken({
-      type: "gateway",
-      tenantId: DEFAULT_TENANT_ID,
-      invocationId: "inv-002",
-      audience: "gateway",
-      expiresAt: now + 60000,
-    });
+    const token = issueWorkloadToken(
+      executionClaims("gateway", { invocationId: "inv-002", expiresAt: now + 60_000 }),
+    );
     const headers = new Headers();
     headers.set("authorization", `Bearer ${token}`);
 
     const principal = resolveWorkloadPrincipal(headers, "gateway");
     expect(principal.audience).toBe("gateway");
     expect(principal.invocationId).toBe("inv-002");
-    expect(principal.runtimeRevisionId).toBeNull();
+    expect(principal.runtimeRevisionId).toBe("rt-rev-001");
   });
 
-  it("resolveWorkloadPrincipal service token 解析成功", () => {
-    const now = Date.now();
-    const token = issueWorkloadToken({
-      type: "service",
-      tenantId: DEFAULT_TENANT_ID,
-      audience: "admin",
-      serviceId: "cicd",
-      expiresAt: now + 60000,
-    });
+  it("Service Identity 不通过 resolveWorkloadPrincipal 认证", () => {
     const headers = new Headers();
-    headers.set("authorization", `Bearer ${token}`);
-
-    const principal = resolveWorkloadPrincipal(headers, "admin");
-    expect(principal.audience).toBe("admin");
-    expect(principal.callerType).toBe("service");
-    expect(principal.serviceId).toBe("cicd");
-    expect(principal.invocationId).toBeNull();
+    expect(() => resolveWorkloadPrincipal(headers, "runtime")).toThrow(AuthenticationError);
   });
 
   it("resolveWorkloadPrincipal 缺 token 抛 AuthenticationError", () => {
@@ -888,28 +834,19 @@ describe("resolver（workload）", () => {
 
   it("resolveWorkloadPrincipal audience 不匹配抛 WorkloadTokenError", () => {
     const now = Date.now();
-    const token = issueWorkloadToken({
-      type: "runtime",
-      tenantId: DEFAULT_TENANT_ID,
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime",
-      expiresAt: now + 60000,
-    });
+    const token = issueWorkloadToken(executionClaims("runtime", { expiresAt: now + 60_000 }));
     const headers = new Headers();
     headers.set("authorization", `Bearer ${token}`);
     expect(() => resolveWorkloadPrincipal(headers, "gateway")).toThrow(WorkloadTokenError);
   });
 
   it("resolveWorkloadPrincipal 过期 token 抛 WorkloadTokenError", () => {
-    const token = issueWorkloadToken({
-      type: "runtime",
-      tenantId: DEFAULT_TENANT_ID,
-      invocationId: "inv-001",
-      runtimeRevisionId: "rt-rev-001",
-      audience: "runtime",
-      expiresAt: Date.now() - 1000,
-    });
+    const token = signWorkloadTokenPayload(
+      executionClaims("runtime", {
+        issuedAt: Date.now() - 60_000,
+        expiresAt: Date.now() - 1_000,
+      }),
+    );
     const headers = new Headers();
     headers.set("authorization", `Bearer ${token}`);
     expect(() => resolveWorkloadPrincipal(headers, "runtime")).toThrow(WorkloadTokenError);

@@ -41,6 +41,7 @@ import {
   parseBindingScope,
   revokeActionBinding,
 } from "@/lib/identity/role-action-queries";
+import type { ServicePrincipal } from "@/lib/identity/service-identity";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
@@ -706,23 +707,12 @@ describe("authorization", () => {
     }
   });
 
-  it("requireActionScope WorkloadPrincipal service 有权 → ok", () => {
-    const principal: WorkloadPrincipal = {
+  it("requireActionScope ServicePrincipal 有权 → ok", () => {
+    const principal: ServicePrincipal = {
       tenantId,
       audience: "admin",
       callerType: "service",
-      claims: {
-        type: "service",
-        tenantId,
-        jti: "jti-service-authz-ok-001",
-        audience: "admin",
-        serviceId: "cicd",
-        issuedAt: Date.now(),
-        expiresAt: Date.now() + 60000,
-      },
       serviceId: "cicd",
-      invocationId: null,
-      runtimeRevisionId: null,
     };
     return requireActionScope(principal, {
       actionCode: "artifact.attestation.verify",
@@ -732,23 +722,12 @@ describe("authorization", () => {
     });
   });
 
-  it("requireActionScope WorkloadPrincipal service 无权 → 403", () => {
-    const principal: WorkloadPrincipal = {
+  it("requireActionScope ServicePrincipal 无权 → 403", () => {
+    const principal: ServicePrincipal = {
       tenantId,
       audience: "admin",
       callerType: "service",
-      claims: {
-        type: "service",
-        tenantId,
-        jti: "jti-service-authz-deny-001",
-        audience: "admin",
-        serviceId: "cicd",
-        issuedAt: Date.now(),
-        expiresAt: Date.now() + 60000,
-      },
       serviceId: "cicd",
-      invocationId: null,
-      runtimeRevisionId: null,
     };
     return requireActionScope(principal, {
       actionCode: "agent.publish",
@@ -767,16 +746,20 @@ describe("authorization", () => {
       audience: "runtime",
       callerType: "workload",
       claims: {
-        type: "runtime",
+        contractVersion: 3,
+        type: "execution",
         tenantId,
         jti: "jti-runtime-authz-001",
         audience: "runtime",
         invocationId: "inv_1",
         runtimeRevisionId: "rr_1",
+        attemptId: "attempt-1",
+        ownershipId: "ownership-1",
+        leaseEpoch: "1",
+        sessionBindingId: "session-1",
         issuedAt: Date.now(),
         expiresAt: Date.now() + 60000,
       },
-      serviceId: null,
       invocationId: "inv_1",
       runtimeRevisionId: "rr_1",
     };

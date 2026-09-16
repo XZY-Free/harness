@@ -34,6 +34,7 @@ import {
 } from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
+import type { ServicePrincipal } from "@/lib/identity/service-identity";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -77,23 +78,12 @@ function buildPrincipal(tenantId: string, userIdentityId: string): Principal {
   };
 }
 
-function buildServicePrincipal(tenantId: string, serviceId: string): WorkloadPrincipal {
+function buildServicePrincipal(tenantId: string, serviceId: string): ServicePrincipal {
   return {
     tenantId,
     audience: "admin",
     callerType: "service",
-    claims: {
-      type: "service",
-      tenantId,
-      jti: "jti-service-idempotency-001",
-      audience: "admin",
-      serviceId,
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + 60000,
-    },
     serviceId,
-    invocationId: null,
-    runtimeRevisionId: null,
   };
 }
 
@@ -103,16 +93,20 @@ function buildWorkloadPrincipal(tenantId: string, invocationId: string): Workloa
     audience: "runtime",
     callerType: "workload",
     claims: {
-      type: "runtime",
+      contractVersion: 3,
+      type: "execution",
       tenantId,
       jti: "jti-runtime-idempotency-001",
       audience: "runtime",
       invocationId,
       runtimeRevisionId: "rr_test",
+      attemptId: "attempt-1",
+      ownershipId: "ownership-1",
+      leaseEpoch: "1",
+      sessionBindingId: "session-1",
       issuedAt: Date.now(),
       expiresAt: Date.now() + 60000,
     },
-    serviceId: null,
     invocationId,
     runtimeRevisionId: "rr_test",
   };
@@ -202,8 +196,10 @@ describe("callerFromWorkloadPrincipal", () => {
   });
 
   it("service 缺失 serviceId 抛错", () => {
-    const principal = buildServicePrincipal("tnt_1", "cicd");
-    principal.serviceId = null;
+    const principal = {
+      ...buildServicePrincipal("tnt_1", "cicd"),
+      serviceId: null,
+    } as unknown as ServicePrincipal;
     expect(() => callerFromWorkloadPrincipal(principal)).toThrow(/缺失 serviceId/);
   });
 
@@ -215,8 +211,10 @@ describe("callerFromWorkloadPrincipal", () => {
   });
 
   it("workload 缺失 invocationId 抛错", () => {
-    const principal = buildWorkloadPrincipal("tnt_1", "inv_1");
-    principal.invocationId = null;
+    const principal = {
+      ...buildWorkloadPrincipal("tnt_1", "inv_1"),
+      invocationId: null,
+    } as unknown as WorkloadPrincipal;
     expect(() => callerFromWorkloadPrincipal(principal)).toThrow(/缺失 invocationId/);
   });
 });

@@ -21,10 +21,12 @@ describe("ExecutionBinding trusted execution subject", () => {
     await db.insert(invocationTable).values({
       id,
       tenantId: DEFAULT_TENANT_ID,
+      subjectType: "job",
       jobId: id,
       invocationSequence: 1,
       invocationKind: "job",
       executionState: "queued",
+      inputDigest: `sha256:${"0".repeat(64)}`,
     });
   }
 
@@ -47,9 +49,9 @@ describe("ExecutionBinding trusted execution subject", () => {
     });
 
     expect(binding).toMatchObject({
-      executionSubjectType: subjectType,
-      executionSubjectId: subjectId,
-      executionSubjectSource: source,
+      principalType: subjectType,
+      principalId: subjectId,
+      principalSource: source,
     });
     expect(recoverTrustedExecutionSubject(binding, DEFAULT_TENANT_ID)).toEqual({
       tenantId: DEFAULT_TENANT_ID,

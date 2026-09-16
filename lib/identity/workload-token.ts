@@ -1,318 +1,224 @@
-/**
- * Workload / Service Identity 模型。
- *
- * 四类 API 受众的身份来源（11-api-and-event-boundaries.md 、§9）：
- * - employee：员工 SSO Session + 可选 Desktop 设备签名。
- * - runtime：短期 Workload Identity，绑定 tenant/invocation/runtime_revision/audience/TTL。
- * - gateway：Invocation-scoped Workload Identity，只能访问 ExecutionBinding 允许的资源。
- * - admin：管理员 SSO + RBAC；CI/CD 使用受限 Service Identity。
- *
- * Token 设计（冻结方案 §25 / §26 / §27）：
- * - Runtime/Gateway Token 绑定 tenant、invocation、runtime_revision、允许的 audience 和短有效期。
- * - Token 使用 HMAC-SHA256 密码学签名，格式固定：
- *
- *     v1.<base64url(payload)>.<base64url(signature)>
- *
- *   签名输入 = `v1.` + base64url(payload)；密钥来自
- *   `SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET`（生产/测试必须配置独立随机 Secret，
- *   ≥ 32 字节，不得使用默认 Secret，不得写入 Repo）。
- * - 旧未签名 base64url(JSON) token 一律拒绝，开发阶段不保留 unsigned fallback。
- * - 验证顺序：版本 → signature(timingSafeEqual) → issuedAt → expiresAt → audience →
- *   jti → invocationId → runtimeRevisionId → revocation。全部通过后才构造 WorkloadPrincipal。
- * - Gateway Token 独立 type=gateway / audience=gateway，与 inbound auth token 不混用。
- *
- * 安全边界：
- * - 模型伪造 userId → 服务端忽略并使用 Workload/Session 身份。
- * - 撤销设备后拒绝新 Lease、Workspace handle 和迟到签名请求。
- *
- * 事实源：docs/architecture/api-and-events.md 、§9、docs/architecture/security.md §5、
- * SnowHarness_专题01_关口02_02-6_Policy_Permission_最终冻结实施方案.md §25/§26/§27。
- */
+/** Authority-bound execution credential. */
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { API_STATUS, apiError, generateRequestId } from "@/lib/http";
 import type { ApiAudience } from "@/lib/http";
 
-/** Workload Identity 类型（caller_type in idempotency_record）。 */
-export type WorkloadCallerType = "user" | "device" | "workload" | "service";
+export const WORKLOAD_TOKEN_SIGNING_SECRET_ENV = "SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET";
+export const WORKLOAD_SIGNING_KEY_ID_ENV = "WORKLOAD_SIGNING_KEY_ID";
+export const WORKLOAD_TOKEN_FORMAT_VERSION = 1 as const;
+export const WORKLOAD_TOKEN_MAX_LENGTH = 16 * 1024;
+export const WORKLOAD_TOKEN_DEFAULT_TTL_MS = {
+  runtime: 5 * 60 * 1000,
+  gateway: 5 * 60 * 1000,
+} as const;
 
-/** Runtime / Gateway Token 的 claims（11-api-and-event-boundaries.md ）。 */
+export type WorkloadTokenAudience = "runtime" | "gateway";
+
 export interface WorkloadTokenClaims {
-  /** Token 类型：runtime（Runtime Protocol）/ gateway（Gateway API）/ service（CI/CD Service Identity）。 */
-  type: "runtime" | "gateway" | "service";
-  /** 绑定租户 id（从身份解析，不信任模型 JSON 参数）。 */
+  contractVersion: 3;
+  type: "execution";
   tenantId: string;
-  /** Token 唯一 id（S12-W05）：用于撤销与重放保护；颁发时生成 randomUUID。 */
+  invocationId: string;
+  runtimeRevisionId: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: string;
+  sessionBindingId: string;
+  audience: WorkloadTokenAudience;
   jti: string;
-  /** 绑定 Invocation id；Runtime/Gateway Token 必须等于当前 path 的 invocation_id。 */
-  invocationId?: string;
-  /** Runtime 修订（仅 Runtime Protocol Token）。 */
-  runtimeRevisionId?: string;
-  /** 允许的 audience（与 idempotency_record.audience 对齐）。 */
-  audience: ApiAudience;
-  /** Service Identity 标识（仅 type=service，如 "cicd"）。 */
-  serviceId?: string;
-  /** 颁发时间（Unix ms）。 */
   issuedAt: number;
-  /** 过期时间（Unix ms）；短有效期。 */
   expiresAt: number;
 }
 
-/** Workload Token 解析错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
+interface WorkloadTokenHeader {
+  formatVersion: 1;
+  algorithm: "HS256";
+  keyId: string;
+}
+
+export type WorkloadTokenErrorCode =
+  | "missing_token"
+  | "malformed_token"
+  | "expired_token"
+  | "audience_mismatch"
+  | "invocation_mismatch"
+  | "token_revoked"
+  | "missing_jti"
+  | "not_current_executor";
+
 export class WorkloadTokenError extends Error {
   constructor(
-    public readonly code:
-      | "missing_token"
-      | "malformed_token"
-      | "expired_token"
-      | "audience_mismatch"
-      | "invocation_mismatch"
-      | "token_revoked"
-      | "missing_jti",
+    public readonly code: WorkloadTokenErrorCode,
     message: string,
   ) {
     super(message);
+    this.name = "WorkloadTokenError";
   }
 }
 
-/** 签名密钥环境变量名。 */
-export const WORKLOAD_TOKEN_SIGNING_SECRET_ENV = "SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET";
-
-/** Token 版本前缀（§26：v1.<payload>.<signature>）。 */
-export const WORKLOAD_TOKEN_VERSION = "v1";
-
-/** 签名密钥最小字节数（§26：至少 32 字节）。 */
-const MIN_SECRET_BYTES = 32;
-
-/**
- * 读取 Workload Token 签名密钥（§26）。
- *
- * 生产/测试必须配置独立随机 Secret，≥ 32 字节，不得使用默认 Secret。
- * 未配置或过短 → fail-closed 抛错（不发未签名 Token，不接受未签名 Token）。
- */
-export function getWorkloadTokenSigningSecret(): Buffer {
+function signingSecret(): Buffer {
   const secret = process.env[WORKLOAD_TOKEN_SIGNING_SECRET_ENV];
   if (!secret) {
     throw new WorkloadTokenError("malformed_token", "Workload Token 签名密钥未配置");
   }
-  const buf = Buffer.from(secret, "utf-8");
-  if (buf.byteLength < MIN_SECRET_BYTES) {
-    throw new WorkloadTokenError(
-      "malformed_token",
-      `Workload Token 签名密钥必须 ≥ ${MIN_SECRET_BYTES} 字节`,
-    );
+  const value = Buffer.from(secret, "utf8");
+  if (value.byteLength < 32) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 签名密钥长度不足");
   }
-  return buf;
+  return value;
 }
 
-/**
- * 对任意 JSON 载荷签发 `v1.<payload>.<signature>`（§26）。
- *
- * 签名输入 = `v1.` + base64url(payload)。本函数只负责签名编码，不做 claim 校验——
- * 供 `issueWorkloadToken` 与测试（构造缺失字段/错误 claim 的已签名 Token）使用。
- */
-export function signWorkloadTokenPayload(payload: unknown): string {
-  const json = JSON.stringify(payload);
-  const payloadBase64 = Buffer.from(json, "utf-8").toString("base64url");
-  const secret = getWorkloadTokenSigningSecret();
-  const signature = createHmac("sha256", secret)
-    .update(`${WORKLOAD_TOKEN_VERSION}.${payloadBase64}`)
-    .digest("base64url");
-  return `${WORKLOAD_TOKEN_VERSION}.${payloadBase64}.${signature}`;
+function signingKeyId(): string {
+  const keyId = process.env[WORKLOAD_SIGNING_KEY_ID_ENV]?.trim();
+  if (!keyId) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token signing key id 未配置");
+  }
+  return keyId;
 }
 
-/** 校验 token 版本前缀 + 签名（timingSafeEqual，fail-closed）。 */
-function assertVersionAndSignature(token: string): string {
-  const parts = token.split(".");
-  if (parts.length !== 3 || parts[0] !== WORKLOAD_TOKEN_VERSION) {
-    throw new WorkloadTokenError(
-      "malformed_token",
-      `Workload Token 必须为 ${WORKLOAD_TOKEN_VERSION}.<payload>.<signature>`,
-    );
+function encode(value: unknown): string {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function decodeJson<T>(segment: string, name: string): T {
+  try {
+    const value: unknown = JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("object expected");
+    }
+    return value as T;
+  } catch {
+    throw new WorkloadTokenError("malformed_token", `Workload Token ${name} 非法`);
   }
-  const payloadBase64 = parts[1];
-  const signatureB64 = parts[2];
-  if (payloadBase64 === undefined || signatureB64 === undefined) {
-    throw new WorkloadTokenError(
-      "malformed_token",
-      `Workload Token 必须为 ${WORKLOAD_TOKEN_VERSION}.<payload>.<signature>`,
-    );
-  }
-  const expected = createHmac("sha256", getWorkloadTokenSigningSecret())
-    .update(`${WORKLOAD_TOKEN_VERSION}.${payloadBase64}`)
+}
+
+function macFor(parts: string[]): Buffer {
+  return createHmac("sha256", signingSecret())
+    .update(["snowharness.workload", ...parts].join("\0"), "utf8")
     .digest();
-  const actual = Buffer.from(signatureB64, "base64url");
-  if (expected.byteLength !== actual.byteLength || !timingSafeEqual(expected, actual)) {
+}
+
+function assertClaims(value: unknown): WorkloadTokenClaims {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token claims 非法");
+  }
+  const c = value as Partial<WorkloadTokenClaims>;
+  const requiredStrings = [
+    c.tenantId,
+    c.invocationId,
+    c.runtimeRevisionId,
+    c.attemptId,
+    c.ownershipId,
+    c.leaseEpoch,
+    c.sessionBindingId,
+    c.jti,
+  ];
+  if (
+    c.contractVersion !== 3 ||
+    c.type !== "execution" ||
+    (c.audience !== "runtime" && c.audience !== "gateway") ||
+    requiredStrings.some((item) => typeof item !== "string" || item.length === 0) ||
+    typeof c.issuedAt !== "number" ||
+    !Number.isSafeInteger(c.issuedAt) ||
+    typeof c.expiresAt !== "number" ||
+    !Number.isSafeInteger(c.expiresAt) ||
+    c.expiresAt <= c.issuedAt
+  ) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 缺少正式执行 claims");
+  }
+  if (!/^[1-9][0-9]*$/.test(c.leaseEpoch as string)) {
+    throw new WorkloadTokenError("malformed_token", "leaseEpoch 必须是正十进制字符串");
+  }
+  return c as WorkloadTokenClaims;
+}
+
+export function signWorkloadTokenPayload(claims: WorkloadTokenClaims): string {
+  const header: WorkloadTokenHeader = {
+    formatVersion: 1,
+    algorithm: "HS256",
+    keyId: signingKeyId(),
+  };
+  const headerSegment = encode(header);
+  const claimsSegment = encode(assertClaims(claims));
+  const macSegment = macFor([headerSegment, claimsSegment]).toString("base64url");
+  return `wh.${headerSegment}.${claimsSegment}.${macSegment}`;
+}
+
+export function decodeWorkloadToken(token: string): WorkloadTokenClaims {
+  if (typeof token !== "string" || token.length === 0) {
+    throw new WorkloadTokenError("missing_token", "缺少 Workload Token");
+  }
+  if (token.length > WORKLOAD_TOKEN_MAX_LENGTH) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 超出长度限制");
+  }
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "wh") {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 格式非法");
+  }
+  const header = decodeJson<Partial<WorkloadTokenHeader>>(parts[1] ?? "", "header");
+  if (
+    header.formatVersion !== 1 ||
+    header.algorithm !== "HS256" ||
+    header.keyId !== signingKeyId()
+  ) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token header 不符合受管算法");
+  }
+  const expected = macFor([parts[1] ?? "", parts[2] ?? ""]);
+  let actual: Buffer;
+  try {
+    actual = Buffer.from(parts[3] ?? "", "base64url");
+  } catch {
+    throw new WorkloadTokenError("malformed_token", "Workload Token MAC 非法");
+  }
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
     throw new WorkloadTokenError("malformed_token", "Workload Token 签名不匹配");
   }
-  return payloadBase64;
-}
-
-/**
- * 解码 Workload Token（v1.<base64url(payload)>.<signature>）。
- *
- * 先验版本 + 签名（§26），再做 claim 校验与过期/撤销校验；任一失败即抛错（fail-closed）。
- * 旧未签名 base64url(JSON) token 全部拒绝，无 unsigned fallback。
- */
-export function decodeWorkloadToken(token: string): WorkloadTokenClaims {
-  const payloadBase64 = assertVersionAndSignature(token);
-
-  let payload: unknown;
-  try {
-    const json = Buffer.from(payloadBase64, "base64url").toString("utf-8");
-    payload = JSON.parse(json);
-  } catch {
-    throw new WorkloadTokenError("malformed_token", "Workload Token payload 格式非法");
-  }
-
-  if (!payload || typeof payload !== "object") {
-    throw new WorkloadTokenError("malformed_token", "Workload Token 内容非对象");
-  }
-
-  const claims = payload as Partial<WorkloadTokenClaims>;
-  if (claims.type !== "runtime" && claims.type !== "gateway" && claims.type !== "service") {
-    throw new WorkloadTokenError("malformed_token", "Workload Token type 缺失或非法");
-  }
-  if (!claims.tenantId) {
-    throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 tenantId");
-  }
-  if (!claims.audience) {
-    throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 audience");
-  }
-  if (typeof claims.issuedAt !== "number" || typeof claims.expiresAt !== "number") {
-    throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 issuedAt/expiresAt");
-  }
-
-  // S12-W05：jti 必填（用于撤销与重放保护）
-  if (!claims.jti || typeof claims.jti !== "string") {
-    throw new WorkloadTokenError("missing_jti", "Workload Token 缺失 jti");
-  }
-
-  // 过期校验
+  const claims = assertClaims(decodeJson<unknown>(parts[2] ?? "", "claims"));
   const now = Date.now();
+  if (claims.issuedAt > now + 5_000) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token issuedAt 超前");
+  }
   if (now >= claims.expiresAt) {
     throw new WorkloadTokenError("expired_token", "Workload Token 已过期");
   }
-
-  // type=service 必须有 serviceId
-  if (claims.type === "service" && !claims.serviceId) {
-    throw new WorkloadTokenError("malformed_token", "Service Identity Token 缺失 serviceId");
-  }
-
-  // type=runtime/gateway 必须有 invocationId
-  if ((claims.type === "runtime" || claims.type === "gateway") && !claims.invocationId) {
-    throw new WorkloadTokenError("malformed_token", `${claims.type} Token 缺失 invocationId`);
-  }
-
-  // type=runtime 必须有 runtimeRevisionId
-  if (claims.type === "runtime" && !claims.runtimeRevisionId) {
-    throw new WorkloadTokenError("malformed_token", "Runtime Token 缺失 runtimeRevisionId");
-  }
-
-  return claims as WorkloadTokenClaims;
+  return claims;
 }
 
-/**
- * 从 Authorization header 提取 Bearer token。
- * 非 Bearer 或空返回 null（调用方据此判断是否走 Workload 认证）。
- */
 export function extractBearerToken(headers: Headers): string | null {
-  const auth = headers.get("authorization");
-  if (!auth) return null;
-  const match = auth.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() ?? null;
+  const value = headers.get("authorization");
+  if (!value) return null;
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
 }
 
-/**
- * 校验 Workload Token 的 audience 与请求期望 audience 一致。
- * Token audience 必须等于期望 audience（runtime Token 不能用于 gateway API）。
- */
-export function assertAudienceMatch(claims: WorkloadTokenClaims, expected: ApiAudience): void {
-  if (claims.audience !== expected) {
-    throw new WorkloadTokenError(
-      "audience_mismatch",
-      `Token audience=${claims.audience} 与请求期望 audience=${expected} 不匹配`,
-    );
-  }
-}
-
-/**
- * 校验 Runtime/Gateway Token 的 invocationId 与请求 path 的 invocationId 一致。
- * Runtime Token 不能用于其他 Invocation 的 API（11-api-and-event-boundaries.md ）。
- */
-export function assertInvocationMatch(
+export function assertAudienceMatch(
   claims: WorkloadTokenClaims,
-  expectedInvocationId: string,
+  expected: ApiAudience | WorkloadTokenAudience,
 ): void {
-  if (claims.invocationId !== expectedInvocationId) {
-    throw new WorkloadTokenError(
-      "invocation_mismatch",
-      `Token invocationId=${claims.invocationId} 与请求期望=${expectedInvocationId} 不匹配`,
-    );
+  if (claims.audience !== expected) {
+    throw new WorkloadTokenError("audience_mismatch", "Workload Token audience 不匹配");
   }
 }
 
-/**
- * 把 WorkloadTokenError 转成 401 响应；非 Token 错误返回 null。
- * `requestId` 来自路由入口的 getRequestId(request)，保证可跟踪。
- */
+export function assertInvocationMatch(claims: WorkloadTokenClaims, invocationId: string): void {
+  if (claims.invocationId !== invocationId) {
+    throw new WorkloadTokenError("invocation_mismatch", "Workload Token invocation 不匹配");
+  }
+}
+
+export function issueWorkloadToken(
+  claims: Omit<WorkloadTokenClaims, "issuedAt" | "jti"> & { jti?: string },
+): string {
+  const issuedAt = Date.now();
+  return signWorkloadTokenPayload({ ...claims, jti: claims.jti ?? randomUUID(), issuedAt });
+}
+
 export function workloadTokenErrorResponse(
   error: unknown,
   requestId: string = generateRequestId(),
 ): Response | null {
-  if (error instanceof WorkloadTokenError) {
-    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
-  }
-  return null;
+  if (!(error instanceof WorkloadTokenError)) return null;
+  return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
 }
 
-/**
- * 颁发 Workload Token（v1.<payload>.<signature>，HMAC-SHA256，§26）。
- *
- * 仅供 Invocation Dispatcher / 调度器内部调用；route handler 不应调用。
- *
- * S12-W05：自动生成 jti（randomUUID）用于撤销与重放保护；调用方可覆盖 jti。
- * 签名密钥来自 SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET（fail-closed，未配置则抛错）。
- */
-export function issueWorkloadToken(
-  claims: Omit<WorkloadTokenClaims, "issuedAt" | "jti"> & { jti?: string },
-): string {
-  const now = Date.now();
-  const full: WorkloadTokenClaims = {
-    ...claims,
-    jti: claims.jti ?? randomUUID(),
-    issuedAt: now,
-  };
-  return signWorkloadTokenPayload(full);
-}
-
-/** 默认 Token TTL（ms）：Runtime/Gateway 5min，Service 10min。 */
-export const WORKLOAD_TOKEN_DEFAULT_TTL_MS = {
-  runtime: 5 * 60 * 1000,
-  gateway: 5 * 60 * 1000,
-  service: 10 * 60 * 1000,
-} as const;
-
-/**
- * CI/CD Service Identity 的默认允许动作（14-production-operations-security-and-retention.md §4、§5）。
- * Service Identity 只能提交引用，不能自报 verification_state；不能发布 Revision。
- *
- * 动作码必须与 action-codes.ts 的稳定 ACTION_CODES 目录对齐：
- * - agent.revision.create（不是 agent.revision.draft）— 与方案 稳定管理动作列表一致。
- */
-export const CICD_SERVICE_ALLOWED_ACTIONS = [
-  "artifact.attestation.verify",
-  "agent.revision.create",
-  "deletion.request",
-] as const;
-
-/** 校验 Service Identity 是否允许执行指定 action code。 */
-export function isServiceActionAllowed(serviceId: string, actionCode: string): boolean {
-  // 当前阶段只有 cicd service；后续扩展其他 service 时在此分支。
-  if (serviceId !== "cicd") {
-    return false;
-  }
-  return (CICD_SERVICE_ALLOWED_ACTIONS as readonly string[]).includes(actionCode);
-}
-
-/** API_STATUS 重新导出，供 route handler 便捷引用。 */
 export { API_STATUS };

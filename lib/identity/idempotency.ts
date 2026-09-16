@@ -31,6 +31,7 @@ import {
   resetFailedForRetry,
 } from "@/lib/identity/idempotency-queries";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
+import type { ServicePrincipal } from "@/lib/identity/service-identity";
 import type {
   IdempotencyCallerType,
   IdempotencyRecord,
@@ -224,17 +225,19 @@ export function callerFromPrincipal(principal: Principal): IdempotencyCaller {
 }
 
 /**
- * 从 WorkloadPrincipal（runtime/gateway/admin Service/Workload Token）提取幂等调用方。
+ * 从执行凭据或独立 Service Identity 提取幂等调用方。
  *
  * - service → callerId = serviceId
  * - workload（runtime/gateway）→ callerId = invocationId（Token 绑定 Invocation）
  *
  * @throws service 缺失 serviceId 或 runtime/gateway 缺失 invocationId 时抛错（调用方应先校验 Token）
  */
-export function callerFromWorkloadPrincipal(principal: WorkloadPrincipal): IdempotencyCaller {
+export function callerFromWorkloadPrincipal(
+  principal: WorkloadPrincipal | ServicePrincipal,
+): IdempotencyCaller {
   if (principal.callerType === "service") {
     if (!principal.serviceId) {
-      throw new Error("callerFromWorkloadPrincipal: service Token 缺失 serviceId");
+      throw new Error("callerFromWorkloadPrincipal: Service Identity 缺失 serviceId");
     }
     return {
       tenantId: principal.tenantId,
@@ -243,21 +246,15 @@ export function callerFromWorkloadPrincipal(principal: WorkloadPrincipal): Idemp
       callerId: principal.serviceId,
     };
   }
-  if (principal.callerType === "workload") {
-    if (!principal.invocationId) {
-      throw new Error("callerFromWorkloadPrincipal: runtime/gateway Token 缺失 invocationId");
-    }
-    return {
-      tenantId: principal.tenantId,
-      audience: principal.audience,
-      callerType: "workload",
-      callerId: principal.invocationId,
-    };
+  if (!principal.invocationId) {
+    throw new Error("callerFromWorkloadPrincipal: execution credential 缺失 invocationId");
   }
-  // device callerType 当前不通过 WorkloadPrincipal 走幂等（Desktop 走 employee audience + 设备签名）
-  throw new Error(
-    `callerFromWorkloadPrincipal: 不支持的 callerType=${principal.callerType as string}`,
-  );
+  return {
+    tenantId: principal.tenantId,
+    audience: principal.audience,
+    callerType: "workload",
+    callerId: principal.invocationId,
+  };
 }
 
 /**
@@ -270,6 +267,7 @@ export function buildReplayResponse(
   record: IdempotencyRecord,
   requestId?: string,
   validateBody?: (body: Record<string, unknown>) => boolean,
+  mapBody?: (body: Record<string, unknown>) => Record<string, unknown>,
 ): Response {
   if (record.processingState !== "completed") {
     throw new Error(
@@ -305,7 +303,10 @@ export function buildReplayResponse(
   if (validateBody && !validateBody(body as Record<string, unknown>)) {
     throw new Error("buildReplayResponse: completed 记录响应结构非法");
   }
-  return Response.json(body, { status, headers });
+  return Response.json(mapBody ? mapBody(body as Record<string, unknown>) : body, {
+    status,
+    headers,
+  });
 }
 
 /**
