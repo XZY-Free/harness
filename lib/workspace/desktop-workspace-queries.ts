@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { getDeviceForUser } from "@/lib/identity/device-queries";
 import { device } from "@/lib/persistence/schema/device";
 import { workspace, workspaceBinding } from "@/lib/persistence/schema/workspace";
+import { computeWorkspaceContractDigest } from "@/lib/workspace/workspace-contract";
 import { and, eq } from "drizzle-orm";
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
@@ -29,9 +30,9 @@ export async function ensureDesktopWorkspace(input: {
   userId: string;
   deviceKey: string;
   displayName: string;
-  locationFingerprint: string;
+  storageScopeDigest: string;
 }): Promise<DesktopWorkspaceRegistration> {
-  if (!SHA256.test(input.locationFingerprint)) {
+  if (!SHA256.test(input.storageScopeDigest)) {
     throw new DesktopWorkspaceUnavailableError("目录指纹无效");
   }
   const displayName = input.displayName.trim();
@@ -44,7 +45,7 @@ export async function ensureDesktopWorkspace(input: {
     throw new DesktopWorkspaceUnavailableError("当前设备尚未注册或已被撤销");
   }
 
-  const workspaceKey = `desktop_${input.locationFingerprint.slice("sha256:".length, 39)}`;
+  const workspaceKey = `desktop_${input.storageScopeDigest.slice("sha256:".length, 39)}`;
   return db.transaction(async (tx) => {
     await tx.insert(workspace).ignore().values({
       tenantId: input.tenantId,
@@ -77,8 +78,7 @@ export async function ensureDesktopWorkspace(input: {
           eq(workspaceBinding.workspaceId, workspaceRow.id),
           eq(workspaceBinding.deviceId, device.id),
           eq(workspaceBinding.bindingType, "desktop"),
-          eq(workspaceBinding.locationFingerprint, input.locationFingerprint),
-          eq(workspaceBinding.bindingState, "active"),
+          eq(workspaceBinding.storageScopeDigest, input.storageScopeDigest),
         ),
       )
       .limit(1);
@@ -89,18 +89,47 @@ export async function ensureDesktopWorkspace(input: {
         id: bindingId,
         tenantId: input.tenantId,
         workspaceId: workspaceRow.id,
+        continuityMode: "HOST_AFFINE",
         bindingType: "desktop",
         deviceId: device.id,
-        locationRef: input.locationFingerprint,
-        locationFingerprint: input.locationFingerprint,
-        bindingState: "active",
-        lastVerifiedAt: new Date(),
+        locationRef: input.storageScopeDigest,
+        storageScopeDigest: input.storageScopeDigest,
+        backendKind: "managed_host",
+        hostIdentity: device.id,
+        storageIdentity: input.storageScopeDigest,
+        accessMode: "read_write",
+        filesystemSemantics: {
+          kind: "desktop",
+          caseSensitive: true,
+          symlinks: true,
+          permissions: true,
+          hardlinks: true,
+          specialFiles: false,
+          xattrsAcl: true,
+          mtime: "preserved",
+        },
+        checkpointPolicy: null,
+        contractDigest: computeWorkspaceContractDigest({
+          bindingId,
+          continuityMode: "HOST_AFFINE",
+          storageScopeDigest: input.storageScopeDigest,
+          hostIdentity: device.id,
+          storageIdentity: input.storageScopeDigest,
+          backendKind: "managed_host",
+          filesystemSemantics: {
+            kind: "desktop",
+            caseSensitive: true,
+            symlinks: true,
+            permissions: true,
+            hardlinks: true,
+            specialFiles: false,
+            xattrsAcl: true,
+            mtime: "preserved",
+          },
+          checkpointPolicy: null,
+        }),
+        createdBy: input.userId,
       });
-    } else {
-      await tx
-        .update(workspaceBinding)
-        .set({ lastVerifiedAt: new Date(), updatedAt: new Date() })
-        .where(eq(workspaceBinding.id, existingBinding.id));
     }
 
     await tx
@@ -139,7 +168,6 @@ export async function resolveWorkspaceBindingId(
         eq(workspace.id, workspaceId),
         eq(workspace.ownerUserId, ownerUserId),
         eq(workspace.lifecycleState, "active"),
-        eq(workspaceBinding.bindingState, "active"),
         eq(device.deviceState, "active"),
       ),
     )

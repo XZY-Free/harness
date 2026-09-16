@@ -34,7 +34,7 @@ describe("Desktop Workspace 绑定", () => {
       userId,
       deviceKey: "device-key-1",
       displayName: "snow_harness",
-      locationFingerprint: `sha256:${"a".repeat(64)}`,
+      storageScopeDigest: `sha256:${"a".repeat(64)}`,
     };
 
     const first = await ensureDesktopWorkspace(input);

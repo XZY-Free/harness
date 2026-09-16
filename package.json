@@ -40,6 +40,7 @@
     "contracts:update": "node scripts/contracts.mjs --write",
     "architecture:check": "depcruise --config dependency-cruiser.config.cjs lib",
     "worker:hosted-provisioning": "tsx scripts/workers/hosted-provisioning-worker.ts",
+    "worker:workspace-host": "tsx scripts/workers/workspace-host.ts",
     "worker:control-plane-outbox": "tsx scripts/workers/control-plane-outbox-worker.ts",
     "worker:runtime-dispatch-retry": "tsx scripts/workers/runtime-dispatch-retry-worker.ts",
     "worker:tool-execution": "tsx scripts/workers/tool-execution-worker.ts",
