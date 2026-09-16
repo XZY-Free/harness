@@ -86,7 +86,7 @@ CREATE TABLE `AgentContractSnapshot` (
 	`agentNameZhCn` varchar(256) NOT NULL,
 	`agentNameEn` varchar(256),
 	`protocolType` varchar(32) NOT NULL,
-	`protocolContractRevision` varchar(128) NOT NULL,
+	`protocolContractDigest` varchar(128) NOT NULL,
 	`scenarioDeclaration` enum('declared','unspecified') NOT NULL,
 	`applicableScenarios` json NOT NULL,
 	`excludedScenarios` json NOT NULL,
@@ -187,7 +187,7 @@ CREATE TABLE `AgentCallBinding` (
 	`credentialRefId` varchar(36),
 	`networkZone` varchar(32) NOT NULL,
 	`protocolType` varchar(32) NOT NULL,
-	`protocolContractRevision` varchar(128) NOT NULL,
+	`protocolContractDigest` varchar(128) NOT NULL,
 	`policyRevisionId` varchar(36) NOT NULL,
 	`policyRulesDigest` varchar(71) NOT NULL,
 	`governanceConfigRevisionId` varchar(36) NOT NULL,
@@ -292,6 +292,25 @@ CREATE TABLE `RoleActionBinding` (
 	CONSTRAINT `RoleActionBinding_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
+CREATE TABLE `BrandChangeAudit` (
+	`id` bigint AUTO_INCREMENT NOT NULL,
+	`revisionBefore` bigint NOT NULL,
+	`revisionAfter` bigint NOT NULL,
+	`patch` json NOT NULL,
+	`changedAt` datetime(3) NOT NULL,
+	`changedBy` varchar(128),
+	CONSTRAINT `BrandChangeAudit_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `BrandSettings` (
+	`id` int NOT NULL DEFAULT 1,
+	`document` json NOT NULL,
+	`revision` bigint NOT NULL DEFAULT 0,
+	`updatedAt` datetime(3) NOT NULL,
+	`updatedBy` varchar(128),
+	CONSTRAINT `BrandSettings_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
 CREATE TABLE `CapabilityUse` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
@@ -370,34 +389,6 @@ CREATE TABLE `Goal` (
 	`updatedAt` datetime(3) NOT NULL,
 	`completedAt` datetime(3),
 	CONSTRAINT `Goal_id` PRIMARY KEY(`id`)
-);
---> statement-breakpoint
-CREATE TABLE `InvocationCommand` (
-	`id` varchar(36) NOT NULL,
-	`invocationId` varchar(36),
-	`threadId` varchar(36) NOT NULL,
-	`turnId` varchar(36),
-	`commandType` enum('steer','interrupt','regenerate','resume','cancel') NOT NULL,
-	`commandPayloadJson` json NOT NULL,
-	`commandPayloadHash` varchar(128) NOT NULL,
-	`commandState` enum('queued','dispatched','acknowledged','failed','cancelled') NOT NULL DEFAULT 'queued',
-	`runtimeExecutionRef` varchar(256),
-	`idempotencyKey` varchar(128),
-	`errorCode` varchar(128),
-	`errorMessage` text,
-	`dispatchAttemptCount` int NOT NULL DEFAULT 0,
-	`nextDispatchAt` datetime(3),
-	`dispatchLeaseOwner` varchar(128),
-	`dispatchLeaseExpiresAt` datetime(3),
-	`lastDispatchAttemptAt` datetime(3),
-	`lastTransientErrorCode` varchar(128),
-	`createdAt` datetime(3) NOT NULL,
-	`dispatchedAt` datetime(3),
-	`acknowledgedAt` datetime(3),
-	`failedAt` datetime(3),
-	`updatedAt` datetime(3) NOT NULL,
-	CONSTRAINT `InvocationCommand_id` PRIMARY KEY(`id`),
-	CONSTRAINT `InvocationCommand_thread_idempotency_uq` UNIQUE(`threadId`,`idempotencyKey`)
 );
 --> statement-breakpoint
 CREATE TABLE `PendingInput` (
@@ -493,6 +484,7 @@ CREATE TABLE `Thread` (
 	`activeGoalId` varchar(36),
 	`title` text,
 	`defaultModelRef` varchar(256),
+	`toolPermissionMode` enum('auto','ask','full_access') NOT NULL DEFAULT 'auto',
 	`defaultEnvironmentDefinitionId` varchar(36),
 	`lifecycleState` enum('active','archived','deleted') NOT NULL DEFAULT 'active',
 	`lastActivityAt` datetime(3) NOT NULL,
@@ -504,7 +496,8 @@ CREATE TABLE `Thread` (
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	`deletedAt` datetime(3),
-	CONSTRAINT `Thread_id` PRIMARY KEY(`id`)
+	CONSTRAINT `Thread_id` PRIMARY KEY(`id`),
+	CONSTRAINT `Thread_tenant_id_uq` UNIQUE(`tenantId`,`id`)
 );
 --> statement-breakpoint
 CREATE TABLE `Turn` (
@@ -671,17 +664,22 @@ CREATE TABLE `EnvironmentChangeRequest` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`threadId` varchar(36) NOT NULL,
-	`invocationId` varchar(36),
-	`fromEnvironmentDefinitionId` varchar(36) NOT NULL,
-	`requestedEnvironmentDefinitionId` varchar(36) NOT NULL,
-	`requestedDeviceId` varchar(36),
-	`requestState` enum('pending','accepted_for_next_invocation','runtime_acknowledged','rejected','expired') NOT NULL DEFAULT 'pending',
-	`reasonCode` varchar(128),
+	`selectionSequence` bigint unsigned NOT NULL,
+	`requestedRevisionId` varchar(36) NOT NULL,
+	`requestState` varchar(32) NOT NULL DEFAULT 'pending',
 	`requestedBy` varchar(128) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`resolvedAt` datetime(3),
-	`updatedAt` datetime(3) NOT NULL,
-	CONSTRAINT `EnvironmentChangeRequest_id` PRIMARY KEY(`id`)
+	`reasonCode` varchar(64),
+	`firstAppliedInvocationId` varchar(36),
+	`expiresAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	CONSTRAINT `EnvironmentChangeRequest_id` PRIMARY KEY(`id`),
+	CONSTRAINT `EnvironmentChangeRequest_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `EnvironmentChangeRequest_tenant_thread_sequence_uq` UNIQUE(`tenantId`,`threadId`,`selectionSequence`),
+	CONSTRAINT `EnvironmentChangeRequest_state_allowed` CHECK(`requestState` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired')),
+	CONSTRAINT `EnvironmentChangeRequest_applied_shape` CHECK(`requestState` <> 'applied' OR `firstAppliedInvocationId` IS NOT NULL),
+	CONSTRAINT `EnvironmentChangeRequest_revision_reference_shape` CHECK(`requestedRevisionId` IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE `EnvironmentDefinition` (
@@ -690,38 +688,85 @@ CREATE TABLE `EnvironmentDefinition` (
 	`environmentKey` varchar(128) NOT NULL,
 	`displayName` varchar(256) NOT NULL,
 	`description` text,
-	`environmentType` enum('desktop','cloud','remote','sandbox') NOT NULL,
-	`filesystemPolicyJson` json NOT NULL,
-	`networkPolicyJson` json NOT NULL,
-	`resourceLimitsJson` json NOT NULL,
-	`secretPolicyJson` json NOT NULL,
-	`lifecycleState` enum('active','archived','deleted') NOT NULL DEFAULT 'active',
-	`versionNo` bigint NOT NULL DEFAULT 1,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	`deletedAt` datetime,
+	`lifecycleState` varchar(32) NOT NULL DEFAULT 'active',
+	`currentRevisionId` varchar(36),
+	`lastRevisionNo` bigint unsigned NOT NULL DEFAULT 0,
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`deletedAt` datetime(6),
 	CONSTRAINT `EnvironmentDefinition_id` PRIMARY KEY(`id`),
-	CONSTRAINT `EnvironmentDefinition_tenant_key_uq` UNIQUE(`tenantId`,`environmentKey`)
+	CONSTRAINT `EnvironmentDefinition_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `EnvironmentDefinition_tenant_key_uq` UNIQUE(`tenantId`,`environmentKey`),
+	CONSTRAINT `EnvironmentDefinition_lifecycle_allowed` CHECK(`lifecycleState` IN ('active', 'archived', 'deleted')),
+	CONSTRAINT `EnvironmentDefinition_current_revision_shape` CHECK(`lifecycleState` <> 'active' OR `currentRevisionId` IS NOT NULL OR `lastRevisionNo` = 0)
 );
 --> statement-breakpoint
 CREATE TABLE `EnvironmentLease` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`environmentDefinitionId` varchar(36) NOT NULL,
 	`invocationId` varchar(36) NOT NULL,
 	`attemptId` varchar(36) NOT NULL,
+	`environmentDefinitionRevisionId` varchar(36) NOT NULL,
 	`deviceId` varchar(36),
-	`workerRef` varchar(256),
-	`leaseState` enum('allocated','active','releasing','released','expired','lost') NOT NULL DEFAULT 'allocated',
+	`workerRef` varchar(512),
+	`hostIdentity` varchar(512),
+	`storageIdentity` varchar(71),
+	`leaseState` varchar(32) NOT NULL DEFAULT 'allocated',
+	`readinessState` varchar(32) NOT NULL DEFAULT 'unresolved',
 	`capabilitiesJson` json,
-	`allocatedAt` datetime(3) NOT NULL,
-	`lastHeartbeatAt` datetime(3),
-	`releasedAt` datetime(3),
-	`expiresAt` datetime(3),
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
+	`complianceEvidence` json,
+	`complianceDigest` varchar(71),
+	`preparedEvidence` json,
+	`preparedDigest` varchar(71),
+	`preparedAt` datetime(6),
+	`activationOwnershipId` varchar(36),
+	`resourceManifest` json NOT NULL,
+	`cleanupLeaseOwner` varchar(128),
+	`cleanupLeaseExpiresAt` datetime(6),
+	`nextCleanupAt` datetime(6),
+	`cleanupCount` int unsigned NOT NULL DEFAULT 0,
+	`lastErrorCode` varchar(64),
+	`allocatedAt` datetime(6) NOT NULL,
+	`lastHeartbeatAt` datetime(6),
+	`expiresAt` datetime(6) NOT NULL,
+	`releasedAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `EnvironmentLease_id` PRIMARY KEY(`id`),
-	CONSTRAINT `EnvironmentLease_invocation_attempt_uq` UNIQUE(`invocationId`,`attemptId`)
+	CONSTRAINT `EnvironmentLease_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `EnvironmentLease_invocation_attempt_uq` UNIQUE(`tenantId`,`invocationId`,`attemptId`),
+	CONSTRAINT `EnvironmentLease_lease_state_allowed` CHECK(`leaseState` IN ('allocated', 'active', 'releasing', 'released', 'expired', 'lost')),
+	CONSTRAINT `EnvironmentLease_readiness_state_allowed` CHECK(`readinessState` IN ('unresolved', 'preparing', 'prepared', 'activating', 'ready', 'blocked')),
+	CONSTRAINT `EnvironmentLease_activation_shape` CHECK((`readinessState` = 'ready' AND `leaseState` = 'active' AND `activationOwnershipId` IS NOT NULL) OR `readinessState` <> 'ready'),
+	CONSTRAINT `EnvironmentLease_compliance_shape` CHECK(`readinessState` NOT IN ('prepared', 'ready') OR (`capabilitiesJson` IS NOT NULL AND `complianceEvidence` IS NOT NULL AND `complianceDigest` IS NOT NULL AND `preparedEvidence` IS NOT NULL AND `preparedDigest` IS NOT NULL AND `preparedAt` IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE TABLE `EnvironmentDefinitionRevision` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`definitionId` varchar(36) NOT NULL,
+	`revisionNo` bigint unsigned NOT NULL,
+	`environmentType` varchar(32) NOT NULL,
+	`filesystemPolicyJson` json NOT NULL,
+	`networkPolicyJson` json NOT NULL,
+	`resourceLimitsJson` json NOT NULL,
+	`secretPolicyJson` json NOT NULL,
+	`executionTarget` json NOT NULL,
+	`requiredCapabilities` json NOT NULL,
+	`semanticDigest` varchar(71) NOT NULL,
+	`createdByType` varchar(16) NOT NULL,
+	`createdById` varchar(128) NOT NULL,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	CONSTRAINT `EnvironmentDefinitionRevision_id` PRIMARY KEY(`id`),
+	CONSTRAINT `EnvironmentDefinitionRevision_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `EnvironmentDefinitionRevision_tenant_definition_revision_uq` UNIQUE(`tenantId`,`definitionId`,`revisionNo`),
+	CONSTRAINT `EnvironmentDefinitionRevision_tenant_definition_id_uq` UNIQUE(`tenantId`,`definitionId`,`id`),
+	CONSTRAINT `EnvironmentDefinitionRevision_revisionNo_positive` CHECK(`revisionNo` >= 1),
+	CONSTRAINT `EnvironmentDefinitionRevision_createdByType_allowed` CHECK(`createdByType` IN ('user', 'service')),
+	CONSTRAINT `EnvironmentDefinitionRevision_semanticDigest_format` CHECK(`semanticDigest` REGEXP '^sha256:[0-9a-f]{64}$'),
+	CONSTRAINT `EnvironmentDefinitionRevision_environment_type_allowed` CHECK(`environmentType` IN ('desktop', 'cloud', 'remote', 'sandbox'))
 );
 --> statement-breakpoint
 CREATE TABLE `evaluation_case` (
@@ -793,15 +838,33 @@ CREATE TABLE `FileChange` (
 CREATE TABLE `FilesystemCheckpoint` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`workspaceBindingId` varchar(36) NOT NULL,
 	`invocationId` varchar(36) NOT NULL,
-	`checkpointType` varchar(32) NOT NULL,
-	`checkpointRef` varchar(512) NOT NULL,
-	`baseRevisionRef` varchar(512),
-	`contentHash` varchar(128) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`expiresAt` datetime(3),
-	CONSTRAINT `FilesystemCheckpoint_id` PRIMARY KEY(`id`)
+	`attemptId` varchar(36) NOT NULL,
+	`ownershipId` varchar(36) NOT NULL,
+	`workspaceBindingId` varchar(36) NOT NULL,
+	`environmentDefinitionRevisionId` varchar(36) NOT NULL,
+	`leaseEpoch` bigint unsigned NOT NULL,
+	`checkpointIntentId` varchar(36) NOT NULL,
+	`writerGeneration` bigint unsigned NOT NULL,
+	`recoveryVersion` bigint unsigned NOT NULL,
+	`producerSequence` bigint unsigned NOT NULL,
+	`recoveryAnchor` json NOT NULL,
+	`recoveryAnchorDigest` varchar(71) NOT NULL,
+	`snapshotFormat` varchar(32) NOT NULL,
+	`manifestRef` varchar(512) NOT NULL,
+	`manifestDigest` varchar(71) NOT NULL,
+	`contentRootDigest` varchar(71) NOT NULL,
+	`fileCount` int unsigned NOT NULL,
+	`totalBytes` bigint unsigned NOT NULL,
+	`filesystemSemantics` json NOT NULL,
+	`storageEvidence` json NOT NULL,
+	`committedAt` datetime(6) NOT NULL,
+	CONSTRAINT `FilesystemCheckpoint_id` PRIMARY KEY(`id`),
+	CONSTRAINT `FilesystemCheckpoint_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `FilesystemCheckpoint_tenant_invocation_intent_uq` UNIQUE(`tenantId`,`invocationId`,`checkpointIntentId`),
+	CONSTRAINT `FilesystemCheckpoint_snapshot_format_allowed` CHECK(`snapshotFormat` = 'content_manifest'),
+	CONSTRAINT `FilesystemCheckpoint_sizes_non_negative` CHECK(`fileCount` >= 0 AND `totalBytes` >= 0),
+	CONSTRAINT `FilesystemCheckpoint_digest_shape` CHECK(`manifestDigest` REGEXP '^sha256:[0-9a-f]{64}$' AND `contentRootDigest` REGEXP '^sha256:[0-9a-f]{64}$' AND `recoveryAnchorDigest` REGEXP '^sha256:[0-9a-f]{64}$')
 );
 --> statement-breakpoint
 CREATE TABLE `GovernanceConfigRevision` (
@@ -960,41 +1023,52 @@ CREATE TABLE `JobCommand` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`jobId` varchar(36) NOT NULL,
-	`commandType` enum('cancel','retry') NOT NULL,
-	`commandState` enum('queued','dispatched','acknowledged','rejected') NOT NULL DEFAULT 'queued',
-	`idempotencyKey` varchar(128),
-	`requestedBy` varchar(36),
-	`reasonCode` varchar(128),
-	`replacementJobId` varchar(36),
-	`errorCode` varchar(128),
-	`errorSummary` text,
-	`commandPayloadJson` json,
-	`createdAt` datetime(3) NOT NULL,
-	`dispatchedAt` datetime(3),
-	`acknowledgedAt` datetime(3),
+	`invocationId` varchar(36),
+	`commandType` varchar(32) NOT NULL,
+	`commandState` varchar(32) NOT NULL DEFAULT 'queued',
+	`idempotencyKey` varchar(128) NOT NULL,
+	`payloadJson` json NOT NULL,
+	`payloadHash` varchar(71) NOT NULL,
+	`requestedByType` varchar(16) NOT NULL,
+	`requestedById` varchar(128) NOT NULL,
+	`leaseOwner` varchar(128),
+	`leaseExpiresAt` datetime(6),
+	`deliveryCount` int unsigned NOT NULL DEFAULT 0,
+	`nextAttemptAt` datetime(6) NOT NULL,
+	`lastErrorCode` varchar(64),
+	`resultJson` json,
+	`completedAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `JobCommand_id` PRIMARY KEY(`id`),
-	CONSTRAINT `JobCommand_job_idempotency_uq` UNIQUE(`jobId`,`idempotencyKey`)
+	CONSTRAINT `JobCommand_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `JobCommand_tenant_job_idempotency_uq` UNIQUE(`tenantId`,`jobId`,`idempotencyKey`),
+	CONSTRAINT `JobCommand_type_allowed` CHECK(`commandType` IN ('cancel', 'retry', 'execution_terminal')),
+	CONSTRAINT `JobCommand_state_allowed` CHECK(`commandState` IN ('queued', 'dispatched', 'waiting', 'acknowledged', 'rejected')),
+	CONSTRAINT `JobCommand_terminal_shape` CHECK(`commandType` <> 'execution_terminal' OR `invocationId` IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE `JobEvent` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`jobId` varchar(36) NOT NULL,
-	`eventSequence` bigint NOT NULL,
-	`eventType` enum('job.queued','job.started','job.progress_updated','job.result_recorded','job.waiting','job.cancel_requested','job.retry_requested','job.completed','job.failed','job.cancelled','job.invocation_queued','job.invocation_started','job.invocation_waiting','job.invocation_resumed','job.invocation_completed','job.invocation_failed','job.invocation_cancelled','job.invocation_lost') NOT NULL,
-	`schemaVersion` int NOT NULL DEFAULT 1,
+	`eventSequence` bigint unsigned NOT NULL,
+	`eventType` varchar(64) NOT NULL,
+	`schemaVersion` int unsigned NOT NULL DEFAULT 1,
 	`invocationId` varchar(36),
-	`actorType` enum('user','agent','system','tool','service') NOT NULL,
-	`actorId` varchar(36),
+	`actorType` varchar(16) NOT NULL,
+	`actorId` varchar(128),
 	`payloadJson` json NOT NULL,
 	`correlationId` varchar(128),
 	`causationId` varchar(128),
 	`idempotencyKey` varchar(128),
-	`occurredAt` datetime(3) NOT NULL,
-	`ingestedAt` datetime(3) NOT NULL,
+	`occurredAt` datetime(6) NOT NULL,
+	`ingestedAt` datetime(6) NOT NULL,
 	CONSTRAINT `JobEvent_id` PRIMARY KEY(`id`),
-	CONSTRAINT `JobEvent_job_sequence_uq` UNIQUE(`jobId`,`eventSequence`),
-	CONSTRAINT `JobEvent_job_idempotency_uq` UNIQUE(`jobId`,`idempotencyKey`)
+	CONSTRAINT `JobEvent_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `JobEvent_tenant_job_sequence_uq` UNIQUE(`tenantId`,`jobId`,`eventSequence`),
+	CONSTRAINT `JobEvent_tenant_job_idempotency_uq` UNIQUE(`tenantId`,`jobId`,`idempotencyKey`)
 );
 --> statement-breakpoint
 CREATE TABLE `JobResultProjection` (
@@ -1003,40 +1077,52 @@ CREATE TABLE `JobResultProjection` (
 	`itemId` varchar(36) NOT NULL,
 	`jobId` varchar(36) NOT NULL,
 	`sourceTurnId` varchar(36) NOT NULL,
-	`projectionKind` enum('existing_source_turn','system_triggered_turn') NOT NULL,
+	`projectionKind` varchar(32) NOT NULL,
 	`resultRef` varchar(512) NOT NULL,
-	`resultHash` varchar(128) NOT NULL,
+	`resultHash` varchar(71) NOT NULL,
 	`resultSummaryJson` json,
-	`createdBy` varchar(36),
-	`createdAt` datetime(3) NOT NULL,
+	`createdBy` varchar(128),
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `JobResultProjection_id` PRIMARY KEY(`id`),
-	CONSTRAINT `JobResultProjection_item_uq` UNIQUE(`itemId`)
+	CONSTRAINT `JobResultProjection_item_uq` UNIQUE(`itemId`),
+	CONSTRAINT `JobResultProjection_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `JobResultProjection_kind_allowed` CHECK(`projectionKind` IN ('existing_source_turn', 'system_triggered_turn'))
 );
 --> statement-breakpoint
 CREATE TABLE `Job` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`agentId` varchar(36) NOT NULL,
-	`jobType` enum('scheduled','batch','deployment','evaluation','knowledge_build','system') NOT NULL,
-	`triggerRef` varchar(256) NOT NULL,
-	`jobState` enum('queued','running','waiting_external','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
+	`jobType` varchar(32) NOT NULL,
+	`triggerRef` varchar(512) NOT NULL,
+	`creationKey` varchar(128) NOT NULL,
+	`jobState` varchar(32) NOT NULL DEFAULT 'queued',
 	`replacesJobId` varchar(36),
 	`threadId` varchar(36),
-	`completionPolicyJson` json NOT NULL,
+	`inputKind` varchar(32) NOT NULL,
+	`inputJson` json,
 	`inputRef` varchar(512),
-	`inputHash` varchar(128),
-	`lastEventSequence` bigint NOT NULL DEFAULT 0,
+	`inputHash` varchar(71) NOT NULL,
+	`completionPolicyJson` json NOT NULL,
+	`lastEventSequence` bigint unsigned NOT NULL DEFAULT 0,
 	`resultRef` varchar(512),
-	`resultHash` varchar(128),
-	`errorCode` varchar(128),
+	`resultHash` varchar(71),
+	`errorCode` varchar(64),
 	`errorSummary` text,
-	`createdBy` varchar(36),
-	`createdAt` datetime(3) NOT NULL,
-	`startedAt` datetime(3),
-	`finishedAt` datetime(3),
-	`updatedAt` datetime(3) NOT NULL,
-	`versionNo` bigint NOT NULL DEFAULT 1,
-	CONSTRAINT `Job_id` PRIMARY KEY(`id`)
+	`createdBy` varchar(128) NOT NULL,
+	`startedAt` datetime(6),
+	`finishedAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	CONSTRAINT `Job_id` PRIMARY KEY(`id`),
+	CONSTRAINT `Job_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `Job_tenant_creation_key_uq` UNIQUE(`tenantId`,`creationKey`),
+	CONSTRAINT `Job_type_allowed` CHECK(`jobType` IN ('scheduled', 'batch', 'deployment', 'evaluation', 'knowledge_build', 'system')),
+	CONSTRAINT `Job_state_allowed` CHECK(`jobState` IN ('queued', 'running', 'waiting_external', 'completed', 'failed', 'cancelled')),
+	CONSTRAINT `Job_input_kind_allowed` CHECK(`inputKind` IN ('inline', 'reference')),
+	CONSTRAINT `Job_input_shape` CHECK((`inputKind` = 'inline' AND `inputJson` IS NOT NULL AND `inputRef` IS NULL) OR (`inputKind` = 'reference' AND `inputJson` IS NULL AND `inputRef` IS NOT NULL)),
+	CONSTRAINT `Job_terminal_shape` CHECK(((`finishedAt` IS NULL AND `jobState` NOT IN ('completed', 'failed', 'cancelled')) OR (`finishedAt` IS NOT NULL AND `jobState` IN ('completed', 'failed', 'cancelled'))))
 );
 --> statement-breakpoint
 CREATE TABLE `KnowledgeBase` (
@@ -1445,11 +1531,13 @@ CREATE TABLE `RetentionPolicy` (
 --> statement-breakpoint
 CREATE TABLE `RuntimeRevision` (
 	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
 	`runtimeId` varchar(36) NOT NULL,
-	`revisionNo` bigint NOT NULL,
+	`revisionNo` bigint unsigned NOT NULL,
 	`protocolType` varchar(32) NOT NULL,
-	`protocolContractRevision` varchar(128) NOT NULL,
-	`runtimeEvidenceKind` enum('hosted_artifact','external_endpoint') NOT NULL,
+	`protocolVersion` int unsigned NOT NULL,
+	`protocolContractDigest` varchar(71) NOT NULL,
+	`runtimeEvidenceKind` varchar(32) NOT NULL,
 	`runtimeTargetDigest` varchar(71) NOT NULL,
 	`endpointRef` varchar(512) NOT NULL,
 	`runtimeArtifactRef` varchar(512),
@@ -1458,14 +1546,17 @@ CREATE TABLE `RuntimeRevision` (
 	`runtimeCapabilitiesJson` json NOT NULL,
 	`identityMode` varchar(32) NOT NULL,
 	`networkZone` varchar(32) NOT NULL,
-	`configHash` varchar(128) NOT NULL,
+	`configHash` varchar(71) NOT NULL,
 	`credentialRefId` varchar(36),
-	`revisionState` enum('draft','published','withdrawn') NOT NULL DEFAULT 'draft',
+	`revisionState` varchar(32) NOT NULL DEFAULT 'draft',
 	`createdBy` varchar(128) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`publishedAt` datetime(3),
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`publishedAt` datetime(6),
 	CONSTRAINT `RuntimeRevision_id` PRIMARY KEY(`id`),
-	CONSTRAINT `RuntimeRevision_runtime_revisionNo_uq` UNIQUE(`runtimeId`,`revisionNo`)
+	CONSTRAINT `RuntimeRevision_runtime_revisionNo_uq` UNIQUE(`runtimeId`,`revisionNo`),
+	CONSTRAINT `RuntimeRevision_evidence_allowed` CHECK(`runtimeEvidenceKind` IN ('hosted_artifact', 'external_endpoint')),
+	CONSTRAINT `RuntimeRevision_state_allowed` CHECK(`revisionState` IN ('draft', 'published', 'withdrawn')),
+	CONSTRAINT `RuntimeRevision_protocol_version_allowed` CHECK(`protocolVersion` = 3)
 );
 --> statement-breakpoint
 CREATE TABLE `Runtime` (
@@ -1473,16 +1564,18 @@ CREATE TABLE `Runtime` (
 	`tenantId` varchar(36) NOT NULL,
 	`runtimeKey` varchar(128) NOT NULL,
 	`displayName` varchar(256) NOT NULL,
-	`runtimeKind` enum('hosted','external') NOT NULL,
+	`runtimeKind` varchar(32) NOT NULL,
 	`ownerUserId` varchar(36) NOT NULL,
-	`lifecycleState` enum('draft','enabled','disabled','retired') NOT NULL DEFAULT 'draft',
+	`lifecycleState` varchar(32) NOT NULL DEFAULT 'draft',
 	`currentRevisionId` varchar(36),
-	`versionNo` bigint NOT NULL DEFAULT 1,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	`deletedAt` datetime,
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`deletedAt` datetime(6),
 	CONSTRAINT `Runtime_id` PRIMARY KEY(`id`),
-	CONSTRAINT `Runtime_tenant_runtimeKey_uq` UNIQUE(`tenantId`,`runtimeKey`)
+	CONSTRAINT `Runtime_tenant_runtimeKey_uq` UNIQUE(`tenantId`,`runtimeKey`),
+	CONSTRAINT `Runtime_kind_allowed` CHECK(`runtimeKind` IN ('hosted', 'external')),
+	CONSTRAINT `Runtime_lifecycle_allowed` CHECK(`lifecycleState` IN ('draft', 'enabled', 'disabled', 'retired'))
 );
 --> statement-breakpoint
 CREATE TABLE `ExecutionBinding` (
@@ -1490,151 +1583,273 @@ CREATE TABLE `ExecutionBinding` (
 	`tenantId` varchar(36) NOT NULL,
 	`runtimeRevisionId` varchar(36) NOT NULL,
 	`deploymentRouteId` varchar(36) NOT NULL,
-	`modelProvider` varchar(128) NOT NULL,
-	`modelId` varchar(256) NOT NULL,
-	`modelRevisionRef` varchar(256),
-	`initialEnvironmentLeaseId` varchar(36),
-	`workspaceBindingId` varchar(36),
-	`policyRevisionId` varchar(36) NOT NULL,
-	`policyRulesDigest` varchar(71) NOT NULL,
-	`governanceConfigRevisionId` varchar(36) NOT NULL,
-	`governanceConfigDigest` varchar(71) NOT NULL,
-	`contextCheckpointId` varchar(36),
 	`routeRevisionId` varchar(36) NOT NULL,
 	`routeActivationId` varchar(36) NOT NULL,
+	`policyRevisionId` varchar(36) NOT NULL,
+	`governanceConfigRevisionId` varchar(36) NOT NULL,
+	`runtimePublicationRecordId` varchar(36) NOT NULL,
+	`conformanceRunId` varchar(36) NOT NULL,
+	`modelProvider` varchar(128) NOT NULL,
+	`modelId` varchar(256) NOT NULL,
+	`modelRevisionRef` varchar(512),
+	`policyRulesDigest` varchar(71) NOT NULL,
+	`governanceConfigDigest` varchar(71) NOT NULL,
 	`routeContentDigest` varchar(71) NOT NULL,
-	`runtimeArtifactId` varchar(36),
-	`runtimeArtifactDigest` varchar(71),
-	`runtimeEvidenceKind` enum('hosted_artifact','external_endpoint') NOT NULL,
 	`runtimeConfigDigest` varchar(71) NOT NULL,
 	`runtimeTargetDigest` varchar(71) NOT NULL,
 	`capabilityManifestDigest` varchar(71) NOT NULL,
-	`runtimeAttestationIds` json NOT NULL,
-	`runtimePublicationRecordId` varchar(36) NOT NULL,
-	`conformanceRunId` varchar(36) NOT NULL,
 	`resolutionInputDigest` varchar(71) NOT NULL,
-	`projectionVersionNo` int NOT NULL,
-	`environmentDefinitionRevisionId` varchar(36),
-	`capabilityCatalogJson` json NOT NULL,
 	`capabilityCatalogDigest` varchar(71) NOT NULL,
+	`configHash` varchar(71) NOT NULL,
+	`runtimeEvidenceKind` varchar(32) NOT NULL,
+	`runtimeArtifactId` varchar(36),
+	`runtimeArtifactDigest` varchar(71),
+	`runtimeAttestationIds` json NOT NULL,
+	`projectionVersionNo` bigint unsigned NOT NULL,
+	`capabilityCatalogJson` json NOT NULL,
 	`capabilityCatalogVersion` varchar(32) NOT NULL,
 	`capabilityCatalogSourceRefs` json NOT NULL,
-	`capabilityCatalogCreatedAt` datetime(3) NOT NULL,
-	`executionSubjectType` enum('user','service') NOT NULL,
-	`executionSubjectId` varchar(128) NOT NULL,
-	`executionSubjectSource` enum('authenticated_user','trusted_service') NOT NULL,
-	`executionSubjectFrozenAt` datetime(3) NOT NULL,
-	`configHash` varchar(128) NOT NULL,
-	`boundAt` datetime(3) NOT NULL,
+	`capabilityCatalogCreatedAt` datetime(6) NOT NULL,
+	`principalType` varchar(32) NOT NULL,
+	`principalId` varchar(128) NOT NULL,
+	`principalSource` varchar(32) NOT NULL,
+	`principalFrozenAt` datetime(6) NOT NULL,
+	`environmentMode` varchar(32) NOT NULL,
+	`environmentDefinitionRevisionId` varchar(36),
+	`workspaceBindingId` varchar(36) NOT NULL,
+	`boundAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `ExecutionBinding_invocationId` PRIMARY KEY(`invocationId`),
-	CONSTRAINT `ExecutionBinding_runtimeAttestationIds_non_empty` CHECK(JSON_TYPE(`ExecutionBinding`.`runtimeAttestationIds`) = 'ARRAY' AND (JSON_LENGTH(`ExecutionBinding`.`runtimeAttestationIds`) >= 1 OR `ExecutionBinding`.`runtimeEvidenceKind` = 'external_endpoint'))
+	CONSTRAINT `ExecutionBinding_tenant_invocation_uq` UNIQUE(`tenantId`,`invocationId`),
+	CONSTRAINT `ExecutionBinding_runtime_evidence_allowed` CHECK(`runtimeEvidenceKind` IN ('hosted_artifact', 'external_endpoint')),
+	CONSTRAINT `ExecutionBinding_principal_type_allowed` CHECK(`principalType` IN ('user', 'service')),
+	CONSTRAINT `ExecutionBinding_principal_source_allowed` CHECK(`principalSource` IN ('authenticated_user', 'trusted_service')),
+	CONSTRAINT `ExecutionBinding_environment_mode_allowed` CHECK(`environmentMode` IN ('MANAGED', 'NO_PLATFORM_ENVIRONMENT')),
+	CONSTRAINT `ExecutionBinding_environment_reference_shape` CHECK((`environmentMode` = 'MANAGED' AND `environmentDefinitionRevisionId` IS NOT NULL) OR (`environmentMode` = 'NO_PLATFORM_ENVIRONMENT' AND `environmentDefinitionRevisionId` IS NULL)),
+	CONSTRAINT `ExecutionBinding_artifact_evidence_shape` CHECK((`runtimeEvidenceKind` = 'hosted_artifact' AND `runtimeArtifactId` IS NOT NULL AND `runtimeArtifactDigest` IS NOT NULL) OR (`runtimeEvidenceKind` = 'external_endpoint' AND `runtimeArtifactId` IS NULL AND `runtimeArtifactDigest` IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `ExecutionOwnership` (
 	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
 	`invocationId` varchar(36) NOT NULL,
-	`deviceId` varchar(36),
+	`attemptId` varchar(36) NOT NULL,
 	`environmentLeaseId` varchar(36),
-	`ownershipState` enum('active','released','lost') NOT NULL DEFAULT 'active',
-	`leaseEpoch` bigint NOT NULL,
-	`acquiredAt` datetime(3) NOT NULL,
-	`lastHeartbeatAt` datetime(3),
-	`releasedAt` datetime(3),
+	`leaseEpoch` bigint unsigned NOT NULL,
+	`ownershipState` varchar(32) NOT NULL DEFAULT 'active',
+	`activeSlot` tinyint GENERATED ALWAYS AS (CASE `ownershipState` WHEN 'active' THEN 1 ELSE NULL END) STORED,
+	`executionPhase` varchar(32) NOT NULL DEFAULT 'activating',
+	`acquiredAt` datetime(6) NOT NULL,
+	`lastHeartbeatAt` datetime(6) NOT NULL,
+	`leaseExpiresAt` datetime(6) NOT NULL,
+	`dispatchDeadline` datetime(6) NOT NULL,
+	`releasedAt` datetime(6),
+	`reasonCode` varchar(64),
+	`reasonDetail` json,
+	`acquiredByType` varchar(32) NOT NULL,
+	`acquiredById` varchar(128) NOT NULL,
+	`closedByType` varchar(16),
+	`closedById` varchar(128),
+	`workspaceWriterGeneration` bigint unsigned,
+	`activationEvidence` json,
+	`activationDigest` varchar(71),
+	`activatedAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `ExecutionOwnership_id` PRIMARY KEY(`id`),
-	CONSTRAINT `ExecutionOwnership_invocation_epoch_uq` UNIQUE(`invocationId`,`leaseEpoch`)
+	CONSTRAINT `ExecutionOwnership_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `ExecutionOwnership_tenant_invocation_epoch_uq` UNIQUE(`tenantId`,`invocationId`,`leaseEpoch`),
+	CONSTRAINT `ExecutionOwnership_tenant_invocation_active_slot_uq` UNIQUE(`tenantId`,`invocationId`,`activeSlot`),
+	CONSTRAINT `ExecutionOwnership_tenant_invocation_attempt_id_epoch_uq` UNIQUE(`tenantId`,`invocationId`,`attemptId`,`id`,`leaseEpoch`),
+	CONSTRAINT `ExecutionOwnership_state_allowed` CHECK(`ownershipState` IN ('active', 'released', 'lost', 'revoked')),
+	CONSTRAINT `ExecutionOwnership_phase_allowed` CHECK(`executionPhase` IN ('activating', 'dispatching', 'executing', 'suspending')),
+	CONSTRAINT `ExecutionOwnership_acquired_by_allowed` CHECK(`acquiredByType` IN ('system', 'service')),
+	CONSTRAINT `ExecutionOwnership_epoch_positive` CHECK(`leaseEpoch` >= 1),
+	CONSTRAINT `ExecutionOwnership_lease_expiry_shape` CHECK(`leaseExpiresAt` > `acquiredAt`),
+	CONSTRAINT `ExecutionOwnership_active_shape` CHECK((`ownershipState` = 'active' AND `releasedAt` IS NULL) OR (`ownershipState` <> 'active' AND `releasedAt` IS NOT NULL)),
+	CONSTRAINT `ExecutionOwnership_executing_activation_shape` CHECK(`executionPhase` <> 'executing' OR (`activatedAt` IS NOT NULL AND `activationDigest` IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `InvocationAttempt` (
 	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
 	`invocationId` varchar(36) NOT NULL,
-	`attemptNo` int NOT NULL,
-	`attemptState` enum('queued','running','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
-	`environmentLeaseId` varchar(36),
-	`workerRef` varchar(256),
-	`runtimeExecutionRef` varchar(256),
-	`checkpointRef` varchar(512),
+	`attemptNo` int unsigned NOT NULL,
+	`attemptState` varchar(32) NOT NULL DEFAULT 'queued',
+	`preparationState` varchar(32) NOT NULL DEFAULT 'pending',
+	`preparationEvidence` json,
+	`preparationDigest` varchar(71),
+	`preparedAt` datetime(6),
+	`preparationLeaseOwner` varchar(128),
+	`preparationLeaseExpiresAt` datetime(6),
+	`nextPreparationAt` datetime(6),
+	`preparationCount` int unsigned NOT NULL DEFAULT 0,
+	`resumeAnchor` json,
+	`resumeAnchorDigest` varchar(71),
+	`filesystemCheckpointId` varchar(36),
 	`retryReasonCode` varchar(64),
-	`startedAt` datetime(3),
-	`finishedAt` datetime(3),
-	`lastHeartbeatAt` datetime(3),
-	`errorCode` varchar(128),
+	`startedAt` datetime(6),
+	`finishedAt` datetime(6),
+	`errorCode` varchar(64),
 	`errorSummary` text,
-	`dispatchAttemptCount` int NOT NULL DEFAULT 0,
-	`nextDispatchAt` datetime(3),
-	`dispatchLeaseOwner` varchar(128),
-	`dispatchLeaseExpiresAt` datetime(3),
-	`lastDispatchAttemptAt` datetime(3),
-	`lastTransientErrorCode` varchar(128),
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `InvocationAttempt_id` PRIMARY KEY(`id`),
-	CONSTRAINT `InvocationAttempt_invocation_attempt_uq` UNIQUE(`invocationId`,`attemptNo`)
+	CONSTRAINT `InvocationAttempt_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `InvocationAttempt_tenant_invocation_attempt_no_uq` UNIQUE(`tenantId`,`invocationId`,`attemptNo`),
+	CONSTRAINT `InvocationAttempt_tenant_invocation_id_uq` UNIQUE(`tenantId`,`invocationId`,`id`),
+	CONSTRAINT `InvocationAttempt_state_allowed` CHECK(`attemptState` IN ('queued', 'running', 'suspended', 'completed', 'failed', 'cancelled', 'lost')),
+	CONSTRAINT `InvocationAttempt_preparation_state_allowed` CHECK(`preparationState` IN ('pending', 'preparing', 'prepared', 'failed')),
+	CONSTRAINT `InvocationAttempt_attempt_no_positive` CHECK(`attemptNo` >= 1),
+	CONSTRAINT `InvocationAttempt_preparation_evidence_shape` CHECK((`preparationState` = 'prepared' AND `preparationEvidence` IS NOT NULL AND `preparationDigest` IS NOT NULL AND `preparedAt` IS NOT NULL) OR `preparationState` <> 'prepared'),
+	CONSTRAINT `InvocationAttempt_terminal_shape` CHECK(((`finishedAt` IS NULL AND `attemptState` NOT IN ('completed', 'failed', 'cancelled', 'lost')) OR (`finishedAt` IS NOT NULL AND `attemptState` IN ('completed', 'failed', 'cancelled', 'lost'))))
+);
+--> statement-breakpoint
+CREATE TABLE `InvocationCommand` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`invocationId` varchar(36) NOT NULL,
+	`commandType` varchar(32) NOT NULL,
+	`commandState` varchar(32) NOT NULL DEFAULT 'queued',
+	`idempotencyKey` varchar(128) NOT NULL,
+	`payloadJson` json NOT NULL,
+	`payloadDigest` varchar(71) NOT NULL,
+	`targetOwnershipId` varchar(36),
+	`targetSessionId` varchar(36),
+	`requestedByType` varchar(16) NOT NULL,
+	`requestedById` varchar(128) NOT NULL,
+	`dispatchCount` int unsigned NOT NULL DEFAULT 0,
+	`nextDispatchAt` datetime(6),
+	`dispatchLeaseOwner` varchar(128),
+	`dispatchLeaseExpiresAt` datetime(6),
+	`receiptJson` json,
+	`lastErrorCode` varchar(64),
+	`completedAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	CONSTRAINT `InvocationCommand_id` PRIMARY KEY(`id`),
+	CONSTRAINT `InvocationCommand_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `InvocationCommand_tenant_invocation_idempotency_uq` UNIQUE(`tenantId`,`invocationId`,`idempotencyKey`),
+	CONSTRAINT `InvocationCommand_type_allowed` CHECK(`commandType` IN ('cancel', 'resume', 'steer', 'checkpoint')),
+	CONSTRAINT `InvocationCommand_state_allowed` CHECK(`commandState` IN ('queued', 'dispatched', 'acknowledged', 'failed')),
+	CONSTRAINT `InvocationCommand_digest_shape` CHECK(`payloadDigest` LIKE 'sha256:%')
 );
 --> statement-breakpoint
 CREATE TABLE `Invocation` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
+	`subjectType` varchar(32) NOT NULL,
 	`threadId` varchar(36),
 	`turnId` varchar(36),
 	`jobId` varchar(36),
-	`invocationSequence` bigint NOT NULL,
-	`invocationKind` enum('initial','regenerate','job') NOT NULL,
-	`executionState` enum('queued','running','waiting_user','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
 	`triggerItemId` varchar(36),
 	`replacesInvocationId` varchar(36),
 	`outputItemId` varchar(36),
+	`invocationSequence` bigint unsigned NOT NULL,
+	`invocationKind` varchar(32) NOT NULL,
+	`executionState` varchar(32) NOT NULL DEFAULT 'queued',
+	`inputDigest` varchar(71) NOT NULL,
 	`resultRef` varchar(512),
-	`runtimeSessionBindingId` varchar(36),
-	`runtimeExecutionRef` varchar(256),
-	`startedAt` datetime(3),
-	`finishedAt` datetime(3),
-	`lastHeartbeatAt` datetime(3),
-	`errorCode` varchar(128),
+	`resultDigest` varchar(71),
+	`lastOwnershipEpoch` bigint unsigned NOT NULL DEFAULT 0,
+	`lastProducerSequence` bigint unsigned NOT NULL DEFAULT 0,
+	`recoveryVersion` bigint unsigned NOT NULL DEFAULT 0,
+	`checkpointGate` varchar(32) NOT NULL DEFAULT 'open',
+	`checkpointIntentId` varchar(36),
+	`checkpointOwnerId` varchar(36),
+	`checkpointDeadline` datetime(6),
+	`checkpointProducerSequence` bigint unsigned,
+	`checkpointRecoveryVersion` bigint unsigned,
+	`checkpointAnchor` json,
+	`checkpointPreparedEvidence` json,
+	`startedAt` datetime(6),
+	`finishedAt` datetime(6),
+	`errorCode` varchar(64),
 	`errorSummary` text,
-	`versionNo` bigint NOT NULL DEFAULT 1,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `Invocation_id` PRIMARY KEY(`id`),
-	CONSTRAINT `Invocation_thread_sequence_uq` UNIQUE(`threadId`,`invocationSequence`),
-	CONSTRAINT `Invocation_job_sequence_uq` UNIQUE(`jobId`,`invocationSequence`)
+	CONSTRAINT `Invocation_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `Invocation_tenant_job_uq` UNIQUE(`tenantId`,`jobId`),
+	CONSTRAINT `Invocation_tenant_turn_sequence_uq` UNIQUE(`tenantId`,`turnId`,`invocationSequence`),
+	CONSTRAINT `Invocation_subject_allowed` CHECK(`subjectType` IN ('thread', 'job')),
+	CONSTRAINT `Invocation_kind_allowed` CHECK(`invocationKind` IN ('initial', 'regenerate', 'job')),
+	CONSTRAINT `Invocation_state_allowed` CHECK(`executionState` IN ('queued', 'running', 'waiting_user', 'completed', 'failed', 'cancelled', 'lost')),
+	CONSTRAINT `Invocation_checkpoint_gate_allowed` CHECK(`checkpointGate` IN ('open', 'quiescing', 'frozen')),
+	CONSTRAINT `Invocation_subject_shape` CHECK((`subjectType` = 'thread' AND `threadId` IS NOT NULL AND `turnId` IS NOT NULL AND `triggerItemId` IS NOT NULL AND `jobId` IS NULL) OR (`subjectType` = 'job' AND `jobId` IS NOT NULL AND `threadId` IS NULL AND `turnId` IS NULL AND `triggerItemId` IS NULL AND `invocationKind` = 'job' AND `invocationSequence` = 1)),
+	CONSTRAINT `Invocation_result_terminal_shape` CHECK(((`resultRef` IS NULL AND `resultDigest` IS NULL) OR (`resultRef` IS NOT NULL AND `resultDigest` IS NOT NULL)) AND ((`finishedAt` IS NULL AND `executionState` NOT IN ('completed', 'failed', 'cancelled', 'lost')) OR (`finishedAt` IS NOT NULL AND `executionState` IN ('completed', 'failed', 'cancelled', 'lost')))),
+	CONSTRAINT `Invocation_checkpoint_owner_shape` CHECK(`checkpointGate` = 'open' OR `checkpointOwnerId` IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE `RuntimeEventIngress` (
 	`id` varchar(36) NOT NULL,
-	`invocationId` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
+	`invocationId` varchar(36) NOT NULL,
+	`acceptedAttemptId` varchar(36) NOT NULL,
+	`acceptedOwnershipId` varchar(36) NOT NULL,
+	`acceptedSessionId` varchar(36) NOT NULL,
+	`acceptedEpoch` bigint unsigned NOT NULL,
 	`producerEventId` varchar(128) NOT NULL,
-	`producerSequence` bigint NOT NULL,
+	`producerSequence` bigint unsigned NOT NULL,
 	`candidateType` varchar(64) NOT NULL,
-	`schemaVersion` int NOT NULL DEFAULT 1,
-	`payloadHash` varchar(128) NOT NULL,
-	`payloadJson` json,
-	`ingressState` enum('accepted','mapped','rejected') NOT NULL DEFAULT 'accepted',
-	`mappedItemId` varchar(36),
-	`mappedThreadEventId` varchar(36),
-	`mappedJobEventId` varchar(36),
-	`receivedAt` datetime(3) NOT NULL,
-	`mappedAt` datetime(3),
-	`rejectedReason` varchar(256),
+	`schemaVersion` int unsigned NOT NULL DEFAULT 1,
+	`payloadHash` varchar(71) NOT NULL,
+	`payloadJson` json NOT NULL,
+	`receiptJson` json NOT NULL,
+	`recoveryVersionAfter` bigint unsigned NOT NULL,
+	`receivedAt` datetime(6) NOT NULL,
+	`acceptedAt` datetime(6) NOT NULL,
 	CONSTRAINT `RuntimeEventIngress_id` PRIMARY KEY(`id`),
-	CONSTRAINT `RuntimeEventIngress_invocation_producer_event_uq` UNIQUE(`invocationId`,`producerEventId`),
-	CONSTRAINT `RuntimeEventIngress_invocation_producer_seq_uq` UNIQUE(`invocationId`,`producerSequence`)
+	CONSTRAINT `RuntimeEventIngress_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `RuntimeEventIngress_tenant_invocation_event_uq` UNIQUE(`tenantId`,`invocationId`,`producerEventId`),
+	CONSTRAINT `RuntimeEventIngress_tenant_invocation_sequence_uq` UNIQUE(`tenantId`,`invocationId`,`producerSequence`),
+	CONSTRAINT `RuntimeEventIngress_sequence_positive` CHECK(`producerSequence` >= 1 AND `acceptedEpoch` >= 1),
+	CONSTRAINT `RuntimeEventIngress_payload_shape` CHECK(JSON_LENGTH(`payloadJson`) IS NOT NULL AND JSON_LENGTH(`receiptJson`) IS NOT NULL AND `payloadHash` REGEXP '^sha256:[0-9a-f]{64}$')
 );
 --> statement-breakpoint
 CREATE TABLE `RuntimeSessionBinding` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
+	`invocationId` varchar(36) NOT NULL,
+	`attemptId` varchar(36) NOT NULL,
+	`ownershipId` varchar(36) NOT NULL,
 	`runtimeRevisionId` varchar(36) NOT NULL,
-	`threadId` varchar(36),
-	`jobId` varchar(36),
-	`externalSessionRef` varchar(256) NOT NULL,
-	`runtimeCapabilitiesJson` json NOT NULL,
-	`bindingState` enum('active','closed','lost') NOT NULL DEFAULT 'active',
-	`createdAt` datetime(3) NOT NULL,
-	`lastUsedAt` datetime(3) NOT NULL,
-	`closedAt` datetime(3),
+	`leaseEpoch` bigint unsigned NOT NULL,
+	`bindingState` varchar(32) NOT NULL DEFAULT 'prepared',
+	`intentType` varchar(32) NOT NULL,
+	`startIntentKey` varchar(128) NOT NULL,
+	`semanticRequestJson` json,
+	`semanticRequestDigest` varchar(71),
+	`intentFrozenAt` datetime(6),
+	`remoteSessionRef` varchar(512),
+	`remoteExecutionRef` varchar(512),
+	`runtimeCapabilitiesJson` json,
+	`transportAcknowledgement` json,
+	`acknowledgedAt` datetime(6),
+	`startedEventId` varchar(36),
+	`dispatchCount` int unsigned NOT NULL DEFAULT 0,
+	`nextDispatchAt` datetime(6),
+	`dispatchLeaseOwner` varchar(128),
+	`dispatchLeaseExpiresAt` datetime(6),
+	`lastDispatchAt` datetime(6),
+	`lastErrorCode` varchar(64),
+	`closedAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `RuntimeSessionBinding_id` PRIMARY KEY(`id`),
-	CONSTRAINT `RuntimeSessionBinding_runtime_external_ref_uq` UNIQUE(`runtimeRevisionId`,`externalSessionRef`)
+	CONSTRAINT `RuntimeSessionBinding_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `RuntimeSessionBinding_tenant_ownership_uq` UNIQUE(`tenantId`,`ownershipId`),
+	CONSTRAINT `RuntimeSessionBinding_tenant_start_intent_uq` UNIQUE(`tenantId`,`startIntentKey`),
+	CONSTRAINT `RuntimeSessionBinding_identity_uq` UNIQUE(`tenantId`,`invocationId`,`attemptId`,`ownershipId`,`leaseEpoch`,`id`),
+	CONSTRAINT `RuntimeSessionBinding_state_allowed` CHECK(`bindingState` IN ('prepared', 'dispatching', 'active', 'closed', 'lost')),
+	CONSTRAINT `RuntimeSessionBinding_intent_allowed` CHECK(`intentType` IN ('start', 'resume')),
+	CONSTRAINT `RuntimeSessionBinding_request_digest_shape` CHECK((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL)),
+	CONSTRAINT `RuntimeSessionBinding_active_started_shape` CHECK(`bindingState` <> 'active' OR `startedEventId` IS NOT NULL),
+	CONSTRAINT `RuntimeSessionBinding_dispatch_freeze_shape` CHECK(((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL AND `intentFrozenAt` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` NOT IN ('dispatching', 'active') OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` <> 'active' OR (`remoteSessionRef` IS NOT NULL AND `remoteExecutionRef` IS NOT NULL AND `startedEventId` IS NOT NULL)))
 );
 --> statement-breakpoint
 CREATE TABLE `IncidentContainment` (
@@ -2077,34 +2292,41 @@ CREATE TABLE `UserActionRequest` (
 CREATE TABLE `WorkloadTokenRevocation` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`jti` varchar(64) NOT NULL,
-	`tokenType` varchar(16) NOT NULL,
+	`jti` varchar(36) NOT NULL,
+	`invocationId` varchar(36) NOT NULL,
+	`reasonCode` varchar(64) NOT NULL,
 	`revokedBy` varchar(128) NOT NULL,
-	`reason` text NOT NULL,
-	`expiresAt` datetime(3) NOT NULL,
-	`revokedAt` datetime(3) NOT NULL,
+	`revokedAt` datetime(6) NOT NULL,
+	`tokenExpiresAt` datetime(6) NOT NULL,
 	CONSTRAINT `WorkloadTokenRevocation_id` PRIMARY KEY(`id`),
+	CONSTRAINT `WorkloadTokenRevocation_tenant_id_uq` UNIQUE(`tenantId`,`id`),
 	CONSTRAINT `WorkloadTokenRevocation_tenant_jti_uq` UNIQUE(`tenantId`,`jti`)
 );
 --> statement-breakpoint
 CREATE TABLE `WorkspaceWriteLock` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`workspaceBindingId` varchar(36) NOT NULL,
-	`holderInvocationId` varchar(36) NOT NULL,
-	`holderRelationId` varchar(36),
-	`pathRef` varchar(512) NOT NULL,
-	`pathFingerprint` varchar(128) NOT NULL,
-	`lockState` enum('acquired','released','expired','revoked') NOT NULL DEFAULT 'acquired',
-	`acquiredAt` datetime(3) NOT NULL,
-	`expiresAt` datetime(3),
-	`releasedAt` datetime(3),
+	`storageScopeDigest` varchar(71) NOT NULL,
+	`writerGeneration` bigint unsigned NOT NULL DEFAULT 0,
+	`lockState` varchar(32) NOT NULL DEFAULT 'released',
+	`holderInvocationId` varchar(36),
+	`holderAttemptId` varchar(36),
+	`holderOwnershipId` varchar(36),
+	`workspaceBindingId` varchar(36),
+	`backendGrantRef` varchar(512),
+	`backendEvidence` json,
+	`leaseExpiresAt` datetime(6),
 	`releaseReasonCode` varchar(64),
-	`versionNo` varchar(64) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `WorkspaceWriteLock_id` PRIMARY KEY(`id`),
-	CONSTRAINT `WorkspaceWriteLock_tenant_binding_path_idx` UNIQUE(`tenantId`,`workspaceBindingId`,`pathFingerprint`)
+	CONSTRAINT `WorkspaceWriteLock_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `WorkspaceWriteLock_tenant_scope_uq` UNIQUE(`tenantId`,`storageScopeDigest`),
+	CONSTRAINT `WorkspaceWriteLock_state_allowed` CHECK(`lockState` IN ('released', 'reserved', 'active', 'releasing', 'quarantined')),
+	CONSTRAINT `WorkspaceWriteLock_generation_non_negative` CHECK(`writerGeneration` >= 0),
+	CONSTRAINT `WorkspaceWriteLock_released_shape` CHECK(`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `leaseExpiresAt` IS NULL)),
+	CONSTRAINT `WorkspaceWriteLock_active_evidence_shape` CHECK(`lockState` <> 'active' OR (`holderInvocationId` IS NOT NULL AND `holderAttemptId` IS NOT NULL AND `holderOwnershipId` IS NOT NULL AND `workspaceBindingId` IS NOT NULL AND `backendGrantRef` IS NOT NULL AND `backendEvidence` IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(`backendEvidence`, '$.scopeDigest')) = `storageScopeDigest` AND JSON_EXTRACT(`backendEvidence`, '$.writerGeneration') IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `Workspace` (
@@ -2123,6 +2345,7 @@ CREATE TABLE `Workspace` (
 	`updatedAt` datetime(3) NOT NULL,
 	`deletedAt` datetime(3),
 	CONSTRAINT `Workspace_id` PRIMARY KEY(`id`),
+	CONSTRAINT `Workspace_tenant_id_uq` UNIQUE(`tenantId`,`id`),
 	CONSTRAINT `Workspace_tenant_key_uq` UNIQUE(`tenantId`,`workspaceKey`)
 );
 --> statement-breakpoint
@@ -2176,18 +2399,28 @@ CREATE TABLE `WorkspaceAttachmentUse` (
 CREATE TABLE `WorkspaceBinding` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`workspaceId` varchar(36) NOT NULL,
-	`bindingType` enum('desktop','cloud','remote','sandbox') NOT NULL,
+	`workspaceId` varchar(36),
+	`continuityMode` varchar(32) NOT NULL,
+	`bindingType` varchar(16),
 	`deviceId` varchar(36),
-	`environmentDefinitionId` varchar(36),
-	`locationRef` varchar(512) NOT NULL,
-	`locationFingerprint` varchar(128),
-	`bindingState` enum('active','inactive','revoked') NOT NULL DEFAULT 'active',
-	`lastVerifiedAt` datetime(3),
-	`versionNo` varchar(64) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	CONSTRAINT `WorkspaceBinding_id` PRIMARY KEY(`id`)
+	`locationRef` varchar(512),
+	`storageScopeDigest` varchar(71),
+	`backendKind` varchar(32),
+	`hostIdentity` varchar(512),
+	`storageIdentity` varchar(71),
+	`accessMode` varchar(32),
+	`filesystemSemantics` json NOT NULL,
+	`checkpointPolicy` json,
+	`contractDigest` varchar(71) NOT NULL,
+	`createdBy` varchar(128) NOT NULL,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	CONSTRAINT `WorkspaceBinding_id` PRIMARY KEY(`id`),
+	CONSTRAINT `WorkspaceBinding_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `WorkspaceBinding_continuity_allowed` CHECK(`continuityMode` IN ('HOST_AFFINE', 'SHARED_DURABLE', 'CHECKPOINT_RESTORABLE', 'NO_PLATFORM_WORKSPACE')),
+	CONSTRAINT `WorkspaceBinding_access_mode_allowed` CHECK(`accessMode` IN ('read', 'read_write') OR `accessMode` IS NULL),
+	CONSTRAINT `WorkspaceBinding_continuity_shape` CHECK((`continuityMode` = 'NO_PLATFORM_WORKSPACE' AND `workspaceId` IS NULL AND `bindingType` IS NULL AND `deviceId` IS NULL AND `locationRef` IS NULL AND `storageScopeDigest` IS NULL AND `backendKind` IS NULL AND `hostIdentity` IS NULL AND `storageIdentity` IS NULL AND `accessMode` IS NULL AND JSON_UNQUOTE(JSON_EXTRACT(`filesystemSemantics`, '$.kind')) = 'none' AND `checkpointPolicy` IS NULL) OR (`continuityMode` <> 'NO_PLATFORM_WORKSPACE' AND `workspaceId` IS NOT NULL AND `bindingType` IS NOT NULL AND `locationRef` IS NOT NULL AND `storageScopeDigest` IS NOT NULL AND `backendKind` IS NOT NULL AND `storageIdentity` IS NOT NULL AND `accessMode` IS NOT NULL)),
+	CONSTRAINT `WorkspaceBinding_host_affine_shape` CHECK(`continuityMode` <> 'HOST_AFFINE' OR `hostIdentity` IS NOT NULL),
+	CONSTRAINT `WorkspaceBinding_checkpoint_shape` CHECK((`continuityMode` = 'CHECKPOINT_RESTORABLE' AND `checkpointPolicy` IS NOT NULL) OR (`continuityMode` <> 'CHECKPOINT_RESTORABLE' AND `checkpointPolicy` IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `ControlPlaneEventDelivery` (
@@ -2509,13 +2742,14 @@ CREATE TABLE `RouteEligibilityProjection` (
 --> statement-breakpoint
 CREATE TABLE `RuntimeConformanceCaseResult` (
 	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
 	`runId` varchar(36) NOT NULL,
 	`caseId` varchar(128) NOT NULL,
 	`passed` boolean NOT NULL,
 	`reason` text,
 	`evidenceDigest` varchar(71) NOT NULL,
 	CONSTRAINT `RuntimeConformanceCaseResult_id` PRIMARY KEY(`id`),
-	CONSTRAINT `RuntimeConformanceCaseResult_run_case_uq` UNIQUE(`runId`,`caseId`)
+	CONSTRAINT `RuntimeConformanceCaseResult_run_case_uq` UNIQUE(`tenantId`,`runId`,`caseId`)
 );
 --> statement-breakpoint
 CREATE TABLE `RuntimeConformanceRun` (
@@ -2524,30 +2758,34 @@ CREATE TABLE `RuntimeConformanceRun` (
 	`runtimeRevisionId` varchar(36) NOT NULL,
 	`runtimeTargetDigest` varchar(71) NOT NULL,
 	`runtimeConfigDigest` varchar(71) NOT NULL,
-	`protocolContractRevision` varchar(128) NOT NULL,
+	`protocolContractDigest` varchar(71) NOT NULL,
 	`suiteRevision` varchar(128) NOT NULL,
 	`runnerArtifactDigest` varchar(71) NOT NULL,
-	`runnerIdentity` varchar(255) NOT NULL,
+	`runnerIdentity` varchar(256) NOT NULL,
 	`testEnvironmentRevision` varchar(128) NOT NULL,
-	`startedAt` datetime(3) NOT NULL,
-	`completedAt` datetime(3) NOT NULL,
-	`overallResult` enum('passed','failed','error','cancelled') NOT NULL,
-	`conformanceFormat` enum('standard_dsse') NOT NULL DEFAULT 'standard_dsse',
+	`startedAt` datetime(6) NOT NULL,
+	`completedAt` datetime(6) NOT NULL,
+	`overallResult` varchar(32) NOT NULL,
+	`conformanceFormat` varchar(32) NOT NULL DEFAULT 'standard_dsse',
 	`evidenceManifestDigest` varchar(71) NOT NULL,
 	`envelopeDigest` varchar(71) NOT NULL,
 	`envelopeJson` text NOT NULL,
 	`payloadDigest` varchar(71) NOT NULL,
-	`signingKeyId` varchar(255) NOT NULL,
+	`signingKeyId` varchar(256) NOT NULL,
 	`verificationEngine` varchar(64) NOT NULL,
 	`verificationEngineVersion` varchar(32) NOT NULL,
-	`predicateType` varchar(255) NOT NULL,
-	`verifiedAt` datetime(3) NOT NULL,
-	`idempotencyKey` varchar(255) NOT NULL,
+	`predicateType` varchar(256) NOT NULL,
+	`verifiedAt` datetime(6) NOT NULL,
+	`idempotencyKey` varchar(128) NOT NULL,
+	`protocolVersion` int unsigned NOT NULL,
 	`requestId` varchar(64) NOT NULL,
-	`recordedAt` datetime(3) NOT NULL,
+	`recordedAt` datetime(6) NOT NULL,
 	CONSTRAINT `RuntimeConformanceRun_id` PRIMARY KEY(`id`),
 	CONSTRAINT `RuntimeConformanceRun_idempotency_uq` UNIQUE(`tenantId`,`runtimeRevisionId`,`idempotencyKey`),
-	CONSTRAINT `RuntimeConformanceRun_evidence_uq` UNIQUE(`tenantId`,`evidenceManifestDigest`)
+	CONSTRAINT `RuntimeConformanceRun_evidence_uq` UNIQUE(`tenantId`,`evidenceManifestDigest`),
+	CONSTRAINT `RuntimeConformanceRun_overall_result_allowed` CHECK(`overallResult` IN ('passed', 'failed', 'error', 'cancelled')),
+	CONSTRAINT `RuntimeConformanceRun_format_allowed` CHECK(`conformanceFormat` = 'standard_dsse'),
+	CONSTRAINT `RuntimeConformanceRun_protocol_version_allowed` CHECK(`protocolVersion` = 3)
 );
 --> statement-breakpoint
 CREATE TABLE `HostedProvisioningRequest` (
@@ -2606,7 +2844,6 @@ ALTER TABLE `CatalogEntry` ADD CONSTRAINT `CatalogEntry_tenantId_Tenant_id_fk` F
 ALTER TABLE `CatalogRevision` ADD CONSTRAINT `CatalogRevision_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ContextCheckpoint` ADD CONSTRAINT `ContextCheckpoint_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Goal` ADD CONSTRAINT `Goal_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `InvocationCommand` ADD CONSTRAINT `InvocationCommand_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `PendingInput` ADD CONSTRAINT `PendingInput_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ThreadEvent` ADD CONSTRAINT `ThreadEvent_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ThreadItem` ADD CONSTRAINT `ThreadItem_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2625,12 +2862,15 @@ ALTER TABLE `EffectRecord` ADD CONSTRAINT `EffectRecord_tenantId_Tenant_id_fk` F
 ALTER TABLE `EffectTarget` ADD CONSTRAINT `EffectTarget_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EffectTarget` ADD CONSTRAINT `EffectTarget_effectRecordId_EffectRecord_id_fk` FOREIGN KEY (`effectRecordId`) REFERENCES `EffectRecord`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_fromEnvironmentDefinitionId_Environ5abe` FOREIGN KEY (`fromEnvironmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1` FOREIGN KEY (`requestedEnvironmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_thread_fk` FOREIGN KEY (`tenantId`,`threadId`) REFERENCES `Thread`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`firstAppliedInvocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentDefinition` ADD CONSTRAINT `EnvironmentDefinition_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317` FOREIGN KEY (`environmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_tenant_invocation_attempt_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`) REFERENCES `InvocationAttempt`(`tenantId`,`invocationId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentDefinitionRevision` ADD CONSTRAINT `EnvironmentDefinitionRevision_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentDefinitionRevision` ADD CONSTRAINT `EnvironmentDefinitionRevision_tenantId_definitionId_fk` FOREIGN KEY (`tenantId`,`definitionId`) REFERENCES `EnvironmentDefinition`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_case` ADD CONSTRAINT `evaluation_case_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_case` ADD CONSTRAINT `evaluation_case_run_id_evaluation_run_id_fk` FOREIGN KEY (`run_id`) REFERENCES `evaluation_run`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_result` ADD CONSTRAINT `evaluation_result_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2642,6 +2882,7 @@ ALTER TABLE `FileChange` ADD CONSTRAINT `FileChange_tenantId_Tenant_id_fk` FOREI
 ALTER TABLE `FileChange` ADD CONSTRAINT `FileChange_workspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `FilesystemCheckpoint` ADD CONSTRAINT `FilesystemCheckpoint_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `FilesystemCheckpoint` ADD CONSTRAINT `FilesystemCheckpoint_workspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `FilesystemCheckpoint` ADD CONSTRAINT `FilesystemCheckpoint_tenant_owner_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`,`ownershipId`,`leaseEpoch`) REFERENCES `ExecutionOwnership`(`tenantId`,`invocationId`,`attemptId`,`id`,`leaseEpoch`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `GovernanceConfigRevision` ADD CONSTRAINT `GovernanceConfigRevision_configSetId_GovernanceConfigSet_id_fk` FOREIGN KEY (`configSetId`) REFERENCES `GovernanceConfigSet`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `GovernanceConfigSet` ADD CONSTRAINT `GovernanceConfigSet_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IdempotencyRecord` ADD CONSTRAINT `IdempotencyRecord_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2655,9 +2896,17 @@ ALTER TABLE `PrincipalBinding` ADD CONSTRAINT `PrincipalBinding_userIdentityId_U
 ALTER TABLE `UserExtensionAttribute` ADD CONSTRAINT `UserExtensionAttribute_userIdentityId_UserIdentity_id_fk` FOREIGN KEY (`userIdentityId`) REFERENCES `UserIdentity`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `UserIdentity` ADD CONSTRAINT `UserIdentity_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `JobCommand` ADD CONSTRAINT `JobCommand_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `JobCommand` ADD CONSTRAINT `JobCommand_tenant_job_fk` FOREIGN KEY (`tenantId`,`jobId`) REFERENCES `Job`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `JobCommand` ADD CONSTRAINT `JobCommand_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `JobEvent` ADD CONSTRAINT `JobEvent_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `JobEvent` ADD CONSTRAINT `JobEvent_tenant_job_fk` FOREIGN KEY (`tenantId`,`jobId`) REFERENCES `Job`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `JobEvent` ADD CONSTRAINT `JobEvent_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `JobResultProjection` ADD CONSTRAINT `JobResultProjection_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `JobResultProjection` ADD CONSTRAINT `JobResultProjection_tenant_job_fk` FOREIGN KEY (`tenantId`,`jobId`) REFERENCES `Job`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `JobResultProjection` ADD CONSTRAINT `JobResultProjection_item_fk` FOREIGN KEY (`itemId`) REFERENCES `ThreadItem`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `JobResultProjection` ADD CONSTRAINT `JobResultProjection_source_turn_fk` FOREIGN KEY (`sourceTurnId`) REFERENCES `Turn`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Job` ADD CONSTRAINT `Job_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `Job` ADD CONSTRAINT `Job_tenant_replacement_fk` FOREIGN KEY (`tenantId`,`replacesJobId`) REFERENCES `Job`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeBase` ADD CONSTRAINT `KnowledgeBase_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeChunk` ADD CONSTRAINT `KnowledgeChunk_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeChunk` ADD CONSTRAINT `KnowledgeChunk_documentRevisionId_KnowledgeDocumentRevision_85e8` FOREIGN KEY (`documentRevisionId`) REFERENCES `KnowledgeDocumentRevision`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2683,14 +2932,26 @@ ALTER TABLE `RecoveryDrillCheck` ADD CONSTRAINT `RecoveryDrillCheck_drillId_Reco
 ALTER TABLE `RecoveryDrill` ADD CONSTRAINT `RecoveryDrill_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `LegalHold` ADD CONSTRAINT `LegalHold_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RetentionPolicy` ADD CONSTRAINT `RetentionPolicy_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `RuntimeRevision` ADD CONSTRAINT `RuntimeRevision_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeRevision` ADD CONSTRAINT `RuntimeRevision_runtimeId_Runtime_id_fk` FOREIGN KEY (`runtimeId`) REFERENCES `Runtime`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Runtime` ADD CONSTRAINT `Runtime_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_tenant_invocation_attempt_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`) REFERENCES `InvocationAttempt`(`tenantId`,`invocationId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `InvocationAttempt` ADD CONSTRAINT `InvocationAttempt_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `InvocationAttempt` ADD CONSTRAINT `InvocationAttempt_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `InvocationCommand` ADD CONSTRAINT `InvocationCommand_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `InvocationCommand` ADD CONSTRAINT `InvocationCommand_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `RuntimeEventIngress` ADD CONSTRAINT `RuntimeEventIngress_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_turnId_Turn_id_fk` FOREIGN KEY (`turnId`) REFERENCES `Turn`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_triggerItemId_ThreadItem_id_fk` FOREIGN KEY (`triggerItemId`) REFERENCES `ThreadItem`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_outputItemId_ThreadItem_id_fk` FOREIGN KEY (`outputItemId`) REFERENCES `ThreadItem`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeEventIngress` ADD CONSTRAINT `RuntimeEventIngress_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `RuntimeEventIngress` ADD CONSTRAINT `RuntimeEventIngress_tenant_session_fk` FOREIGN KEY (`tenantId`,`invocationId`,`acceptedAttemptId`,`acceptedOwnershipId`,`acceptedEpoch`,`acceptedSessionId`) REFERENCES `RuntimeSessionBinding`(`tenantId`,`invocationId`,`attemptId`,`ownershipId`,`leaseEpoch`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeSessionBinding` ADD CONSTRAINT `RuntimeSessionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `RuntimeSessionBinding` ADD CONSTRAINT `RuntimeSessionBinding_tenant_owner_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`,`ownershipId`,`leaseEpoch`) REFERENCES `ExecutionOwnership`(`tenantId`,`invocationId`,`attemptId`,`id`,`leaseEpoch`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IncidentContainment` ADD CONSTRAINT `IncidentContainment_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IncidentContainment` ADD CONSTRAINT `IncidentContainment_incidentId_SecurityIncident_id_fk` FOREIGN KEY (`incidentId`) REFERENCES `SecurityIncident`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `SecurityIncident` ADD CONSTRAINT `SecurityIncident_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2726,8 +2987,7 @@ ALTER TABLE `usage_record` ADD CONSTRAINT `usage_record_tenant_id_Tenant_id_fk` 
 ALTER TABLE `UserActionRequest` ADD CONSTRAINT `UserActionRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkloadTokenRevocation` ADD CONSTRAINT `WorkloadTokenRevocation_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_workspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_holderInvocationId_Invocation_id_fk` FOREIGN KEY (`holderInvocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_tenant_binding_fk` FOREIGN KEY (`tenantId`,`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Workspace` ADD CONSTRAINT `Workspace_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2739,6 +2999,7 @@ ALTER TABLE `WorkspaceAttachmentUse` ADD CONSTRAINT `WorkspaceAttachmentUse_work
 ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_workspaceId_Workspace_id_fk` FOREIGN KEY (`workspaceId`) REFERENCES `Workspace`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_deviceId_Device_id_fk` FOREIGN KEY (`deviceId`) REFERENCES `Device`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_tenant_workspace_fk` FOREIGN KEY (`tenantId`,`workspaceId`) REFERENCES `Workspace`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ArtifactAttestation` ADD CONSTRAINT `ArtifactAttestation_artifactId_Artifact_id_fk` FOREIGN KEY (`artifactId`) REFERENCES `Artifact`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AttestationRevocationRecord` ADD CONSTRAINT `AttestationRevocationRecord_attestationId_ArtifactAttestatiob0ec` FOREIGN KEY (`attestationId`) REFERENCES `ArtifactAttestation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WithdrawalRecord` ADD CONSTRAINT `WithdrawalRecord_publicationRecordId_PublicationRecord_id_fk` FOREIGN KEY (`publicationRecordId`) REFERENCES `PublicationRecord`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2772,6 +3033,7 @@ CREATE INDEX `AuditEvent_tenant_target_idx` ON `AuditEvent` (`tenantId`,`targetT
 CREATE INDEX `AuditEvent_tenant_action_idx` ON `AuditEvent` (`tenantId`,`actionType`);--> statement-breakpoint
 CREATE INDEX `RoleActionBinding_tenant_principal_idx` ON `RoleActionBinding` (`tenantId`,`principalBindingId`);--> statement-breakpoint
 CREATE INDEX `RoleActionBinding_tenant_action_idx` ON `RoleActionBinding` (`tenantId`,`actionCode`);--> statement-breakpoint
+CREATE INDEX `BrandChangeAudit_revision_idx` ON `BrandChangeAudit` (`revisionAfter`);--> statement-breakpoint
 CREATE INDEX `CapabilityUse_tenant_invocation_idx` ON `CapabilityUse` (`tenantId`,`invocationId`);--> statement-breakpoint
 CREATE INDEX `CapabilityUse_tenant_type_capability_idx` ON `CapabilityUse` (`tenantId`,`capabilityType`,`capabilityId`);--> statement-breakpoint
 CREATE INDEX `CatalogEntry_tenant_resourceType_lifecycle_idx` ON `CatalogEntry` (`tenantId`,`resourceType`,`lifecycleState`);--> statement-breakpoint
@@ -2779,10 +3041,6 @@ CREATE INDEX `CatalogEntry_tenant_catalogRevision_idx` ON `CatalogEntry` (`tenan
 CREATE INDEX `ContextCheckpoint_tenant_invocation_created_idx` ON `ContextCheckpoint` (`tenantId`,`invocationId`,`createdAt`);--> statement-breakpoint
 CREATE INDEX `ContextCheckpoint_tenant_expires_idx` ON `ContextCheckpoint` (`tenantId`,`expiresAt`);--> statement-breakpoint
 CREATE INDEX `Goal_thread_state_idx` ON `Goal` (`threadId`,`goalState`);--> statement-breakpoint
-CREATE INDEX `InvocationCommand_thread_turn_idx` ON `InvocationCommand` (`threadId`,`turnId`);--> statement-breakpoint
-CREATE INDEX `InvocationCommand_invocation_idx` ON `InvocationCommand` (`invocationId`);--> statement-breakpoint
-CREATE INDEX `InvocationCommand_dispatch_retry_idx` ON `InvocationCommand` (`commandState`,`nextDispatchAt`);--> statement-breakpoint
-CREATE INDEX `InvocationCommand_dispatch_lease_idx` ON `InvocationCommand` (`dispatchLeaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `PendingInput_thread_state_position_idx` ON `PendingInput` (`threadId`,`inputState`,`queuePosition`);--> statement-breakpoint
 CREATE INDEX `ThreadEvent_thread_occurred_id_idx` ON `ThreadEvent` (`threadId`,`occurredAt`,`id`);--> statement-breakpoint
 CREATE INDEX `ThreadEvent_turn_sequence_idx` ON `ThreadEvent` (`turnId`,`eventSequence`);--> statement-breakpoint
@@ -2809,15 +3067,11 @@ CREATE INDEX `EffectRecord_tenant_toolCall_idx` ON `EffectRecord` (`tenantId`,`t
 CREATE INDEX `EffectRecord_tenant_state_idx` ON `EffectRecord` (`tenantId`,`effectState`);--> statement-breakpoint
 CREATE INDEX `EffectTarget_tenant_record_idx` ON `EffectTarget` (`tenantId`,`effectRecordId`);--> statement-breakpoint
 CREATE INDEX `EffectTarget_tenant_state_idx` ON `EffectTarget` (`tenantId`,`targetState`);--> statement-breakpoint
-CREATE INDEX `EnvironmentChangeRequest_tenant_thread_state_idx` ON `EnvironmentChangeRequest` (`tenantId`,`threadId`,`requestState`);--> statement-breakpoint
-CREATE INDEX `EnvironmentChangeRequest_tenant_invocation_idx` ON `EnvironmentChangeRequest` (`tenantId`,`invocationId`);--> statement-breakpoint
-CREATE INDEX `EnvironmentChangeRequest_from_definition_idx` ON `EnvironmentChangeRequest` (`fromEnvironmentDefinitionId`);--> statement-breakpoint
-CREATE INDEX `EnvironmentChangeRequest_requested_definition_idx` ON `EnvironmentChangeRequest` (`requestedEnvironmentDefinitionId`);--> statement-breakpoint
+CREATE INDEX `EnvironmentChangeRequest_tenant_thread_state_idx` ON `EnvironmentChangeRequest` (`tenantId`,`threadId`,`requestState`,`selectionSequence`);--> statement-breakpoint
 CREATE INDEX `EnvironmentDefinition_tenant_lifecycle_updated_idx` ON `EnvironmentDefinition` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
-CREATE INDEX `EnvironmentDefinition_tenant_type_idx` ON `EnvironmentDefinition` (`tenantId`,`environmentType`);--> statement-breakpoint
-CREATE INDEX `EnvironmentLease_tenant_state_idx` ON `EnvironmentLease` (`tenantId`,`leaseState`);--> statement-breakpoint
-CREATE INDEX `EnvironmentLease_definition_idx` ON `EnvironmentLease` (`environmentDefinitionId`);--> statement-breakpoint
-CREATE INDEX `EnvironmentLease_device_idx` ON `EnvironmentLease` (`deviceId`);--> statement-breakpoint
+CREATE INDEX `EnvironmentLease_cleanup_idx` ON `EnvironmentLease` (`leaseState`,`nextCleanupAt`,`cleanupLeaseExpiresAt`);--> statement-breakpoint
+CREATE INDEX `EnvironmentLease_revision_idx` ON `EnvironmentLease` (`tenantId`,`environmentDefinitionRevisionId`);--> statement-breakpoint
+CREATE INDEX `EnvironmentDefinitionRevision_tenant_definition_digest_idx` ON `EnvironmentDefinitionRevision` (`tenantId`,`definitionId`,`semanticDigest`);--> statement-breakpoint
 CREATE INDEX `tenant_run_idx` ON `evaluation_case` (`tenant_id`,`run_id`);--> statement-breakpoint
 CREATE INDEX `tenant_case_state_idx` ON `evaluation_case` (`tenant_id`,`case_state`);--> statement-breakpoint
 CREATE INDEX `tenant_run_idx` ON `evaluation_result` (`tenant_id`,`run_id`);--> statement-breakpoint
@@ -2829,9 +3083,7 @@ CREATE INDEX `tenant_agent_revision_idx` ON `evaluation_run` (`tenant_id`,`agent
 CREATE INDEX `FileChange_tenant_toolCall_idx` ON `FileChange` (`tenantId`,`toolCallId`);--> statement-breakpoint
 CREATE INDEX `FileChange_tenant_binding_idx` ON `FileChange` (`tenantId`,`workspaceBindingId`);--> statement-breakpoint
 CREATE INDEX `FileChange_tenant_artifact_idx` ON `FileChange` (`tenantId`,`artifactId`);--> statement-breakpoint
-CREATE INDEX `FilesystemCheckpoint_tenant_binding_idx` ON `FilesystemCheckpoint` (`tenantId`,`workspaceBindingId`);--> statement-breakpoint
-CREATE INDEX `FilesystemCheckpoint_tenant_invocation_idx` ON `FilesystemCheckpoint` (`tenantId`,`invocationId`);--> statement-breakpoint
-CREATE INDEX `FilesystemCheckpoint_tenant_expires_idx` ON `FilesystemCheckpoint` (`tenantId`,`expiresAt`);--> statement-breakpoint
+CREATE INDEX `FilesystemCheckpoint_recovery_idx` ON `FilesystemCheckpoint` (`tenantId`,`invocationId`,`recoveryVersion`,`committedAt`);--> statement-breakpoint
 CREATE INDEX `GovernanceConfigRevision_set_state_idx` ON `GovernanceConfigRevision` (`configSetId`,`revisionState`);--> statement-breakpoint
 CREATE INDEX `GovernanceConfigSet_tenant_lifecycle_updated_idx` ON `GovernanceConfigSet` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
 CREATE INDEX `IdempotencyRecord_tenant_expires_idx` ON `IdempotencyRecord` (`tenantId`,`expiresAt`);--> statement-breakpoint
@@ -2839,18 +3091,11 @@ CREATE INDEX `AuthSession_user_expiry_idx` ON `AuthSession` (`tenantId`,`userIde
 CREATE INDEX `PrincipalBinding_tenant_user_idx` ON `PrincipalBinding` (`tenantId`,`userIdentityId`);--> statement-breakpoint
 CREATE INDEX `UserExtensionAttribute_user_idx` ON `UserExtensionAttribute` (`userIdentityId`);--> statement-breakpoint
 CREATE INDEX `UserIdentity_tenant_email_idx` ON `UserIdentity` (`tenantId`,`email`);--> statement-breakpoint
-CREATE INDEX `JobCommand_tenant_job_state_idx` ON `JobCommand` (`tenantId`,`jobId`,`commandState`);--> statement-breakpoint
-CREATE INDEX `JobCommand_tenant_replacement_idx` ON `JobCommand` (`tenantId`,`replacementJobId`);--> statement-breakpoint
-CREATE INDEX `JobEvent_tenant_job_idx` ON `JobEvent` (`tenantId`,`jobId`);--> statement-breakpoint
-CREATE INDEX `JobEvent_tenant_job_invocation_idx` ON `JobEvent` (`tenantId`,`jobId`,`invocationId`);--> statement-breakpoint
-CREATE INDEX `JobEvent_tenant_job_occurred_idx` ON `JobEvent` (`tenantId`,`jobId`,`occurredAt`);--> statement-breakpoint
+CREATE INDEX `JobCommand_state_next_attempt_lease_idx` ON `JobCommand` (`commandState`,`nextAttemptAt`,`leaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `JobResultProjection_tenant_job_idx` ON `JobResultProjection` (`tenantId`,`jobId`);--> statement-breakpoint
 CREATE INDEX `JobResultProjection_tenant_source_turn_idx` ON `JobResultProjection` (`tenantId`,`sourceTurnId`);--> statement-breakpoint
-CREATE INDEX `Job_tenant_agent_idx` ON `Job` (`tenantId`,`agentId`);--> statement-breakpoint
-CREATE INDEX `Job_tenant_state_idx` ON `Job` (`tenantId`,`jobState`);--> statement-breakpoint
-CREATE INDEX `Job_tenant_thread_idx` ON `Job` (`tenantId`,`threadId`);--> statement-breakpoint
-CREATE INDEX `Job_tenant_replaces_idx` ON `Job` (`tenantId`,`replacesJobId`);--> statement-breakpoint
-CREATE INDEX `Job_tenant_type_state_idx` ON `Job` (`tenantId`,`jobType`,`jobState`);--> statement-breakpoint
+CREATE INDEX `Job_tenant_state_updated_idx` ON `Job` (`tenantId`,`jobState`,`updatedAt`);--> statement-breakpoint
+CREATE INDEX `Job_tenant_replacement_idx` ON `Job` (`tenantId`,`replacesJobId`);--> statement-breakpoint
 CREATE INDEX `KnowledgeBase_tenant_lifecycle_idx` ON `KnowledgeBase` (`tenantId`,`lifecycleState`);--> statement-breakpoint
 CREATE INDEX `KnowledgeBase_tenant_owner_idx` ON `KnowledgeBase` (`tenantId`,`ownerUserId`);--> statement-breakpoint
 CREATE INDEX `KnowledgeChunk_tenant_revision_idx` ON `KnowledgeChunk` (`tenantId`,`documentRevisionId`);--> statement-breakpoint
@@ -2894,20 +3139,18 @@ CREATE INDEX `RetentionPolicy_tenant_data_class_idx` ON `RetentionPolicy` (`tena
 CREATE INDEX `RuntimeRevision_runtime_state_idx` ON `RuntimeRevision` (`runtimeId`,`revisionState`);--> statement-breakpoint
 CREATE INDEX `RuntimeRevision_artifact_idx` ON `RuntimeRevision` (`artifactId`);--> statement-breakpoint
 CREATE INDEX `Runtime_tenant_lifecycle_updated_idx` ON `Runtime` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
-CREATE INDEX `ExecutionBinding_tenant_idx` ON `ExecutionBinding` (`tenantId`);--> statement-breakpoint
-CREATE INDEX `ExecutionBinding_runtimeRevision_idx` ON `ExecutionBinding` (`runtimeRevisionId`);--> statement-breakpoint
-CREATE INDEX `ExecutionBinding_routeRevision_idx` ON `ExecutionBinding` (`routeRevisionId`);--> statement-breakpoint
-CREATE INDEX `ExecutionBinding_runtimeArtifact_idx` ON `ExecutionBinding` (`runtimeArtifactId`);--> statement-breakpoint
-CREATE INDEX `ExecutionBinding_conformanceRun_idx` ON `ExecutionBinding` (`conformanceRunId`);--> statement-breakpoint
-CREATE INDEX `ExecutionOwnership_invocation_state_idx` ON `ExecutionOwnership` (`invocationId`,`ownershipState`);--> statement-breakpoint
-CREATE INDEX `InvocationAttempt_invocation_state_idx` ON `InvocationAttempt` (`invocationId`,`attemptState`);--> statement-breakpoint
-CREATE INDEX `InvocationAttempt_dispatch_retry_idx` ON `InvocationAttempt` (`attemptState`,`nextDispatchAt`);--> statement-breakpoint
-CREATE INDEX `InvocationAttempt_dispatch_lease_idx` ON `InvocationAttempt` (`dispatchLeaseExpiresAt`);--> statement-breakpoint
-CREATE INDEX `Invocation_tenant_state_idx` ON `Invocation` (`tenantId`,`executionState`);--> statement-breakpoint
-CREATE INDEX `Invocation_turn_idx` ON `Invocation` (`turnId`);--> statement-breakpoint
-CREATE INDEX `RuntimeEventIngress_invocation_state_idx` ON `RuntimeEventIngress` (`invocationId`,`ingressState`);--> statement-breakpoint
-CREATE INDEX `RuntimeSessionBinding_thread_idx` ON `RuntimeSessionBinding` (`threadId`);--> statement-breakpoint
-CREATE INDEX `RuntimeSessionBinding_job_idx` ON `RuntimeSessionBinding` (`jobId`);--> statement-breakpoint
+CREATE INDEX `ExecutionBinding_tenant_runtime_revision_idx` ON `ExecutionBinding` (`tenantId`,`runtimeRevisionId`);--> statement-breakpoint
+CREATE INDEX `ExecutionBinding_tenant_environment_revision_idx` ON `ExecutionBinding` (`tenantId`,`environmentDefinitionRevisionId`);--> statement-breakpoint
+CREATE INDEX `ExecutionBinding_tenant_workspace_binding_idx` ON `ExecutionBinding` (`tenantId`,`workspaceBindingId`);--> statement-breakpoint
+CREATE INDEX `ExecutionOwnership_state_expiry_idx` ON `ExecutionOwnership` (`ownershipState`,`leaseExpiresAt`);--> statement-breakpoint
+CREATE INDEX `ExecutionOwnership_tenant_attempt_epoch_idx` ON `ExecutionOwnership` (`tenantId`,`attemptId`,`leaseEpoch`);--> statement-breakpoint
+CREATE INDEX `InvocationAttempt_preparation_idx` ON `InvocationAttempt` (`preparationState`,`nextPreparationAt`,`preparationLeaseExpiresAt`);--> statement-breakpoint
+CREATE INDEX `InvocationCommand_state_dispatch_idx` ON `InvocationCommand` (`commandState`,`nextDispatchAt`,`dispatchLeaseExpiresAt`);--> statement-breakpoint
+CREATE INDEX `Invocation_tenant_state_updated_idx` ON `Invocation` (`tenantId`,`executionState`,`updatedAt`);--> statement-breakpoint
+CREATE INDEX `Invocation_checkpoint_gate_deadline_idx` ON `Invocation` (`tenantId`,`checkpointGate`,`checkpointDeadline`);--> statement-breakpoint
+CREATE INDEX `RuntimeEventIngress_tenant_owner_sequence_idx` ON `RuntimeEventIngress` (`tenantId`,`acceptedOwnershipId`,`producerSequence`);--> statement-breakpoint
+CREATE INDEX `RuntimeSessionBinding_state_dispatch_idx` ON `RuntimeSessionBinding` (`bindingState`,`nextDispatchAt`,`dispatchLeaseExpiresAt`);--> statement-breakpoint
+CREATE INDEX `RuntimeSessionBinding_tenant_revision_execution_idx` ON `RuntimeSessionBinding` (`tenantId`,`runtimeRevisionId`,`remoteExecutionRef`);--> statement-breakpoint
 CREATE INDEX `IncidentContainment_tenant_incident_idx` ON `IncidentContainment` (`tenantId`,`incidentId`);--> statement-breakpoint
 CREATE INDEX `IncidentContainment_incident_state_idx` ON `IncidentContainment` (`incidentId`,`actionState`);--> statement-breakpoint
 CREATE INDEX `SecurityIncident_tenant_state_idx` ON `SecurityIncident` (`tenantId`,`incidentState`);--> statement-breakpoint
@@ -2954,11 +3197,10 @@ CREATE INDEX `UserActionRequest_tenant_invocation_state_idx` ON `UserActionReque
 CREATE INDEX `UserActionRequest_tenant_toolCall_idx` ON `UserActionRequest` (`tenantId`,`toolCallId`);--> statement-breakpoint
 CREATE INDEX `UserActionRequest_tenant_state_expires_idx` ON `UserActionRequest` (`tenantId`,`requestState`,`expiresAt`);--> statement-breakpoint
 CREATE INDEX `UserActionRequest_auth_state_hash_idx` ON `UserActionRequest` (`authStateHash`);--> statement-breakpoint
-CREATE INDEX `WorkloadTokenRevocation_tenant_revoked_idx` ON `WorkloadTokenRevocation` (`tenantId`,`revokedAt`);--> statement-breakpoint
-CREATE INDEX `WorkloadTokenRevocation_expires_idx` ON `WorkloadTokenRevocation` (`expiresAt`);--> statement-breakpoint
+CREATE INDEX `WorkloadTokenRevocation_tenant_invocation_idx` ON `WorkloadTokenRevocation` (`tenantId`,`invocationId`);--> statement-breakpoint
+CREATE INDEX `WorkloadTokenRevocation_expiry_idx` ON `WorkloadTokenRevocation` (`tokenExpiresAt`);--> statement-breakpoint
 CREATE INDEX `WorkspaceWriteLock_tenant_holder_idx` ON `WorkspaceWriteLock` (`tenantId`,`holderInvocationId`);--> statement-breakpoint
-CREATE INDEX `WorkspaceWriteLock_tenant_state_idx` ON `WorkspaceWriteLock` (`tenantId`,`lockState`);--> statement-breakpoint
-CREATE INDEX `WorkspaceWriteLock_tenant_expiry_idx` ON `WorkspaceWriteLock` (`tenantId`,`expiresAt`);--> statement-breakpoint
+CREATE INDEX `WorkspaceWriteLock_state_expiry_idx` ON `WorkspaceWriteLock` (`lockState`,`leaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `Workspace_tenant_owner_idx` ON `Workspace` (`tenantId`,`ownerUserId`);--> statement-breakpoint
 CREATE INDEX `Workspace_tenant_lifecycle_idx` ON `Workspace` (`tenantId`,`lifecycleState`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachment_tenant_thread_idx` ON `WorkspaceAttachment` (`tenantId`,`threadId`);--> statement-breakpoint
@@ -2969,9 +3211,8 @@ CREATE INDEX `WorkspaceAttachmentAccessGrant_tenant_expiry_idx` ON `WorkspaceAtt
 CREATE INDEX `WorkspaceAttachmentAccessGrant_attachment_idx` ON `WorkspaceAttachmentAccessGrant` (`workspaceAttachmentId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachmentUse_tenant_turn_idx` ON `WorkspaceAttachmentUse` (`tenantId`,`turnId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachmentUse_tenant_attachment_idx` ON `WorkspaceAttachmentUse` (`tenantId`,`workspaceAttachmentId`);--> statement-breakpoint
-CREATE INDEX `WorkspaceBinding_tenant_workspace_idx` ON `WorkspaceBinding` (`tenantId`,`workspaceId`);--> statement-breakpoint
-CREATE INDEX `WorkspaceBinding_tenant_device_idx` ON `WorkspaceBinding` (`tenantId`,`deviceId`);--> statement-breakpoint
-CREATE INDEX `WorkspaceBinding_tenant_state_idx` ON `WorkspaceBinding` (`tenantId`,`bindingState`);--> statement-breakpoint
+CREATE INDEX `WorkspaceBinding_tenant_workspace_created_idx` ON `WorkspaceBinding` (`tenantId`,`workspaceId`,`createdAt`);--> statement-breakpoint
+CREATE INDEX `WorkspaceBinding_tenant_scope_idx` ON `WorkspaceBinding` (`tenantId`,`storageScopeDigest`);--> statement-breakpoint
 CREATE INDEX `ControlPlaneEventDelivery_claimable_idx` ON `ControlPlaneEventDelivery` (`state`,`consumerName`,`nextAttemptAt`,`lockExpiresAt`);--> statement-breakpoint
 CREATE INDEX `ControlPlaneOutboxEvent_aggregate_idx` ON `ControlPlaneOutboxEvent` (`aggregateType`,`aggregateId`,`occurredAt`);--> statement-breakpoint
 CREATE INDEX `Artifact_tenant_kind_created_idx` ON `Artifact` (`tenantId`,`kind`,`createdAt`);--> statement-breakpoint
@@ -2994,28 +3235,3 @@ CREATE INDEX `RuntimeConformanceRun_revision_completed_idx` ON `RuntimeConforman
 CREATE INDEX `HostedProvisioningRequest_tenantId_idx` ON `HostedProvisioningRequest` (`tenantId`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_state_idx` ON `HostedProvisioningRequest` (`state`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_claimable_idx` ON `HostedProvisioningRequest` (`state`,`nextAttemptAt`,`leaseExpiresAt`);
---> statement-breakpoint
-CREATE TRIGGER `RouteRevision_prevent_update` BEFORE UPDATE ON `RouteRevision` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteRevision is append-only'; END;
---> statement-breakpoint
-CREATE TRIGGER `RouteActivation_prevent_update` BEFORE UPDATE ON `RouteActivation` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteActivation is append-only'; END;
---> statement-breakpoint
-CREATE TABLE `BrandSettings` (
-`id` int NOT NULL DEFAULT 1,
-`document` json NOT NULL,
-`revision` bigint NOT NULL DEFAULT 0,
-`updatedAt` datetime(3) NOT NULL,
-`updatedBy` varchar(128),
-CONSTRAINT `BrandSettings_id` PRIMARY KEY(`id`)
-);
---> statement-breakpoint
-CREATE TABLE `BrandChangeAudit` (
-`id` bigint NOT NULL AUTO_INCREMENT,
-`revisionBefore` bigint NOT NULL,
-`revisionAfter` bigint NOT NULL,
-`patch` json NOT NULL,
-`changedAt` datetime(3) NOT NULL,
-`changedBy` varchar(128),
-CONSTRAINT `BrandChangeAudit_id` PRIMARY KEY(`id`)
-);
---> statement-breakpoint
-CREATE INDEX `BrandChangeAudit_revision_idx` ON `BrandChangeAudit` (`revisionAfter`);

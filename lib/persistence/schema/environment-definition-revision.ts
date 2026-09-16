@@ -42,10 +42,7 @@
  * 由 F14 完成；对应 Fresh DB seed 与 verify-fresh-db 由 F16/F17 完成。
  */
 import { randomUUID } from "node:crypto";
-import {
-  ENVIRONMENT_TYPES,
-  environmentDefinitionTable,
-} from "@/lib/persistence/schema/environment";
+import { environmentDefinitionTable } from "@/lib/persistence/schema/environment";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { type InferInsertModel, type InferSelectModel, sql } from "drizzle-orm";
 import {
@@ -55,7 +52,6 @@ import {
   foreignKey,
   index,
   json,
-  mysqlEnum,
   mysqlTable,
   uniqueIndex,
   varchar,
@@ -92,9 +88,9 @@ export const environmentDefinitionRevisionTable = mysqlTable(
      * Definition 锁下递增，1 开始。
      * BIGINT UNSIGNED 存储为字符串以避免 JS Number 精度损失。
      */
-    revisionNo: bigint("revisionNo", { mode: "bigint" }).notNull(),
+    revisionNo: bigint("revisionNo", { mode: "number", unsigned: true }).notNull(),
     /** 从 Definition 迁入的真实字段（ENUM desktop/cloud/remote/sandbox）。 */
-    environmentType: mysqlEnum("environmentType", ENVIRONMENT_TYPES).notNull(),
+    environmentType: varchar("environmentType", { length: 32 }).notNull(),
     /** 严格 FilesystemPolicy；从原 Definition 迁入，不复制双 Authority。 */
     filesystemPolicyJson: json("filesystemPolicyJson").notNull(),
     /** 严格 NetworkPolicy；从原 Definition 迁入，不复制双 Authority。 */
@@ -165,6 +161,10 @@ export const environmentDefinitionRevisionTable = mysqlTable(
     semanticDigestFormat: check(
       "EnvironmentDefinitionRevision_semanticDigest_format",
       sql`\`semanticDigest\` REGEXP '^sha256:[0-9a-f]{64}$'`,
+    ),
+    environmentTypeAllowed: check(
+      "EnvironmentDefinitionRevision_environment_type_allowed",
+      sql`\`environmentType\` IN ('desktop', 'cloud', 'remote', 'sandbox')`,
     ),
   }),
 );

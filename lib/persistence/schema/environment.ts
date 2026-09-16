@@ -1,77 +1,31 @@
-/**
- * 执行环境 schema：EnvironmentDefinition / EnvironmentLease /
- * EnvironmentChangeRequest。
- *
- * 事实源：
- * - docs/architecture/persistence.md （execution_ownership 与
- * environment_change_request）、（environment_definition 与 environment_lease）。
- * - docs/architecture/agent-control-plane.md §11（Execution Environment）。
- * - docs/architecture/capabilities-and-security.md 。
- *
- * 关键不变量：
- * - EnvironmentDefinition.tenantId + environmentKey UNIQUE；environmentType 四态
- * （desktop/cloud/remote/sandbox）。
- * - EnvironmentLease 表示某次 Attempt 的实际实例：UNIQUE(invocationId, attemptId)。
- * Desktop binding 与 Lease 必须共享同一 deviceId（应用层校验）。
- * - Lease 失联进入恢复判断，不删除 Thread 或 Workspace。
- * - EnvironmentChangeRequest 状态机：pending → accepted_for_next_invocation/
- * runtime_acknowledged/rejected/expired；当前 Invocation 热迁移必须 Runtime capability
- * 支持并 ack，否则只影响下一 Invocation。
- * - ExecutionOwnership 已在 runtime.ts 中定义（leaseEpoch 单调递增，
- * UNIQUE(invocationId, leaseEpoch)）。
- */
+/** Environment identity, immutable revisions, leases, and future-selection requests. */
 import { randomUUID } from "node:crypto";
-import { invocationTable } from "@/lib/persistence/schema/executions";
+import { threadTable } from "@/lib/persistence/schema/conversation";
+import { invocationAttemptTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   datetime,
   foreignKey,
   index,
+  int,
   json,
-  mysqlEnum,
   mysqlTable,
   text,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 
-// ─── Environment Type ─────────────────────────────────────
-
-/**
- * 环境类型（与 WorkspaceBindingType 一致）。
- * - desktop：本机执行。
- * - cloud：云端 Workspace。
- * - remote：远程 Runtime。
- * - sandbox：不可信代码沙箱。
- */
 export const ENVIRONMENT_TYPES = ["desktop", "cloud", "remote", "sandbox"] as const;
 export type EnvironmentType = (typeof ENVIRONMENT_TYPES)[number];
 
-// ─── Environment Definition Lifecycle ─────────────────────
-
-/**
- * EnvironmentDefinition 生命周期。
- * - active：可用。
- * - archived：归档，不允许新 Lease。
- * - deleted：软删除（终态）。
- */
 export const ENVIRONMENT_DEFINITION_LIFECYCLE_STATES = ["active", "archived", "deleted"] as const;
 export type EnvironmentDefinitionLifecycleState =
   (typeof ENVIRONMENT_DEFINITION_LIFECYCLE_STATES)[number];
 
-// ─── Environment Lease State ──────────────────────────────
-
-/**
- * EnvironmentLease 状态。
- * - allocated：已分配，尚未激活。
- * - active：Runtime 正在使用此 Lease。
- * - releasing：平台正在释放（运行中 ToolCall 完成后回收）。
- * - released：主动释放（终态）。
- * - expired：超时未心跳（终态）。
- * - lost：Runtime 主动报告丢失或心跳超时被标记（终态）。
- */
 export const ENVIRONMENT_LEASE_STATES = [
   "allocated",
   "active",
@@ -81,87 +35,61 @@ export const ENVIRONMENT_LEASE_STATES = [
   "lost",
 ] as const;
 export type EnvironmentLeaseState = (typeof ENVIRONMENT_LEASE_STATES)[number];
-
-/** Lease 终态集合（不可恢复）。 */
 export const ENVIRONMENT_LEASE_TERMINAL_STATES: readonly EnvironmentLeaseState[] = [
   "released",
   "expired",
   "lost",
 ];
 
-// ─── Environment Change Request State ─────────────────────
+export const ENVIRONMENT_READINESS_STATES = [
+  "unresolved",
+  "preparing",
+  "prepared",
+  "activating",
+  "ready",
+  "blocked",
+] as const;
+export type EnvironmentReadinessState = (typeof ENVIRONMENT_READINESS_STATES)[number];
 
-/**
- * EnvironmentChangeRequest 状态机（）。
- * - pending：员工已请求，等待平台决策。
- * - accepted_for_next_invocation：Runtime 不支持热迁移，标记下一 Invocation 生效。
- * - runtime_acknowledged：Runtime 支持热迁移并 ack，当前 Invocation 已切换。
- * - rejected：平台或策略拒绝（终态）。
- * - expired：未在窗口内 ack 或下一 Invocation 接纳（终态）。
- */
 export const ENVIRONMENT_CHANGE_REQUEST_STATES = [
   "pending",
   "accepted_for_next_invocation",
-  "runtime_acknowledged",
+  "applied",
   "rejected",
   "expired",
 ] as const;
 export type EnvironmentChangeRequestState = (typeof ENVIRONMENT_CHANGE_REQUEST_STATES)[number];
-
-/** EnvironmentChangeRequest 终态集合。 */
 export const ENVIRONMENT_CHANGE_REQUEST_TERMINAL_STATES: readonly EnvironmentChangeRequestState[] =
   ["rejected", "expired"];
 
-// ─── EnvironmentDefinition ────────────────────────────────
+const ascii = (name: string, length: number) => varchar(name, { length }).$type<string>();
+const timestamp = (name: string) => datetime(name, { mode: "date", fsp: 6 });
+const unsignedBigint = (name: string) => bigint(name, { mode: "number", unsigned: true });
+const currentTimestamp = () => sql`CURRENT_TIMESTAMP(6)`;
 
-/**
- * EnvironmentDefinition 表：固定文件、网络、资源、Secret 策略的环境定义（）。
- *
- * 关键约束：
- * - UNIQUE(tenantId, environmentKey)：租户内稳定 key 唯一。
- * - lifecycleState 三态（active/archived/deleted），deleted 为终态。
- * - archived 不允许新 Lease 引用，但不删除历史 Lease。
- * - versionNo 乐观并发控制（ bigint 单调递增）。
- * - filesystem/network/resource/secret policy JSON 由平台固定 Schema，本表只持久化。
- */
 export const environmentDefinitionTable = mysqlTable(
   "EnvironmentDefinition",
   {
-    id: varchar("id", { length: 36 })
+    id: ascii("id", 36)
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
+    tenantId: ascii("tenantId", 36)
       .notNull()
       .references(() => tenant.id),
-    /** 租户内稳定唯一 key（slug），如 "desktop-default"。 */
-    environmentKey: varchar("environmentKey", { length: 128 }).notNull(),
+    environmentKey: ascii("environmentKey", 128).notNull(),
     displayName: varchar("displayName", { length: 256 }).notNull(),
     description: text("description"),
-    /** 环境类型（desktop/cloud/remote/sandbox）。 */
-    environmentType: mysqlEnum("environmentType", ENVIRONMENT_TYPES).notNull(),
-    /** 文件系统策略（路径白名单/黑名单、读写权限）。 */
-    filesystemPolicyJson: json("filesystemPolicyJson").notNull(),
-    /** 网络策略（出站域名/IP 白名单）。 */
-    networkPolicyJson: json("networkPolicyJson").notNull(),
-    /** 资源限制（CPU、内存、时长、并发）。 */
-    resourceLimitsJson: json("resourceLimitsJson").notNull(),
-    /** Secret 注入策略（哪些 CredentialRef 可注入、注入方式）。 */
-    secretPolicyJson: json("secretPolicyJson").notNull(),
-    lifecycleState: mysqlEnum("lifecycleState", ENVIRONMENT_DEFINITION_LIFECYCLE_STATES)
-      .notNull()
-      .default("active"),
-    /** 乐观并发版本号（单调递增）。 */
-    versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    deletedAt: datetime("deletedAt", { mode: "date" }),
+    lifecycleState: ascii("lifecycleState", 32).notNull().default("active"),
+    currentRevisionId: ascii("currentRevisionId", 36),
+    lastRevisionNo: unsignedBigint("lastRevisionNo").notNull().default(0),
+    versionNo: unsignedBigint("versionNo").notNull().default(1),
+    createdAt: timestamp("createdAt").notNull().default(currentTimestamp()),
+    updatedAt: timestamp("updatedAt").notNull().default(currentTimestamp()),
+    deletedAt: timestamp("deletedAt"),
   },
   (t) => ({
+    tenantIdUq: uniqueIndex("EnvironmentDefinition_tenant_id_uq").on(t.tenantId, t.id),
     tenantKeyUq: uniqueIndex("EnvironmentDefinition_tenant_key_uq").on(
       t.tenantId,
       t.environmentKey,
@@ -171,159 +99,167 @@ export const environmentDefinitionTable = mysqlTable(
       t.lifecycleState,
       t.updatedAt,
     ),
-    tenantTypeIdx: index("EnvironmentDefinition_tenant_type_idx").on(t.tenantId, t.environmentType),
+    lifecycleAllowed: check(
+      "EnvironmentDefinition_lifecycle_allowed",
+      sql`\`lifecycleState\` IN ('active', 'archived', 'deleted')`,
+    ),
+    currentRevisionShape: check(
+      "EnvironmentDefinition_current_revision_shape",
+      sql`\`lifecycleState\` <> 'active' OR \`currentRevisionId\` IS NOT NULL OR \`lastRevisionNo\` = 0`,
+    ),
   }),
 );
 
 export type EnvironmentDefinition = InferSelectModel<typeof environmentDefinitionTable>;
 export type EnvironmentDefinitionInsert = InferInsertModel<typeof environmentDefinitionTable>;
 
-// ─── EnvironmentLease ─────────────────────────────────────
-
-/**
- * EnvironmentLease 表：某次 Attempt 的实际执行环境实例（）。
- *
- * 关键约束：
- * - UNIQUE(invocationId, attemptId)：同一 Invocation 同一 Attempt 只能有一个 Lease。
- * - environmentDefinitionId 引用 EnvironmentDefinition（FK RESTRICT，不允许删除有 Lease 引用的 Definition）。
- * - invocationId 引用 Invocation（FK CASCADE，Invocation 删除时 Lease 一并删除）。
- * - Desktop Lease 必含 deviceId；Cloud/Remote/Sandbox 可空。
- * - leaseState 状态机：allocated → active → releasing → released/expired/lost。
- * - 终态后不可恢复。
- * - capabilitiesJson 由 Runtime 探测填入，包括热迁移能力。
- */
 export const environmentLeaseTable = mysqlTable(
   "EnvironmentLease",
   {
-    id: varchar("id", { length: 36 })
+    id: ascii("id", 36)
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
+    tenantId: ascii("tenantId", 36)
       .notNull()
       .references(() => tenant.id),
-    environmentDefinitionId: varchar("environmentDefinitionId", { length: 36 }).notNull(),
-    /** 引用 Invocation.id（FK CASCADE）。 */
-    invocationId: varchar("invocationId", { length: 36 })
+    invocationId: ascii("invocationId", 36)
       .notNull()
       .references(() => invocationTable.id),
-    /** 引用 InvocationAttempt.id（逻辑外键，应用层校验）。 */
-    attemptId: varchar("attemptId", { length: 36 }).notNull(),
-    /** Desktop Lease 必填；Cloud/Remote/Sandbox 可空。 */
-    deviceId: varchar("deviceId", { length: 36 }),
-    /** Runtime 内部 worker 引用。 */
-    workerRef: varchar("workerRef", { length: 256 }),
-    leaseState: mysqlEnum("leaseState", ENVIRONMENT_LEASE_STATES).notNull().default("allocated"),
-    /** Runtime 探测的真实能力（包括热迁移支持）。 */
+    attemptId: ascii("attemptId", 36).notNull(),
+    environmentDefinitionRevisionId: ascii("environmentDefinitionRevisionId", 36).notNull(),
+    deviceId: ascii("deviceId", 36),
+    workerRef: varchar("workerRef", { length: 512 }),
+    hostIdentity: varchar("hostIdentity", { length: 512 }),
+    storageIdentity: ascii("storageIdentity", 71),
+    leaseState: ascii("leaseState", 32).notNull().default("allocated"),
+    readinessState: ascii("readinessState", 32).notNull().default("unresolved"),
     capabilitiesJson: json("capabilitiesJson"),
-    allocatedAt: datetime("allocatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
-    releasedAt: datetime("releasedAt", { mode: "date", fsp: 3 }),
-    /** Lease 过期时间；超过且无心跳 → expired。 */
-    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
+    complianceEvidence: json("complianceEvidence"),
+    complianceDigest: ascii("complianceDigest", 71),
+    preparedEvidence: json("preparedEvidence"),
+    preparedDigest: ascii("preparedDigest", 71),
+    preparedAt: timestamp("preparedAt"),
+    activationOwnershipId: ascii("activationOwnershipId", 36),
+    resourceManifest: json("resourceManifest").notNull(),
+    cleanupLeaseOwner: ascii("cleanupLeaseOwner", 128),
+    cleanupLeaseExpiresAt: timestamp("cleanupLeaseExpiresAt"),
+    nextCleanupAt: timestamp("nextCleanupAt"),
+    cleanupCount: int("cleanupCount", { unsigned: true }).notNull().default(0),
+    lastErrorCode: ascii("lastErrorCode", 64),
+    allocatedAt: timestamp("allocatedAt").notNull(),
+    lastHeartbeatAt: timestamp("lastHeartbeatAt"),
+    expiresAt: timestamp("expiresAt").notNull(),
+    releasedAt: timestamp("releasedAt"),
+    versionNo: unsignedBigint("versionNo").notNull().default(1),
+    createdAt: timestamp("createdAt").notNull().default(currentTimestamp()),
+    updatedAt: timestamp("updatedAt").notNull().default(currentTimestamp()),
   },
   (t) => ({
+    tenantIdUq: uniqueIndex("EnvironmentLease_tenant_id_uq").on(t.tenantId, t.id),
     invocationAttemptUq: uniqueIndex("EnvironmentLease_invocation_attempt_uq").on(
+      t.tenantId,
       t.invocationId,
       t.attemptId,
     ),
-    tenantStateIdx: index("EnvironmentLease_tenant_state_idx").on(t.tenantId, t.leaseState),
-    definitionIdx: index("EnvironmentLease_definition_idx").on(t.environmentDefinitionId),
-    deviceIdx: index("EnvironmentLease_device_idx").on(t.deviceId),
-    // 显式命名 FK（0000 基线中 drizzle 截断生成，<64 字符）。
-    definitionFk: foreignKey({
-      name: "EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317",
-      columns: [t.environmentDefinitionId],
-      foreignColumns: [environmentDefinitionTable.id],
+    cleanupIdx: index("EnvironmentLease_cleanup_idx").on(
+      t.leaseState,
+      t.nextCleanupAt,
+      t.cleanupLeaseExpiresAt,
+    ),
+    revisionIdx: index("EnvironmentLease_revision_idx").on(
+      t.tenantId,
+      t.environmentDefinitionRevisionId,
+    ),
+    leaseStateAllowed: check(
+      "EnvironmentLease_lease_state_allowed",
+      sql`\`leaseState\` IN ('allocated', 'active', 'releasing', 'released', 'expired', 'lost')`,
+    ),
+    readinessStateAllowed: check(
+      "EnvironmentLease_readiness_state_allowed",
+      sql`\`readinessState\` IN ('unresolved', 'preparing', 'prepared', 'activating', 'ready', 'blocked')`,
+    ),
+    attemptIdentityFk: foreignKey({
+      name: "EnvironmentLease_tenant_invocation_attempt_fk",
+      columns: [t.tenantId, t.invocationId, t.attemptId],
+      foreignColumns: [
+        invocationAttemptTable.tenantId,
+        invocationAttemptTable.invocationId,
+        invocationAttemptTable.id,
+      ],
     }),
+    activationShape: check(
+      "EnvironmentLease_activation_shape",
+      sql`(\`readinessState\` = 'ready' AND \`leaseState\` = 'active' AND \`activationOwnershipId\` IS NOT NULL) OR \`readinessState\` <> 'ready'`,
+    ),
+    complianceShape: check(
+      "EnvironmentLease_compliance_shape",
+      sql`\`readinessState\` NOT IN ('prepared', 'ready') OR (\`capabilitiesJson\` IS NOT NULL AND \`complianceEvidence\` IS NOT NULL AND \`complianceDigest\` IS NOT NULL AND \`preparedEvidence\` IS NOT NULL AND \`preparedDigest\` IS NOT NULL AND \`preparedAt\` IS NOT NULL)`,
+    ),
   }),
 );
 
 export type EnvironmentLease = InferSelectModel<typeof environmentLeaseTable>;
 export type EnvironmentLeaseInsert = InferInsertModel<typeof environmentLeaseTable>;
 
-// ─── EnvironmentChangeRequest ─────────────────────────────
-
-/**
- * EnvironmentChangeRequest 表：员工请求切换执行环境（）。
- *
- * 关键约束：
- * - threadId + invocationId 必须同租户（应用层校验）。
- * - requestState 状态机：pending → accepted_for_next_invocation/runtime_acknowledged/
- * rejected/expired。
- * - 当前 Invocation 热迁移必须 Runtime capability 支持且无 unknown_effect，
- * 否则只影响下一 Invocation（accepted_for_next_invocation）。
- * - runtime_acknowledged 表示当前 Invocation 已切换 Lease。
- * - 终态后不可恢复。
- */
 export const environmentChangeRequestTable = mysqlTable(
   "EnvironmentChangeRequest",
   {
-    id: varchar("id", { length: 36 })
+    id: ascii("id", 36)
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
+    tenantId: ascii("tenantId", 36)
       .notNull()
       .references(() => tenant.id),
-    threadId: varchar("threadId", { length: 36 }).notNull(),
-    /** 当前 Invocation id；可空表示下一 Invocation 生效。 */
-    invocationId: varchar("invocationId", { length: 36 }),
-    fromEnvironmentDefinitionId: varchar("fromEnvironmentDefinitionId", { length: 36 }).notNull(),
-    requestedEnvironmentDefinitionId: varchar("requestedEnvironmentDefinitionId", {
-      length: 36,
-    }).notNull(),
-    /** 切换到指定设备（仅 Desktop 必填）。 */
-    requestedDeviceId: varchar("requestedDeviceId", { length: 36 }),
-    requestState: mysqlEnum("requestState", ENVIRONMENT_CHANGE_REQUEST_STATES)
+    threadId: ascii("threadId", 36)
       .notNull()
-      .default("pending"),
-    /** 员工请求原因 / Runtime 拒绝原因。 */
-    reasonCode: varchar("reasonCode", { length: 128 }),
-    /** 请求发起者 userIdentityId 或 serviceId。 */
-    requestedBy: varchar("requestedBy", { length: 128 }).notNull(),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    resolvedAt: datetime("resolvedAt", { mode: "date", fsp: 3 }),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
+      .references(() => threadTable.id),
+    selectionSequence: unsignedBigint("selectionSequence").notNull(),
+    requestedRevisionId: ascii("requestedRevisionId", 36).notNull(),
+    requestState: ascii("requestState", 32).notNull().default("pending"),
+    requestedBy: ascii("requestedBy", 128).notNull(),
+    reasonCode: ascii("reasonCode", 64),
+    firstAppliedInvocationId: ascii("firstAppliedInvocationId", 36),
+    expiresAt: timestamp("expiresAt"),
+    versionNo: unsignedBigint("versionNo").notNull().default(1),
+    createdAt: timestamp("createdAt").notNull().default(currentTimestamp()),
+    updatedAt: timestamp("updatedAt").notNull().default(currentTimestamp()),
   },
   (t) => ({
-    tenantThreadStateIdx: index("EnvironmentChangeRequest_tenant_thread_state_idx").on(
+    tenantIdUq: uniqueIndex("EnvironmentChangeRequest_tenant_id_uq").on(t.tenantId, t.id),
+    selectionUq: uniqueIndex("EnvironmentChangeRequest_tenant_thread_sequence_uq").on(
+      t.tenantId,
+      t.threadId,
+      t.selectionSequence,
+    ),
+    stateIdx: index("EnvironmentChangeRequest_tenant_thread_state_idx").on(
       t.tenantId,
       t.threadId,
       t.requestState,
+      t.selectionSequence,
     ),
-    tenantInvocationIdx: index("EnvironmentChangeRequest_tenant_invocation_idx").on(
-      t.tenantId,
-      t.invocationId,
+    stateAllowed: check(
+      "EnvironmentChangeRequest_state_allowed",
+      sql`\`requestState\` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired')`,
     ),
-    fromDefinitionIdx: index("EnvironmentChangeRequest_from_definition_idx").on(
-      t.fromEnvironmentDefinitionId,
+    appliedShape: check(
+      "EnvironmentChangeRequest_applied_shape",
+      sql`\`requestState\` <> 'applied' OR \`firstAppliedInvocationId\` IS NOT NULL`,
     ),
-    requestedDefinitionIdx: index("EnvironmentChangeRequest_requested_definition_idx").on(
-      t.requestedEnvironmentDefinitionId,
+    revisionReferenceShape: check(
+      "EnvironmentChangeRequest_revision_reference_shape",
+      sql`\`requestedRevisionId\` IS NOT NULL`,
     ),
-    // 显式命名 FK（0000 基线中 drizzle 截断生成，<64 字符，避免超长逻辑名在后续迁移被反复 rename）。
-    fromDefinitionFk: foreignKey({
-      name: "EnvironmentChangeRequest_fromEnvironmentDefinitionId_Environ5abe",
-      columns: [t.fromEnvironmentDefinitionId],
-      foreignColumns: [environmentDefinitionTable.id],
+    threadFk: foreignKey({
+      name: "EnvironmentChangeRequest_tenant_thread_fk",
+      columns: [t.tenantId, t.threadId],
+      foreignColumns: [threadTable.tenantId, threadTable.id],
     }),
-    requestedDefinitionFk: foreignKey({
-      name: "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1",
-      columns: [t.requestedEnvironmentDefinitionId],
-      foreignColumns: [environmentDefinitionTable.id],
+    appliedInvocationFk: foreignKey({
+      name: "EnvironmentChangeRequest_tenant_invocation_fk",
+      columns: [t.tenantId, t.firstAppliedInvocationId],
+      foreignColumns: [invocationTable.tenantId, invocationTable.id],
     }),
   }),
 );

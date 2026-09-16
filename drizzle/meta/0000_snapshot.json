@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "ce9c6e9f-a741-4683-967d-971e107a18f3",
+  "id": "c4b437ba-f165-4f72-8d56-35d3253774aa",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -707,8 +707,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "protocolContractRevision": {
-          "name": "protocolContractRevision",
+        "protocolContractDigest": {
+          "name": "protocolContractDigest",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true,
@@ -1492,8 +1492,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "protocolContractRevision": {
-          "name": "protocolContractRevision",
+        "protocolContractDigest": {
+          "name": "protocolContractDigest",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true,
@@ -2424,6 +2424,127 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
+    "BrandChangeAudit": {
+      "name": "BrandChangeAudit",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "revisionBefore": {
+          "name": "revisionBefore",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionAfter": {
+          "name": "revisionAfter",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "patch": {
+          "name": "patch",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "changedAt": {
+          "name": "changedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "changedBy": {
+          "name": "changedBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "BrandChangeAudit_revision_idx": {
+          "name": "BrandChangeAudit_revision_idx",
+          "columns": [
+            "revisionAfter"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "BrandChangeAudit_id": {
+          "name": "BrandChangeAudit_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "BrandSettings": {
+      "name": "BrandSettings",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "document": {
+          "name": "document",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedBy": {
+          "name": "updatedBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "BrandSettings_id": {
+          "name": "BrandSettings_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
     "CapabilityUse": {
       "name": "CapabilityUse",
       "columns": {
@@ -3065,239 +3186,6 @@
       "compositePrimaryKeys": {
         "Goal_id": {
           "name": "Goal_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "InvocationCommand": {
-      "name": "InvocationCommand",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "invocationId": {
-          "name": "invocationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "threadId": {
-          "name": "threadId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "turnId": {
-          "name": "turnId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "commandType": {
-          "name": "commandType",
-          "type": "enum('steer','interrupt','regenerate','resume','cancel')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "commandPayloadJson": {
-          "name": "commandPayloadJson",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "commandPayloadHash": {
-          "name": "commandPayloadHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "commandState": {
-          "name": "commandState",
-          "type": "enum('queued','dispatched','acknowledged','failed','cancelled')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'queued'"
-        },
-        "runtimeExecutionRef": {
-          "name": "runtimeExecutionRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "idempotencyKey": {
-          "name": "idempotencyKey",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "errorCode": {
-          "name": "errorCode",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "errorMessage": {
-          "name": "errorMessage",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dispatchAttemptCount": {
-          "name": "dispatchAttemptCount",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "nextDispatchAt": {
-          "name": "nextDispatchAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dispatchLeaseOwner": {
-          "name": "dispatchLeaseOwner",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dispatchLeaseExpiresAt": {
-          "name": "dispatchLeaseExpiresAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lastDispatchAttemptAt": {
-          "name": "lastDispatchAttemptAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lastTransientErrorCode": {
-          "name": "lastTransientErrorCode",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "dispatchedAt": {
-          "name": "dispatchedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "acknowledgedAt": {
-          "name": "acknowledgedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "failedAt": {
-          "name": "failedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "InvocationCommand_thread_turn_idx": {
-          "name": "InvocationCommand_thread_turn_idx",
-          "columns": [
-            "threadId",
-            "turnId"
-          ],
-          "isUnique": false
-        },
-        "InvocationCommand_invocation_idx": {
-          "name": "InvocationCommand_invocation_idx",
-          "columns": [
-            "invocationId"
-          ],
-          "isUnique": false
-        },
-        "InvocationCommand_dispatch_retry_idx": {
-          "name": "InvocationCommand_dispatch_retry_idx",
-          "columns": [
-            "commandState",
-            "nextDispatchAt"
-          ],
-          "isUnique": false
-        },
-        "InvocationCommand_dispatch_lease_idx": {
-          "name": "InvocationCommand_dispatch_lease_idx",
-          "columns": [
-            "dispatchLeaseExpiresAt"
-          ],
-          "isUnique": false
-        },
-        "InvocationCommand_thread_idempotency_uq": {
-          "name": "InvocationCommand_thread_idempotency_uq",
-          "columns": [
-            "threadId",
-            "idempotencyKey"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "InvocationCommand_threadId_Thread_id_fk": {
-          "name": "InvocationCommand_threadId_Thread_id_fk",
-          "tableFrom": "InvocationCommand",
-          "tableTo": "Thread",
-          "columnsFrom": [
-            "threadId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "InvocationCommand_id": {
-          "name": "InvocationCommand_id",
           "columns": [
             "id"
           ]
@@ -4059,6 +3947,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "toolPermissionMode": {
+          "name": "toolPermissionMode",
+          "type": "enum('auto','ask','full_access')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'auto'"
+        },
         "defaultEnvironmentDefinitionId": {
           "name": "defaultEnvironmentDefinitionId",
           "type": "varchar(36)",
@@ -4144,6 +4040,14 @@
         }
       },
       "indexes": {
+        "Thread_tenant_id_uq": {
+          "name": "Thread_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
         "Thread_tenant_owner_lifecycle_activity_idx": {
           "name": "Thread_tenant_owner_lifecycle_activity_idx",
           "columns": [
@@ -5484,48 +5388,27 @@
           "notNull": true,
           "autoincrement": false
         },
-        "invocationId": {
-          "name": "invocationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "fromEnvironmentDefinitionId": {
-          "name": "fromEnvironmentDefinitionId",
-          "type": "varchar(36)",
+        "selectionSequence": {
+          "name": "selectionSequence",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "requestedEnvironmentDefinitionId": {
-          "name": "requestedEnvironmentDefinitionId",
+        "requestedRevisionId": {
+          "name": "requestedRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "requestedDeviceId": {
-          "name": "requestedDeviceId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "requestState": {
           "name": "requestState",
-          "type": "enum('pending','accepted_for_next_invocation','runtime_acknowledged','rejected','expired')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
           "default": "'pending'"
-        },
-        "reasonCode": {
-          "name": "reasonCode",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "requestedBy": {
           "name": "requestedBy",
@@ -5534,57 +5417,77 @@
           "notNull": true,
           "autoincrement": false
         },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "resolvedAt": {
-          "name": "resolvedAt",
-          "type": "datetime(3)",
+        "reasonCode": {
+          "name": "reasonCode",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
+        "firstAppliedInvocationId": {
+          "name": "firstAppliedInvocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
+        "EnvironmentChangeRequest_tenant_id_uq": {
+          "name": "EnvironmentChangeRequest_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "EnvironmentChangeRequest_tenant_thread_sequence_uq": {
+          "name": "EnvironmentChangeRequest_tenant_thread_sequence_uq",
+          "columns": [
+            "tenantId",
+            "threadId",
+            "selectionSequence"
+          ],
+          "isUnique": true
+        },
         "EnvironmentChangeRequest_tenant_thread_state_idx": {
           "name": "EnvironmentChangeRequest_tenant_thread_state_idx",
           "columns": [
             "tenantId",
             "threadId",
-            "requestState"
-          ],
-          "isUnique": false
-        },
-        "EnvironmentChangeRequest_tenant_invocation_idx": {
-          "name": "EnvironmentChangeRequest_tenant_invocation_idx",
-          "columns": [
-            "tenantId",
-            "invocationId"
-          ],
-          "isUnique": false
-        },
-        "EnvironmentChangeRequest_from_definition_idx": {
-          "name": "EnvironmentChangeRequest_from_definition_idx",
-          "columns": [
-            "fromEnvironmentDefinitionId"
-          ],
-          "isUnique": false
-        },
-        "EnvironmentChangeRequest_requested_definition_idx": {
-          "name": "EnvironmentChangeRequest_requested_definition_idx",
-          "columns": [
-            "requestedEnvironmentDefinitionId"
+            "requestState",
+            "selectionSequence"
           ],
           "isUnique": false
         }
@@ -5603,12 +5506,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "EnvironmentChangeRequest_fromEnvironmentDefinitionId_Environ5abe": {
-          "name": "EnvironmentChangeRequest_fromEnvironmentDefinitionId_Environ5abe",
+        "EnvironmentChangeRequest_threadId_Thread_id_fk": {
+          "name": "EnvironmentChangeRequest_threadId_Thread_id_fk",
           "tableFrom": "EnvironmentChangeRequest",
-          "tableTo": "EnvironmentDefinition",
+          "tableTo": "Thread",
           "columnsFrom": [
-            "fromEnvironmentDefinitionId"
+            "threadId"
           ],
           "columnsTo": [
             "id"
@@ -5616,14 +5519,31 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1": {
-          "name": "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1",
+        "EnvironmentChangeRequest_tenant_thread_fk": {
+          "name": "EnvironmentChangeRequest_tenant_thread_fk",
           "tableFrom": "EnvironmentChangeRequest",
-          "tableTo": "EnvironmentDefinition",
+          "tableTo": "Thread",
           "columnsFrom": [
-            "requestedEnvironmentDefinitionId"
+            "tenantId",
+            "threadId"
           ],
           "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "EnvironmentChangeRequest_tenant_invocation_fk": {
+          "name": "EnvironmentChangeRequest_tenant_invocation_fk",
+          "tableFrom": "EnvironmentChangeRequest",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "tenantId",
+            "firstAppliedInvocationId"
+          ],
+          "columnsTo": [
+            "tenantId",
             "id"
           ],
           "onDelete": "no action",
@@ -5639,7 +5559,20 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "EnvironmentChangeRequest_state_allowed": {
+          "name": "EnvironmentChangeRequest_state_allowed",
+          "value": "`requestState` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired')"
+        },
+        "EnvironmentChangeRequest_applied_shape": {
+          "name": "EnvironmentChangeRequest_applied_shape",
+          "value": "`requestState` <> 'applied' OR `firstAppliedInvocationId` IS NOT NULL"
+        },
+        "EnvironmentChangeRequest_revision_reference_shape": {
+          "name": "EnvironmentChangeRequest_revision_reference_shape",
+          "value": "`requestedRevisionId` IS NOT NULL"
+        }
+      }
     },
     "EnvironmentDefinition": {
       "name": "EnvironmentDefinition",
@@ -5679,9 +5612,493 @@
           "notNull": false,
           "autoincrement": false
         },
+        "lifecycleState": {
+          "name": "lifecycleState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "currentRevisionId": {
+          "name": "currentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastRevisionNo": {
+          "name": "lastRevisionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "EnvironmentDefinition_tenant_id_uq": {
+          "name": "EnvironmentDefinition_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "EnvironmentDefinition_tenant_key_uq": {
+          "name": "EnvironmentDefinition_tenant_key_uq",
+          "columns": [
+            "tenantId",
+            "environmentKey"
+          ],
+          "isUnique": true
+        },
+        "EnvironmentDefinition_tenant_lifecycle_updated_idx": {
+          "name": "EnvironmentDefinition_tenant_lifecycle_updated_idx",
+          "columns": [
+            "tenantId",
+            "lifecycleState",
+            "updatedAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "EnvironmentDefinition_tenantId_Tenant_id_fk": {
+          "name": "EnvironmentDefinition_tenantId_Tenant_id_fk",
+          "tableFrom": "EnvironmentDefinition",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "EnvironmentDefinition_id": {
+          "name": "EnvironmentDefinition_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "EnvironmentDefinition_lifecycle_allowed": {
+          "name": "EnvironmentDefinition_lifecycle_allowed",
+          "value": "`lifecycleState` IN ('active', 'archived', 'deleted')"
+        },
+        "EnvironmentDefinition_current_revision_shape": {
+          "name": "EnvironmentDefinition_current_revision_shape",
+          "value": "`lifecycleState` <> 'active' OR `currentRevisionId` IS NOT NULL OR `lastRevisionNo` = 0"
+        }
+      }
+    },
+    "EnvironmentLease": {
+      "name": "EnvironmentLease",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocationId": {
+          "name": "invocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attemptId": {
+          "name": "attemptId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "environmentDefinitionRevisionId": {
+          "name": "environmentDefinitionRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deviceId": {
+          "name": "deviceId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "workerRef": {
+          "name": "workerRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hostIdentity": {
+          "name": "hostIdentity",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "storageIdentity": {
+          "name": "storageIdentity",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "leaseState": {
+          "name": "leaseState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'allocated'"
+        },
+        "readinessState": {
+          "name": "readinessState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'unresolved'"
+        },
+        "capabilitiesJson": {
+          "name": "capabilitiesJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "complianceEvidence": {
+          "name": "complianceEvidence",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "complianceDigest": {
+          "name": "complianceDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparedEvidence": {
+          "name": "preparedEvidence",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparedDigest": {
+          "name": "preparedDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparedAt": {
+          "name": "preparedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "activationOwnershipId": {
+          "name": "activationOwnershipId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resourceManifest": {
+          "name": "resourceManifest",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cleanupLeaseOwner": {
+          "name": "cleanupLeaseOwner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cleanupLeaseExpiresAt": {
+          "name": "cleanupLeaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "nextCleanupAt": {
+          "name": "nextCleanupAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cleanupCount": {
+          "name": "cleanupCount",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "lastErrorCode": {
+          "name": "lastErrorCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "allocatedAt": {
+          "name": "allocatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lastHeartbeatAt": {
+          "name": "lastHeartbeatAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "releasedAt": {
+          "name": "releasedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "EnvironmentLease_tenant_id_uq": {
+          "name": "EnvironmentLease_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "EnvironmentLease_invocation_attempt_uq": {
+          "name": "EnvironmentLease_invocation_attempt_uq",
+          "columns": [
+            "tenantId",
+            "invocationId",
+            "attemptId"
+          ],
+          "isUnique": true
+        },
+        "EnvironmentLease_cleanup_idx": {
+          "name": "EnvironmentLease_cleanup_idx",
+          "columns": [
+            "leaseState",
+            "nextCleanupAt",
+            "cleanupLeaseExpiresAt"
+          ],
+          "isUnique": false
+        },
+        "EnvironmentLease_revision_idx": {
+          "name": "EnvironmentLease_revision_idx",
+          "columns": [
+            "tenantId",
+            "environmentDefinitionRevisionId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "EnvironmentLease_tenantId_Tenant_id_fk": {
+          "name": "EnvironmentLease_tenantId_Tenant_id_fk",
+          "tableFrom": "EnvironmentLease",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "EnvironmentLease_invocationId_Invocation_id_fk": {
+          "name": "EnvironmentLease_invocationId_Invocation_id_fk",
+          "tableFrom": "EnvironmentLease",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "invocationId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "EnvironmentLease_tenant_invocation_attempt_fk": {
+          "name": "EnvironmentLease_tenant_invocation_attempt_fk",
+          "tableFrom": "EnvironmentLease",
+          "tableTo": "InvocationAttempt",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId",
+            "attemptId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "invocationId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "EnvironmentLease_id": {
+          "name": "EnvironmentLease_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "EnvironmentLease_lease_state_allowed": {
+          "name": "EnvironmentLease_lease_state_allowed",
+          "value": "`leaseState` IN ('allocated', 'active', 'releasing', 'released', 'expired', 'lost')"
+        },
+        "EnvironmentLease_readiness_state_allowed": {
+          "name": "EnvironmentLease_readiness_state_allowed",
+          "value": "`readinessState` IN ('unresolved', 'preparing', 'prepared', 'activating', 'ready', 'blocked')"
+        },
+        "EnvironmentLease_activation_shape": {
+          "name": "EnvironmentLease_activation_shape",
+          "value": "(`readinessState` = 'ready' AND `leaseState` = 'active' AND `activationOwnershipId` IS NOT NULL) OR `readinessState` <> 'ready'"
+        },
+        "EnvironmentLease_compliance_shape": {
+          "name": "EnvironmentLease_compliance_shape",
+          "value": "`readinessState` NOT IN ('prepared', 'ready') OR (`capabilitiesJson` IS NOT NULL AND `complianceEvidence` IS NOT NULL AND `complianceDigest` IS NOT NULL AND `preparedEvidence` IS NOT NULL AND `preparedDigest` IS NOT NULL AND `preparedAt` IS NOT NULL)"
+        }
+      }
+    },
+    "EnvironmentDefinitionRevision": {
+      "name": "EnvironmentDefinitionRevision",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "definitionId": {
+          "name": "definitionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionNo": {
+          "name": "revisionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "environmentType": {
           "name": "environmentType",
-          "type": "enum('desktop','cloud','remote','sandbox')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -5714,243 +6131,91 @@
           "notNull": true,
           "autoincrement": false
         },
-        "lifecycleState": {
-          "name": "lifecycleState",
-          "type": "enum('active','archived','deleted')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'active'"
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "deletedAt": {
-          "name": "deletedAt",
-          "type": "datetime",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "EnvironmentDefinition_tenant_key_uq": {
-          "name": "EnvironmentDefinition_tenant_key_uq",
-          "columns": [
-            "tenantId",
-            "environmentKey"
-          ],
-          "isUnique": true
-        },
-        "EnvironmentDefinition_tenant_lifecycle_updated_idx": {
-          "name": "EnvironmentDefinition_tenant_lifecycle_updated_idx",
-          "columns": [
-            "tenantId",
-            "lifecycleState",
-            "updatedAt"
-          ],
-          "isUnique": false
-        },
-        "EnvironmentDefinition_tenant_type_idx": {
-          "name": "EnvironmentDefinition_tenant_type_idx",
-          "columns": [
-            "tenantId",
-            "environmentType"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "EnvironmentDefinition_tenantId_Tenant_id_fk": {
-          "name": "EnvironmentDefinition_tenantId_Tenant_id_fk",
-          "tableFrom": "EnvironmentDefinition",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "EnvironmentDefinition_id": {
-          "name": "EnvironmentDefinition_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "EnvironmentLease": {
-      "name": "EnvironmentLease",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "environmentDefinitionId": {
-          "name": "environmentDefinitionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "invocationId": {
-          "name": "invocationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "attemptId": {
-          "name": "attemptId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "deviceId": {
-          "name": "deviceId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "workerRef": {
-          "name": "workerRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "leaseState": {
-          "name": "leaseState",
-          "type": "enum('allocated','active','releasing','released','expired','lost')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'allocated'"
-        },
-        "capabilitiesJson": {
-          "name": "capabilitiesJson",
+        "executionTarget": {
+          "name": "executionTarget",
           "type": "json",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "allocatedAt": {
-          "name": "allocatedAt",
-          "type": "datetime(3)",
+        "requiredCapabilities": {
+          "name": "requiredCapabilities",
+          "type": "json",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "lastHeartbeatAt": {
-          "name": "lastHeartbeatAt",
-          "type": "datetime(3)",
+        "semanticDigest": {
+          "name": "semanticDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "releasedAt": {
-          "name": "releasedAt",
-          "type": "datetime(3)",
+        "createdByType": {
+          "name": "createdByType",
+          "type": "varchar(16)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "datetime(3)",
+        "createdById": {
+          "name": "createdById",
+          "type": "varchar(128)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "EnvironmentLease_invocation_attempt_uq": {
-          "name": "EnvironmentLease_invocation_attempt_uq",
+        "EnvironmentDefinitionRevision_tenant_id_uq": {
+          "name": "EnvironmentDefinitionRevision_tenant_id_uq",
           "columns": [
-            "invocationId",
-            "attemptId"
+            "tenantId",
+            "id"
           ],
           "isUnique": true
         },
-        "EnvironmentLease_tenant_state_idx": {
-          "name": "EnvironmentLease_tenant_state_idx",
+        "EnvironmentDefinitionRevision_tenant_definition_revision_uq": {
+          "name": "EnvironmentDefinitionRevision_tenant_definition_revision_uq",
           "columns": [
             "tenantId",
-            "leaseState"
+            "definitionId",
+            "revisionNo"
           ],
-          "isUnique": false
+          "isUnique": true
         },
-        "EnvironmentLease_definition_idx": {
-          "name": "EnvironmentLease_definition_idx",
+        "EnvironmentDefinitionRevision_tenant_definition_id_uq": {
+          "name": "EnvironmentDefinitionRevision_tenant_definition_id_uq",
           "columns": [
-            "environmentDefinitionId"
+            "tenantId",
+            "definitionId",
+            "id"
           ],
-          "isUnique": false
+          "isUnique": true
         },
-        "EnvironmentLease_device_idx": {
-          "name": "EnvironmentLease_device_idx",
+        "EnvironmentDefinitionRevision_tenant_definition_digest_idx": {
+          "name": "EnvironmentDefinitionRevision_tenant_definition_digest_idx",
           "columns": [
-            "deviceId"
+            "tenantId",
+            "definitionId",
+            "semanticDigest"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "EnvironmentLease_tenantId_Tenant_id_fk": {
-          "name": "EnvironmentLease_tenantId_Tenant_id_fk",
-          "tableFrom": "EnvironmentLease",
+        "EnvironmentDefinitionRevision_tenantId_Tenant_id_fk": {
+          "name": "EnvironmentDefinitionRevision_tenantId_Tenant_id_fk",
+          "tableFrom": "EnvironmentDefinitionRevision",
           "tableTo": "Tenant",
           "columnsFrom": [
             "tenantId"
@@ -5961,27 +6226,16 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "EnvironmentLease_invocationId_Invocation_id_fk": {
-          "name": "EnvironmentLease_invocationId_Invocation_id_fk",
-          "tableFrom": "EnvironmentLease",
-          "tableTo": "Invocation",
-          "columnsFrom": [
-            "invocationId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317": {
-          "name": "EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317",
-          "tableFrom": "EnvironmentLease",
+        "EnvironmentDefinitionRevision_tenantId_definitionId_fk": {
+          "name": "EnvironmentDefinitionRevision_tenantId_definitionId_fk",
+          "tableFrom": "EnvironmentDefinitionRevision",
           "tableTo": "EnvironmentDefinition",
           "columnsFrom": [
-            "environmentDefinitionId"
+            "tenantId",
+            "definitionId"
           ],
           "columnsTo": [
+            "tenantId",
             "id"
           ],
           "onDelete": "no action",
@@ -5989,15 +6243,32 @@
         }
       },
       "compositePrimaryKeys": {
-        "EnvironmentLease_id": {
-          "name": "EnvironmentLease_id",
+        "EnvironmentDefinitionRevision_id": {
+          "name": "EnvironmentDefinitionRevision_id",
           "columns": [
             "id"
           ]
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "EnvironmentDefinitionRevision_revisionNo_positive": {
+          "name": "EnvironmentDefinitionRevision_revisionNo_positive",
+          "value": "`revisionNo` >= 1"
+        },
+        "EnvironmentDefinitionRevision_createdByType_allowed": {
+          "name": "EnvironmentDefinitionRevision_createdByType_allowed",
+          "value": "`createdByType` IN ('user', 'service')"
+        },
+        "EnvironmentDefinitionRevision_semanticDigest_format": {
+          "name": "EnvironmentDefinitionRevision_semanticDigest_format",
+          "value": "`semanticDigest` REGEXP '^sha256:[0-9a-f]{64}$'"
+        },
+        "EnvironmentDefinitionRevision_environment_type_allowed": {
+          "name": "EnvironmentDefinitionRevision_environment_type_allowed",
+          "value": "`environmentType` IN ('desktop', 'cloud', 'remote', 'sandbox')"
+        }
+      }
     },
     "evaluation_case": {
       "name": "evaluation_case",
@@ -6655,13 +6926,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "workspaceBindingId": {
-          "name": "workspaceBindingId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "invocationId": {
           "name": "invocationId",
           "type": "varchar(36)",
@@ -6669,71 +6933,172 @@
           "notNull": true,
           "autoincrement": false
         },
-        "checkpointType": {
-          "name": "checkpointType",
+        "attemptId": {
+          "name": "attemptId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ownershipId": {
+          "name": "ownershipId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspaceBindingId": {
+          "name": "workspaceBindingId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "environmentDefinitionRevisionId": {
+          "name": "environmentDefinitionRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "leaseEpoch": {
+          "name": "leaseEpoch",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "checkpointIntentId": {
+          "name": "checkpointIntentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "writerGeneration": {
+          "name": "writerGeneration",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recoveryVersion": {
+          "name": "recoveryVersion",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "producerSequence": {
+          "name": "producerSequence",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recoveryAnchor": {
+          "name": "recoveryAnchor",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recoveryAnchorDigest": {
+          "name": "recoveryAnchorDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshotFormat": {
+          "name": "snapshotFormat",
           "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "checkpointRef": {
-          "name": "checkpointRef",
+        "manifestRef": {
+          "name": "manifestRef",
           "type": "varchar(512)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "baseRevisionRef": {
-          "name": "baseRevisionRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contentHash": {
-          "name": "contentHash",
-          "type": "varchar(128)",
+        "manifestDigest": {
+          "name": "manifestDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
+        "contentRootDigest": {
+          "name": "contentRootDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "datetime(3)",
+        "fileCount": {
+          "name": "fileCount",
+          "type": "int unsigned",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "totalBytes": {
+          "name": "totalBytes",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "filesystemSemantics": {
+          "name": "filesystemSemantics",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "storageEvidence": {
+          "name": "storageEvidence",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "committedAt": {
+          "name": "committedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {
-        "FilesystemCheckpoint_tenant_binding_idx": {
-          "name": "FilesystemCheckpoint_tenant_binding_idx",
+        "FilesystemCheckpoint_tenant_id_uq": {
+          "name": "FilesystemCheckpoint_tenant_id_uq",
           "columns": [
             "tenantId",
-            "workspaceBindingId"
+            "id"
           ],
-          "isUnique": false
+          "isUnique": true
         },
-        "FilesystemCheckpoint_tenant_invocation_idx": {
-          "name": "FilesystemCheckpoint_tenant_invocation_idx",
+        "FilesystemCheckpoint_tenant_invocation_intent_uq": {
+          "name": "FilesystemCheckpoint_tenant_invocation_intent_uq",
           "columns": [
             "tenantId",
-            "invocationId"
+            "invocationId",
+            "checkpointIntentId"
           ],
-          "isUnique": false
+          "isUnique": true
         },
-        "FilesystemCheckpoint_tenant_expires_idx": {
-          "name": "FilesystemCheckpoint_tenant_expires_idx",
+        "FilesystemCheckpoint_recovery_idx": {
+          "name": "FilesystemCheckpoint_recovery_idx",
           "columns": [
             "tenantId",
-            "expiresAt"
+            "invocationId",
+            "recoveryVersion",
+            "committedAt"
           ],
           "isUnique": false
         }
@@ -6764,6 +7129,27 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "FilesystemCheckpoint_tenant_owner_fk": {
+          "name": "FilesystemCheckpoint_tenant_owner_fk",
+          "tableFrom": "FilesystemCheckpoint",
+          "tableTo": "ExecutionOwnership",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "ownershipId",
+            "leaseEpoch"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "id",
+            "leaseEpoch"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -6775,7 +7161,20 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "FilesystemCheckpoint_snapshot_format_allowed": {
+          "name": "FilesystemCheckpoint_snapshot_format_allowed",
+          "value": "`snapshotFormat` = 'content_manifest'"
+        },
+        "FilesystemCheckpoint_sizes_non_negative": {
+          "name": "FilesystemCheckpoint_sizes_non_negative",
+          "value": "`fileCount` >= 0 AND `totalBytes` >= 0"
+        },
+        "FilesystemCheckpoint_digest_shape": {
+          "name": "FilesystemCheckpoint_digest_shape",
+          "value": "`manifestDigest` REGEXP '^sha256:[0-9a-f]{64}$' AND `contentRootDigest` REGEXP '^sha256:[0-9a-f]{64}$' AND `recoveryAnchorDigest` REGEXP '^sha256:[0-9a-f]{64}$'"
+        }
+      }
     },
     "GovernanceConfigRevision": {
       "name": "GovernanceConfigRevision",
@@ -7904,14 +8303,6 @@
           ],
           "isUnique": true
         },
-        "UserIdentity_tenant_account_uq": {
-          "name": "UserIdentity_tenant_account_uq",
-          "columns": [
-            "tenantId",
-            "loginAccount"
-          ],
-          "isUnique": true
-        },
         "UserIdentity_tenant_email_idx": {
           "name": "UserIdentity_tenant_email_idx",
           "columns": [
@@ -7919,6 +8310,14 @@
             "email"
           ],
           "isUnique": false
+        },
+        "UserIdentity_tenant_account_uq": {
+          "name": "UserIdentity_tenant_account_uq",
+          "columns": [
+            "tenantId",
+            "loginAccount"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -7971,16 +8370,23 @@
           "notNull": true,
           "autoincrement": false
         },
+        "invocationId": {
+          "name": "invocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "commandType": {
           "name": "commandType",
-          "type": "enum('cancel','retry')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "commandState": {
           "name": "commandState",
-          "type": "enum('queued','dispatched','acknowledged','rejected')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -7990,96 +8396,136 @@
           "name": "idempotencyKey",
           "type": "varchar(128)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "requestedBy": {
-          "name": "requestedBy",
-          "type": "varchar(36)",
+        "payloadJson": {
+          "name": "payloadJson",
+          "type": "json",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "reasonCode": {
-          "name": "reasonCode",
+        "payloadHash": {
+          "name": "payloadHash",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestedByType": {
+          "name": "requestedByType",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestedById": {
+          "name": "requestedById",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "leaseOwner": {
+          "name": "leaseOwner",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "replacementJobId": {
-          "name": "replacementJobId",
-          "type": "varchar(36)",
+        "leaseExpiresAt": {
+          "name": "leaseExpiresAt",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "errorCode": {
-          "name": "errorCode",
-          "type": "varchar(128)",
+        "deliveryCount": {
+          "name": "deliveryCount",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "nextAttemptAt": {
+          "name": "nextAttemptAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lastErrorCode": {
+          "name": "lastErrorCode",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "errorSummary": {
-          "name": "errorSummary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "commandPayloadJson": {
-          "name": "commandPayloadJson",
+        "resultJson": {
+          "name": "resultJson",
           "type": "json",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
+        "completedAt": {
+          "name": "completedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": 1
         },
-        "dispatchedAt": {
-          "name": "dispatchedAt",
-          "type": "datetime(3)",
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         },
-        "acknowledgedAt": {
-          "name": "acknowledgedAt",
-          "type": "datetime(3)",
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "JobCommand_job_idempotency_uq": {
-          "name": "JobCommand_job_idempotency_uq",
+        "JobCommand_tenant_id_uq": {
+          "name": "JobCommand_tenant_id_uq",
           "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "JobCommand_tenant_job_idempotency_uq": {
+          "name": "JobCommand_tenant_job_idempotency_uq",
+          "columns": [
+            "tenantId",
             "jobId",
             "idempotencyKey"
           ],
           "isUnique": true
         },
-        "JobCommand_tenant_job_state_idx": {
-          "name": "JobCommand_tenant_job_state_idx",
+        "JobCommand_state_next_attempt_lease_idx": {
+          "name": "JobCommand_state_next_attempt_lease_idx",
           "columns": [
-            "tenantId",
-            "jobId",
-            "commandState"
-          ],
-          "isUnique": false
-        },
-        "JobCommand_tenant_replacement_idx": {
-          "name": "JobCommand_tenant_replacement_idx",
-          "columns": [
-            "tenantId",
-            "replacementJobId"
+            "commandState",
+            "nextAttemptAt",
+            "leaseExpiresAt"
           ],
           "isUnique": false
         }
@@ -8097,6 +8543,36 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "JobCommand_tenant_job_fk": {
+          "name": "JobCommand_tenant_job_fk",
+          "tableFrom": "JobCommand",
+          "tableTo": "Job",
+          "columnsFrom": [
+            "tenantId",
+            "jobId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "JobCommand_tenant_invocation_fk": {
+          "name": "JobCommand_tenant_invocation_fk",
+          "tableFrom": "JobCommand",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -8108,7 +8584,20 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "JobCommand_type_allowed": {
+          "name": "JobCommand_type_allowed",
+          "value": "`commandType` IN ('cancel', 'retry', 'execution_terminal')"
+        },
+        "JobCommand_state_allowed": {
+          "name": "JobCommand_state_allowed",
+          "value": "`commandState` IN ('queued', 'dispatched', 'waiting', 'acknowledged', 'rejected')"
+        },
+        "JobCommand_terminal_shape": {
+          "name": "JobCommand_terminal_shape",
+          "value": "`commandType` <> 'execution_terminal' OR `invocationId` IS NOT NULL"
+        }
+      }
     },
     "JobEvent": {
       "name": "JobEvent",
@@ -8136,21 +8625,21 @@
         },
         "eventSequence": {
           "name": "eventSequence",
-          "type": "bigint",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "eventType": {
           "name": "eventType",
-          "type": "enum('job.queued','job.started','job.progress_updated','job.result_recorded','job.waiting','job.cancel_requested','job.retry_requested','job.completed','job.failed','job.cancelled','job.invocation_queued','job.invocation_started','job.invocation_waiting','job.invocation_resumed','job.invocation_completed','job.invocation_failed','job.invocation_cancelled','job.invocation_lost')",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "schemaVersion": {
           "name": "schemaVersion",
-          "type": "int",
+          "type": "int unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -8165,14 +8654,14 @@
         },
         "actorType": {
           "name": "actorType",
-          "type": "enum('user','agent','system','tool','service')",
+          "type": "varchar(16)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "actorId": {
           "name": "actorId",
-          "type": "varchar(36)",
+          "type": "varchar(128)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -8207,61 +8696,45 @@
         },
         "occurredAt": {
           "name": "occurredAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "ingestedAt": {
           "name": "ingestedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {
-        "JobEvent_job_sequence_uq": {
-          "name": "JobEvent_job_sequence_uq",
+        "JobEvent_tenant_id_uq": {
+          "name": "JobEvent_tenant_id_uq",
           "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "JobEvent_tenant_job_sequence_uq": {
+          "name": "JobEvent_tenant_job_sequence_uq",
+          "columns": [
+            "tenantId",
             "jobId",
             "eventSequence"
           ],
           "isUnique": true
         },
-        "JobEvent_job_idempotency_uq": {
-          "name": "JobEvent_job_idempotency_uq",
+        "JobEvent_tenant_job_idempotency_uq": {
+          "name": "JobEvent_tenant_job_idempotency_uq",
           "columns": [
+            "tenantId",
             "jobId",
             "idempotencyKey"
           ],
           "isUnique": true
-        },
-        "JobEvent_tenant_job_idx": {
-          "name": "JobEvent_tenant_job_idx",
-          "columns": [
-            "tenantId",
-            "jobId"
-          ],
-          "isUnique": false
-        },
-        "JobEvent_tenant_job_invocation_idx": {
-          "name": "JobEvent_tenant_job_invocation_idx",
-          "columns": [
-            "tenantId",
-            "jobId",
-            "invocationId"
-          ],
-          "isUnique": false
-        },
-        "JobEvent_tenant_job_occurred_idx": {
-          "name": "JobEvent_tenant_job_occurred_idx",
-          "columns": [
-            "tenantId",
-            "jobId",
-            "occurredAt"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -8273,6 +8746,36 @@
             "tenantId"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "JobEvent_tenant_job_fk": {
+          "name": "JobEvent_tenant_job_fk",
+          "tableFrom": "JobEvent",
+          "tableTo": "Job",
+          "columnsFrom": [
+            "tenantId",
+            "jobId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "JobEvent_tenant_invocation_fk": {
+          "name": "JobEvent_tenant_invocation_fk",
+          "tableFrom": "JobEvent",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId"
+          ],
+          "columnsTo": [
+            "tenantId",
             "id"
           ],
           "onDelete": "no action",
@@ -8330,7 +8833,7 @@
         },
         "projectionKind": {
           "name": "projectionKind",
-          "type": "enum('existing_source_turn','system_triggered_turn')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -8344,7 +8847,7 @@
         },
         "resultHash": {
           "name": "resultHash",
-          "type": "varchar(128)",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -8358,17 +8861,18 @@
         },
         "createdBy": {
           "name": "createdBy",
-          "type": "varchar(36)",
+          "type": "varchar(128)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
@@ -8376,6 +8880,14 @@
           "name": "JobResultProjection_item_uq",
           "columns": [
             "itemId"
+          ],
+          "isUnique": true
+        },
+        "JobResultProjection_tenant_id_uq": {
+          "name": "JobResultProjection_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
           ],
           "isUnique": true
         },
@@ -8409,6 +8921,47 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "JobResultProjection_tenant_job_fk": {
+          "name": "JobResultProjection_tenant_job_fk",
+          "tableFrom": "JobResultProjection",
+          "tableTo": "Job",
+          "columnsFrom": [
+            "tenantId",
+            "jobId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "JobResultProjection_item_fk": {
+          "name": "JobResultProjection_item_fk",
+          "tableFrom": "JobResultProjection",
+          "tableTo": "ThreadItem",
+          "columnsFrom": [
+            "itemId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "JobResultProjection_source_turn_fk": {
+          "name": "JobResultProjection_source_turn_fk",
+          "tableFrom": "JobResultProjection",
+          "tableTo": "Turn",
+          "columnsFrom": [
+            "sourceTurnId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -8420,7 +8973,12 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "JobResultProjection_kind_allowed": {
+          "name": "JobResultProjection_kind_allowed",
+          "value": "`projectionKind` IN ('existing_source_turn', 'system_triggered_turn')"
+        }
+      }
     },
     "Job": {
       "name": "Job",
@@ -8448,21 +9006,28 @@
         },
         "jobType": {
           "name": "jobType",
-          "type": "enum('scheduled','batch','deployment','evaluation','knowledge_build','system')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "triggerRef": {
           "name": "triggerRef",
-          "type": "varchar(256)",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "creationKey": {
+          "name": "creationKey",
+          "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "jobState": {
           "name": "jobState",
-          "type": "enum('queued','running','waiting_external','completed','failed','cancelled')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -8482,11 +9047,18 @@
           "notNull": false,
           "autoincrement": false
         },
-        "completionPolicyJson": {
-          "name": "completionPolicyJson",
-          "type": "json",
+        "inputKind": {
+          "name": "inputKind",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "inputJson": {
+          "name": "inputJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "inputRef": {
@@ -8498,14 +9070,21 @@
         },
         "inputHash": {
           "name": "inputHash",
-          "type": "varchar(128)",
+          "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completionPolicyJson": {
+          "name": "completionPolicyJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "lastEventSequence": {
           "name": "lastEventSequence",
-          "type": "bigint",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -8520,14 +9099,14 @@
         },
         "resultHash": {
           "name": "resultHash",
-          "type": "varchar(128)",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "errorCode": {
           "name": "errorCode",
-          "type": "varchar(128)",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -8541,87 +9120,81 @@
         },
         "createdBy": {
           "name": "createdBy",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "startedAt": {
           "name": "startedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "finishedAt": {
           "name": "finishedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "versionNo": {
           "name": "versionNo",
-          "type": "bigint",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
           "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "Job_tenant_agent_idx": {
-          "name": "Job_tenant_agent_idx",
+        "Job_tenant_id_uq": {
+          "name": "Job_tenant_id_uq",
           "columns": [
             "tenantId",
-            "agentId"
+            "id"
+          ],
+          "isUnique": true
+        },
+        "Job_tenant_creation_key_uq": {
+          "name": "Job_tenant_creation_key_uq",
+          "columns": [
+            "tenantId",
+            "creationKey"
+          ],
+          "isUnique": true
+        },
+        "Job_tenant_state_updated_idx": {
+          "name": "Job_tenant_state_updated_idx",
+          "columns": [
+            "tenantId",
+            "jobState",
+            "updatedAt"
           ],
           "isUnique": false
         },
-        "Job_tenant_state_idx": {
-          "name": "Job_tenant_state_idx",
-          "columns": [
-            "tenantId",
-            "jobState"
-          ],
-          "isUnique": false
-        },
-        "Job_tenant_thread_idx": {
-          "name": "Job_tenant_thread_idx",
-          "columns": [
-            "tenantId",
-            "threadId"
-          ],
-          "isUnique": false
-        },
-        "Job_tenant_replaces_idx": {
-          "name": "Job_tenant_replaces_idx",
+        "Job_tenant_replacement_idx": {
+          "name": "Job_tenant_replacement_idx",
           "columns": [
             "tenantId",
             "replacesJobId"
-          ],
-          "isUnique": false
-        },
-        "Job_tenant_type_state_idx": {
-          "name": "Job_tenant_type_state_idx",
-          "columns": [
-            "tenantId",
-            "jobType",
-            "jobState"
           ],
           "isUnique": false
         }
@@ -8639,6 +9212,21 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "Job_tenant_replacement_fk": {
+          "name": "Job_tenant_replacement_fk",
+          "tableFrom": "Job",
+          "tableTo": "Job",
+          "columnsFrom": [
+            "tenantId",
+            "replacesJobId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -8650,7 +9238,28 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "Job_type_allowed": {
+          "name": "Job_type_allowed",
+          "value": "`jobType` IN ('scheduled', 'batch', 'deployment', 'evaluation', 'knowledge_build', 'system')"
+        },
+        "Job_state_allowed": {
+          "name": "Job_state_allowed",
+          "value": "`jobState` IN ('queued', 'running', 'waiting_external', 'completed', 'failed', 'cancelled')"
+        },
+        "Job_input_kind_allowed": {
+          "name": "Job_input_kind_allowed",
+          "value": "`inputKind` IN ('inline', 'reference')"
+        },
+        "Job_input_shape": {
+          "name": "Job_input_shape",
+          "value": "(`inputKind` = 'inline' AND `inputJson` IS NOT NULL AND `inputRef` IS NULL) OR (`inputKind` = 'reference' AND `inputJson` IS NULL AND `inputRef` IS NOT NULL)"
+        },
+        "Job_terminal_shape": {
+          "name": "Job_terminal_shape",
+          "value": "((`finishedAt` IS NULL AND `jobState` NOT IN ('completed', 'failed', 'cancelled')) OR (`finishedAt` IS NOT NULL AND `jobState` IN ('completed', 'failed', 'cancelled')))"
+        }
+      }
     },
     "KnowledgeBase": {
       "name": "KnowledgeBase",
@@ -11988,6 +12597,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "runtimeId": {
           "name": "runtimeId",
           "type": "varchar(36)",
@@ -11997,7 +12613,7 @@
         },
         "revisionNo": {
           "name": "revisionNo",
-          "type": "bigint",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -12009,16 +12625,23 @@
           "notNull": true,
           "autoincrement": false
         },
-        "protocolContractRevision": {
-          "name": "protocolContractRevision",
-          "type": "varchar(128)",
+        "protocolVersion": {
+          "name": "protocolVersion",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolContractDigest": {
+          "name": "protocolContractDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "runtimeEvidenceKind": {
           "name": "runtimeEvidenceKind",
-          "type": "enum('hosted_artifact','external_endpoint')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -12081,7 +12704,7 @@
         },
         "configHash": {
           "name": "configHash",
-          "type": "varchar(128)",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -12095,7 +12718,7 @@
         },
         "revisionState": {
           "name": "revisionState",
-          "type": "enum('draft','published','withdrawn')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -12110,14 +12733,15 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         },
         "publishedAt": {
           "name": "publishedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -12149,6 +12773,19 @@
         }
       },
       "foreignKeys": {
+        "RuntimeRevision_tenantId_Tenant_id_fk": {
+          "name": "RuntimeRevision_tenantId_Tenant_id_fk",
+          "tableFrom": "RuntimeRevision",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "RuntimeRevision_runtimeId_Runtime_id_fk": {
           "name": "RuntimeRevision_runtimeId_Runtime_id_fk",
           "tableFrom": "RuntimeRevision",
@@ -12172,7 +12809,20 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "RuntimeRevision_evidence_allowed": {
+          "name": "RuntimeRevision_evidence_allowed",
+          "value": "`runtimeEvidenceKind` IN ('hosted_artifact', 'external_endpoint')"
+        },
+        "RuntimeRevision_state_allowed": {
+          "name": "RuntimeRevision_state_allowed",
+          "value": "`revisionState` IN ('draft', 'published', 'withdrawn')"
+        },
+        "RuntimeRevision_protocol_version_allowed": {
+          "name": "RuntimeRevision_protocol_version_allowed",
+          "value": "`protocolVersion` = 3"
+        }
+      }
     },
     "Runtime": {
       "name": "Runtime",
@@ -12207,7 +12857,7 @@
         },
         "runtimeKind": {
           "name": "runtimeKind",
-          "type": "enum('hosted','external')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -12221,7 +12871,7 @@
         },
         "lifecycleState": {
           "name": "lifecycleState",
-          "type": "enum('draft','enabled','disabled','retired')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -12236,7 +12886,7 @@
         },
         "versionNo": {
           "name": "versionNo",
-          "type": "bigint",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -12244,21 +12894,23 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         },
         "deletedAt": {
           "name": "deletedAt",
-          "type": "datetime",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -12307,7 +12959,16 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "Runtime_kind_allowed": {
+          "name": "Runtime_kind_allowed",
+          "value": "`runtimeKind` IN ('hosted', 'external')"
+        },
+        "Runtime_lifecycle_allowed": {
+          "name": "Runtime_lifecycle_allowed",
+          "value": "`lifecycleState` IN ('draft', 'enabled', 'disabled', 'retired')"
+        }
+      }
     },
     "ExecutionBinding": {
       "name": "ExecutionBinding",
@@ -12340,6 +13001,48 @@
           "notNull": true,
           "autoincrement": false
         },
+        "routeRevisionId": {
+          "name": "routeRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeActivationId": {
+          "name": "routeActivationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policyRevisionId": {
+          "name": "policyRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "governanceConfigRevisionId": {
+          "name": "governanceConfigRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimePublicationRecordId": {
+          "name": "runtimePublicationRecordId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "conformanceRunId": {
+          "name": "conformanceRunId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "modelProvider": {
           "name": "modelProvider",
           "type": "varchar(128)",
@@ -12356,42 +13059,14 @@
         },
         "modelRevisionRef": {
           "name": "modelRevisionRef",
-          "type": "varchar(256)",
+          "type": "varchar(512)",
           "primaryKey": false,
           "notNull": false,
-          "autoincrement": false
-        },
-        "initialEnvironmentLeaseId": {
-          "name": "initialEnvironmentLeaseId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "workspaceBindingId": {
-          "name": "workspaceBindingId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "policyRevisionId": {
-          "name": "policyRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
           "autoincrement": false
         },
         "policyRulesDigest": {
           "name": "policyRulesDigest",
           "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "governanceConfigRevisionId": {
-          "name": "governanceConfigRevisionId",
-          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -12403,51 +13078,9 @@
           "notNull": true,
           "autoincrement": false
         },
-        "contextCheckpointId": {
-          "name": "contextCheckpointId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "routeRevisionId": {
-          "name": "routeRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "routeActivationId": {
-          "name": "routeActivationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "routeContentDigest": {
           "name": "routeContentDigest",
           "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeArtifactId": {
-          "name": "runtimeArtifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "runtimeArtifactDigest": {
-          "name": "runtimeArtifactDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "runtimeEvidenceKind": {
-          "name": "runtimeEvidenceKind",
-          "type": "enum('hosted_artifact','external_endpoint')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -12473,27 +13106,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "runtimeAttestationIds": {
-          "name": "runtimeAttestationIds",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimePublicationRecordId": {
-          "name": "runtimePublicationRecordId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conformanceRunId": {
-          "name": "conformanceRunId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "resolutionInputDigest": {
           "name": "resolutionInputDigest",
           "type": "varchar(71)",
@@ -12501,30 +13113,58 @@
           "notNull": true,
           "autoincrement": false
         },
-        "projectionVersionNo": {
-          "name": "projectionVersionNo",
-          "type": "int",
+        "capabilityCatalogDigest": {
+          "name": "capabilityCatalogDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "environmentDefinitionRevisionId": {
-          "name": "environmentDefinitionRevisionId",
+        "configHash": {
+          "name": "configHash",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeEvidenceKind": {
+          "name": "runtimeEvidenceKind",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeArtifactId": {
+          "name": "runtimeArtifactId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "capabilityCatalogJson": {
-          "name": "capabilityCatalogJson",
+        "runtimeArtifactDigest": {
+          "name": "runtimeArtifactDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeAttestationIds": {
+          "name": "runtimeAttestationIds",
           "type": "json",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "capabilityCatalogDigest": {
-          "name": "capabilityCatalogDigest",
-          "type": "varchar(71)",
+        "projectionVersionNo": {
+          "name": "projectionVersionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilityCatalogJson": {
+          "name": "capabilityCatalogJson",
+          "type": "json",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -12545,100 +13185,114 @@
         },
         "capabilityCatalogCreatedAt": {
           "name": "capabilityCatalogCreatedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "executionSubjectType": {
-          "name": "executionSubjectType",
-          "type": "enum('user','service')",
+        "principalType": {
+          "name": "principalType",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "executionSubjectId": {
-          "name": "executionSubjectId",
+        "principalId": {
+          "name": "principalId",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "executionSubjectSource": {
-          "name": "executionSubjectSource",
-          "type": "enum('authenticated_user','trusted_service')",
+        "principalSource": {
+          "name": "principalSource",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "executionSubjectFrozenAt": {
-          "name": "executionSubjectFrozenAt",
-          "type": "datetime(3)",
+        "principalFrozenAt": {
+          "name": "principalFrozenAt",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "configHash": {
-          "name": "configHash",
-          "type": "varchar(128)",
+        "environmentMode": {
+          "name": "environmentMode",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "environmentDefinitionRevisionId": {
+          "name": "environmentDefinitionRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "workspaceBindingId": {
+          "name": "workspaceBindingId",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "boundAt": {
           "name": "boundAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "ExecutionBinding_tenant_idx": {
-          "name": "ExecutionBinding_tenant_idx",
+        "ExecutionBinding_tenant_invocation_uq": {
+          "name": "ExecutionBinding_tenant_invocation_uq",
           "columns": [
-            "tenantId"
+            "tenantId",
+            "invocationId"
           ],
-          "isUnique": false
+          "isUnique": true
         },
-        "ExecutionBinding_runtimeRevision_idx": {
-          "name": "ExecutionBinding_runtimeRevision_idx",
+        "ExecutionBinding_tenant_runtime_revision_idx": {
+          "name": "ExecutionBinding_tenant_runtime_revision_idx",
           "columns": [
+            "tenantId",
             "runtimeRevisionId"
           ],
           "isUnique": false
         },
-        "ExecutionBinding_routeRevision_idx": {
-          "name": "ExecutionBinding_routeRevision_idx",
+        "ExecutionBinding_tenant_environment_revision_idx": {
+          "name": "ExecutionBinding_tenant_environment_revision_idx",
           "columns": [
-            "routeRevisionId"
+            "tenantId",
+            "environmentDefinitionRevisionId"
           ],
           "isUnique": false
         },
-        "ExecutionBinding_runtimeArtifact_idx": {
-          "name": "ExecutionBinding_runtimeArtifact_idx",
+        "ExecutionBinding_tenant_workspace_binding_idx": {
+          "name": "ExecutionBinding_tenant_workspace_binding_idx",
           "columns": [
-            "runtimeArtifactId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_conformanceRun_idx": {
-          "name": "ExecutionBinding_conformanceRun_idx",
-          "columns": [
-            "conformanceRunId"
+            "tenantId",
+            "workspaceBindingId"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "ExecutionBinding_invocationId_Invocation_id_fk": {
-          "name": "ExecutionBinding_invocationId_Invocation_id_fk",
+        "ExecutionBinding_tenant_invocation_fk": {
+          "name": "ExecutionBinding_tenant_invocation_fk",
           "tableFrom": "ExecutionBinding",
           "tableTo": "Invocation",
           "columnsFrom": [
+            "tenantId",
             "invocationId"
           ],
           "columnsTo": [
+            "tenantId",
             "id"
           ],
           "onDelete": "no action",
@@ -12655,9 +13309,29 @@
       },
       "uniqueConstraints": {},
       "checkConstraint": {
-        "ExecutionBinding_runtimeAttestationIds_non_empty": {
-          "name": "ExecutionBinding_runtimeAttestationIds_non_empty",
-          "value": "JSON_TYPE(`ExecutionBinding`.`runtimeAttestationIds`) = 'ARRAY' AND (JSON_LENGTH(`ExecutionBinding`.`runtimeAttestationIds`) >= 1 OR `ExecutionBinding`.`runtimeEvidenceKind` = 'external_endpoint')"
+        "ExecutionBinding_runtime_evidence_allowed": {
+          "name": "ExecutionBinding_runtime_evidence_allowed",
+          "value": "`runtimeEvidenceKind` IN ('hosted_artifact', 'external_endpoint')"
+        },
+        "ExecutionBinding_principal_type_allowed": {
+          "name": "ExecutionBinding_principal_type_allowed",
+          "value": "`principalType` IN ('user', 'service')"
+        },
+        "ExecutionBinding_principal_source_allowed": {
+          "name": "ExecutionBinding_principal_source_allowed",
+          "value": "`principalSource` IN ('authenticated_user', 'trusted_service')"
+        },
+        "ExecutionBinding_environment_mode_allowed": {
+          "name": "ExecutionBinding_environment_mode_allowed",
+          "value": "`environmentMode` IN ('MANAGED', 'NO_PLATFORM_ENVIRONMENT')"
+        },
+        "ExecutionBinding_environment_reference_shape": {
+          "name": "ExecutionBinding_environment_reference_shape",
+          "value": "(`environmentMode` = 'MANAGED' AND `environmentDefinitionRevisionId` IS NOT NULL) OR (`environmentMode` = 'NO_PLATFORM_ENVIRONMENT' AND `environmentDefinitionRevisionId` IS NULL)"
+        },
+        "ExecutionBinding_artifact_evidence_shape": {
+          "name": "ExecutionBinding_artifact_evidence_shape",
+          "value": "(`runtimeEvidenceKind` = 'hosted_artifact' AND `runtimeArtifactId` IS NOT NULL AND `runtimeArtifactDigest` IS NOT NULL) OR (`runtimeEvidenceKind` = 'external_endpoint' AND `runtimeArtifactId` IS NULL AND `runtimeArtifactDigest` IS NULL)"
         }
       }
     },
@@ -12671,6 +13345,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "invocationId": {
           "name": "invocationId",
           "type": "varchar(36)",
@@ -12678,11 +13359,11 @@
           "notNull": true,
           "autoincrement": false
         },
-        "deviceId": {
-          "name": "deviceId",
+        "attemptId": {
+          "name": "attemptId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "environmentLeaseId": {
@@ -12692,62 +13373,271 @@
           "notNull": false,
           "autoincrement": false
         },
+        "leaseEpoch": {
+          "name": "leaseEpoch",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "ownershipState": {
           "name": "ownershipState",
-          "type": "enum('active','released','lost')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
         },
-        "leaseEpoch": {
-          "name": "leaseEpoch",
-          "type": "bigint",
+        "activeSlot": {
+          "name": "activeSlot",
+          "type": "tinyint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "CASE `ownershipState` WHEN 'active' THEN 1 ELSE NULL END",
+            "type": "stored"
+          }
+        },
+        "executionPhase": {
+          "name": "executionPhase",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "'activating'"
         },
         "acquiredAt": {
           "name": "acquiredAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "lastHeartbeatAt": {
           "name": "lastHeartbeatAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "leaseExpiresAt": {
+          "name": "leaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dispatchDeadline": {
+          "name": "dispatchDeadline",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "releasedAt": {
           "name": "releasedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "reasonCode": {
+          "name": "reasonCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reasonDetail": {
+          "name": "reasonDetail",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "acquiredByType": {
+          "name": "acquiredByType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "acquiredById": {
+          "name": "acquiredById",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "closedByType": {
+          "name": "closedByType",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "closedById": {
+          "name": "closedById",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "workspaceWriterGeneration": {
+          "name": "workspaceWriterGeneration",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "activationEvidence": {
+          "name": "activationEvidence",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "activationDigest": {
+          "name": "activationDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "activatedAt": {
+          "name": "activatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "ExecutionOwnership_invocation_epoch_uq": {
-          "name": "ExecutionOwnership_invocation_epoch_uq",
+        "ExecutionOwnership_tenant_id_uq": {
+          "name": "ExecutionOwnership_tenant_id_uq",
           "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "ExecutionOwnership_tenant_invocation_epoch_uq": {
+          "name": "ExecutionOwnership_tenant_invocation_epoch_uq",
+          "columns": [
+            "tenantId",
             "invocationId",
             "leaseEpoch"
           ],
           "isUnique": true
         },
-        "ExecutionOwnership_invocation_state_idx": {
-          "name": "ExecutionOwnership_invocation_state_idx",
+        "ExecutionOwnership_tenant_invocation_active_slot_uq": {
+          "name": "ExecutionOwnership_tenant_invocation_active_slot_uq",
           "columns": [
+            "tenantId",
             "invocationId",
-            "ownershipState"
+            "activeSlot"
+          ],
+          "isUnique": true
+        },
+        "ExecutionOwnership_state_expiry_idx": {
+          "name": "ExecutionOwnership_state_expiry_idx",
+          "columns": [
+            "ownershipState",
+            "leaseExpiresAt"
           ],
           "isUnique": false
+        },
+        "ExecutionOwnership_tenant_attempt_epoch_idx": {
+          "name": "ExecutionOwnership_tenant_attempt_epoch_idx",
+          "columns": [
+            "tenantId",
+            "attemptId",
+            "leaseEpoch"
+          ],
+          "isUnique": false
+        },
+        "ExecutionOwnership_tenant_invocation_attempt_id_epoch_uq": {
+          "name": "ExecutionOwnership_tenant_invocation_attempt_id_epoch_uq",
+          "columns": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "id",
+            "leaseEpoch"
+          ],
+          "isUnique": true
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "ExecutionOwnership_tenantId_Tenant_id_fk": {
+          "name": "ExecutionOwnership_tenantId_Tenant_id_fk",
+          "tableFrom": "ExecutionOwnership",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ExecutionOwnership_invocationId_Invocation_id_fk": {
+          "name": "ExecutionOwnership_invocationId_Invocation_id_fk",
+          "tableFrom": "ExecutionOwnership",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "invocationId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ExecutionOwnership_tenant_invocation_attempt_fk": {
+          "name": "ExecutionOwnership_tenant_invocation_attempt_fk",
+          "tableFrom": "ExecutionOwnership",
+          "tableTo": "InvocationAttempt",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId",
+            "attemptId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "invocationId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "ExecutionOwnership_id": {
           "name": "ExecutionOwnership_id",
@@ -12757,13 +13647,49 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "ExecutionOwnership_state_allowed": {
+          "name": "ExecutionOwnership_state_allowed",
+          "value": "`ownershipState` IN ('active', 'released', 'lost', 'revoked')"
+        },
+        "ExecutionOwnership_phase_allowed": {
+          "name": "ExecutionOwnership_phase_allowed",
+          "value": "`executionPhase` IN ('activating', 'dispatching', 'executing', 'suspending')"
+        },
+        "ExecutionOwnership_acquired_by_allowed": {
+          "name": "ExecutionOwnership_acquired_by_allowed",
+          "value": "`acquiredByType` IN ('system', 'service')"
+        },
+        "ExecutionOwnership_epoch_positive": {
+          "name": "ExecutionOwnership_epoch_positive",
+          "value": "`leaseEpoch` >= 1"
+        },
+        "ExecutionOwnership_lease_expiry_shape": {
+          "name": "ExecutionOwnership_lease_expiry_shape",
+          "value": "`leaseExpiresAt` > `acquiredAt`"
+        },
+        "ExecutionOwnership_active_shape": {
+          "name": "ExecutionOwnership_active_shape",
+          "value": "(`ownershipState` = 'active' AND `releasedAt` IS NULL) OR (`ownershipState` <> 'active' AND `releasedAt` IS NOT NULL)"
+        },
+        "ExecutionOwnership_executing_activation_shape": {
+          "name": "ExecutionOwnership_executing_activation_shape",
+          "value": "`executionPhase` <> 'executing' OR (`activatedAt` IS NOT NULL AND `activationDigest` IS NOT NULL)"
+        }
+      }
     },
     "InvocationAttempt": {
       "name": "InvocationAttempt",
       "columns": {
         "id": {
           "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
@@ -12778,43 +13704,94 @@
         },
         "attemptNo": {
           "name": "attemptNo",
-          "type": "int",
+          "type": "int unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "attemptState": {
           "name": "attemptState",
-          "type": "enum('queued','running','completed','failed','cancelled','lost')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
           "default": "'queued'"
         },
-        "environmentLeaseId": {
-          "name": "environmentLeaseId",
+        "preparationState": {
+          "name": "preparationState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "preparationEvidence": {
+          "name": "preparationEvidence",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparationDigest": {
+          "name": "preparationDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparedAt": {
+          "name": "preparedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparationLeaseOwner": {
+          "name": "preparationLeaseOwner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparationLeaseExpiresAt": {
+          "name": "preparationLeaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "nextPreparationAt": {
+          "name": "nextPreparationAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparationCount": {
+          "name": "preparationCount",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "resumeAnchor": {
+          "name": "resumeAnchor",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resumeAnchorDigest": {
+          "name": "resumeAnchorDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "filesystemCheckpointId": {
+          "name": "filesystemCheckpointId",
           "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "workerRef": {
-          "name": "workerRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "runtimeExecutionRef": {
-          "name": "runtimeExecutionRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "checkpointRef": {
-          "name": "checkpointRef",
-          "type": "varchar(512)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -12828,28 +13805,21 @@
         },
         "startedAt": {
           "name": "startedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "finishedAt": {
           "name": "finishedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lastHeartbeatAt": {
-          "name": "lastHeartbeatAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "errorCode": {
           "name": "errorCode",
-          "type": "varchar(128)",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -12861,98 +13831,82 @@
           "notNull": false,
           "autoincrement": false
         },
-        "dispatchAttemptCount": {
-          "name": "dispatchAttemptCount",
-          "type": "int",
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 0
-        },
-        "nextDispatchAt": {
-          "name": "nextDispatchAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dispatchLeaseOwner": {
-          "name": "dispatchLeaseOwner",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dispatchLeaseExpiresAt": {
-          "name": "dispatchLeaseExpiresAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lastDispatchAttemptAt": {
-          "name": "lastDispatchAttemptAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lastTransientErrorCode": {
-          "name": "lastTransientErrorCode",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "default": 1
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "InvocationAttempt_invocation_attempt_uq": {
-          "name": "InvocationAttempt_invocation_attempt_uq",
+        "InvocationAttempt_tenant_id_uq": {
+          "name": "InvocationAttempt_tenant_id_uq",
           "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "InvocationAttempt_tenant_invocation_attempt_no_uq": {
+          "name": "InvocationAttempt_tenant_invocation_attempt_no_uq",
+          "columns": [
+            "tenantId",
             "invocationId",
             "attemptNo"
           ],
           "isUnique": true
         },
-        "InvocationAttempt_invocation_state_idx": {
-          "name": "InvocationAttempt_invocation_state_idx",
+        "InvocationAttempt_tenant_invocation_id_uq": {
+          "name": "InvocationAttempt_tenant_invocation_id_uq",
           "columns": [
+            "tenantId",
             "invocationId",
-            "attemptState"
+            "id"
           ],
-          "isUnique": false
+          "isUnique": true
         },
-        "InvocationAttempt_dispatch_retry_idx": {
-          "name": "InvocationAttempt_dispatch_retry_idx",
+        "InvocationAttempt_preparation_idx": {
+          "name": "InvocationAttempt_preparation_idx",
           "columns": [
-            "attemptState",
-            "nextDispatchAt"
-          ],
-          "isUnique": false
-        },
-        "InvocationAttempt_dispatch_lease_idx": {
-          "name": "InvocationAttempt_dispatch_lease_idx",
-          "columns": [
-            "dispatchLeaseExpiresAt"
+            "preparationState",
+            "nextPreparationAt",
+            "preparationLeaseExpiresAt"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
+        "InvocationAttempt_tenantId_Tenant_id_fk": {
+          "name": "InvocationAttempt_tenantId_Tenant_id_fk",
+          "tableFrom": "InvocationAttempt",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "InvocationAttempt_invocationId_Invocation_id_fk": {
           "name": "InvocationAttempt_invocationId_Invocation_id_fk",
           "tableFrom": "InvocationAttempt",
@@ -12976,7 +13930,273 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "InvocationAttempt_state_allowed": {
+          "name": "InvocationAttempt_state_allowed",
+          "value": "`attemptState` IN ('queued', 'running', 'suspended', 'completed', 'failed', 'cancelled', 'lost')"
+        },
+        "InvocationAttempt_preparation_state_allowed": {
+          "name": "InvocationAttempt_preparation_state_allowed",
+          "value": "`preparationState` IN ('pending', 'preparing', 'prepared', 'failed')"
+        },
+        "InvocationAttempt_attempt_no_positive": {
+          "name": "InvocationAttempt_attempt_no_positive",
+          "value": "`attemptNo` >= 1"
+        },
+        "InvocationAttempt_preparation_evidence_shape": {
+          "name": "InvocationAttempt_preparation_evidence_shape",
+          "value": "(`preparationState` = 'prepared' AND `preparationEvidence` IS NOT NULL AND `preparationDigest` IS NOT NULL AND `preparedAt` IS NOT NULL) OR `preparationState` <> 'prepared'"
+        },
+        "InvocationAttempt_terminal_shape": {
+          "name": "InvocationAttempt_terminal_shape",
+          "value": "((`finishedAt` IS NULL AND `attemptState` NOT IN ('completed', 'failed', 'cancelled', 'lost')) OR (`finishedAt` IS NOT NULL AND `attemptState` IN ('completed', 'failed', 'cancelled', 'lost')))"
+        }
+      }
+    },
+    "InvocationCommand": {
+      "name": "InvocationCommand",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocationId": {
+          "name": "invocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "commandType": {
+          "name": "commandType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "commandState": {
+          "name": "commandState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "idempotencyKey": {
+          "name": "idempotencyKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payloadJson": {
+          "name": "payloadJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payloadDigest": {
+          "name": "payloadDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "targetOwnershipId": {
+          "name": "targetOwnershipId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "targetSessionId": {
+          "name": "targetSessionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "requestedByType": {
+          "name": "requestedByType",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestedById": {
+          "name": "requestedById",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dispatchCount": {
+          "name": "dispatchCount",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "nextDispatchAt": {
+          "name": "nextDispatchAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseOwner": {
+          "name": "dispatchLeaseOwner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseExpiresAt": {
+          "name": "dispatchLeaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "receiptJson": {
+          "name": "receiptJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastErrorCode": {
+          "name": "lastErrorCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "completedAt": {
+          "name": "completedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "InvocationCommand_tenant_id_uq": {
+          "name": "InvocationCommand_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "InvocationCommand_tenant_invocation_idempotency_uq": {
+          "name": "InvocationCommand_tenant_invocation_idempotency_uq",
+          "columns": [
+            "tenantId",
+            "invocationId",
+            "idempotencyKey"
+          ],
+          "isUnique": true
+        },
+        "InvocationCommand_state_dispatch_idx": {
+          "name": "InvocationCommand_state_dispatch_idx",
+          "columns": [
+            "commandState",
+            "nextDispatchAt",
+            "dispatchLeaseExpiresAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "InvocationCommand_tenantId_Tenant_id_fk": {
+          "name": "InvocationCommand_tenantId_Tenant_id_fk",
+          "tableFrom": "InvocationCommand",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "InvocationCommand_tenant_invocation_fk": {
+          "name": "InvocationCommand_tenant_invocation_fk",
+          "tableFrom": "InvocationCommand",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "InvocationCommand_id": {
+          "name": "InvocationCommand_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "InvocationCommand_type_allowed": {
+          "name": "InvocationCommand_type_allowed",
+          "value": "`commandType` IN ('cancel', 'resume', 'steer', 'checkpoint')"
+        },
+        "InvocationCommand_state_allowed": {
+          "name": "InvocationCommand_state_allowed",
+          "value": "`commandState` IN ('queued', 'dispatched', 'acknowledged', 'failed')"
+        },
+        "InvocationCommand_digest_shape": {
+          "name": "InvocationCommand_digest_shape",
+          "value": "`payloadDigest` LIKE 'sha256:%'"
+        }
+      }
     },
     "Invocation": {
       "name": "Invocation",
@@ -12991,6 +14211,13 @@
         "tenantId": {
           "name": "tenantId",
           "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subjectType": {
+          "name": "subjectType",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -13016,28 +14243,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "invocationSequence": {
-          "name": "invocationSequence",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "invocationKind": {
-          "name": "invocationKind",
-          "type": "enum('initial','regenerate','job')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "executionState": {
-          "name": "executionState",
-          "type": "enum('queued','running','waiting_user','completed','failed','cancelled','lost')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'queued'"
-        },
         "triggerItemId": {
           "name": "triggerItemId",
           "type": "varchar(36)",
@@ -13059,6 +14264,35 @@
           "notNull": false,
           "autoincrement": false
         },
+        "invocationSequence": {
+          "name": "invocationSequence",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocationKind": {
+          "name": "invocationKind",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionState": {
+          "name": "executionState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "inputDigest": {
+          "name": "inputDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "resultRef": {
           "name": "resultRef",
           "type": "varchar(512)",
@@ -13066,44 +14300,111 @@
           "notNull": false,
           "autoincrement": false
         },
-        "runtimeSessionBindingId": {
-          "name": "runtimeSessionBindingId",
+        "resultDigest": {
+          "name": "resultDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastOwnershipEpoch": {
+          "name": "lastOwnershipEpoch",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "lastProducerSequence": {
+          "name": "lastProducerSequence",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "recoveryVersion": {
+          "name": "recoveryVersion",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "checkpointGate": {
+          "name": "checkpointGate",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'open'"
+        },
+        "checkpointIntentId": {
+          "name": "checkpointIntentId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "runtimeExecutionRef": {
-          "name": "runtimeExecutionRef",
-          "type": "varchar(256)",
+        "checkpointOwnerId": {
+          "name": "checkpointOwnerId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkpointDeadline": {
+          "name": "checkpointDeadline",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkpointProducerSequence": {
+          "name": "checkpointProducerSequence",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkpointRecoveryVersion": {
+          "name": "checkpointRecoveryVersion",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkpointAnchor": {
+          "name": "checkpointAnchor",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkpointPreparedEvidence": {
+          "name": "checkpointPreparedEvidence",
+          "type": "json",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "startedAt": {
           "name": "startedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "finishedAt": {
           "name": "finishedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lastHeartbeatAt": {
-          "name": "lastHeartbeatAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "errorCode": {
           "name": "errorCode",
-          "type": "varchar(128)",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -13117,7 +14418,7 @@
         },
         "versionNo": {
           "name": "versionNo",
-          "type": "bigint",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -13125,48 +14426,62 @@
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "Invocation_thread_sequence_uq": {
-          "name": "Invocation_thread_sequence_uq",
-          "columns": [
-            "threadId",
-            "invocationSequence"
-          ],
-          "isUnique": true
-        },
-        "Invocation_job_sequence_uq": {
-          "name": "Invocation_job_sequence_uq",
-          "columns": [
-            "jobId",
-            "invocationSequence"
-          ],
-          "isUnique": true
-        },
-        "Invocation_tenant_state_idx": {
-          "name": "Invocation_tenant_state_idx",
+        "Invocation_tenant_id_uq": {
+          "name": "Invocation_tenant_id_uq",
           "columns": [
             "tenantId",
-            "executionState"
+            "id"
+          ],
+          "isUnique": true
+        },
+        "Invocation_tenant_job_uq": {
+          "name": "Invocation_tenant_job_uq",
+          "columns": [
+            "tenantId",
+            "jobId"
+          ],
+          "isUnique": true
+        },
+        "Invocation_tenant_turn_sequence_uq": {
+          "name": "Invocation_tenant_turn_sequence_uq",
+          "columns": [
+            "tenantId",
+            "turnId",
+            "invocationSequence"
+          ],
+          "isUnique": true
+        },
+        "Invocation_tenant_state_updated_idx": {
+          "name": "Invocation_tenant_state_updated_idx",
+          "columns": [
+            "tenantId",
+            "executionState",
+            "updatedAt"
           ],
           "isUnique": false
         },
-        "Invocation_turn_idx": {
-          "name": "Invocation_turn_idx",
+        "Invocation_checkpoint_gate_deadline_idx": {
+          "name": "Invocation_checkpoint_gate_deadline_idx",
           "columns": [
-            "turnId"
+            "tenantId",
+            "checkpointGate",
+            "checkpointDeadline"
           ],
           "isUnique": false
         }
@@ -13184,6 +14499,58 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "Invocation_threadId_Thread_id_fk": {
+          "name": "Invocation_threadId_Thread_id_fk",
+          "tableFrom": "Invocation",
+          "tableTo": "Thread",
+          "columnsFrom": [
+            "threadId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "Invocation_turnId_Turn_id_fk": {
+          "name": "Invocation_turnId_Turn_id_fk",
+          "tableFrom": "Invocation",
+          "tableTo": "Turn",
+          "columnsFrom": [
+            "turnId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "Invocation_triggerItemId_ThreadItem_id_fk": {
+          "name": "Invocation_triggerItemId_ThreadItem_id_fk",
+          "tableFrom": "Invocation",
+          "tableTo": "ThreadItem",
+          "columnsFrom": [
+            "triggerItemId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "Invocation_outputItemId_ThreadItem_id_fk": {
+          "name": "Invocation_outputItemId_ThreadItem_id_fk",
+          "tableFrom": "Invocation",
+          "tableTo": "ThreadItem",
+          "columnsFrom": [
+            "outputItemId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -13195,13 +14562,49 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "Invocation_subject_allowed": {
+          "name": "Invocation_subject_allowed",
+          "value": "`subjectType` IN ('thread', 'job')"
+        },
+        "Invocation_kind_allowed": {
+          "name": "Invocation_kind_allowed",
+          "value": "`invocationKind` IN ('initial', 'regenerate', 'job')"
+        },
+        "Invocation_state_allowed": {
+          "name": "Invocation_state_allowed",
+          "value": "`executionState` IN ('queued', 'running', 'waiting_user', 'completed', 'failed', 'cancelled', 'lost')"
+        },
+        "Invocation_checkpoint_gate_allowed": {
+          "name": "Invocation_checkpoint_gate_allowed",
+          "value": "`checkpointGate` IN ('open', 'quiescing', 'frozen')"
+        },
+        "Invocation_subject_shape": {
+          "name": "Invocation_subject_shape",
+          "value": "(`subjectType` = 'thread' AND `threadId` IS NOT NULL AND `turnId` IS NOT NULL AND `triggerItemId` IS NOT NULL AND `jobId` IS NULL) OR (`subjectType` = 'job' AND `jobId` IS NOT NULL AND `threadId` IS NULL AND `turnId` IS NULL AND `triggerItemId` IS NULL AND `invocationKind` = 'job' AND `invocationSequence` = 1)"
+        },
+        "Invocation_result_terminal_shape": {
+          "name": "Invocation_result_terminal_shape",
+          "value": "((`resultRef` IS NULL AND `resultDigest` IS NULL) OR (`resultRef` IS NOT NULL AND `resultDigest` IS NOT NULL)) AND ((`finishedAt` IS NULL AND `executionState` NOT IN ('completed', 'failed', 'cancelled', 'lost')) OR (`finishedAt` IS NOT NULL AND `executionState` IN ('completed', 'failed', 'cancelled', 'lost')))"
+        },
+        "Invocation_checkpoint_owner_shape": {
+          "name": "Invocation_checkpoint_owner_shape",
+          "value": "`checkpointGate` = 'open' OR `checkpointOwnerId` IS NOT NULL"
+        }
+      }
     },
     "RuntimeEventIngress": {
       "name": "RuntimeEventIngress",
       "columns": {
         "id": {
           "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
@@ -13214,9 +14617,30 @@
           "notNull": true,
           "autoincrement": false
         },
-        "tenantId": {
-          "name": "tenantId",
+        "acceptedAttemptId": {
+          "name": "acceptedAttemptId",
           "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "acceptedOwnershipId": {
+          "name": "acceptedOwnershipId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "acceptedSessionId": {
+          "name": "acceptedSessionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "acceptedEpoch": {
+          "name": "acceptedEpoch",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -13230,7 +14654,7 @@
         },
         "producerSequence": {
           "name": "producerSequence",
-          "type": "bigint",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -13244,7 +14668,7 @@
         },
         "schemaVersion": {
           "name": "schemaVersion",
-          "type": "int",
+          "type": "int unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -13252,7 +14676,7 @@
         },
         "payloadHash": {
           "name": "payloadHash",
-          "type": "varchar(128)",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -13261,100 +14685,76 @@
           "name": "payloadJson",
           "type": "json",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "ingressState": {
-          "name": "ingressState",
-          "type": "enum('accepted','mapped','rejected')",
+        "receiptJson": {
+          "name": "receiptJson",
+          "type": "json",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'accepted'"
-        },
-        "mappedItemId": {
-          "name": "mappedItemId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
-        "mappedThreadEventId": {
-          "name": "mappedThreadEventId",
-          "type": "varchar(36)",
+        "recoveryVersionAfter": {
+          "name": "recoveryVersionAfter",
+          "type": "bigint unsigned",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "mappedJobEventId": {
-          "name": "mappedJobEventId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "receivedAt": {
           "name": "receivedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "mappedAt": {
-          "name": "mappedAt",
-          "type": "datetime(3)",
+        "acceptedAt": {
+          "name": "acceptedAt",
+          "type": "datetime(6)",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "rejectedReason": {
-          "name": "rejectedReason",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {
-        "RuntimeEventIngress_invocation_producer_event_uq": {
-          "name": "RuntimeEventIngress_invocation_producer_event_uq",
+        "RuntimeEventIngress_tenant_id_uq": {
+          "name": "RuntimeEventIngress_tenant_id_uq",
           "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "RuntimeEventIngress_tenant_invocation_event_uq": {
+          "name": "RuntimeEventIngress_tenant_invocation_event_uq",
+          "columns": [
+            "tenantId",
             "invocationId",
             "producerEventId"
           ],
           "isUnique": true
         },
-        "RuntimeEventIngress_invocation_producer_seq_uq": {
-          "name": "RuntimeEventIngress_invocation_producer_seq_uq",
+        "RuntimeEventIngress_tenant_invocation_sequence_uq": {
+          "name": "RuntimeEventIngress_tenant_invocation_sequence_uq",
           "columns": [
+            "tenantId",
             "invocationId",
             "producerSequence"
           ],
           "isUnique": true
         },
-        "RuntimeEventIngress_invocation_state_idx": {
-          "name": "RuntimeEventIngress_invocation_state_idx",
+        "RuntimeEventIngress_tenant_owner_sequence_idx": {
+          "name": "RuntimeEventIngress_tenant_owner_sequence_idx",
           "columns": [
-            "invocationId",
-            "ingressState"
+            "tenantId",
+            "acceptedOwnershipId",
+            "producerSequence"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "RuntimeEventIngress_invocationId_Invocation_id_fk": {
-          "name": "RuntimeEventIngress_invocationId_Invocation_id_fk",
-          "tableFrom": "RuntimeEventIngress",
-          "tableTo": "Invocation",
-          "columnsFrom": [
-            "invocationId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "RuntimeEventIngress_tenantId_Tenant_id_fk": {
           "name": "RuntimeEventIngress_tenantId_Tenant_id_fk",
           "tableFrom": "RuntimeEventIngress",
@@ -13363,6 +14763,29 @@
             "tenantId"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "RuntimeEventIngress_tenant_session_fk": {
+          "name": "RuntimeEventIngress_tenant_session_fk",
+          "tableFrom": "RuntimeEventIngress",
+          "tableTo": "RuntimeSessionBinding",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId",
+            "acceptedAttemptId",
+            "acceptedOwnershipId",
+            "acceptedEpoch",
+            "acceptedSessionId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "ownershipId",
+            "leaseEpoch",
             "id"
           ],
           "onDelete": "no action",
@@ -13378,7 +14801,16 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "RuntimeEventIngress_sequence_positive": {
+          "name": "RuntimeEventIngress_sequence_positive",
+          "value": "`producerSequence` >= 1 AND `acceptedEpoch` >= 1"
+        },
+        "RuntimeEventIngress_payload_shape": {
+          "name": "RuntimeEventIngress_payload_shape",
+          "value": "JSON_LENGTH(`payloadJson`) IS NOT NULL AND JSON_LENGTH(`receiptJson`) IS NOT NULL AND `payloadHash` REGEXP '^sha256:[0-9a-f]{64}$'"
+        }
+      }
     },
     "RuntimeSessionBinding": {
       "name": "RuntimeSessionBinding",
@@ -13397,6 +14829,27 @@
           "notNull": true,
           "autoincrement": false
         },
+        "invocationId": {
+          "name": "invocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attemptId": {
+          "name": "attemptId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ownershipId": {
+          "name": "ownershipId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "runtimeRevisionId": {
           "name": "runtimeRevisionId",
           "type": "varchar(36)",
@@ -13404,86 +14857,227 @@
           "notNull": true,
           "autoincrement": false
         },
-        "threadId": {
-          "name": "threadId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "jobId": {
-          "name": "jobId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "externalSessionRef": {
-          "name": "externalSessionRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeCapabilitiesJson": {
-          "name": "runtimeCapabilitiesJson",
-          "type": "json",
+        "leaseEpoch": {
+          "name": "leaseEpoch",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "bindingState": {
           "name": "bindingState",
-          "type": "enum('active','closed','lost')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'active'"
+          "default": "'prepared'"
         },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
+        "intentType": {
+          "name": "intentType",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "lastUsedAt": {
-          "name": "lastUsedAt",
-          "type": "datetime(3)",
+        "startIntentKey": {
+          "name": "startIntentKey",
+          "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "semanticRequestJson": {
+          "name": "semanticRequestJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "semanticRequestDigest": {
+          "name": "semanticRequestDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "intentFrozenAt": {
+          "name": "intentFrozenAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "remoteSessionRef": {
+          "name": "remoteSessionRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "remoteExecutionRef": {
+          "name": "remoteExecutionRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeCapabilitiesJson": {
+          "name": "runtimeCapabilitiesJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "transportAcknowledgement": {
+          "name": "transportAcknowledgement",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "acknowledgedAt": {
+          "name": "acknowledgedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "startedEventId": {
+          "name": "startedEventId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchCount": {
+          "name": "dispatchCount",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "nextDispatchAt": {
+          "name": "nextDispatchAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseOwner": {
+          "name": "dispatchLeaseOwner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseExpiresAt": {
+          "name": "dispatchLeaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastDispatchAt": {
+          "name": "lastDispatchAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastErrorCode": {
+          "name": "lastErrorCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "closedAt": {
           "name": "closedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "RuntimeSessionBinding_runtime_external_ref_uq": {
-          "name": "RuntimeSessionBinding_runtime_external_ref_uq",
+        "RuntimeSessionBinding_tenant_id_uq": {
+          "name": "RuntimeSessionBinding_tenant_id_uq",
           "columns": [
-            "runtimeRevisionId",
-            "externalSessionRef"
+            "tenantId",
+            "id"
           ],
           "isUnique": true
         },
-        "RuntimeSessionBinding_thread_idx": {
-          "name": "RuntimeSessionBinding_thread_idx",
+        "RuntimeSessionBinding_tenant_ownership_uq": {
+          "name": "RuntimeSessionBinding_tenant_ownership_uq",
           "columns": [
-            "threadId"
+            "tenantId",
+            "ownershipId"
+          ],
+          "isUnique": true
+        },
+        "RuntimeSessionBinding_tenant_start_intent_uq": {
+          "name": "RuntimeSessionBinding_tenant_start_intent_uq",
+          "columns": [
+            "tenantId",
+            "startIntentKey"
+          ],
+          "isUnique": true
+        },
+        "RuntimeSessionBinding_state_dispatch_idx": {
+          "name": "RuntimeSessionBinding_state_dispatch_idx",
+          "columns": [
+            "bindingState",
+            "nextDispatchAt",
+            "dispatchLeaseExpiresAt"
           ],
           "isUnique": false
         },
-        "RuntimeSessionBinding_job_idx": {
-          "name": "RuntimeSessionBinding_job_idx",
+        "RuntimeSessionBinding_tenant_revision_execution_idx": {
+          "name": "RuntimeSessionBinding_tenant_revision_execution_idx",
           "columns": [
-            "jobId"
+            "tenantId",
+            "runtimeRevisionId",
+            "remoteExecutionRef"
           ],
           "isUnique": false
+        },
+        "RuntimeSessionBinding_identity_uq": {
+          "name": "RuntimeSessionBinding_identity_uq",
+          "columns": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "ownershipId",
+            "leaseEpoch",
+            "id"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -13499,6 +15093,27 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "RuntimeSessionBinding_tenant_owner_fk": {
+          "name": "RuntimeSessionBinding_tenant_owner_fk",
+          "tableFrom": "RuntimeSessionBinding",
+          "tableTo": "ExecutionOwnership",
+          "columnsFrom": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "ownershipId",
+            "leaseEpoch"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "id",
+            "leaseEpoch"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -13510,7 +15125,28 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "RuntimeSessionBinding_state_allowed": {
+          "name": "RuntimeSessionBinding_state_allowed",
+          "value": "`bindingState` IN ('prepared', 'dispatching', 'active', 'closed', 'lost')"
+        },
+        "RuntimeSessionBinding_intent_allowed": {
+          "name": "RuntimeSessionBinding_intent_allowed",
+          "value": "`intentType` IN ('start', 'resume')"
+        },
+        "RuntimeSessionBinding_request_digest_shape": {
+          "name": "RuntimeSessionBinding_request_digest_shape",
+          "value": "(`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL)"
+        },
+        "RuntimeSessionBinding_active_started_shape": {
+          "name": "RuntimeSessionBinding_active_started_shape",
+          "value": "`bindingState` <> 'active' OR `startedEventId` IS NOT NULL"
+        },
+        "RuntimeSessionBinding_dispatch_freeze_shape": {
+          "name": "RuntimeSessionBinding_dispatch_freeze_shape",
+        "value": "((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL AND `intentFrozenAt` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` NOT IN ('dispatching', 'active') OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` <> 'active' OR (`remoteSessionRef` IS NOT NULL AND `remoteExecutionRef` IS NOT NULL AND `startedEventId` IS NOT NULL))"
+        }
+      }
     },
     "IncidentContainment": {
       "name": "IncidentContainment",
@@ -17274,14 +18910,21 @@
         },
         "jti": {
           "name": "jti",
-          "type": "varchar(64)",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "tokenType": {
-          "name": "tokenType",
-          "type": "varchar(16)",
+        "invocationId": {
+          "name": "invocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reasonCode": {
+          "name": "reasonCode",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -17293,29 +18936,30 @@
           "notNull": true,
           "autoincrement": false
         },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "revokedAt": {
           "name": "revokedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tokenExpiresAt": {
+          "name": "tokenExpiresAt",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {
+        "WorkloadTokenRevocation_tenant_id_uq": {
+          "name": "WorkloadTokenRevocation_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
         "WorkloadTokenRevocation_tenant_jti_uq": {
           "name": "WorkloadTokenRevocation_tenant_jti_uq",
           "columns": [
@@ -17324,18 +18968,18 @@
           ],
           "isUnique": true
         },
-        "WorkloadTokenRevocation_tenant_revoked_idx": {
-          "name": "WorkloadTokenRevocation_tenant_revoked_idx",
+        "WorkloadTokenRevocation_tenant_invocation_idx": {
+          "name": "WorkloadTokenRevocation_tenant_invocation_idx",
           "columns": [
             "tenantId",
-            "revokedAt"
+            "invocationId"
           ],
           "isUnique": false
         },
-        "WorkloadTokenRevocation_expires_idx": {
-          "name": "WorkloadTokenRevocation_expires_idx",
+        "WorkloadTokenRevocation_expiry_idx": {
+          "name": "WorkloadTokenRevocation_expiry_idx",
           "columns": [
-            "expiresAt"
+            "tokenExpiresAt"
           ],
           "isUnique": false
         }
@@ -17383,66 +19027,74 @@
           "notNull": true,
           "autoincrement": false
         },
-        "workspaceBindingId": {
-          "name": "workspaceBindingId",
-          "type": "varchar(36)",
+        "storageScopeDigest": {
+          "name": "storageScopeDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "writerGeneration": {
+          "name": "writerGeneration",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "lockState": {
+          "name": "lockState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'released'"
         },
         "holderInvocationId": {
           "name": "holderInvocationId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
-        "holderRelationId": {
-          "name": "holderRelationId",
+        "holderAttemptId": {
+          "name": "holderAttemptId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "pathRef": {
-          "name": "pathRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "pathFingerprint": {
-          "name": "pathFingerprint",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lockState": {
-          "name": "lockState",
-          "type": "enum('acquired','released','expired','revoked')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'acquired'"
-        },
-        "acquiredAt": {
-          "name": "acquiredAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "datetime(3)",
+        "holderOwnershipId": {
+          "name": "holderOwnershipId",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "releasedAt": {
-          "name": "releasedAt",
-          "type": "datetime(3)",
+        "workspaceBindingId": {
+          "name": "workspaceBindingId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "backendGrantRef": {
+          "name": "backendGrantRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "backendEvidence": {
+          "name": "backendEvidence",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "leaseExpiresAt": {
+          "name": "leaseExpiresAt",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -17456,33 +19108,43 @@
         },
         "versionNo": {
           "name": "versionNo",
-          "type": "varchar(64)",
+          "type": "bigint unsigned",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": 1
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         },
         "updatedAt": {
           "name": "updatedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "WorkspaceWriteLock_tenant_binding_path_idx": {
-          "name": "WorkspaceWriteLock_tenant_binding_path_idx",
+        "WorkspaceWriteLock_tenant_id_uq": {
+          "name": "WorkspaceWriteLock_tenant_id_uq",
           "columns": [
             "tenantId",
-            "workspaceBindingId",
-            "pathFingerprint"
+            "id"
+          ],
+          "isUnique": true
+        },
+        "WorkspaceWriteLock_tenant_scope_uq": {
+          "name": "WorkspaceWriteLock_tenant_scope_uq",
+          "columns": [
+            "tenantId",
+            "storageScopeDigest"
           ],
           "isUnique": true
         },
@@ -17494,19 +19156,11 @@
           ],
           "isUnique": false
         },
-        "WorkspaceWriteLock_tenant_state_idx": {
-          "name": "WorkspaceWriteLock_tenant_state_idx",
+        "WorkspaceWriteLock_state_expiry_idx": {
+          "name": "WorkspaceWriteLock_state_expiry_idx",
           "columns": [
-            "tenantId",
-            "lockState"
-          ],
-          "isUnique": false
-        },
-        "WorkspaceWriteLock_tenant_expiry_idx": {
-          "name": "WorkspaceWriteLock_tenant_expiry_idx",
-          "columns": [
-            "tenantId",
-            "expiresAt"
+            "lockState",
+            "leaseExpiresAt"
           ],
           "isUnique": false
         }
@@ -17525,27 +19179,16 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "WorkspaceWriteLock_workspaceBindingId_WorkspaceBinding_id_fk": {
-          "name": "WorkspaceWriteLock_workspaceBindingId_WorkspaceBinding_id_fk",
+        "WorkspaceWriteLock_tenant_binding_fk": {
+          "name": "WorkspaceWriteLock_tenant_binding_fk",
           "tableFrom": "WorkspaceWriteLock",
           "tableTo": "WorkspaceBinding",
           "columnsFrom": [
+            "tenantId",
             "workspaceBindingId"
           ],
           "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "WorkspaceWriteLock_holderInvocationId_Invocation_id_fk": {
-          "name": "WorkspaceWriteLock_holderInvocationId_Invocation_id_fk",
-          "tableFrom": "WorkspaceWriteLock",
-          "tableTo": "Invocation",
-          "columnsFrom": [
-            "holderInvocationId"
-          ],
-          "columnsTo": [
+            "tenantId",
             "id"
           ],
           "onDelete": "no action",
@@ -17561,7 +19204,24 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "WorkspaceWriteLock_state_allowed": {
+          "name": "WorkspaceWriteLock_state_allowed",
+          "value": "`lockState` IN ('released', 'reserved', 'active', 'releasing', 'quarantined')"
+        },
+        "WorkspaceWriteLock_generation_non_negative": {
+          "name": "WorkspaceWriteLock_generation_non_negative",
+          "value": "`writerGeneration` >= 0"
+        },
+        "WorkspaceWriteLock_released_shape": {
+          "name": "WorkspaceWriteLock_released_shape",
+          "value": "`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `leaseExpiresAt` IS NULL)"
+        },
+        "WorkspaceWriteLock_active_evidence_shape": {
+          "name": "WorkspaceWriteLock_active_evidence_shape",
+          "value": "`lockState` <> 'active' OR (`holderInvocationId` IS NOT NULL AND `holderAttemptId` IS NOT NULL AND `holderOwnershipId` IS NOT NULL AND `workspaceBindingId` IS NOT NULL AND `backendGrantRef` IS NOT NULL AND `backendEvidence` IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(`backendEvidence`, '$.scopeDigest')) = `storageScopeDigest` AND JSON_EXTRACT(`backendEvidence`, '$.writerGeneration') IS NOT NULL)"
+        }
+      }
     },
     "Workspace": {
       "name": "Workspace",
@@ -17668,6 +19328,14 @@
         }
       },
       "indexes": {
+        "Workspace_tenant_id_uq": {
+          "name": "Workspace_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
         "Workspace_tenant_key_uq": {
           "name": "Workspace_tenant_key_uq",
           "columns": [
@@ -18201,14 +19869,21 @@
           "name": "workspaceId",
           "type": "varchar(36)",
           "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "continuityMode": {
+          "name": "continuityMode",
+          "type": "varchar(32)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "bindingType": {
           "name": "bindingType",
-          "type": "enum('desktop','cloud','remote','sandbox')",
+          "type": "varchar(16)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "deviceId": {
@@ -18218,86 +19893,108 @@
           "notNull": false,
           "autoincrement": false
         },
-        "environmentDefinitionId": {
-          "name": "environmentDefinitionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "locationRef": {
           "name": "locationRef",
           "type": "varchar(512)",
           "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "storageScopeDigest": {
+          "name": "storageScopeDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "backendKind": {
+          "name": "backendKind",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hostIdentity": {
+          "name": "hostIdentity",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "storageIdentity": {
+          "name": "storageIdentity",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "accessMode": {
+          "name": "accessMode",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "filesystemSemantics": {
+          "name": "filesystemSemantics",
+          "type": "json",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "locationFingerprint": {
-          "name": "locationFingerprint",
+        "checkpointPolicy": {
+          "name": "checkpointPolicy",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "contractDigest": {
+          "name": "contractDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdBy": {
+          "name": "createdBy",
           "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "bindingState": {
-          "name": "bindingState",
-          "type": "enum('active','inactive','revoked')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'active'"
-        },
-        "lastVerifiedAt": {
-          "name": "lastVerifiedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "createdAt": {
           "name": "createdAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
         }
       },
       "indexes": {
-        "WorkspaceBinding_tenant_workspace_idx": {
-          "name": "WorkspaceBinding_tenant_workspace_idx",
+        "WorkspaceBinding_tenant_id_uq": {
+          "name": "WorkspaceBinding_tenant_id_uq",
           "columns": [
             "tenantId",
-            "workspaceId"
+            "id"
+          ],
+          "isUnique": true
+        },
+        "WorkspaceBinding_tenant_workspace_created_idx": {
+          "name": "WorkspaceBinding_tenant_workspace_created_idx",
+          "columns": [
+            "tenantId",
+            "workspaceId",
+            "createdAt"
           ],
           "isUnique": false
         },
-        "WorkspaceBinding_tenant_device_idx": {
-          "name": "WorkspaceBinding_tenant_device_idx",
+        "WorkspaceBinding_tenant_scope_idx": {
+          "name": "WorkspaceBinding_tenant_scope_idx",
           "columns": [
             "tenantId",
-            "deviceId"
-          ],
-          "isUnique": false
-        },
-        "WorkspaceBinding_tenant_state_idx": {
-          "name": "WorkspaceBinding_tenant_state_idx",
-          "columns": [
-            "tenantId",
-            "bindingState"
+            "storageScopeDigest"
           ],
           "isUnique": false
         }
@@ -18341,6 +20038,21 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "WorkspaceBinding_tenant_workspace_fk": {
+          "name": "WorkspaceBinding_tenant_workspace_fk",
+          "tableFrom": "WorkspaceBinding",
+          "tableTo": "Workspace",
+          "columnsFrom": [
+            "tenantId",
+            "workspaceId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -18352,7 +20064,28 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "WorkspaceBinding_continuity_allowed": {
+          "name": "WorkspaceBinding_continuity_allowed",
+          "value": "`continuityMode` IN ('HOST_AFFINE', 'SHARED_DURABLE', 'CHECKPOINT_RESTORABLE', 'NO_PLATFORM_WORKSPACE')"
+        },
+        "WorkspaceBinding_access_mode_allowed": {
+          "name": "WorkspaceBinding_access_mode_allowed",
+          "value": "`accessMode` IN ('read', 'read_write') OR `accessMode` IS NULL"
+        },
+        "WorkspaceBinding_continuity_shape": {
+          "name": "WorkspaceBinding_continuity_shape",
+          "value": "(`continuityMode` = 'NO_PLATFORM_WORKSPACE' AND `workspaceId` IS NULL AND `bindingType` IS NULL AND `deviceId` IS NULL AND `locationRef` IS NULL AND `storageScopeDigest` IS NULL AND `backendKind` IS NULL AND `hostIdentity` IS NULL AND `storageIdentity` IS NULL AND `accessMode` IS NULL AND JSON_UNQUOTE(JSON_EXTRACT(`filesystemSemantics`, '$.kind')) = 'none' AND `checkpointPolicy` IS NULL) OR (`continuityMode` <> 'NO_PLATFORM_WORKSPACE' AND `workspaceId` IS NOT NULL AND `bindingType` IS NOT NULL AND `locationRef` IS NOT NULL AND `storageScopeDigest` IS NOT NULL AND `backendKind` IS NOT NULL AND `storageIdentity` IS NOT NULL AND `accessMode` IS NOT NULL)"
+        },
+        "WorkspaceBinding_host_affine_shape": {
+          "name": "WorkspaceBinding_host_affine_shape",
+          "value": "`continuityMode` <> 'HOST_AFFINE' OR `hostIdentity` IS NOT NULL"
+        },
+        "WorkspaceBinding_checkpoint_shape": {
+          "name": "WorkspaceBinding_checkpoint_shape",
+          "value": "(`continuityMode` = 'CHECKPOINT_RESTORABLE' AND `checkpointPolicy` IS NOT NULL) OR (`continuityMode` <> 'CHECKPOINT_RESTORABLE' AND `checkpointPolicy` IS NULL)"
+        }
+      }
     },
     "ControlPlaneEventDelivery": {
       "name": "ControlPlaneEventDelivery",
@@ -20288,6 +22021,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "runId": {
           "name": "runId",
           "type": "varchar(36)",
@@ -20328,6 +22068,7 @@
         "RuntimeConformanceCaseResult_run_case_uq": {
           "name": "RuntimeConformanceCaseResult_run_case_uq",
           "columns": [
+            "tenantId",
             "runId",
             "caseId"
           ],
@@ -20398,9 +22139,9 @@
           "notNull": true,
           "autoincrement": false
         },
-        "protocolContractRevision": {
-          "name": "protocolContractRevision",
-          "type": "varchar(128)",
+        "protocolContractDigest": {
+          "name": "protocolContractDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -20421,7 +22162,7 @@
         },
         "runnerIdentity": {
           "name": "runnerIdentity",
-          "type": "varchar(255)",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -20435,28 +22176,28 @@
         },
         "startedAt": {
           "name": "startedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "completedAt": {
           "name": "completedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "overallResult": {
           "name": "overallResult",
-          "type": "enum('passed','failed','error','cancelled')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "conformanceFormat": {
           "name": "conformanceFormat",
-          "type": "enum('standard_dsse')",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -20492,7 +22233,7 @@
         },
         "signingKeyId": {
           "name": "signingKeyId",
-          "type": "varchar(255)",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -20513,21 +22254,28 @@
         },
         "predicateType": {
           "name": "predicateType",
-          "type": "varchar(255)",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "verifiedAt": {
           "name": "verifiedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "idempotencyKey": {
           "name": "idempotencyKey",
-          "type": "varchar(255)",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolVersion": {
+          "name": "protocolVersion",
+          "type": "int unsigned",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -20541,7 +22289,7 @@
         },
         "recordedAt": {
           "name": "recordedAt",
-          "type": "datetime(3)",
+          "type": "datetime(6)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -20584,7 +22332,20 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "RuntimeConformanceRun_overall_result_allowed": {
+          "name": "RuntimeConformanceRun_overall_result_allowed",
+          "value": "`overallResult` IN ('passed', 'failed', 'error', 'cancelled')"
+        },
+        "RuntimeConformanceRun_format_allowed": {
+          "name": "RuntimeConformanceRun_format_allowed",
+          "value": "`conformanceFormat` = 'standard_dsse'"
+        },
+        "RuntimeConformanceRun_protocol_version_allowed": {
+          "name": "RuntimeConformanceRun_protocol_version_allowed",
+          "value": "`protocolVersion` = 3"
+        }
+      }
     },
     "HostedProvisioningRequest": {
       "name": "HostedProvisioningRequest",

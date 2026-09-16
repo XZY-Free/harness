@@ -25,12 +25,14 @@
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   datetime,
   index,
+  int,
   json,
-  mysqlEnum,
   mysqlTable,
   text,
   uniqueIndex,
@@ -113,23 +115,24 @@ export const runtimeTable = mysqlTable(
     runtimeKey: varchar("runtimeKey", { length: 128 }).notNull(),
     displayName: varchar("displayName", { length: 256 }).notNull(),
     /** hosted 或 external。 */
-    runtimeKind: mysqlEnum("runtimeKind", RUNTIME_KINDS).notNull(),
+    runtimeKind: varchar("runtimeKind", { length: 32 }).$type<RuntimeKind>().notNull(),
     /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）。 */
     ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
-    lifecycleState: mysqlEnum("lifecycleState", RUNTIME_LIFECYCLE_STATES)
+    lifecycleState: varchar("lifecycleState", { length: 32 })
+      .$type<RuntimeLifecycleState>()
       .notNull()
       .default("draft"),
     /** 当前发布修订 id（逻辑外键 → RuntimeRevision.id）；null 表示未发布。 */
     currentRevisionId: varchar("currentRevisionId", { length: 36 }),
     /** 乐观并发版本号。 */
-    versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+    versionNo: bigint("versionNo", { mode: "number", unsigned: true }).notNull().default(1),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 6 })
       .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .default(sql`CURRENT_TIMESTAMP(6)`),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 6 })
       .notNull()
-      .$defaultFn(() => new Date()),
-    deletedAt: datetime("deletedAt", { mode: "date" }),
+      .default(sql`CURRENT_TIMESTAMP(6)`),
+    deletedAt: datetime("deletedAt", { mode: "date", fsp: 6 }),
   },
   (t) => ({
     tenantKeyUq: uniqueIndex("Runtime_tenant_runtimeKey_uq").on(t.tenantId, t.runtimeKey),
@@ -137,6 +140,14 @@ export const runtimeTable = mysqlTable(
       t.tenantId,
       t.lifecycleState,
       t.updatedAt,
+    ),
+    runtimeKindAllowed: check(
+      "Runtime_kind_allowed",
+      sql`\`runtimeKind\` IN ('hosted', 'external')`,
+    ),
+    lifecycleAllowed: check(
+      "Runtime_lifecycle_allowed",
+      sql`\`lifecycleState\` IN ('draft', 'enabled', 'disabled', 'retired')`,
     ),
   }),
 );
@@ -153,19 +164,25 @@ export const runtimeRevisionTable = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
     runtimeId: varchar("runtimeId", { length: 36 })
       .notNull()
       .references(() => runtimeTable.id),
     /** Runtime 内单调递增修订号。 */
-    revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
+    revisionNo: bigint("revisionNo", { mode: "number", unsigned: true }).notNull(),
     /** 协议类型（harness_runtime_protocol/...）；varchar 以便扩展。 */
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
     /**
      * Conformance 与发布共同冻结的协议契约版本（显式传入，禁止默认值污染全部协议）。
      */
-    protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
+    protocolVersion: int("protocolVersion", { unsigned: true }).notNull(),
+    protocolContractDigest: varchar("protocolContractDigest", { length: 71 }).notNull(),
     /** 证据种类：hosted_artifact | external_endpoint（语义字段）。 */
-    runtimeEvidenceKind: mysqlEnum("runtimeEvidenceKind", RUNTIME_EVIDENCE_KINDS).notNull(),
+    runtimeEvidenceKind: varchar("runtimeEvidenceKind", { length: 32 })
+      .$type<RuntimeEvidenceKind>()
+      .notNull(),
     /** 被测对象统一 digest（canonical 计算自证据事实）。 */
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     /** 受管连接引用，不保存带 Secret 的 URL。 */
@@ -186,16 +203,19 @@ export const runtimeRevisionTable = mysqlTable(
     /** 网络区域（internal/external/dmz/...）；varchar 以便扩展。 */
     networkZone: varchar("networkZone", { length: 32 }).notNull(),
     /** 配置 hash（带算法前缀，如 sha256:...）。 */
-    configHash: varchar("configHash", { length: 128 }).notNull(),
+    configHash: varchar("configHash", { length: 71 }).notNull(),
     /** 绑定的同租户 CredentialRef（bearer 模式）；none 模式与旧行为 null。不存 secret。 */
     credentialRefId: varchar("credentialRefId", { length: 36 }),
-    revisionState: mysqlEnum("revisionState", RUNTIME_REVISION_STATES).notNull().default("draft"),
+    revisionState: varchar("revisionState", { length: 32 })
+      .$type<RuntimeRevisionState>()
+      .notNull()
+      .default("draft"),
     /** 创建者 userIdentityId 或 serviceId。 */
     createdBy: varchar("createdBy", { length: 128 }).notNull(),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+    createdAt: datetime("createdAt", { mode: "date", fsp: 6 })
       .notNull()
-      .$defaultFn(() => new Date()),
-    publishedAt: datetime("publishedAt", { mode: "date", fsp: 3 }),
+      .default(sql`CURRENT_TIMESTAMP(6)`),
+    publishedAt: datetime("publishedAt", { mode: "date", fsp: 6 }),
   },
   (t) => ({
     runtimeRevisionNoUq: uniqueIndex("RuntimeRevision_runtime_revisionNo_uq").on(
@@ -204,6 +224,18 @@ export const runtimeRevisionTable = mysqlTable(
     ),
     runtimeStateIdx: index("RuntimeRevision_runtime_state_idx").on(t.runtimeId, t.revisionState),
     artifactIdx: index("RuntimeRevision_artifact_idx").on(t.artifactId),
+    evidenceAllowed: check(
+      "RuntimeRevision_evidence_allowed",
+      sql`\`runtimeEvidenceKind\` IN ('hosted_artifact', 'external_endpoint')`,
+    ),
+    stateAllowed: check(
+      "RuntimeRevision_state_allowed",
+      sql`\`revisionState\` IN ('draft', 'published', 'withdrawn')`,
+    ),
+    protocolVersionAllowed: check(
+      "RuntimeRevision_protocol_version_allowed",
+      sql`\`protocolVersion\` = 3`,
+    ),
   }),
 );
 

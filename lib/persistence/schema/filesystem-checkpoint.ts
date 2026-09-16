@@ -1,57 +1,26 @@
-/**
- * 文件系统 Checkpoint schema：FilesystemCheckpoint（阶段 8 S08-C06）。
- *
- * 事实源：
- * - docs/architecture/persistence.md （filesystem_checkpoint）、
- * （invocation_attempt.checkpoint_ref 引用本表）、§10 迁移映射第 676 行
- * （GitCheckpoint 转 FilesystemCheckpoint，不再代表会话恢复）。
- * - docs/architecture/api-and-events.md （attempt.checkpoint_ref）。
- * - docs/architecture/capabilities-and-security.md 。
- *
- * 与 lib/persistence/schema/context-checkpoint.ts（ContextCheckpoint 上下文组装/压缩点）是不同表：
- * - FilesystemCheckpoint：文件系统状态恢复点（用于 Invocation 失联恢复）。
- * - ContextCheckpoint：上下文组装/压缩点（用于 LLM 上下文窗口管理）。
- * 两者语义不同，不互相冒充（第 547 行明确）。
- *
- * 关键不变量：
- * - 只恢复文件状态，不恢复会话（会话恢复读取 Item 和 Event）。
- * - 恢复时必须避开已确认副作用（invocation_attempt.checkpoint_ref）。
- * - contentHash 必须是 sha256:<64-hex> 格式。
- * - checkpointRef 必须是受管对象引用，不接受公网 URL。
- * - 写入后不可变（无状态机、无 versionNo 乐观锁）；expiresAt 用于清理。
- * - 跨租户隔离：所有查询按 tenantId 过滤；tenantId 外键 → Tenant(id) ON DELETE CASCADE。
- * - workspaceBindingId 外键 → WorkspaceBinding(id) ON DELETE CASCADE。
- * - invocationId 逻辑外键 → Invocation.id（不加 DB FK 避免跨阶段耦合）。
- */
+/** Immutable filesystem snapshots and recovery evidence. */
 import { randomUUID } from "node:crypto";
+import { executionOwnershipTable } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { workspaceBinding } from "@/lib/persistence/schema/workspace";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-import { datetime, index, mysqlTable, varchar } from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
+import {
+  bigint,
+  check,
+  datetime,
+  foreignKey,
+  index,
+  int,
+  json,
+  mysqlTable,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/mysql-core";
 
-// ─── FilesystemCheckpointType ────────────────────────────
+export const FILESYSTEM_CHECKPOINT_FORMATS = ["content_manifest"] as const;
+export type FilesystemCheckpointFormat = (typeof FILESYSTEM_CHECKPOINT_FORMATS)[number];
 
-/**
- * 文件系统 Checkpoint 类型（应用层枚举，文档未限定穷尽值）。
- * - git：Git commit/tag 作为 checkpoint。
- * - snapshot：文件系统快照（如 ZFS/Btrfs snapshot）。
- * - tarball：tar.gz 归档。
- * - zip：zip 归档。
- */
-export const FILESYSTEM_CHECKPOINT_TYPES = ["git", "snapshot", "tarball", "zip"] as const;
-export type FilesystemCheckpointType = (typeof FILESYSTEM_CHECKPOINT_TYPES)[number];
-
-// ─── FilesystemCheckpoint 表 ──────────────────────────
-
-/**
- * FilesystemCheckpoint 表：文件系统状态恢复点（）。
- *
- * 关键约束：
- * - workspaceBindingId 外键 → WorkspaceBinding(id) ON DELETE CASCADE。
- * - invocationId 必填（逻辑外键 → Invocation.id）。
- * - 恢复时必须避开已确认副作用（由调用方在更高层校验）。
- * - 写入后不可变。
- */
 export const filesystemCheckpointTable = mysqlTable(
   "FilesystemCheckpoint",
   {
@@ -62,36 +31,70 @@ export const filesystemCheckpointTable = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    /** 路径解释所必需的 Binding（DB 级 FK → WorkspaceBinding.id ON DELETE CASCADE）。 */
+    invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    attemptId: varchar("attemptId", { length: 36 }).notNull(),
+    ownershipId: varchar("ownershipId", { length: 36 }).notNull(),
     workspaceBindingId: varchar("workspaceBindingId", { length: 36 })
       .notNull()
       .references(() => workspaceBinding.id),
-    /** 所属 Invocation id（逻辑外键 → Invocation.id；必填）。 */
-    invocationId: varchar("invocationId", { length: 36 }).notNull(),
-    /** Checkpoint 类型（git / snapshot / tarball / zip）。 */
-    checkpointType: varchar("checkpointType", { length: 32 }).notNull(),
-    /** Checkpoint 内容存储引用（受管对象引用，不接受公网 URL）。 */
-    checkpointRef: varchar("checkpointRef", { length: 512 }).notNull(),
-    /** 基线版本引用（如 git commit hash；可为 null）。 */
-    baseRevisionRef: varchar("baseRevisionRef", { length: 512 }),
-    /** Checkpoint 内容 hash（sha256: 前缀 + 64 hex）。 */
-    contentHash: varchar("contentHash", { length: 128 }).notNull(),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    /** 过期时间（用于清理；null 表示不过期）。 */
-    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
+    environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", {
+      length: 36,
+    }).notNull(),
+    leaseEpoch: bigint("leaseEpoch", { mode: "number", unsigned: true }).notNull(),
+    checkpointIntentId: varchar("checkpointIntentId", { length: 36 }).notNull(),
+    writerGeneration: bigint("writerGeneration", { mode: "number", unsigned: true }).notNull(),
+    recoveryVersion: bigint("recoveryVersion", { mode: "number", unsigned: true }).notNull(),
+    producerSequence: bigint("producerSequence", { mode: "number", unsigned: true }).notNull(),
+    recoveryAnchor: json("recoveryAnchor").notNull(),
+    recoveryAnchorDigest: varchar("recoveryAnchorDigest", { length: 71 }).notNull(),
+    snapshotFormat: varchar("snapshotFormat", { length: 32 })
+      .$type<FilesystemCheckpointFormat>()
+      .notNull(),
+    manifestRef: varchar("manifestRef", { length: 512 }).notNull(),
+    manifestDigest: varchar("manifestDigest", { length: 71 }).notNull(),
+    contentRootDigest: varchar("contentRootDigest", { length: 71 }).notNull(),
+    fileCount: int("fileCount", { unsigned: true }).notNull(),
+    totalBytes: bigint("totalBytes", { mode: "number", unsigned: true }).notNull(),
+    filesystemSemantics: json("filesystemSemantics").notNull(),
+    storageEvidence: json("storageEvidence").notNull(),
+    committedAt: datetime("committedAt", { mode: "date", fsp: 6 }).notNull(),
   },
   (t) => ({
-    tenantBindingIdx: index("FilesystemCheckpoint_tenant_binding_idx").on(
-      t.tenantId,
-      t.workspaceBindingId,
-    ),
-    tenantInvocationIdx: index("FilesystemCheckpoint_tenant_invocation_idx").on(
+    tenantIdUq: uniqueIndex("FilesystemCheckpoint_tenant_id_uq").on(t.tenantId, t.id),
+    invocationIntentUq: uniqueIndex("FilesystemCheckpoint_tenant_invocation_intent_uq").on(
       t.tenantId,
       t.invocationId,
+      t.checkpointIntentId,
     ),
-    tenantExpiresIdx: index("FilesystemCheckpoint_tenant_expires_idx").on(t.tenantId, t.expiresAt),
+    recoveryIdx: index("FilesystemCheckpoint_recovery_idx").on(
+      t.tenantId,
+      t.invocationId,
+      t.recoveryVersion,
+      t.committedAt,
+    ),
+    snapshotFormatAllowed: check(
+      "FilesystemCheckpoint_snapshot_format_allowed",
+      sql`\`snapshotFormat\` = 'content_manifest'`,
+    ),
+    sizesNonNegative: check(
+      "FilesystemCheckpoint_sizes_non_negative",
+      sql`\`fileCount\` >= 0 AND \`totalBytes\` >= 0`,
+    ),
+    ownershipFk: foreignKey({
+      name: "FilesystemCheckpoint_tenant_owner_fk",
+      columns: [t.tenantId, t.invocationId, t.attemptId, t.ownershipId, t.leaseEpoch],
+      foreignColumns: [
+        executionOwnershipTable.tenantId,
+        executionOwnershipTable.invocationId,
+        executionOwnershipTable.attemptId,
+        executionOwnershipTable.id,
+        executionOwnershipTable.leaseEpoch,
+      ],
+    }),
+    digestShape: check(
+      "FilesystemCheckpoint_digest_shape",
+      sql`\`manifestDigest\` REGEXP '^sha256:[0-9a-f]{64}$' AND \`contentRootDigest\` REGEXP '^sha256:[0-9a-f]{64}$' AND \`recoveryAnchorDigest\` REGEXP '^sha256:[0-9a-f]{64}$'`,
+    ),
   }),
 );
 

@@ -28,6 +28,7 @@ export * from "@/lib/persistence/schema/deployment-route";
 export * from "@/lib/persistence/schema/device";
 export * from "@/lib/persistence/schema/effect";
 export * from "@/lib/persistence/schema/environment";
+export * from "@/lib/persistence/schema/environment-definition-revision";
 export * from "@/lib/persistence/schema/evaluation";
 export * from "@/lib/persistence/schema/file-change";
 export * from "@/lib/persistence/schema/filesystem-checkpoint";

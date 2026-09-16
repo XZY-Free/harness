@@ -261,6 +261,7 @@ export const threadTable = mysqlTable(
     deletedAt: datetime("deletedAt", { mode: "date", fsp: 3 }),
   },
   (t) => ({
+    tenantIdUq: uniqueIndex("Thread_tenant_id_uq").on(t.tenantId, t.id),
     tenantOwnerLifecycleActivityIdx: index("Thread_tenant_owner_lifecycle_activity_idx").on(
       t.tenantId,
       t.ownerUserId,
