@@ -108,21 +108,26 @@ describe("Hosted Runtime adapter", () => {
       steerPayload: { inputRef: "input:1" },
     });
 
+    // R02 §2：Hosted 必须携带**准确 authority**，不允许只给 invocationId 让服务端
+    // 重新加载当前 Owner。因此三处调用都必须逐项带上冻结的 tuple。
     expect(service.cancel).toHaveBeenCalledWith({
       tenantId: "tenant",
       invocationId: authority.invocationId,
+      authority,
       idempotencyKey: `hosted-cancel:${authority.invocationId}`,
       reason: "user_cancel",
     });
     expect(service.resume).toHaveBeenCalledWith({
       tenantId: "tenant",
       invocationId: authority.invocationId,
+      authority,
       idempotencyKey: `hosted-resume:${authority.invocationId}`,
       resumePayload: { requestId: "input" },
     });
     expect(service.steer).toHaveBeenCalledWith({
       tenantId: "tenant",
       invocationId: authority.invocationId,
+      authority,
       idempotencyKey: `hosted-steer:${authority.invocationId}`,
       steerPayload: { inputRef: "input:1" },
     });

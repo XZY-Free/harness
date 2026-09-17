@@ -45,9 +45,11 @@ describe("Hosted Adapter durable resume", () => {
     });
 
     expect(result.response.accepted).toBe(true);
+    // R02 §2：全新 Adapter 也必须把冻结 tuple 一路交到 durable service。
     expect(resume).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       invocationId: authority.invocationId,
+      authority,
       idempotencyKey: `hosted-resume:${authority.invocationId}`,
       resumePayload: { requestId: "uar-1" },
     });
