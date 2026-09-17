@@ -101,8 +101,12 @@ export async function dispatchQueuedInvocationAttempt(
             tenantId: params.tenantId,
             invocationId: invocation.id,
             attemptId: attempt.id,
+            // 只实例化 Binding 冻结的 Revision（R07 §1）。
+            revisionId: binding.environmentDefinitionRevisionId as string,
             revision,
             workspaceBindingId: binding.workspaceBindingId,
+            workspaceRoot: endpoint.workspace?.root ?? null,
+            recoveryAnchorDigest: null,
           })
         : null;
     const started = await startRuntimeInvocation({
@@ -115,6 +119,7 @@ export async function dispatchQueuedInvocationAttempt(
       auth: endpoint.auth,
       callbackEndpoints: endpoint.callbackEndpoints,
       environmentLeaseId: environmentLease?.id ?? null,
+      environmentProvisioner: endpoint.environmentProvisioner ?? null,
       workspace: endpoint.workspace,
       now: params.now,
     });

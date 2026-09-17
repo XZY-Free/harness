@@ -28,6 +28,7 @@ import {
   computeWorkspaceContractDigest,
 } from "@/lib/workspace/workspace-contract";
 import { type WorkspaceHost, createManagedWorkspaceHost } from "@/lib/workspace/workspace-host";
+import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import { requireWorkspaceReadiness } from "@/lib/workspace/workspace-readiness";
 import {
@@ -68,17 +69,25 @@ function expectThrownName(fn: () => unknown, name: string) {
 async function createTestBinding(input: {
   root: string;
   continuityMode: "HOST_AFFINE" | "SHARED_DURABLE" | "CHECKPOINT_RESTORABLE";
-  storageIdentity: string;
-  hostIdentity: string;
+  /** 显式传入时表示纯函数场景（不做 Writer 激活）；否则用受管 Broker 的真实探测结果。 */
+  storageIdentity?: string;
+  hostIdentity?: string;
   bindingType?: "desktop" | "cloud" | "remote" | "sandbox";
   deviceId?: string | null;
 }) {
+  const probe =
+    input.storageIdentity && input.hostIdentity
+      ? null
+      : await createWorkspaceHostBroker({ root: input.root }).probeIdentity();
+  const storageIdentity = input.storageIdentity ?? probe?.storageIdentity ?? "";
+  const hostIdentity = input.hostIdentity ?? probe?.hostIdentity ?? "";
   const logical = await createWorkspace({
     tenantId: TENANT_ID,
     workspaceKey: `continuity-${randomUUID()}`,
     displayName: "Continuity fixture",
   });
-  const storageScopeDigest = protocolDigest({ scope: input.root });
+  // 物理 scope 由 Broker 按实际 root + 存储身份 + Host 身份派生，不信任提交的字符串。
+  const storageScopeDigest = probe ? probe.scopeDigest : protocolDigest({ scope: input.root });
   const binding = await createWorkspaceBinding({
     tenantId: TENANT_ID,
     workspaceId: logical.id,
@@ -88,8 +97,8 @@ async function createTestBinding(input: {
     locationRef: `managed://continuity-${randomUUID()}`,
     storageScopeDigest,
     backendKind: "managed_host",
-    hostIdentity: input.hostIdentity,
-    storageIdentity: input.storageIdentity,
+    hostIdentity,
+    storageIdentity,
     accessMode: "read_write",
     filesystemSemantics: desktopSemantics,
     checkpointPolicy:
@@ -107,8 +116,8 @@ async function createTestBinding(input: {
       bindingId: "fixture",
       continuityMode: input.continuityMode,
       storageScopeDigest,
-      hostIdentity: input.hostIdentity,
-      storageIdentity: input.storageIdentity,
+      hostIdentity,
+      storageIdentity,
       backendKind: "managed_host",
       filesystemSemantics: desktopSemantics,
       checkpointPolicy:
@@ -174,8 +183,6 @@ describe("Workspace continuity integration", () => {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const first = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
@@ -321,8 +328,6 @@ describe("Workspace continuity integration", () => {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const first = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
@@ -338,7 +343,7 @@ describe("Workspace continuity integration", () => {
       await expect(
         reserveWorkspaceWriter({
           tenantId: TENANT_ID,
-          storageScopeDigest: protocolDigest({ scope: temporaryRoot }),
+          storageScopeDigest: binding.storageScopeDigest as string,
           invocationId: second.invocation.id,
           attemptId: second.attempt.id,
           ownershipId: "any-ownership",
@@ -358,14 +363,10 @@ describe("Workspace continuity integration", () => {
       const { binding: aliasA } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const { binding: aliasB } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const fixtureA = await seedPreparedRuntimeAttempt({ workspaceBinding: aliasA });
@@ -380,7 +381,7 @@ describe("Workspace continuity integration", () => {
       await expect(
         reserveWorkspaceWriter({
           tenantId: TENANT_ID,
-          storageScopeDigest: protocolDigest({ scope: temporaryRoot }),
+          storageScopeDigest: aliasA.storageScopeDigest as string,
           invocationId: fixtureB.invocation.id,
           attemptId: fixtureB.attempt.id,
           ownershipId: "alias-b-ownership",
@@ -399,8 +400,6 @@ describe("Workspace continuity integration", () => {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const first = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
@@ -474,9 +473,11 @@ describe("Workspace continuity integration", () => {
 
   it("WORKSPACE-07: a reserved DB slot without a fenced backend writer fails closed before running", async () => {
     try {
-      const scopeDigest = protocolDigest({ scope: temporaryRoot });
+      const broker = createWorkspaceHostBroker({ root: temporaryRoot });
+      const probe = await broker.probeIdentity();
+      const scopeDigest = probe.scopeDigest;
       // Backend 已存在更高的 current writer generation（旧进程未停）。
-      const host: WorkspaceHost = createManagedWorkspaceHost(temporaryRoot);
+      const host: WorkspaceHost = broker;
       const backend = createWorkspaceBackend(host);
       const dummyAuthority = {
         invocationId: randomUUID(),
@@ -487,18 +488,17 @@ describe("Workspace continuity integration", () => {
         sessionBindingId: randomUUID(),
       };
       await backend.host.activateWriter({
+        tenantId: TENANT_ID,
         scopeDigest,
         writerGeneration: 2,
         authority: dummyAuthority,
-        expectedStorageIdentity: protocolDigest({ storage: temporaryRoot }),
+        expectedStorageIdentity: probe.storageIdentity,
         operationId: "stale-backend",
         root: path.join(temporaryRoot, "old-root"),
       });
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const fixture = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
       // DB 侧 reserve 得到 gen1，但 Host current 已是 gen2：激活必须 fail closed。
@@ -514,6 +514,7 @@ describe("Workspace continuity integration", () => {
       expect(reserved.writerGeneration).toBe(1);
       await expect(
         backend.host.activateWriter({
+          tenantId: TENANT_ID,
           scopeDigest,
           writerGeneration: reserved.writerGeneration,
           authority: {
@@ -521,7 +522,7 @@ describe("Workspace continuity integration", () => {
             invocationId: fixture.invocation.id,
             attemptId: fixture.attempt.id,
           },
-          expectedStorageIdentity: protocolDigest({ storage: temporaryRoot }),
+          expectedStorageIdentity: probe.storageIdentity,
           operationId: "fenced-start",
           root: path.join(temporaryRoot, "new-root"),
         }),
@@ -543,8 +544,10 @@ describe("Workspace continuity integration", () => {
 
   it("WORKSPACE-08: replaying a lost backend acknowledgement returns the same grant without a new writer", async () => {
     try {
-      const scopeDigest = protocolDigest({ scope: temporaryRoot });
-      const host = createManagedWorkspaceHost(temporaryRoot);
+      const broker = createWorkspaceHostBroker({ root: temporaryRoot });
+      const probe = await broker.probeIdentity();
+      const scopeDigest = probe.scopeDigest;
+      const host = broker;
       const authority = {
         invocationId: randomUUID(),
         runtimeRevisionId: randomUUID(),
@@ -554,19 +557,21 @@ describe("Workspace continuity integration", () => {
         sessionBindingId: randomUUID(),
       };
       const first = await host.activateWriter({
+        tenantId: TENANT_ID,
         scopeDigest,
         writerGeneration: 1,
         authority,
-        expectedStorageIdentity: protocolDigest({ storage: temporaryRoot }),
+        expectedStorageIdentity: probe.storageIdentity,
         operationId: "replay-check",
         root: temporaryRoot,
       });
       // 回执丢失后以同一 generation 重放操作：同 G 取回同 receipt，不产生新 writer。
       const replayed = await host.activateWriter({
+        tenantId: TENANT_ID,
         scopeDigest,
         writerGeneration: 1,
         authority,
-        expectedStorageIdentity: protocolDigest({ storage: temporaryRoot }),
+        expectedStorageIdentity: probe.storageIdentity,
         operationId: "replay-check",
         root: temporaryRoot,
       });
@@ -575,10 +580,11 @@ describe("Workspace continuity integration", () => {
       const current = await host.getWriter(scopeDigest, 1);
       expect(current?.grantRef).toBe(first.grantRef);
       const conflicted = host.activateWriter({
+        tenantId: TENANT_ID,
         scopeDigest,
         writerGeneration: 1,
         authority: { ...authority, ownershipId: randomUUID() },
-        expectedStorageIdentity: protocolDigest({ storage: temporaryRoot }),
+        expectedStorageIdentity: probe.storageIdentity,
         operationId: "replay-check-conflict",
         root: temporaryRoot,
       });
@@ -593,8 +599,6 @@ describe("Workspace continuity integration", () => {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const owner = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
@@ -637,8 +641,6 @@ describe("Workspace continuity integration", () => {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const fixture = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
@@ -676,16 +678,31 @@ describe("Workspace continuity integration", () => {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
-        storageIdentity: protocolDigest({ storage: temporaryRoot }),
-        hostIdentity: "continuity-host-a",
       });
       const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const fixture = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
       const run = await prepareAndActivate({ fixture, binding, backend, root: temporaryRoot });
+      // 正式激活会同时冻结 activationEvidence/Digest；这里按同一形状补齐，readiness 才能核验。
+      const readinessEvidence = {
+        kind: "execution-activated",
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        ownershipId: run.acquired.ownership.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        workspace: {
+          mode: binding.continuityMode,
+          lockId: run.activated.lockId,
+          writerGeneration: run.activated.writerGeneration,
+          grantRef: run.activated.grant.grantRef,
+          backendEvidence: run.activated.grant.backendEvidence,
+        },
+      };
       await db
         .update(executionOwnershipTable)
         .set({
           workspaceWriterGeneration: run.activated.writerGeneration,
+          activationEvidence: readinessEvidence,
+          activationDigest: protocolDigest(readinessEvidence),
           updatedAt: new Date(),
         })
         .where(eq(executionOwnershipTable.id, run.acquired.ownership.id));
@@ -697,6 +714,7 @@ describe("Workspace continuity integration", () => {
           ownershipId: run.acquired.ownership.id,
           workspaceBindingId: binding.id,
           expectedWriterGeneration: run.activated.writerGeneration,
+          backend: backend.host,
         }),
       ).resolves.toMatchObject({
         bindingId: binding.id,
@@ -709,6 +727,7 @@ describe("Workspace continuity integration", () => {
           invocationId: fixture.invocation.id,
           ownershipId: "not-the-owner",
           workspaceBindingId: binding.id,
+          backend: backend.host,
         }),
       ).rejects.toThrow("NotCurrentExecutor");
       await expect(
@@ -718,6 +737,7 @@ describe("Workspace continuity integration", () => {
           ownershipId: run.acquired.ownership.id,
           workspaceBindingId: binding.id,
           expectedWriterGeneration: run.activated.writerGeneration + 7,
+          backend: backend.host,
         }),
       ).rejects.toThrow("WorkspaceWriterNotFenced");
     } finally {

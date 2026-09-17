@@ -49,6 +49,13 @@ export const workspaceWriteLock = mysqlTable(
     workspaceBindingId: varchar("workspaceBindingId", { length: 36 }),
     backendGrantRef: varchar("backendGrantRef", { length: 512 }),
     backendEvidence: json("backendEvidence"),
+    /**
+     * 稳定 Backend operationId：同一逻辑激活重试必须复用同一个 operation，
+     * DB 确认失败时靠它查回已存在的回执，而不是再杀一次或新建一个 generation。
+     */
+    backendOperationId: varchar("backendOperationId", { length: 255 }),
+    /** Backend 实际回执（含真实旧 Writer 停止/排空证据）。 */
+    backendReceipt: json("backendReceipt"),
     leaseExpiresAt: datetime("leaseExpiresAt", { mode: "date", fsp: 6 }),
     releaseReasonCode: varchar("releaseReasonCode", { length: 64 }),
     versionNo: bigint("versionNo", { mode: "number", unsigned: true }).notNull().default(1),
@@ -79,7 +86,7 @@ export const workspaceWriteLock = mysqlTable(
     }),
     releasedShape: check(
       "WorkspaceWriteLock_released_shape",
-      sql`\`lockState\` <> 'released' OR (\`holderInvocationId\` IS NULL AND \`holderAttemptId\` IS NULL AND \`holderOwnershipId\` IS NULL AND \`workspaceBindingId\` IS NULL AND \`backendGrantRef\` IS NULL AND \`backendEvidence\` IS NULL AND \`leaseExpiresAt\` IS NULL)`,
+      sql`\`lockState\` <> 'released' OR (\`holderInvocationId\` IS NULL AND \`holderAttemptId\` IS NULL AND \`holderOwnershipId\` IS NULL AND \`workspaceBindingId\` IS NULL AND \`backendGrantRef\` IS NULL AND \`backendEvidence\` IS NULL AND \`backendOperationId\` IS NULL AND \`backendReceipt\` IS NULL AND \`leaseExpiresAt\` IS NULL)`,
     ),
     activeEvidenceShape: check(
       "WorkspaceWriteLock_active_evidence_shape",

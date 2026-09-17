@@ -8,14 +8,14 @@
   },
   "counts": {
     "unit": 320,
-    "db": 121,
+    "db": 123,
     "integration": 13,
     "contract": 31,
     "e2e-web": 4,
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 493,
+  "total": 495,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -3164,6 +3164,17 @@
       ]
     },
     {
+      "file": "lib/environment/__tests__/environment-compliance.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/environment/__tests__/environment-revision.db.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -5156,6 +5167,17 @@
     },
     {
       "file": "lib/workspace/__tests__/workspace-continuity.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/__tests__/workspace-host-recovery.integration.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,

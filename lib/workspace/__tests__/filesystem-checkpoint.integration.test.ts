@@ -21,11 +21,8 @@ import {
   createEnvironmentDefinition,
   getEnvironmentRevisionById,
 } from "@/lib/environment/environment-definition-store";
-import {
-  activateEnvironmentLease,
-  createEnvironmentLease,
-  prepareEnvironmentLease,
-} from "@/lib/environment/environment-lease-store";
+import { activateEnvironmentLease } from "@/lib/environment/environment-lease-store";
+import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -47,7 +44,7 @@ import { type SnapshotEntry, digestJson } from "@/lib/workspace/snapshot-manifes
 import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import { createWorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { computeWorkspaceContractDigest } from "@/lib/workspace/workspace-contract";
-import { createManagedWorkspaceHost } from "@/lib/workspace/workspace-host";
+import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import {
   activatePreparedWorkspaceWriter,
@@ -97,8 +94,15 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
   const writerRoot = path.join(temporaryRoot, "writer");
   const hostRoot = path.join(temporaryRoot, "host");
   await mkdir(writerRoot, { recursive: true });
-  const storageScopeDigest = protocolDigest({ scope: `checkpoint-${randomUUID()}` });
-  const storageIdentity = protocolDigest({ storage: temporaryRoot });
+  await mkdir(hostRoot, { recursive: true });
+  // 物理身份来自受管 Broker 的真实探测：写根（writerRoot）与控制面根（hostRoot）物理分离。
+  const probe = await createWorkspaceHostBroker({
+    root: hostRoot,
+    managedRoot: writerRoot,
+  }).probeIdentity();
+  const storageScopeDigest = probe.scopeDigest;
+  const storageIdentity = probe.storageIdentity;
+  const hostIdentity = probe.hostIdentity;
   const logicalWorkspace = await createWorkspace({
     tenantId: TENANT_ID,
     workspaceKey: `checkpoint-fixture-${randomUUID()}`,
@@ -112,7 +116,7 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
     locationRef: "managed://checkpoint-fixture",
     storageScopeDigest,
     backendKind: "managed_host",
-    hostIdentity: "checkpoint-host",
+    hostIdentity,
     storageIdentity,
     accessMode: "read_write",
     filesystemSemantics,
@@ -122,7 +126,7 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
       continuityMode: "CHECKPOINT_RESTORABLE",
       storageScopeDigest,
       backendKind: "managed_host",
-      hostIdentity: "checkpoint-host",
+      hostIdentity,
       storageIdentity,
       filesystemSemantics,
       checkpointPolicy,
@@ -155,17 +159,14 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
     workspaceBinding: workspace,
     environmentDefinitionRevisionId: environmentRevision.id,
   });
-  const environmentLease = await createEnvironmentLease({
+  // 环境前置事实：真实实例核验由 R07 的 ENV-01..06 覆盖；本文件聚焦 Checkpoint 语义，
+  // 因此经 test-support 构造"已核验"证据（不使用生产默认成功路径）。
+  const environmentLease = await seedPreparedEnvironmentLease({
     tenantId: TENANT_ID,
     invocationId: fixture.invocation.id,
     attemptId: fixture.attempt.id,
-    environmentDefinitionRevisionId: environmentRevision.id,
-  });
-  await prepareEnvironmentLease({
-    tenantId: TENANT_ID,
-    leaseId: environmentLease.id,
-    capabilitiesJson: {},
-    evidence: { fixture: "checkpoint" },
+    revision: environmentRevision,
+    workspaceBindingId: workspace.id,
   });
   const acquired = await acquireTestRuntimeAuthority({
     tenantId: TENANT_ID,
@@ -174,7 +175,9 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
     runtimeRevisionId: fixture.binding.runtimeRevisionId,
     environmentLeaseId: environmentLease.id,
   });
-  const backend = createWorkspaceBackend(createManagedWorkspaceHost(hostRoot));
+  const backend = createWorkspaceBackend(
+    createWorkspaceHostBroker({ root: hostRoot, managedRoot: writerRoot }),
+  );
   const candidate = await prepareWorkspaceCandidate({
     attemptId: fixture.attempt.id,
     binding: workspace,
@@ -211,6 +214,10 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
     tenantId: TENANT_ID,
     leaseId: environmentLease.id,
     ownershipId: acquired.ownership.id,
+    attemptId: fixture.attempt.id,
+    invocationId: fixture.invocation.id,
+    environmentDefinitionRevisionId: environmentRevision.id,
+    recoveryAnchorDigest: null,
   });
   const semanticRequest = { fixture: "checkpoint", invocationId: fixture.invocation.id };
   const semanticRequestDigest = protocolDigest(semanticRequest);

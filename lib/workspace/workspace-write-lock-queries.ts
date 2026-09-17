@@ -25,6 +25,13 @@ export interface AcquireWorkspaceWriteLockParams {
   leaseExpiresAt: Date;
   backendGrantRef?: string | null;
   backendEvidence?: unknown;
+  /**
+   * 稳定 Backend operationId：同一次逻辑激活的所有重试共用它。
+   * 事务外 Backend 已成功但 DB 确认失败时，靠它查回既有回执而不是重复开 Writer。
+   */
+  backendOperationId?: string | null;
+  /** Backend 实际回执（真实旧 Writer 停止/排空证据）。 */
+  backendReceipt?: unknown;
 }
 
 export interface AcquireWorkspaceWriteLockResult {
@@ -51,12 +58,19 @@ export async function reserveWorkspaceWriter(
     )
     .for("update")
     .limit(1);
-  if (
-    current &&
-    (current.lockState === "reserved" || current.lockState === "active") &&
-    (!current.leaseExpiresAt || current.leaseExpiresAt > new Date())
-  ) {
-    throw new WorkspaceWriterConflictError("Workspace writer 已被其他 Invocation 占用");
+  if (current && (current.lockState === "reserved" || current.lockState === "active")) {
+    const notExpired = !current.leaseExpiresAt || current.leaseExpiresAt > new Date();
+    if (notExpired) {
+      // 同一 holder tuple 的重复预留是幂等重放：返回同一 lock 与同一 generation，
+      // 既不允许第二个 Writer，也不因为一次响应丢失就切走 generation。
+      const sameHolder =
+        current.holderInvocationId === input.invocationId &&
+        current.holderAttemptId === input.attemptId &&
+        current.holderOwnershipId === input.ownershipId &&
+        current.workspaceBindingId === input.workspaceBindingId;
+      if (sameHolder) return { lock: current, writerGeneration: current.writerGeneration };
+      throw new WorkspaceWriterConflictError("Workspace writer 已被其他 Invocation 占用");
+    }
   }
   const now = new Date();
   const writerGeneration = (current?.writerGeneration ?? 0) + 1;
@@ -73,6 +87,8 @@ export async function reserveWorkspaceWriter(
         workspaceBindingId: input.workspaceBindingId,
         backendGrantRef: input.backendGrantRef ?? null,
         backendEvidence: input.backendEvidence ?? null,
+        backendOperationId: input.backendOperationId ?? null,
+        backendReceipt: input.backendReceipt ?? null,
         leaseExpiresAt: input.leaseExpiresAt,
         releaseReasonCode: null,
         versionNo: current.versionNo + 1,
@@ -92,6 +108,8 @@ export async function reserveWorkspaceWriter(
       workspaceBindingId: input.workspaceBindingId,
       backendGrantRef: input.backendGrantRef ?? null,
       backendEvidence: input.backendEvidence ?? null,
+      backendOperationId: input.backendOperationId ?? null,
+      backendReceipt: input.backendReceipt ?? null,
       leaseExpiresAt: input.leaseExpiresAt,
       releaseReasonCode: null,
       versionNo: 1,
@@ -116,6 +134,10 @@ export async function activateWorkspaceWriter(
     writerGeneration: number;
     backendGrantRef: string;
     backendEvidence?: unknown;
+    /** 与预留阶段一致的稳定 Backend operationId。 */
+    backendOperationId?: string | null;
+    /** Backend 实际回执。 */
+    backendReceipt?: unknown;
   },
   executor: DbOrTx = db,
 ): Promise<WorkspaceWriteLock> {
@@ -142,6 +164,8 @@ export async function activateWorkspaceWriter(
       lockState: "active",
       backendGrantRef: input.backendGrantRef,
       backendEvidence: input.backendEvidence ?? lock.backendEvidence,
+      backendOperationId: input.backendOperationId ?? lock.backendOperationId,
+      backendReceipt: input.backendReceipt ?? lock.backendReceipt,
       updatedAt: now,
       versionNo: lock.versionNo + 1,
     })
@@ -188,6 +212,8 @@ export async function releaseWorkspaceWriteLock(
       workspaceBindingId: null,
       backendGrantRef: null,
       backendEvidence: null,
+      backendOperationId: null,
+      backendReceipt: null,
       leaseExpiresAt: null,
       updatedAt: now,
       versionNo: lock.versionNo + 1,

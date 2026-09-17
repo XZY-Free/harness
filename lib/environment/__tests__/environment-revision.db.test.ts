@@ -14,7 +14,6 @@ import {
   activateEnvironmentLease,
   createEnvironmentLease,
   getEnvironmentLeaseById,
-  prepareEnvironmentLease,
   releaseEnvironmentLease,
 } from "@/lib/environment/environment-lease-store";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
@@ -22,6 +21,7 @@ import {
   getPendingEnvironmentSelection,
   requestEnvironmentSelection,
 } from "@/lib/environment/environment-selection";
+import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
 import {
   createAttempt,
   markAttemptPreparedInTransaction,
@@ -214,11 +214,26 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
       invocationId: fixture.invocation.id,
       attemptId: attempt2.id,
       environmentDefinitionRevisionId: fixture.binding.environmentDefinitionRevisionId!,
+      // §5：Lease 必须在实例化前登记 operation/manifest 归属，Prepared 证据才能核对
+      // Workspace 与恢复水位（生产路径由 provisionWithBackend 写入同一形状）。
+      resourceManifest: {
+        operationId: `test-env-instance:${attempt2.id}:${r1!.id}`,
+        workspaceBindingId: fixture.workspace.id,
+        revisionId: r1!.id,
+        revisionSemanticDigest: r1!.semanticDigest,
+        recoveryAnchorDigest: null,
+        backendKind: "container",
+        resources: [],
+      },
     });
     expect(lease2.environmentDefinitionRevisionId).toBe(r1!.id);
-    const prepared = await prepareEnvironmentLease({
+    const prepared = await seedPreparedEnvironmentLease({
       tenantId: fixture.tenantId,
-      leaseId: lease2.id,
+      invocationId: fixture.invocation.id,
+      attemptId: attempt2.id,
+      revision: r1!,
+      workspaceBindingId: fixture.workspace.id,
+      lease: lease2,
       capabilitiesJson: { isolation: true },
     });
     expect(prepared.readinessState).toBe("prepared");
@@ -247,11 +262,24 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
       invocationId: fixture.invocation.id,
       attemptId: fixture.attempt.id,
       environmentDefinitionRevisionId: r1!.id,
+      resourceManifest: {
+        operationId: `test-env-instance:${fixture.attempt.id}:${r1!.id}`,
+        workspaceBindingId: fixture.workspace.id,
+        revisionId: r1!.id,
+        revisionSemanticDigest: r1!.semanticDigest,
+        recoveryAnchorDigest: null,
+        backendKind: "container",
+        resources: [],
+      },
     });
     await expect(
-      prepareEnvironmentLease({
+      seedPreparedEnvironmentLease({
         tenantId: fixture.tenantId,
-        leaseId: lease.id,
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        revision: r1!,
+        workspaceBindingId: fixture.workspace.id,
+        lease,
         capabilitiesJson: { isolation: true },
       }),
     ).rejects.toBeInstanceOf(EnvironmentComplianceError);
@@ -264,8 +292,45 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
         tenantId: fixture.tenantId,
         leaseId: lease.id,
         ownershipId: "test-ownership",
+        attemptId: fixture.attempt.id,
+        invocationId: fixture.invocation.id,
+        environmentDefinitionRevisionId: r1!.id,
       }),
     ).rejects.toThrow();
+  });
+
+  it("ENV-12: a Lease without a registered operation/manifest cannot be marked prepared", async () => {
+    const definition = await createEnvironmentDefinition({
+      tenantId: DEFAULT_TENANT_ID,
+      environmentKey: "manifest-env",
+      displayName: "归属环境",
+      revision: revisionInput(),
+    });
+    const r1 = await getEnvironmentRevisionById(DEFAULT_TENANT_ID, definition.currentRevisionId!);
+    const fixture = await seedPreparedRuntimeAttempt({ environmentDefinitionRevisionId: r1!.id });
+    // §5：未登记归属的 Lease（崩溃在 create 之前）不能写 Prepared 证据 —— 没有可核对的
+    // Workspace/恢复水位事实，就必须 fail closed，而不是退化成空串后含糊失败。
+    const orphanLease = await createEnvironmentLease({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      environmentDefinitionRevisionId: r1!.id,
+    });
+    await expect(
+      seedPreparedEnvironmentLease({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        revision: r1!,
+        workspaceBindingId: fixture.workspace.id,
+        lease: orphanLease,
+        capabilitiesJson: { isolation: true },
+      }),
+    ).rejects.toThrow(/未登记 operation\/manifest 归属/);
+    const unchanged = await getEnvironmentLeaseById(fixture.tenantId, orphanLease.id);
+    expect(unchanged?.readinessState).toBe("unresolved");
+    expect(unchanged?.preparedEvidence).toBeNull();
+    expect(unchanged?.complianceEvidence).toBeNull();
   });
 
   it("ENV-07: exhausted provisioning retries fail without falling back to the latest revision", async () => {
@@ -330,10 +395,23 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
       attemptId: fixture.attempt.id,
       environmentDefinitionRevisionId: r1!.id,
       capabilitiesJson: { isolation: true },
+      resourceManifest: {
+        operationId: `test-env-instance:${fixture.attempt.id}:${r1!.id}`,
+        workspaceBindingId: fixture.workspace.id,
+        revisionId: r1!.id,
+        revisionSemanticDigest: r1!.semanticDigest,
+        recoveryAnchorDigest: null,
+        backendKind: "container",
+        resources: [],
+      },
     });
-    const prepared = await prepareEnvironmentLease({
+    const prepared = await seedPreparedEnvironmentLease({
       tenantId: fixture.tenantId,
-      leaseId: lease.id,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      revision: r1!,
+      workspaceBindingId: fixture.workspace.id,
+      lease,
       capabilitiesJson: { isolation: true },
     });
     await createEnvironmentRevision(

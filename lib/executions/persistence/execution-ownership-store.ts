@@ -1,6 +1,7 @@
 /** Serialized ExecutionOwnership operations. Every operation locks Invocation first. */
 import { randomUUID } from "node:crypto";
 import { type DbOrTx, db } from "@/lib/db/client";
+import { assertLeasePreparedEvidence } from "@/lib/environment/environment-prepared-evidence";
 import {
   ExecutionAuthorityError,
   OWNERSHIP_DISPATCH_DEADLINE_MS,
@@ -8,8 +9,10 @@ import {
   authorityIdentity,
 } from "@/lib/executions/domain/execution-authority";
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
+import { environmentDefinitionRevisionTable } from "@/lib/persistence/schema/environment-definition-revision";
 import {
   type ExecutionOwnership,
+  executionBindingTable,
   executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
@@ -100,6 +103,52 @@ async function prepareChecks(executor: OwnershipTx, input: AcquireExecutionOwner
     ) {
       throw new ExecutionAuthorityError("WorkspaceNotReady", "EnvironmentLease 尚未达到 ready");
     }
+    // R07 §4：Acquire 也必须复验准备证据本身，而不是只信 Lease 的状态字段。
+    // 换 Revision / 换 WorkspaceBinding / 恢复水位变化 / 已过 Prepared 有效期
+    // 都必须在这里被拒绝，否则旧准备证据会随状态字段一起"漂"进执行。
+    const [binding] = await executor
+      .select({
+        workspaceBindingId: executionBindingTable.workspaceBindingId,
+        environmentDefinitionRevisionId: executionBindingTable.environmentDefinitionRevisionId,
+      })
+      .from(executionBindingTable)
+      .where(
+        and(
+          eq(executionBindingTable.tenantId, input.tenantId),
+          eq(executionBindingTable.invocationId, input.invocationId),
+        ),
+      )
+      .limit(1);
+    if (!binding?.environmentDefinitionRevisionId) {
+      throw new Error("EnvironmentRevisionMismatch");
+    }
+    if (binding.environmentDefinitionRevisionId !== lease.environmentDefinitionRevisionId) {
+      throw new Error("EnvironmentRevisionMismatch");
+    }
+    const [revision] = await executor
+      .select({
+        semanticDigest: environmentDefinitionRevisionTable.semanticDigest,
+      })
+      .from(environmentDefinitionRevisionTable)
+      .where(
+        and(
+          eq(environmentDefinitionRevisionTable.tenantId, input.tenantId),
+          eq(environmentDefinitionRevisionTable.id, binding.environmentDefinitionRevisionId),
+        ),
+      )
+      .limit(1);
+    if (!revision) throw new Error("EnvironmentRevisionMismatch");
+    assertLeasePreparedEvidence({
+      preparedEvidence: lease.preparedEvidence,
+      preparedDigest: lease.preparedDigest,
+      revisionId: binding.environmentDefinitionRevisionId,
+      semanticDigest: revision.semanticDigest,
+      attemptId: input.attemptId,
+      workspaceBindingId: binding.workspaceBindingId,
+      recoveryAnchorDigest: null,
+      // Acquire 在事务内，用 DB Authority 时间判定有效期（不受调用方时钟影响）。
+      now: await getAuthorityDatabaseTime(executor),
+    });
   }
 }
 

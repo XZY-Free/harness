@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "4c3c0202-33e5-40f2-9f77-543d27253231",
+  "id": "5b56de63-7568-4005-9082-aab45f4b8082",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -19228,6 +19228,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "backendOperationId": {
+          "name": "backendOperationId",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "backendReceipt": {
+          "name": "backendReceipt",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "leaseExpiresAt": {
           "name": "leaseExpiresAt",
           "type": "datetime(6)",
@@ -19351,7 +19365,7 @@
         },
         "WorkspaceWriteLock_released_shape": {
           "name": "WorkspaceWriteLock_released_shape",
-          "value": "`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `leaseExpiresAt` IS NULL)"
+          "value": "`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `backendOperationId` IS NULL AND `backendReceipt` IS NULL AND `leaseExpiresAt` IS NULL)"
         },
         "WorkspaceWriteLock_active_evidence_shape": {
           "name": "WorkspaceWriteLock_active_evidence_shape",

@@ -173,9 +173,15 @@ function checkExternalRuntimeTransport(): void {
  * 1. 冻结工程包自身——退役命名清单的定义源，必须能引用历史命名；
  * 2. 测试 fixture 中的负向字符串（对已退役模块的依赖仍由
  *    collectRetiredModuleDependencyViolations 单独把关，不放行真实 import）。
+ *
+ * 与 `scripts/repository-architecture.contract.test.ts` 的
+ * `NAMING_GUARD_EXCEPTION_PREFIXES` 保持同一口径：专题02 收尾审查工程包的
+ * manifests 逐条收录改造前的原验收义务，必须写出已退役版本前缀本身。
+ * 只按前缀精确匹配，不放行生产源码。
  */
 const RETIRED_NAMING_EXCEPTIONS = [
   /^docs\/V12\/02\/snowharness-execution-design\//,
+  /^docs\/topic02\/nexharness-topic02-closure\//,
   /\.test\.tsx?$/,
 ];
 

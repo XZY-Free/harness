@@ -90,8 +90,12 @@ export async function redispatchRuntimeInvocation(
           tenantId: input.tenantId,
           invocationId: invocation.id,
           attemptId: attempt.id,
+          // Redispatch 仍指向 Binding 冻结的原 Revision（R07 §1 / INV-07）。
+          revisionId: binding.environmentDefinitionRevisionId as string,
           revision,
           workspaceBindingId: binding.workspaceBindingId,
+          workspaceRoot: input.workspace?.root ?? null,
+          recoveryAnchorDigest: null,
         })
       : null;
   const started = await startRuntimeInvocation({
@@ -104,6 +108,7 @@ export async function redispatchRuntimeInvocation(
     auth: input.auth,
     callbackEndpoints: input.callbackEndpoints,
     environmentLeaseId: environmentLease?.id ?? null,
+    environmentProvisioner: input.environmentProvisioner ?? null,
     workspace: input.workspace,
   });
   const current = await getInvocationById(input.tenantId, input.invocationId);

@@ -2,8 +2,9 @@ import { db } from "@/lib/db/client";
 import {
   activateEnvironmentLease,
   getEnvironmentLeaseById,
-  releaseEnvironmentLease,
+  scheduleEnvironmentLeaseCleanup,
 } from "@/lib/environment/environment-lease-store";
+import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { authorityIdentity, sameAuthority } from "@/lib/executions/domain/execution-authority";
 import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
 import {
@@ -63,6 +64,11 @@ export interface RuntimeStartInput {
   auth: RuntimeStartTransportRequest["auth"];
   callbackEndpoints: CallbackEndpoints;
   environmentLeaseId?: string | null;
+  /**
+   * 受管 EnvironmentProvisioner：用于真实释放该 Lease 已创建的资源。
+   * 未提供时环境失败只登记控制面清理工作（不允许伪装成"资源已释放"）。
+   */
+  environmentProvisioner?: EnvironmentProvisioner | null;
   workspace?: WorkspaceExecutionResources;
   intentType?: "start" | "resume";
   recovery?: Recovery;
@@ -348,12 +354,9 @@ export async function startRuntimeInvocation(
   let activatedWorkspace: Awaited<ReturnType<typeof activatePreparedWorkspaceWriter>> | null = null;
   try {
     if (ownership.executionPhase === "activating") {
-      if (input.environmentLeaseId)
-        await activateEnvironmentLease({
-          tenantId: input.tenantId,
-          leaseId: input.environmentLeaseId,
-          ownershipId: ownership.id,
-        });
+      // 顺序不变量（repairs/06-environment.md §4）：先真实激活 Workspace Writer，
+      // 再在同一个 Current Ownership 事务内交接 Environment Lease（prepared→ready）。
+      // 不允许在 Writer 激活前写 readiness=ready。
       if (workspaceCandidate) {
         const candidateAuthority = authorityIdentity({
           invocationId: input.invocation.id,
@@ -374,24 +377,8 @@ export async function startRuntimeInvocation(
             : workspaceCandidate,
         });
       }
-      const activationEvidence = {
-        kind: "execution-activated",
-        invocationId: input.invocation.id,
-        attemptId: preparedAttempt.id,
-        ownershipId: ownership.id,
-        leaseEpoch: String(ownership.leaseEpoch),
-        runtimeRevisionId: input.binding.runtimeRevisionId,
-        environmentLeaseId: input.environmentLeaseId ?? null,
-        workspace: activatedWorkspace
-          ? {
-              mode: workspaceBinding.continuityMode,
-              lockId: activatedWorkspace.lockId,
-              writerGeneration: activatedWorkspace.writerGeneration,
-              grantRef: activatedWorkspace.grant.grantRef,
-              backendEvidence: activatedWorkspace.grant.backendEvidence,
-            }
-          : { mode: workspaceBinding.continuityMode, workspaceBindingId: workspaceBinding.id },
-      };
+      const recoveryAnchorDigest =
+        input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
       ownership = await db.transaction(async (tx) => {
         const [invocation] = await tx
           .select({ id: invocationTable.id })
@@ -420,6 +407,56 @@ export async function startRuntimeInvocation(
           .limit(1);
         if (!current || current.leaseEpoch !== result.ownership.leaseEpoch)
           throw new Error("NotCurrentExecutor");
+        let environmentLease: Awaited<ReturnType<typeof activateEnvironmentLease>> | null = null;
+        if (input.environmentLeaseId) {
+          if (current.environmentLeaseId !== input.environmentLeaseId)
+            throw new Error("EnvironmentRevisionMismatch");
+          if (!input.binding.environmentDefinitionRevisionId)
+            throw new Error("EnvironmentRevisionMismatch");
+          // Current Ownership 事务内复核：Lease 确属本 Attempt/Revision/Binding/恢复水位，
+          // prepared 未过期且未被释放，才写 ready + activationOwnershipId。
+          environmentLease = await activateEnvironmentLease(
+            {
+              tenantId: input.tenantId,
+              leaseId: input.environmentLeaseId,
+              ownershipId: current.id,
+              attemptId: preparedAttempt.id,
+              invocationId: input.invocation.id,
+              environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId,
+              recoveryAnchorDigest,
+            },
+            tx,
+          );
+        }
+        const activationEvidence = {
+          kind: "execution-activated",
+          invocationId: input.invocation.id,
+          attemptId: preparedAttempt.id,
+          ownershipId: current.id,
+          leaseEpoch: String(current.leaseEpoch),
+          runtimeRevisionId: input.binding.runtimeRevisionId,
+          environmentLeaseId: input.environmentLeaseId ?? null,
+          environment: environmentLease
+            ? {
+                readinessState: environmentLease.readinessState,
+                leaseState: environmentLease.leaseState,
+                activationOwnershipId: environmentLease.activationOwnershipId,
+                preparedDigest: environmentLease.preparedDigest,
+                workerRef: environmentLease.workerRef,
+                hostIdentity: environmentLease.hostIdentity,
+                storageIdentity: environmentLease.storageIdentity,
+              }
+            : null,
+          workspace: activatedWorkspace
+            ? {
+                mode: workspaceBinding.continuityMode,
+                lockId: activatedWorkspace.lockId,
+                writerGeneration: activatedWorkspace.writerGeneration,
+                grantRef: activatedWorkspace.grant.grantRef,
+                backendEvidence: activatedWorkspace.grant.backendEvidence,
+              }
+            : { mode: workspaceBinding.continuityMode, workspaceBindingId: workspaceBinding.id },
+        };
         await tx
           .update(executionOwnershipTable)
           .set({
@@ -457,10 +494,18 @@ export async function startRuntimeInvocation(
         reasonCode: "activation_failed",
       }).catch(() => undefined);
     await closeOwnershipAfterActivationFailure(input, ownership.id).catch(() => undefined);
-    if (input.environmentLeaseId)
-      await releaseEnvironmentLease(input.tenantId, input.environmentLeaseId, "lost").catch(
-        () => undefined,
+    if (input.environmentLeaseId) {
+      // 真实资源清理优先：控制面 released 必须对应真实释放回执。
+      // 第一次失败 → 保持 releasing + 退避重试（清理 Worker 继续），不吞掉 Backend 错误。
+      await cleanupEnvironmentAfterActivationFailure(
+        {
+          tenantId: input.tenantId,
+          environmentLeaseId: input.environmentLeaseId,
+          environmentProvisioner: input.environmentProvisioner ?? null,
+        },
+        "activation_failed",
       );
+    }
     if (workspaceCandidate && !activatedWorkspace)
       await workspaceCandidate.backend.host
         .cleanup(workspaceCandidate.preparation)
@@ -543,6 +588,35 @@ export async function startRuntimeInvocation(
     acknowledgedAt: new Date(response.acceptedAt),
   });
   return { authority, response, sessionBindingId: session.id };
+}
+
+/**
+ * 激活失败后的 Environment 资源收口（repairs/06-environment.md §5）。
+ *
+ * 真实释放优先：有 Provisioner 时直接调用它做"真实释放 + 失败留待重试"；
+ * 没有 Provisioner 时至少登记持久清理工作（`releasing` + 退避），
+ * **绝不**把控制面写成 released 而真实资源仍在。
+ */
+async function cleanupEnvironmentAfterActivationFailure(
+  input: {
+    tenantId: string;
+    environmentLeaseId: string;
+    environmentProvisioner: EnvironmentProvisioner | null;
+  },
+  reasonCode: string,
+): Promise<void> {
+  const provisioner = input.environmentProvisioner;
+  if (!provisioner) {
+    await scheduleEnvironmentLeaseCleanup({
+      tenantId: input.tenantId,
+      leaseId: input.environmentLeaseId,
+      errorCode: reasonCode,
+    }).catch(() => undefined);
+    return;
+  }
+  await provisioner
+    .cleanup({ tenantId: input.tenantId, leaseId: input.environmentLeaseId, reasonCode })
+    .catch(() => undefined);
 }
 
 async function closeOwnershipAfterActivationFailure(

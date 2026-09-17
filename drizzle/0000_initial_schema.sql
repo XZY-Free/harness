@@ -2331,6 +2331,8 @@ CREATE TABLE `WorkspaceWriteLock` (
 	`workspaceBindingId` varchar(36),
 	`backendGrantRef` varchar(512),
 	`backendEvidence` json,
+	`backendOperationId` varchar(255),
+	`backendReceipt` json,
 	`leaseExpiresAt` datetime(6),
 	`releaseReasonCode` varchar(64),
 	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
@@ -2341,7 +2343,7 @@ CREATE TABLE `WorkspaceWriteLock` (
 	CONSTRAINT `WorkspaceWriteLock_tenant_scope_uq` UNIQUE(`tenantId`,`storageScopeDigest`),
 	CONSTRAINT `WorkspaceWriteLock_state_allowed` CHECK(`lockState` IN ('released', 'reserved', 'active', 'releasing', 'quarantined')),
 	CONSTRAINT `WorkspaceWriteLock_generation_non_negative` CHECK(`writerGeneration` >= 0),
-	CONSTRAINT `WorkspaceWriteLock_released_shape` CHECK(`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `leaseExpiresAt` IS NULL)),
+	CONSTRAINT `WorkspaceWriteLock_released_shape` CHECK(`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `backendOperationId` IS NULL AND `backendReceipt` IS NULL AND `leaseExpiresAt` IS NULL)),
 	CONSTRAINT `WorkspaceWriteLock_active_evidence_shape` CHECK(`lockState` <> 'active' OR (`holderInvocationId` IS NOT NULL AND `holderAttemptId` IS NOT NULL AND `holderOwnershipId` IS NOT NULL AND `workspaceBindingId` IS NOT NULL AND `backendGrantRef` IS NOT NULL AND `backendEvidence` IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(`backendEvidence`, '$.scopeDigest')) = `storageScopeDigest` AND JSON_EXTRACT(`backendEvidence`, '$.writerGeneration') IS NOT NULL))
 );
 --> statement-breakpoint

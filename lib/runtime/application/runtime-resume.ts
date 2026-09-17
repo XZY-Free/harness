@@ -102,7 +102,7 @@ export async function resumeRuntimeInvocation(input: {
     (!environmentLease ||
       environmentLease.environmentDefinitionRevisionId !==
         input.binding.environmentDefinitionRevisionId ||
-      environmentLease.readinessState !== "preparing" ||
+      !["prepared", "ready"].includes(environmentLease.readinessState) ||
       environmentLease.leaseState !== "active" ||
       !input.binding.environmentDefinitionRevisionId ||
       !input.environmentProvisioner)
@@ -124,8 +124,11 @@ export async function resumeRuntimeInvocation(input: {
     environmentLease = await input.environmentProvisioner.revalidate({
       tenantId: input.tenantId,
       lease: environmentLease,
+      revisionId: revision.id,
       revision,
       workspaceBindingId: input.binding.workspaceBindingId,
+      workspaceRoot: input.workspace?.root ?? null,
+      recoveryAnchorDigest: input.anchorDigest ?? null,
     });
     if (
       environmentLease.readinessState !== "prepared" ||
@@ -145,6 +148,7 @@ export async function resumeRuntimeInvocation(input: {
     auth: input.auth,
     callbackEndpoints: input.callbackEndpoints,
     environmentLeaseId: environmentLease?.id ?? null,
+    environmentProvisioner: input.environmentProvisioner ?? null,
     workspace: input.workspace,
     intentType: "resume",
     recovery: {

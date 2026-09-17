@@ -161,6 +161,141 @@ export async function listContainersByLabel(
     .filter(Boolean);
 }
 
+// ─── R07 受管 Environment 实例原语（真实创建 + 真实回读）──────────────
+//
+// 受管 Environment 必须"实际建立资源并回读实际配置"。以下原语只暴露原始事实
+// （container inspect / image inspect / 显式 args 的 run），合规判定在
+// lib/environment/environment-instance-backend.ts，本模块不做任何策略假设。
+
+/** `docker inspect` 中与本平台合规判定相关的字段子集。 */
+export interface DockerContainerInspect {
+  Id: string;
+  Image: string;
+  Name: string;
+  State: { Status: string; Running: boolean; Pid: number; Dead: boolean; ExitCode: number };
+  Config: {
+    Image: string;
+    Entrypoint: string[] | null;
+    Cmd: string[] | null;
+    Env: string[] | null;
+    WorkingDir: string;
+    Labels: Record<string, string> | null;
+  };
+  HostConfig: {
+    Memory: number;
+    MemorySwap: number;
+    NanoCpus: number;
+    PidsLimit: number | null;
+    NetworkMode: string;
+    PidMode: string;
+    ReadonlyRootfs: boolean;
+    Privileged: boolean;
+    StorageOpt: Record<string, string> | null;
+    Ulimits: Array<{ Name: string; Soft: number; Hard: number }> | null;
+  };
+  Mounts: Array<{ Type: string; Source: string; Destination: string; RW: boolean; Mode: string }>;
+}
+
+/** `docker image inspect` 的字段子集。 */
+export interface DockerImageInspect {
+  Id: string;
+  RepoDigests: string[] | null;
+  Config: { Entrypoint: string[] | null; Cmd: string[] | null } | null;
+}
+
+/** 真实回读容器；容器不存在返回 null（不抛错——"不存在"是合法事实）。 */
+export async function inspectContainer(name: string): Promise<DockerContainerInspect | null> {
+  const { execa } = await import("execa");
+  const result = await execa("docker", ["inspect", name], { reject: false, timeout: 15_000 });
+  if (result.exitCode !== 0) return null;
+  try {
+    const parsed = JSON.parse(result.stdout) as DockerContainerInspect[];
+    return parsed[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 真实回读镜像；镜像不存在返回 null。 */
+export async function inspectImage(reference: string): Promise<DockerImageInspect | null> {
+  const { execa } = await import("execa");
+  const result = await execa("docker", ["image", "inspect", reference], {
+    reject: false,
+    timeout: 15_000,
+  });
+  if (result.exitCode !== 0) return null;
+  try {
+    const parsed = JSON.parse(result.stdout) as DockerImageInspect[];
+    return parsed[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export interface RunManagedContainerOpts {
+  name: string;
+  /** 镜像引用（repo@sha256:… 或 repo:tag）。 */
+  image: string;
+  /** 固定入口（首元素经 `--entrypoint` 覆盖，其余与 args 一起作为容器命令）。 */
+  entrypoint: string[];
+  args: string[];
+  labels: Record<string, string>;
+  /** 内存上限（字节）；0/undefined=不设。 */
+  memoryBytes?: number;
+  /** CPU 配额（纳核，1e9 = 1 CPU）；0/undefined=不设。 */
+  nanoCpus?: number;
+  pidsLimit?: number;
+  openFilesLimit?: number;
+  /** 容器 rootfs 只读。 */
+  readOnlyRootfs?: boolean;
+  /** docker `--network` 值；undefined=默认 bridge。 */
+  networkMode?: string;
+  mounts: Array<{ source: string; target: string; readOnly: boolean }>;
+  workdir?: string;
+  /** 已解析的 secret（经 `--env-file` 注入，不写命令行防泄露）。 */
+  envFilePath?: string;
+}
+
+/**
+ * 受管容器创建：全部参数显式来自调用方（不做平台默认假设）。
+ * 与 `runContainer` 的区别：不强制发布端口、不强制 `/workspace` 挂载、不强制 `sleep infinity`，
+ * 且入口/资源/网络/文件系统/secret 全部由外部策略决定——正是"实际应用固定策略"所需。
+ */
+export async function runManagedContainer(opts: RunManagedContainerOpts): Promise<string> {
+  const { execa } = await import("execa");
+  const args = ["run", "-d", "--name", opts.name];
+  for (const [key, value] of Object.entries(opts.labels)) {
+    args.push("--label", `${key}=${value}`);
+  }
+  const entrypointBinary = opts.entrypoint[0];
+  if (!entrypointBinary) {
+    throw new Error("受管容器必须指定固定入口（entrypoint 不能为空）");
+  }
+  args.push("--entrypoint", entrypointBinary);
+  if (opts.memoryBytes && opts.memoryBytes > 0) args.push("--memory", String(opts.memoryBytes));
+  if (opts.nanoCpus && opts.nanoCpus > 0) args.push("--cpus", String(opts.nanoCpus / 1e9));
+  if (opts.pidsLimit && opts.pidsLimit > 0) args.push("--pids-limit", String(opts.pidsLimit));
+  if (opts.openFilesLimit && opts.openFilesLimit > 0) {
+    args.push("--ulimit", `nofile=${opts.openFilesLimit}:${opts.openFilesLimit}`);
+  }
+  if (opts.readOnlyRootfs) args.push("--read-only");
+  if (opts.networkMode) args.push("--network", opts.networkMode);
+  if (opts.workdir) args.push("--workdir", opts.workdir);
+  if (opts.envFilePath) args.push("--env-file", opts.envFilePath);
+  for (const mount of opts.mounts) {
+    args.push("-v", `${mount.source}:${mount.target}${mount.readOnly ? ":ro" : ""}`);
+  }
+  args.push(opts.image, ...opts.entrypoint.slice(1), ...opts.args);
+
+  const result = await execa("docker", args, { reject: false, timeout: 120_000 });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `docker run（受管 Environment）失败（exit ${result.exitCode}）：${result.stderr.slice(0, 500)}`,
+    );
+  }
+  return result.stdout.trim();
+}
+
 /** 在容器内后台执行命令（`docker exec -d name sh -lc "cd /workspace && {command}"`）。立即返回，不等输出。
  * 供 DevServerPreviewRuntime 启动长驻 dev server（npm run dev）。 */
 export async function execDetached(name: string, command: string): Promise<void> {

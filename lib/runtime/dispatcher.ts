@@ -1,6 +1,6 @@
 /** Canonical dispatcher for thread executions. */
 import { randomUUID } from "node:crypto";
-import { aiConfig } from "@/lib/config";
+import { aiConfig, runtimeConfig } from "@/lib/config";
 import { allocateEventSequences } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
@@ -9,7 +9,7 @@ import {
   getEnvironmentRevisionById,
 } from "@/lib/environment/environment-definition-store";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
-import { createManagedEnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
+import { createDefaultEnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { getPendingEnvironmentSelection } from "@/lib/environment/environment-selection";
 import {
   type CreateExecutionBindingCommand,
@@ -291,22 +291,25 @@ export async function dispatchInvocationForTurn(params: {
     // 不在 dispatch 处阻断基础聊天。
   }
   const attempt = await createAttempt({ invocationId: invocation.id, tenantId: params.tenantId });
-  const environmentLease = environmentRevision
-    ? await (
-        environmentProvisioner ??
-        createManagedEnvironmentProvisioner({
-          discoverCapabilities: async () => {
-            throw new Error("EnvironmentComplianceFailed: 未配置受管 EnvironmentProvisioner");
-          },
+  const resolvedEnvironmentProvisioner =
+    environmentProvisioner ??
+    (environmentRevision
+      ? createDefaultEnvironmentProvisioner({ runtimeType: runtimeConfig.defaultType })
+      : null);
+  const environmentLease =
+    environmentRevision && resolvedEnvironmentProvisioner
+      ? await resolvedEnvironmentProvisioner.provision({
+          tenantId: params.tenantId,
+          invocationId: invocation.id,
+          attemptId: attempt.id,
+          // 只从 Binding 冻结的 Revision 读取执行语义（R07 §1）。
+          revisionId: environmentRevision.id,
+          revision: environmentRevision,
+          workspaceBindingId,
+          workspaceRoot: workspaceResources?.root ?? null,
+          recoveryAnchorDigest: null,
         })
-      ).provision({
-        tenantId: params.tenantId,
-        invocationId: invocation.id,
-        attemptId: attempt.id,
-        revision: environmentRevision,
-        workspaceBindingId,
-      })
-    : null;
+      : null;
   const transition = await transitionTurnToQueued({
     threadId: thread.id,
     turn,
