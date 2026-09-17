@@ -76,6 +76,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         authority: claims,
         executor: tx,
         requiredPhase: "dispatching",
+        // Resume 是新执行的起点：Checkpoint Gate 未解除时不得接纳。
+        operationKind: "new_action",
       });
       const current = await getRuntimeSessionBindingByStartIntent(
         claims.tenantId,

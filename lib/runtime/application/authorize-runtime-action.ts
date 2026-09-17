@@ -1,5 +1,8 @@
 import type { DbOrTx } from "@/lib/db/client";
-import { requireCurrentExecutionAuthority } from "@/lib/executions/application/require-current-execution-authority";
+import {
+  type ExecutionOperationKind,
+  requireCurrentExecutionAuthority,
+} from "@/lib/executions/application/require-current-execution-authority";
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 
 /** Parent Invocation authorization gate for ToolCall/AgentCall/other platform actions. */
@@ -8,11 +11,14 @@ export async function authorizeRuntimeAction(input: {
   authority: AuthorityIdentity;
   executor: DbOrTx;
   requiredPhase?: "activating" | "dispatching" | "executing" | "suspending";
+  /** 平台行动接纳默认是新行动（受 Checkpoint Gate 约束）。 */
+  operationKind?: ExecutionOperationKind;
 }): Promise<void> {
   await requireCurrentExecutionAuthority({
     tenantId: input.tenantId,
     authority: input.authority,
     executor: input.executor,
     requiredPhase: input.requiredPhase ?? "executing",
+    operationKind: input.operationKind ?? "new_action",
   });
 }

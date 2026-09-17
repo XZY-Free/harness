@@ -267,4 +267,156 @@ describe("RuntimeEventIngress database fencing", () => {
       );
     expect(ingress).toEqual([]);
   });
+
+  it("R05: 两个唯一键任一错配都是稳定身份冲突，不能当作精确 Replay", async () => {
+    const runtime = await createActiveRuntime();
+    const stored = progressEvent("2");
+    await ingressRuntimeEvents({
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [stored] },
+    });
+
+    // 同 producerSequence、新 eventId：既不是 replay，也不是合法新事件。
+    await expect(
+      ingressRuntimeEvents({
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        batch: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [progressEvent("2", randomUUID(), { message: "same-sequence" })],
+        },
+      }),
+    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+
+    // 同 eventId、新 producerSequence：同样必须 fail closed。
+    await expect(
+      ingressRuntimeEvents({
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        batch: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [progressEvent("3", stored.eventId, { message: "same-event-id" })],
+        },
+      }),
+    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+
+    // 原事件本身仍然可以精确 Replay（身份与 payload 逐字相同）。
+    const replay = await ingressRuntimeEvents({
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [stored] },
+    });
+    expect(replay.replayedEventIds).toEqual([stored.eventId]);
+
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, runtime.fixture.tenantId),
+          eq(invocationTable.id, runtime.fixture.invocation.id),
+        ),
+      );
+    expect(invocation?.lastProducerSequence).toBe(2);
+  });
+
+  it("R05: Batch 内部重复 eventId / producerSequence 在写入前被识别", async () => {
+    const runtime = await createActiveRuntime();
+    const sharedEventId = randomUUID();
+    const duplicatedEventId = randomUUID();
+    await expect(
+      ingressRuntimeEvents({
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        batch: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [progressEvent("2", sharedEventId), progressEvent("3", sharedEventId)],
+        },
+      }),
+    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+    await expect(
+      ingressRuntimeEvents({
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        batch: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [
+            progressEvent("2", duplicatedEventId),
+            progressEvent("2", randomUUID(), { message: "dup-seq" }),
+          ],
+        },
+      }),
+    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+    // 两个非法批次都不得留下任何新 Ledger 事实（只有 execution.started 一条）。
+    const ingress = await db
+      .select()
+      .from(runtimeEventIngressTable)
+      .where(
+        and(
+          eq(runtimeEventIngressTable.tenantId, runtime.fixture.tenantId),
+          eq(runtimeEventIngressTable.invocationId, runtime.fixture.invocation.id),
+        ),
+      );
+    expect(ingress.map((row) => row.producerSequence)).toEqual([1]);
+  });
+
+  it("R04: 终态事件是最后一条状态写入，Job 桥版本与批次水位一次归并", async () => {
+    const runtime = await createActiveRuntime();
+    await ingressRuntimeEvents({
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: runtime.acquired.authority,
+        events: [
+          progressEvent("2", randomUUID(), {
+            resultRef: "receipt-ref",
+            resultDigest: protocolDigest({ ok: true }),
+          }),
+        ],
+      },
+    });
+    const [beforeRow] = await db
+      .select({ versionNo: invocationTable.versionNo })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, runtime.fixture.invocation.id));
+    const beforeVersion = beforeRow?.versionNo ?? 0;
+    const result = await ingressRuntimeEvents({
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: runtime.acquired.authority,
+        events: [
+          progressEvent("3", randomUUID(), { message: "no-op" }),
+          {
+            eventId: randomUUID(),
+            producerSequence: "4",
+            type: "execution.completed" as const,
+            schemaVersion: 1,
+            payload: { resultRef: "thread-result", resultDigest: protocolDigest({ done: true }) },
+          },
+        ],
+      },
+    });
+    expect(result.acceptedThroughProducerSequence).toBe("4");
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, runtime.fixture.tenantId),
+          eq(invocationTable.id, runtime.fixture.invocation.id),
+        ),
+      );
+    expect(invocation?.executionState).toBe("completed");
+    expect(invocation?.lastProducerSequence).toBe(4);
+    // 批次水位只归并一次（+1），终态推进一次（+1）：终态写入之后不再有兜底版本更新。
+    expect(invocation?.versionNo).toBe(beforeVersion + 2);
+  });
 });

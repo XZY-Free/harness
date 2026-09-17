@@ -71,7 +71,11 @@ export const jobTable = mysqlTable(
     tenantId: ascii("tenantId", 36)
       .notNull()
       .references(() => tenant.id),
-    agentId: ascii("agentId", 36).notNull(),
+    /**
+     * 可选 Agent 引用。NULL 表示该 Job 不需要 Agent（如 knowledge_build / system 由可信
+     * service Principal 驱动）；非 null 时必须与 Job 同 tenant 且被该 Job 的执行能力采用。
+     */
+    agentId: ascii("agentId", 36),
     jobType: ascii("jobType", 32).$type<JobType>().notNull(),
     triggerRef: varchar("triggerRef", { length: 512 }).notNull(),
     creationKey: ascii("creationKey", 128).notNull(),

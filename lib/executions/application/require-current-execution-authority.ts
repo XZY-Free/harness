@@ -12,12 +12,29 @@ import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import { getActiveLocksByInvocation } from "@/lib/workspace/workspace-write-lock-queries";
 import { and, eq } from "drizzle-orm";
 
+/**
+ * 接纳请求的操作类别。Checkpoint Gate 只约束"新决策来源"的操作；
+ * 已接纳行动的完成/失败、终态收口、控制命令与展示性进度必须能在
+ * quiescing/frozen 下继续落库，否则安全点会吞掉真实执行事实。
+ */
+export type ExecutionOperationKind =
+  | "new_action"
+  | "accepted_action_completion"
+  | "terminal"
+  | "control"
+  | "progress";
+
+/** 只有新决策/新行动来源要求 Checkpoint Gate 处于 open。 */
+const GATE_OPEN_REQUIRED: readonly ExecutionOperationKind[] = ["new_action"];
+
 /** Parent Invocation guard used by both Runtime ingress and Runtime-originated Actions. */
 export async function requireCurrentExecutionAuthority(input: {
   tenantId: string;
   authority: AuthorityIdentity;
   executor?: DbOrTx;
   requiredPhase?: "activating" | "dispatching" | "executing" | "suspending";
+  /** 操作类别；由服务端入口按事件 Schema 决定，不接受调用方任意字符串提权。 */
+  operationKind: ExecutionOperationKind;
 }) {
   const executor = input.executor;
   if (!executor) {
@@ -83,7 +100,7 @@ export async function requireCurrentExecutionAuthority(input: {
   ) {
     throw new Error("NotCurrentExecutor");
   }
-  if (invocation.checkpointGate !== "open") {
+  if (GATE_OPEN_REQUIRED.includes(input.operationKind) && invocation.checkpointGate !== "open") {
     throw new ExecutionAuthorityError(
       "CheckpointStale",
       "Checkpoint Gate 未解除，禁止接纳新的 Runtime Action",

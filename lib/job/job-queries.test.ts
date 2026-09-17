@@ -251,7 +251,7 @@ describe("createJob 参数校验", () => {
     ).rejects.toThrow(/tenantId 不能为空/);
   });
 
-  it("agentId 为空抛错", async () => {
+  it("agentId 为空字符串抛错（null 才是合法的无 Agent）", async () => {
     const fx = await seedFixture();
     await expect(
       createJob({
@@ -261,7 +261,25 @@ describe("createJob 参数校验", () => {
         triggerRef: "schedule-001",
         completionPolicyJson: { type: "all_success" },
       }),
-    ).rejects.toThrow(/agentId 不能为空/);
+    ).rejects.toThrow(/agentId 只能为 null 或非空字符串/);
+  });
+
+  it("T31：agentId=null 的可信 service Job 可以创建，不伪造 Agent", async () => {
+    const fx = await seedFixture();
+    const { job } = await createJob({
+      tenantId: fx.tenantId,
+      agentId: null,
+      jobType: "knowledge_build",
+      triggerRef: "schedule:knowledge-build",
+      completionPolicyJson: { type: "all_success" },
+      inputJson: { source: "managed" },
+      createdBy: "knowledge-service",
+    });
+    expect(job.agentId).toBeNull();
+    expect(job.jobState).toBe("queued");
+    expect(job.inputHash).toMatch(/^sha256:/);
+    const reloaded = await getJobById(fx.tenantId, job.id);
+    expect(reloaded?.agentId).toBeNull();
   });
 
   it("triggerRef 为空抛错", async () => {

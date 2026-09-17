@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "c4b437ba-f165-4f72-8d56-35d3253774aa",
+  "id": "947ee2cd-fb0f-4bb6-9c0d-60fddb3a3825",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -9001,7 +9001,7 @@
           "name": "agentId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "jobType": {
@@ -15144,7 +15144,7 @@
         },
         "RuntimeSessionBinding_dispatch_freeze_shape": {
           "name": "RuntimeSessionBinding_dispatch_freeze_shape",
-        "value": "((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL AND `intentFrozenAt` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` NOT IN ('dispatching', 'active') OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` <> 'active' OR (`remoteSessionRef` IS NOT NULL AND `remoteExecutionRef` IS NOT NULL AND `startedEventId` IS NOT NULL))"
+          "value": "((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL AND `intentFrozenAt` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` NOT IN ('dispatching', 'active') OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` <> 'active' OR (`remoteSessionRef` IS NOT NULL AND `remoteExecutionRef` IS NOT NULL AND `startedEventId` IS NOT NULL))"
         }
       }
     },

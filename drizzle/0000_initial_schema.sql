@@ -1092,7 +1092,7 @@ CREATE TABLE `JobResultProjection` (
 CREATE TABLE `Job` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`agentId` varchar(36) NOT NULL,
+	`agentId` varchar(36),
 	`jobType` varchar(32) NOT NULL,
 	`triggerRef` varchar(512) NOT NULL,
 	`creationKey` varchar(128) NOT NULL,

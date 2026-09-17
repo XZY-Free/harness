@@ -9,7 +9,7 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { requireCurrentExecutionAuthority } from "@/lib/executions/application/require-current-execution-authority";
-import { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
+import type { ExecutionOperationKind } from "@/lib/executions/application/require-current-execution-authority";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { bridgeInvocationTerminalToJob } from "@/lib/job/job-terminal-bridge";
 import { createUserActionRequest } from "@/lib/permission/user-action-queries";
@@ -40,7 +40,7 @@ import {
   getActiveLocksByInvocation,
   releaseWorkspaceWriteLock,
 } from "@/lib/workspace/workspace-write-lock-queries";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 export type IngressTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -143,6 +143,105 @@ function toNumber(value: string): number {
   return result;
 }
 
+/**
+ * 由正式 Event Schema 决定操作类别（不接受调用方传字符串）。
+ *
+ * - new_action：产生新决策/新行动，必须 Gate=open。
+ * - accepted_action_completion：已接纳行动的完成/失败回执，quiescing 下仍必须落库。
+ * - terminal：终态与暂停收口。
+ * - control：控制/用户输入事实。
+ * - progress：展示性进度与启动证明，本身不产生新决策。
+ */
+function classifyOperationKind(event: RuntimeEvent): ExecutionOperationKind {
+  switch (event.type) {
+    case "action":
+    case "harness.action.proposed":
+    case "response.completed":
+      return "new_action";
+    case "harness.action.started":
+    case "harness.action.completed":
+    case "harness.action.failed":
+      return "accepted_action_completion";
+    case "execution.completed":
+    case "execution.failed":
+    case "execution.cancelled":
+    case "execution.suspended":
+    case "terminal":
+      return "terminal";
+    case "user-action":
+      return "control";
+    default:
+      return "progress";
+  }
+}
+
+/** 已接纳行动回执必须引用本 Invocation 先前正式接纳过的 action_id。 */
+function actionIdOf(event: RuntimeEvent): string | null {
+  const value = event.payload.action_id;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * 已接纳行动回执不能借 completion 分支创建新 Action：
+ * 必须能在本 Invocation 已提交的 Ledger 中找到同一 action_id 的接纳事实。
+ */
+async function assertAcceptedParentAction(
+  tx: IngressTx,
+  tenantId: string,
+  invocationId: string,
+  event: RuntimeEvent,
+): Promise<void> {
+  if (event.type === "harness.action.started") return;
+  const actionId = actionIdOf(event);
+  if (!actionId) {
+    throw new IngressAuthorityMismatchError(invocationId);
+  }
+  const acceptedTypes = ["harness.action.proposed", "harness.action.started"];
+  const [accepted] = await tx
+    .select({ id: runtimeEventIngressTable.id })
+    .from(runtimeEventIngressTable)
+    .where(
+      and(
+        eq(runtimeEventIngressTable.tenantId, tenantId),
+        eq(runtimeEventIngressTable.invocationId, invocationId),
+        inArray(runtimeEventIngressTable.candidateType, acceptedTypes),
+        sql`JSON_UNQUOTE(JSON_EXTRACT(${runtimeEventIngressTable.payloadJson}, '$.action_id')) = ${actionId}`,
+      ),
+    )
+    .limit(1);
+  if (!accepted) throw new IngressAuthorityMismatchError(invocationId);
+}
+
+/**
+ * Batch 内部集合校验：同 eventId 重复、同 producerSequence 重复、同 eventId 不同
+ * payloadHash 都必须在写前识别，不能靠逐条 savepoint 兜底后留下半批事实。
+ */
+function assertBatchSetConsistency(events: readonly RuntimeEvent[]): void {
+  const byEventId = new Map<string, string>();
+  const bySequence = new Map<string, string>();
+  for (const event of events) {
+    const payloadHash = computeEventPayloadHash(event);
+    const seenEventId = byEventId.get(event.eventId);
+    if (seenEventId !== undefined) {
+      if (seenEventId !== payloadHash)
+        throw new EventPayloadHashConflictError(
+          "batch",
+          event.eventId,
+          event.producerSequence,
+          seenEventId,
+          payloadHash,
+        );
+      throw new ProducerSequenceGapError("batch", "唯一 eventId", event.eventId);
+    }
+    byEventId.set(event.eventId, payloadHash);
+    const seenSequence = bySequence.get(event.producerSequence);
+    if (seenSequence !== undefined) {
+      throw new ProducerSequenceGapError("batch", "唯一 producerSequence", event.producerSequence);
+    }
+    bySequence.set(event.producerSequence, event.eventId);
+  }
+}
+
 async function lockInvocation(
   tx: IngressTx,
   tenantId: string,
@@ -163,12 +262,14 @@ async function requireIngressAuthority(
   tenantId: string,
   authority: AuthorityIdentity,
   requiredPhase: "dispatching" | "executing",
+  operationKind: ExecutionOperationKind,
 ) {
   const owner = await requireCurrentExecutionAuthority({
     tenantId,
     authority,
     executor: tx,
     requiredPhase,
+    operationKind,
   });
   const [attempt] = await tx
     .select()
@@ -284,12 +385,24 @@ async function requireIngressAuthority(
   return { owner, attempt, session, binding };
 }
 
+/**
+ * 一个 Event 在 Ledger 中的身份定位结果。
+ *
+ * `exact` 才允许作为精确历史 Replay 返回原回执：两个唯一键（producerEventId、
+ * producerSequence）必须同时命中同一行，且行内 eventId / sequence 与请求逐字相同。
+ * 任一键命中而另一键缺失/指向别处 = 稳定身份冲突，不能退化成"payload 相同所以是重放"。
+ */
+type ExistingEventLookup =
+  | { kind: "none" }
+  | { kind: "exact"; row: typeof runtimeEventIngressTable.$inferSelect }
+  | { kind: "conflict"; reason: string };
+
 async function findExisting(
   tx: IngressTx,
   tenantId: string,
   invocationId: string,
   event: RuntimeEvent,
-) {
+): Promise<ExistingEventLookup> {
   const [byId] = await tx
     .select()
     .from(runtimeEventIngressTable)
@@ -301,7 +414,6 @@ async function findExisting(
       ),
     )
     .limit(1);
-  if (byId) return byId;
   const [bySequence] = await tx
     .select()
     .from(runtimeEventIngressTable)
@@ -313,7 +425,36 @@ async function findExisting(
       ),
     )
     .limit(1);
-  return bySequence;
+
+  if (!byId && !bySequence) return { kind: "none" };
+  if (!byId) {
+    return {
+      kind: "conflict",
+      reason: `producerSequence ${event.producerSequence} 已被另一 eventId 占用（${bySequence?.producerEventId ?? "?"}）`,
+    };
+  }
+  if (!bySequence) {
+    return {
+      kind: "conflict",
+      reason: `eventId ${event.eventId} 已存在但携带另一 producerSequence（${byId.producerSequence}）`,
+    };
+  }
+  if (byId.id !== bySequence.id) {
+    return {
+      kind: "conflict",
+      reason: `eventId 与 producerSequence 分别命中不同 Ledger 行（${byId.id} / ${bySequence.id}）`,
+    };
+  }
+  if (
+    byId.producerEventId !== event.eventId ||
+    byId.producerSequence !== toNumber(event.producerSequence)
+  ) {
+    return {
+      kind: "conflict",
+      reason: `Ledger 行身份与请求不一致（${byId.producerEventId}/${byId.producerSequence}）`,
+    };
+  }
+  return { kind: "exact", row: byId };
 }
 
 function receiptFromRow(row: typeof runtimeEventIngressTable.$inferSelect): EventReceipt {
@@ -746,19 +887,8 @@ async function applyLifecycle(
         typeof event.payload.resultDigest === "string" ? event.payload.resultDigest : null;
       const errorCode =
         typeof event.payload.errorCode === "string" ? event.payload.errorCode : null;
-      await tx
-        .update(invocationTable)
-        .set({
-          executionState: state,
-          finishedAt: now,
-          resultRef,
-          resultDigest,
-          errorCode,
-          recoveryVersion: invocation.recoveryVersion + 1,
-          versionNo: invocation.versionNo + 1,
-          updatedAt: now,
-        })
-        .where(eq(invocationTable.id, invocation.id));
+      // 先收口从属事实（Attempt/Turn/Ownership/Session 与物理 Writer），
+      // 最后才写 Invocation 终态并桥接 Job——terminalVersion 必须等于最终提交版本。
       await tx
         .update(invocationAttemptTable)
         .set({ attemptState: state, finishedAt: now, updatedAt: now })
@@ -810,6 +940,27 @@ async function applyLifecycle(
             eq(runtimeSessionBindingTable.invocationId, invocation.id),
           ),
         );
+      await tx
+        .update(invocationTable)
+        .set({
+          executionState: state,
+          finishedAt: now,
+          resultRef,
+          resultDigest,
+          errorCode,
+          recoveryVersion: invocation.recoveryVersion + 1,
+          versionNo: invocation.versionNo + 1,
+          updatedAt: now,
+        })
+        .where(eq(invocationTable.id, invocation.id));
+      const [terminalRow] = await tx
+        .select()
+        .from(invocationTable)
+        .where(eq(invocationTable.id, invocation.id))
+        .limit(1);
+      if (!terminalRow) throw new IngressInvocationNotFoundError(invocation.id);
+      await bridgeInvocationTerminalToJob(tx, terminalRow, now);
+      return terminalRow;
     }
   }
   const [updated] = await tx
@@ -818,8 +969,6 @@ async function applyLifecycle(
     .where(eq(invocationTable.id, invocation.id))
     .limit(1);
   if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
-  if (INVOCATION_TERMINAL_STATES.includes(updated.executionState))
-    await bridgeInvocationTerminalToJob(tx, updated, now);
   return updated;
 }
 
@@ -904,6 +1053,7 @@ export async function ingressRuntimeEvents(
   if (parsed.authority.invocationId !== input.invocationId)
     throw new IngressAuthorityMismatchError(input.invocationId);
   if (parsed.events.length === 0) throw new IngressBatchEmptyError(input.invocationId);
+  assertBatchSetConsistency(parsed.events);
   const now = input.receivedAt ?? new Date();
   const result = await db.transaction(async (tx) => {
     const invocation = await lockInvocation(tx, input.tenantId, input.invocationId);
@@ -914,16 +1064,25 @@ export async function ingressRuntimeEvents(
     for (const event of parsed.events) {
       const payloadHash = computeEventPayloadHash(event);
       const existing = await findExisting(tx, input.tenantId, input.invocationId, event);
-      if (existing) {
-        if (existing.payloadHash !== payloadHash)
+      if (existing.kind === "conflict") {
+        throw new ProducerSequenceGapError(input.invocationId, existing.reason, event.eventId);
+      }
+      if (existing.kind === "exact") {
+        const row = existing.row;
+        if (
+          row.payloadHash !== payloadHash ||
+          row.candidateType !== event.type ||
+          row.schemaVersion !== event.schemaVersion
+        ) {
           throw new EventPayloadHashConflictError(
             input.invocationId,
             event.eventId,
             event.producerSequence,
-            existing.payloadHash,
+            row.payloadHash,
             payloadHash,
           );
-        const receipt = receiptFromRow(existing);
+        }
+        const receipt = receiptFromRow(row);
         if (!sameAuthority(receipt.acceptedAuthority, parsed.authority))
           throw new IngressAuthorityMismatchError(input.invocationId);
         receipts.push(receipt);
@@ -950,8 +1109,26 @@ export async function ingressRuntimeEvents(
     }
     if (INVOCATION_TERMINAL_STATES.includes(invocation.executionState))
       throw new IngressInvocationTerminalError(input.invocationId, invocation.executionState);
+    // 本批的序列水位在本事务中先归并一次：终态写入与 Job 终态桥必须是这条 Invocation
+    // 在本事务内的最后一次状态写入，否则 JobCommand.terminalVersion 会落后于实际版本。
+    const lastSequence = toNumber(newEvents[newEvents.length - 1]?.event.producerSequence ?? "0");
+    await tx
+      .update(invocationTable)
+      .set({
+        lastProducerSequence: lastSequence,
+        versionNo: sql`${invocationTable.versionNo} + 1`,
+        updatedAt: now,
+      })
+      .where(eq(invocationTable.id, invocation.id));
+    const [afterWatermark] = await tx
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, invocation.id))
+      .limit(1);
+    if (!afterWatermark) throw new IngressInvocationNotFoundError(input.invocationId);
+
     const newReceipts: EventReceipt[] = [];
-    let lifecycleInvocation = invocation;
+    let lifecycleInvocation = afterWatermark;
     for (const { event, payloadHash } of newEvents) {
       if (INVOCATION_TERMINAL_STATES.includes(lifecycleInvocation.executionState))
         throw new IngressInvocationTerminalError(
@@ -959,17 +1136,16 @@ export async function ingressRuntimeEvents(
           lifecycleInvocation.executionState,
         );
       const requiredPhase = event.type === "execution.started" ? "dispatching" : "executing";
+      const operationKind = classifyOperationKind(event);
       const authority = await requireIngressAuthority(
         tx,
         input.tenantId,
         parsed.authority,
         requiredPhase,
+        operationKind,
       );
-      if (event.type === "action" && lifecycleInvocation.checkpointGate !== "open") {
-        throw new ExecutionAuthorityError(
-          "CheckpointStale",
-          "Checkpoint Gate 未解除，禁止接纳新的 Runtime Action",
-        );
+      if (operationKind === "accepted_action_completion") {
+        await assertAcceptedParentAction(tx, input.tenantId, input.invocationId, event);
       }
       validateExecutionStarted(event, authority.session);
       const mapped = await mapEvent(tx, lifecycleInvocation, event);
@@ -1021,18 +1197,6 @@ export async function ingressRuntimeEvents(
         authority.binding,
       );
     }
-    // newEvents 至少含一条已接纳事件（batch 校验 min(1)）。
-    const lastEvent = newEvents[newEvents.length - 1];
-    if (!lastEvent) throw new Error("已接纳事件批次不能为空");
-    const lastSequence = toNumber(lastEvent.event.producerSequence);
-    await tx
-      .update(invocationTable)
-      .set({
-        lastProducerSequence: lastSequence,
-        versionNo: sql`${invocationTable.versionNo} + 1`,
-        updatedAt: now,
-      })
-      .where(eq(invocationTable.id, invocation.id));
     return {
       invocationId: input.invocationId,
       receipts: [...receipts, ...newReceipts].sort(

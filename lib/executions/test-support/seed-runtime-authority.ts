@@ -11,6 +11,8 @@ import {
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import { DEFAULT_TENANT_ID } from "@/lib/identity/tenant-bootstrap";
+import { createJobInvocation } from "@/lib/job/job-execution";
+import { createJob } from "@/lib/job/job-queries";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
@@ -20,6 +22,98 @@ import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-bind
 import { and, eq } from "drizzle-orm";
 
 export const TEST_RUNTIME_REVISION_ID = "11111111-1111-4111-8111-111111111111";
+
+/**
+ * Job 无 Thread 的等价候选：Job → 唯一 Invocation(subjectType=job) → Binding → Attempt(prepared)。
+ *
+ * 与 seedPreparedRuntimeAttempt 同样只准备"候选资源已就绪"的事实，不创建 Thread/Turn，
+ * 也不替 Runtime 预置 Ownership。用于验证真实 Job 事件走正式 Ingress 的产品路径。
+ */
+export async function seedPreparedJobRuntimeAttempt(
+  input: {
+    tenantId?: string;
+    runtimeRevisionId?: string;
+    workspaceBinding?: WorkspaceBinding;
+    agentId?: string | null;
+  } = {},
+) {
+  const tenantId = input.tenantId ?? DEFAULT_TENANT_ID;
+  const { job } = await createJob({
+    tenantId,
+    agentId: input.agentId ?? null,
+    jobType: "knowledge_build",
+    triggerRef: `trigger:${randomUUID()}`,
+    creationKey: `creation:${randomUUID()}`,
+    completionPolicyJson: { policy: "all_success" },
+    inputJson: { task: "job-runtime-ingress-fixture" },
+  });
+  const workspace =
+    input.workspaceBinding ?? (await createNoPlatformWorkspaceBinding(tenantId, "test-service"));
+  const runtimeRevisionId = input.runtimeRevisionId ?? TEST_RUNTIME_REVISION_ID;
+  const created = await createJobInvocation({
+    tenantId,
+    jobId: job.id,
+    binding: {
+      runtimeRevisionId,
+      deploymentRouteId: "test-route",
+      routeRevisionId: randomUUID(),
+      routeActivationId: randomUUID(),
+      routeContentDigest: protocolDigest("route-content"),
+      policyRevisionId: randomUUID(),
+      policyRulesDigest: protocolDigest("policy-rules"),
+      governanceConfigRevisionId: randomUUID(),
+      governanceConfigDigest: protocolDigest("governance-config"),
+      runtimePublicationRecordId: randomUUID(),
+      conformanceRunId: randomUUID(),
+      modelProvider: "test",
+      modelId: "test-model",
+      modelRevisionRef: null,
+      runtimeArtifactId: null,
+      runtimeArtifactDigest: null,
+      runtimeEvidenceKind: "external_endpoint",
+      runtimeTargetDigest: protocolDigest("target"),
+      runtimeConfigDigest: protocolDigest("runtime-config"),
+      capabilityManifestDigest: protocolDigest("manifest"),
+      runtimeAttestationIds: [],
+      resolutionInputDigest: protocolDigest("resolution"),
+      projectionVersionNo: 1,
+      capabilityCatalogDigest: protocolDigest("catalog"),
+      capabilityCatalogJson: { fixture: "job-runtime-ingress" },
+      capabilityCatalogVersion: "1",
+      capabilityCatalogSourceRefs: [],
+      capabilityCatalogCreatedAt: new Date(),
+      workspaceBindingId: workspace.id,
+      environmentDefinitionRevisionId: null,
+      environmentMode: "NO_PLATFORM_ENVIRONMENT",
+      principalType: "service",
+      principalId: "test-service",
+      principalSource: "trusted_service",
+      principalFrozenAt: new Date(),
+      configHash: protocolDigest({ fixture: "job-runtime-ingress", jobId: job.id }),
+    },
+  });
+  const attempt = await createAttempt({ tenantId, invocationId: created.invocation.id });
+  const evidence = {
+    kind: "test-candidate",
+    invocationId: created.invocation.id,
+    attemptId: attempt.id,
+  };
+  await db.transaction((tx) =>
+    markAttemptPreparedInTransaction(tx, {
+      attemptId: attempt.id,
+      evidence,
+      digest: protocolDigest(evidence),
+    }),
+  );
+  return {
+    tenantId,
+    job,
+    invocation: created.invocation,
+    binding: created.binding,
+    workspace,
+    attempt,
+  };
+}
 
 export async function seedPreparedRuntimeAttempt(
   input: {

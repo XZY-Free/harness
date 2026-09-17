@@ -81,6 +81,8 @@ export async function POST(request: Request): Promise<Response> {
         authority: claims,
         executor: tx,
         requiredPhase: "dispatching",
+        // Start 是新执行的起点：Checkpoint Gate 未解除时不得接纳。
+        operationKind: "new_action",
       });
       const current = await getRuntimeSessionBindingByStartIntent(
         claims.tenantId,

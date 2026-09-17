@@ -60,7 +60,11 @@ const STATE_TRANSITIONS: Record<JobState, readonly JobState[]> = {
 /** createJob 入参。 */
 export interface CreateJobParams {
   tenantId: string;
-  agentId: string;
+  /**
+   * 可选 Agent 引用。null/缺省表示该 Job 不需要 Agent——无 Agent 不等于无权限，
+   * service Principal、正式输入、ExecutionBinding 仍是必需事实。
+   */
+  agentId?: string | null;
   jobType: JobType;
   /** 领域触发引用（如 schedule_id、batch_id、deployment_id）。 */
   triggerRef: string;
@@ -117,8 +121,9 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
   if (!params.tenantId) {
     throw new Error("createJob: tenantId 不能为空");
   }
-  if (!params.agentId) {
-    throw new Error("createJob: agentId 不能为空");
+  const agentId = params.agentId ?? null;
+  if (agentId !== null && (typeof agentId !== "string" || agentId.trim().length === 0)) {
+    throw new Error("createJob: agentId 只能为 null 或非空字符串");
   }
   if (!params.triggerRef) {
     throw new Error("createJob: triggerRef 不能为空");
@@ -179,7 +184,7 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
     await tx.insert(jobTable).values({
       id: jobId,
       tenantId: params.tenantId,
-      agentId: params.agentId,
+      agentId,
       jobType: params.jobType,
       triggerRef: params.triggerRef,
       creationKey,
@@ -215,7 +220,7 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
       payload: {
         job_id: jobId,
         tenant_id: params.tenantId,
-        agent_id: params.agentId,
+        agent_id: agentId,
         job_type: params.jobType,
         trigger_ref: params.triggerRef,
         thread_id: params.threadId ?? null,

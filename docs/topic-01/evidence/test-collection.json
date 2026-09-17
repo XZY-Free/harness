@@ -7,7 +7,7 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 319,
+    "unit": 320,
     "db": 119,
     "integration": 13,
     "contract": 31,
@@ -15,7 +15,7 @@
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 490,
+  "total": 491,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -3692,6 +3692,17 @@
       ]
     },
     {
+      "file": "lib/job/__tests__/job-terminal-version.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/job/job-control-queries.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -4034,10 +4045,10 @@
     },
     {
       "file": "lib/routes/persistence/route-history-append-only.test.ts",
-      "group": "db",
-      "command": "pnpm vitest run --project db",
-      "needsDB": true,
-      "serial": true,
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
