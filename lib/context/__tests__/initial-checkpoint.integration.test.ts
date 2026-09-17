@@ -35,6 +35,7 @@ import { createExecutionBinding as seedBinding } from "@/lib/executions/test-sup
 import { TEST_EXECUTION_BINDING_EVIDENCE } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
+import { resolveJobBindingCommand } from "@/lib/job/job-admission";
 import { JobExecutionConflictError, createJobInvocation } from "@/lib/job/job-execution";
 import { createJob } from "@/lib/job/job-queries";
 import type { SourceRange } from "@/lib/persistence/schema/context-checkpoint";
@@ -43,9 +44,16 @@ import {
   contextCheckpoint,
 } from "@/lib/persistence/schema/context-checkpoint";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
-import { executionBindingTable, invocationAttemptTable } from "@/lib/persistence/schema/executions";
+import {
+  executionBindingTable,
+  invocationAttemptTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
+import { jobTable } from "@/lib/persistence/schema/job";
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
+import { seedRuntimeRouteAuthority } from "@/lib/test-support/seed-runtime-route-authority";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -60,6 +68,7 @@ beforeEach(async () => {
   await resetDatabase(db);
   await ensureDefaultTenant();
   workspace = await createNoPlatformWorkspaceBinding(TENANT, "test-service");
+  jobAuthorityPromise = null;
 });
 
 // ─── 夹具 ───────────────────────────────────────────────────
@@ -315,46 +324,62 @@ async function seedTargetThreadInvocation(initialContextCheckpointId: string | n
   return { invocationId: invocation.id, binding, threadId };
 }
 
-function jobBinding(initialContextCheckpointId: string | null) {
-  return {
-    runtimeRevisionId: RUNTIME_REVISION_ID,
-    deploymentRouteId: "job-test-route",
-    routeRevisionId: randomUUID(),
-    routeActivationId: randomUUID(),
-    routeContentDigest: protocolDigest("route-content"),
-    policyRevisionId: randomUUID(),
-    policyRulesDigest: protocolDigest("policy-rules"),
-    governanceConfigRevisionId: randomUUID(),
-    governanceConfigDigest: protocolDigest("governance-config"),
-    runtimePublicationRecordId: randomUUID(),
-    conformanceRunId: randomUUID(),
-    modelProvider: "test",
-    modelId: "test-model",
-    modelRevisionRef: null,
-    runtimeArtifactId: null,
-    runtimeArtifactDigest: null,
-    runtimeEvidenceKind: "external_endpoint" as const,
-    runtimeTargetDigest: protocolDigest("target"),
-    runtimeConfigDigest: protocolDigest("runtime-config"),
-    capabilityManifestDigest: protocolDigest("manifest"),
-    runtimeAttestationIds: [],
-    resolutionInputDigest: protocolDigest("resolution"),
-    projectionVersionNo: 1,
-    capabilityCatalogDigest: protocolDigest("catalog"),
-    capabilityCatalogJson: { fixture: "t33-job" },
-    capabilityCatalogVersion: "1",
-    capabilityCatalogSourceRefs: [],
-    capabilityCatalogCreatedAt: new Date(),
-    workspaceBindingId: workspace.id,
-    environmentDefinitionRevisionId: null,
-    environmentMode: "NO_PLATFORM_ENVIRONMENT" as const,
-    principalType: "service" as const,
-    principalId: "test-service",
-    principalSource: "trusted_service" as const,
-    principalFrozenAt: new Date(),
-    configHash: protocolDigest({ fixture: "t33-job-binding" }),
-    initialContextCheckpointId,
-  };
+/**
+ * 每个用例建一次 Job 可解析的 Route 权威（resetDatabase 后必须重建）。
+ *
+ * R01 §2：Job 的 Binding 走与 Thread 同一个 Binding Authority，必须有真实
+ * Route/RuntimeRevision/Publication/Conformance/Projection 证据才能落库。
+ */
+let jobAuthorityPromise: Promise<string> | null = null;
+
+async function ensureJobRouteAuthority(): Promise<string> {
+  jobAuthorityPromise ??= (async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const { revision } = await seedPublishedRuntimeRevision(
+      TENANT,
+      "test-service",
+      `t33-job-${suffix}`,
+      ["event_stream"],
+      suffix,
+    );
+    await seedRuntimeRouteAuthority({
+      tenantId: TENANT,
+      runtimeRevisionId: revision.id,
+      actorId: "t33-fixture",
+    });
+    return revision.id;
+  })();
+  return jobAuthorityPromise;
+}
+
+/**
+ * 经正式 Job admission（解析 + 唯一 Binding Authority）建立一个 Job 的
+ * Invocation/Binding。测试不自行拼装 Binding 台账行。
+ */
+async function createJobBindingWithAuthority(input: {
+  jobId: string;
+  initialContextCheckpointId: string | null;
+}) {
+  await ensureJobRouteAuthority();
+  const [job] = await db
+    .select()
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, TENANT), eq(jobTable.id, input.jobId)))
+    .limit(1);
+  if (!job) throw new Error(`Job 不存在：${input.jobId}`);
+  const resolved = await resolveJobBindingCommand({
+    tenantId: TENANT,
+    job,
+    thread: null,
+    initialContextCheckpointId: input.initialContextCheckpointId,
+  });
+  if (!resolved.resolved) throw new Error(`Job Binding 解析失败：${resolved.reason}`);
+  return createJobInvocation({
+    tenantId: TENANT,
+    jobId: job.id,
+    binding: resolved.binding,
+    capabilityCatalog: resolved.capabilityCatalog,
+  });
 }
 
 async function seedJobWithBinding(initialContextCheckpointId: string | null) {
@@ -366,13 +391,14 @@ async function seedJobWithBinding(initialContextCheckpointId: string | null) {
     creationKey: `creation:${randomUUID()}`,
     completionPolicyJson: { policy: "all_success" },
     inputJson: { task: "t33-job" },
+    // Job 的可信 service principal 就是 `createdBy`（R01 §3）；夹具来源 Checkpoint 也由
+    // 同一 principal 产生，否则访问权限核验本来就应该失败。
+    createdBy: "test-service",
   });
-  const created = await createJobInvocation({
-    tenantId: TENANT,
+  return createJobBindingWithAuthority({
     jobId: job.id,
-    binding: jobBinding(initialContextCheckpointId),
+    initialContextCheckpointId,
   });
-  return created;
 }
 
 // ─── CONTEXT-01 ─────────────────────────────────────────────
@@ -581,10 +607,13 @@ describe("CONTEXT-02：过期、跨 tenant、撤权、Hash 错误、非 compress
       creationKey: `creation:${randomUUID()}`,
       completionPolicyJson: { policy: "all_success" },
       inputJson: { task: "t33-job-reject" },
+      createdBy: "test-service",
     });
+    // R01 §2：Job 与 Thread 走同一个 Binding Authority，因此与 Thread 路径一样
+    // 直接抛出 `InitialCompressionError`（不再包一层 Job 专属错误，避免两套语义）。
     await expect(
-      createJobInvocation({ tenantId: TENANT, jobId: job.id, binding: jobBinding(expired.id) }),
-    ).rejects.toBeInstanceOf(JobExecutionConflictError);
+      createJobBindingWithAuthority({ jobId: job.id, initialContextCheckpointId: expired.id }),
+    ).rejects.toBeInstanceOf(InitialCompressionError);
   });
 });
 
@@ -641,20 +670,19 @@ describe("CONTEXT-03：同 Start 重试 / Redispatch 保持同一初始材料身
       creationKey: `creation:${randomUUID()}`,
       completionPolicyJson: { policy: "all_success" },
       inputJson: { task: "t33-job-redispatch" },
+      createdBy: "test-service",
     });
-    const same = await createJobInvocation({
-      tenantId: TENANT,
+    const same = await createJobBindingWithAuthority({
       jobId: job.id,
-      binding: jobBinding(first.id),
+      initialContextCheckpointId: first.id,
     });
     expect(same.created).toBe(true);
 
     // 同 Job 换一个初始压缩材料 → 冻结不可覆盖。
     await expect(
-      createJobInvocation({
-        tenantId: TENANT,
+      createJobBindingWithAuthority({
         jobId: created.job.id,
-        binding: jobBinding(second.id),
+        initialContextCheckpointId: second.id,
       }),
     ).rejects.toBeInstanceOf(JobExecutionConflictError);
   });

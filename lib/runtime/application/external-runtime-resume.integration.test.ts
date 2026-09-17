@@ -1,86 +1,80 @@
 /**
- * External Runtime resume 适配 V12 resumeHarnessInvocation 后的行为验证。
+ * External Runtime 的 Parent resume 必须经**同一** Start 服务（`runtime-resume`）进入。
  *
- * 冻结不变量：
+ * 冻结不变量（R02 §7）：
  * - resume 复用原 Invocation 与 Binding，只按 invocationId 加载，不新建 Invocation；
- * - ExecutionAuthority 来自当前活跃 ExecutionOwnership + RuntimeSessionBinding；
- * - Hosted Loop 用同一 invocationId 启动，Authority 全程不变。
+ * - External 分支**不**自造临时 idempotency key：它调用 `resumeRuntimeInvocation`
+ *   （→ `startRuntimeInvocation`，`intentType=resume`），由 Session 冻结稳定启动意图；
+ * - Hosted Loop 只服务 hosted_artifact Binding，外部 Binding 不得走 in-process 路径。
  */
-import type {
-  ExecutionBinding,
-  ExecutionOwnership,
-  Invocation,
-  RuntimeSessionBinding,
-} from "@/lib/persistence/schema/executions";
+import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getInvocationById: vi.fn<() => Promise<Invocation>>(),
-  getExecutionBindingByInvocation: vi.fn<() => Promise<ExecutionBinding>>(),
-  getActiveExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
-  getRuntimeSessionBindingByOwnership: vi.fn<() => Promise<RuntimeSessionBinding>>(),
+  getInvocationById: vi.fn(),
+  getExecutionBindingByInvocation: vi.fn(),
+  getAttemptById: vi.fn(),
+  getLatestAttempt: vi.fn(),
   getRuntimeRevisionById: vi.fn(),
-  renewExecutionOwnership: vi.fn(),
-  hostedLoopOptions: [] as Array<Record<string, unknown>>,
-  hostedLoopRun: vi.fn(),
+  startRuntimeInvocation: vi.fn(),
+  resolveOutboundRuntimeAuth: vi.fn(),
+  createHttpHarnessRuntimeTransport: vi.fn(),
 }));
 
 vi.mock("@/lib/executions/persistence/invocation-store", () => ({
   getInvocationById: mocks.getInvocationById,
-  getAttemptById: vi.fn(),
+  getAttemptById: mocks.getAttemptById,
+}));
+vi.mock("@/lib/executions/persistence/attempt-store", () => ({
+  getAttemptById: mocks.getAttemptById,
+  getLatestAttempt: mocks.getLatestAttempt,
 }));
 vi.mock("@/lib/executions/persistence/execution-binding-queries", () => ({
   getExecutionBindingByInvocation: mocks.getExecutionBindingByInvocation,
 }));
 vi.mock("@/lib/executions/persistence/execution-ownership-store", () => ({
-  getActiveExecutionOwnership: mocks.getActiveExecutionOwnership,
-  renewExecutionOwnership: mocks.renewExecutionOwnership,
+  getActiveExecutionOwnership: vi.fn(),
+  renewExecutionOwnership: vi.fn(),
   closeExecutionOwnership: vi.fn(),
+  acquireExecutionOwnership: vi.fn(),
 }));
 vi.mock("@/lib/runtime/persistence/runtime-session-store", () => ({
-  getRuntimeSessionBindingByOwnership: mocks.getRuntimeSessionBindingByOwnership,
+  getRuntimeSessionBindingByOwnership: vi.fn(),
+  createRuntimeSessionBindingInTransaction: vi.fn(),
+  updateRuntimeSessionDispatchInTransaction: vi.fn(),
+  markRuntimeSessionLostByOwnershipInTransaction: vi.fn(),
+  markRuntimeSessionLostInTransaction: vi.fn(),
 }));
 vi.mock("@/lib/runtime/persistence/runtime-revision-queries", () => ({
   getRuntimeRevisionById: mocks.getRuntimeRevisionById,
 }));
+vi.mock("@/lib/runtime/credentials/resolve-outbound-runtime-auth", () => ({
+  resolveOutboundRuntimeAuth: mocks.resolveOutboundRuntimeAuth,
+}));
+vi.mock("@/lib/runtime/transport/http-harness-runtime-transport", () => ({
+  createHttpHarnessRuntimeTransport: mocks.createHttpHarnessRuntimeTransport,
+}));
+vi.mock("@/lib/runtime/application/runtime-start", () => ({
+  startRuntimeInvocation: mocks.startRuntimeInvocation,
+  buildExecutionCredentials: vi.fn(),
+}));
 vi.mock("@/lib/runtime/adapters/hosted-adapter", () => ({
   HostedHarnessLoop: class {
-    options: Record<string, unknown>;
-    run = mocks.hostedLoopRun;
-    constructor(options: Record<string, unknown>) {
-      this.options = options;
-      mocks.hostedLoopOptions.push(options);
-    }
+    run = vi.fn();
   },
 }));
-vi.mock("@/lib/conversations/turn-queries", () => ({
-  getTurnById: vi.fn(async () => ({ id: "turn-external" })),
-}));
-vi.mock("@/lib/workspace/workspace-queries", () => ({
-  getWorkspaceBindingById: vi.fn(async () => ({
-    id: "workspace-1",
-    continuityMode: "NO_PLATFORM_WORKSPACE",
-    contractDigest: `sha256:${"0".repeat(64)}`,
-  })),
-}));
-vi.mock("@/lib/runtime/harness-loop/configured-model-ports", () => ({
-  configuredDecisionPort: vi.fn(() => ({ decideNextAction: async () => null })),
-  configuredFinalResponsePort: vi.fn(() => ({ generateFinalResponse: async () => "" })),
-}));
-vi.mock("@/lib/runtime/harness-loop/mysql-recovery-port", () => ({
-  createMySqlHarnessLoopRecoveryPort: vi.fn(() => ({ load: async () => null })),
-}));
 
-import { resumeHarnessInvocation } from "./runtime-resume";
+import { resumeHarnessInvocation, type resumeRuntimeInvocation } from "./runtime-resume";
 
 const invocation = {
   id: "invocation-external",
   tenantId: "tenant-1",
-  executionState: "running",
+  executionState: "waiting_user",
   threadId: "thread-1",
   turnId: "turn-1",
   triggerItemId: null,
   lastProducerSequence: 1,
+  recoveryVersion: 2,
 } as Invocation;
 
 const binding = {
@@ -94,51 +88,40 @@ const binding = {
   environmentMode: "NO_PLATFORM_ENVIRONMENT",
 } as ExecutionBinding;
 
-const ownership = {
-  id: "ownership-1",
-  attemptId: "attempt-1",
-  leaseEpoch: 3,
-  executionPhase: "executing",
-} as ExecutionOwnership;
-
-const session = {
-  id: "session-1",
+const attempt = {
+  id: "attempt-1",
   invocationId: "invocation-external",
-  attemptId: "attempt-1",
-  ownershipId: "ownership-1",
-  runtimeRevisionId: "runtime-revision-external",
-  leaseEpoch: 3,
-  bindingState: "active",
-  startIntentKey: "start:ownership-1",
-  semanticRequestDigest: null,
-  remoteSessionRef: null,
-  remoteExecutionRef: null,
-  transportAcknowledgement: null,
-} as RuntimeSessionBinding;
+  tenantId: "tenant-1",
+  attemptState: "suspended",
+  filesystemCheckpointId: null,
+  resumeAnchorDigest: null,
+} as unknown as Parameters<typeof resumeRuntimeInvocation>[0]["attempt"];
 
 describe("External Runtime continuation resume", () => {
   beforeEach(() => {
-    mocks.hostedLoopOptions.length = 0;
-    mocks.hostedLoopRun.mockReset();
-    mocks.hostedLoopRun.mockResolvedValue({
-      completed: true,
-      responseText: "",
-      sentEvents: [],
-      pending: false,
-      waitingForUser: false,
-    });
-    mocks.renewExecutionOwnership.mockResolvedValue(ownership);
+    vi.clearAllMocks();
     mocks.getInvocationById.mockResolvedValue(invocation);
     mocks.getExecutionBindingByInvocation.mockResolvedValue(binding);
-    mocks.getActiveExecutionOwnership.mockResolvedValue(ownership);
-    mocks.getRuntimeSessionBindingByOwnership.mockResolvedValue(session);
+    mocks.getAttemptById.mockResolvedValue(attempt);
+    mocks.getLatestAttempt.mockResolvedValue(attempt);
     mocks.getRuntimeRevisionById.mockResolvedValue({
       id: "runtime-revision-external",
       tenantId: "tenant-1",
+      runtimeEvidenceKind: "external_endpoint",
+      endpointRef: "https://runtime.test",
+      identityMode: "none",
+      credentialRefId: null,
+    });
+    mocks.resolveOutboundRuntimeAuth.mockResolvedValue({ mode: "none" });
+    mocks.createHttpHarnessRuntimeTransport.mockReturnValue({ kind: "external-http-transport" });
+    mocks.startRuntimeInvocation.mockResolvedValue({
+      authority: { ownershipId: "ownership-1" },
+      response: { acceptedAt: new Date().toISOString() },
+      sessionBindingId: "session-1",
     });
   });
 
-  it("复用原 Invocation、Binding 和 source version，不新建 Invocation", async () => {
+  it("复用原 Invocation/Binding，并经同一 Start 服务（intentType=resume）进入", async () => {
     const result = await resumeHarnessInvocation({
       tenantId: "tenant-1",
       invocationId: "invocation-external",
@@ -148,31 +131,49 @@ describe("External Runtime continuation resume", () => {
     expect(result).toMatchObject({
       status: "resumed",
       invocationId: "invocation-external",
+      runtime: "external",
     });
-    // 只按 durable identity 加载同一 Invocation/Binding；resume 全程无新建 Invocation 的路径。
+    // 只按 durable identity 加载同一 Invocation/Binding；resume 全程无新建 Invocation。
     expect(mocks.getInvocationById).toHaveBeenCalledWith("tenant-1", "invocation-external");
     expect(mocks.getExecutionBindingByInvocation).toHaveBeenCalledWith(
       "tenant-1",
       "invocation-external",
     );
-    // Loop 复用同一 Invocation 与当前 Authority 启动。
-    expect(mocks.hostedLoopOptions).toHaveLength(1);
-    expect(mocks.hostedLoopOptions[0]).toMatchObject({
-      invocationId: "invocation-external",
+    // 进入同一 Start 服务：存在 suspended Attempt + external transport + intentType=resume。
+    expect(mocks.startRuntimeInvocation).toHaveBeenCalledTimes(1);
+    const started = mocks.startRuntimeInvocation.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(started).toMatchObject({
       tenantId: "tenant-1",
+      invocation: expect.objectContaining({ id: "invocation-external" }),
+      binding: expect.objectContaining({ invocationId: "invocation-external" }),
+      attempt: expect.objectContaining({ id: "attempt-1", attemptState: "suspended" }),
+      intentType: "resume",
+      recovery: expect.objectContaining({ kind: "resume" }),
     });
+    // transport 由 revision 端点构造，不是 in-process Hosted Loop。
+    expect(mocks.createHttpHarnessRuntimeTransport).toHaveBeenCalledWith({
+      endpoint: "https://runtime.test",
+      auth: { mode: "none" },
+    });
+    expect(started.runtimeClient).toEqual({ kind: "external-http-transport" });
+    // External 回调端点按 invocationId 解析，不是 in-process Hosted 通道。
+    expect(started.callbackEndpoints).toMatchObject({
+      events: expect.stringContaining("/runtime/invocations/invocation-external/events"),
+      heartbeat: expect.stringContaining("/runtime/invocations/invocation-external/heartbeat"),
+    });
+  });
 
-    // 第二次 resume（tool_call 来源，sourceVersion 1）仍复用同一 Invocation/Binding。
-    await resumeHarnessInvocation({
-      tenantId: "tenant-1",
-      invocationId: "invocation-external",
-      sourceType: "tool_call",
-      agentCallId: "tool-call-1",
-      sourceVersion: 1,
-    });
-    expect(mocks.getInvocationById).toHaveBeenLastCalledWith("tenant-1", "invocation-external");
-    expect(mocks.getExecutionBindingByInvocation).toHaveBeenCalledTimes(2);
-    expect(mocks.hostedLoopOptions).toHaveLength(2);
-    expect(mocks.hostedLoopOptions[1]).toMatchObject({ invocationId: "invocation-external" });
+  it("终态 Attempt 直接拒绝，不构造任何外部请求", async () => {
+    mocks.getLatestAttempt.mockResolvedValue({ ...attempt, attemptState: "lost" });
+    await expect(
+      resumeHarnessInvocation({
+        tenantId: "tenant-1",
+        invocationId: "invocation-external",
+        agentCallId: "call-2",
+        sourceVersion: 1,
+      }),
+    ).rejects.toThrow("AttemptMismatch");
+    expect(mocks.createHttpHarnessRuntimeTransport).not.toHaveBeenCalled();
+    expect(mocks.startRuntimeInvocation).not.toHaveBeenCalled();
   });
 });

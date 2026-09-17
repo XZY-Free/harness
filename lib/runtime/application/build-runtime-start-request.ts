@@ -34,6 +34,16 @@ export interface BuildRuntimeStartRequestInput {
     anchor?: string;
     anchorDigest?: string;
   };
+  /**
+   * R02 §1：已冻结的语义请求（`RuntimeSessionBinding.semanticRequestJson`）。
+   *
+   * 存在时表示这是同一次 Start/Resume 的**重试/重放**：语义域字段必须读回这份持久事实，
+   * 不能重新挑选。当前唯一会随执行推进而漂移的语义字段是
+   * `producerSequenceStart`（由 Invocation 水位推导）——重试必须复用首派发的值，
+   * 否则同一 Start 身份会算出不同 `semanticRequestDigest` 并被判 `StartIntentConflict`。
+   * 其余语义字段都来自 Binding / RuntimeRevision / WorkspaceBinding 等不可变事实。
+   */
+  frozenSemanticRequest?: unknown;
   now?: Date;
 }
 
@@ -44,6 +54,20 @@ export interface BuildRuntimeStartRequestResult {
 
 function inputDigest(value: unknown): string {
   return protocolDigest(value);
+}
+
+/**
+ * 读回已冻结语义请求里的 `producerSequenceStart`（R02 §1）。
+ * 冻结事实缺失/形状不合规时返回 `null`，由调用方按首派发推导——此时后续
+ * `updateRuntimeSessionDispatchInTransaction` 的语义请求冻结校验仍会兜底
+ * （同 Key 不同 digest → `StartIntentConflict`）。
+ */
+function readFrozenProducerSequenceStart(frozen: unknown): string | null {
+  if (!frozen || typeof frozen !== "object") return null;
+  const value = (frozen as { producerSequenceStart?: unknown }).producerSequenceStart;
+  if (typeof value === "string" && value.length > 0) return value;
+  if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
+  return null;
 }
 
 export async function buildRuntimeStartRequestForInvocation(
@@ -157,6 +181,8 @@ export async function buildRuntimeStartRequestForInvocation(
   };
   const recovery = input.recovery ?? { kind: "initial" as const };
   const authorityForRequest = input.authority;
+  // R02 §1：重试复用已冻结的 producerSequenceStart（这是唯一会随水位漂移的语义字段）。
+  const frozenProducerSequenceStart = readFrozenProducerSequenceStart(input.frozenSemanticRequest);
   const requestWithoutDigest = {
     protocolVersion: 3 as const,
     authority: authorityForRequest,
@@ -173,9 +199,9 @@ export async function buildRuntimeStartRequestForInvocation(
       activationEvidenceRef: input.activationEvidenceRef,
     }),
     recovery,
-    producerSequenceStart: String(
-      input.attempt?.producerSequenceStart ?? invocation.lastProducerSequence + 1,
-    ),
+    producerSequenceStart:
+      frozenProducerSequenceStart ??
+      String(input.attempt?.producerSequenceStart ?? invocation.lastProducerSequence + 1),
     callbackEndpoints: input.callbackEndpoints,
     credentials: input.credentials,
     executionLimits: {

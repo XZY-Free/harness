@@ -78,7 +78,7 @@ describe("canonical production worker topology", () => {
     vi.unstubAllEnvs();
   });
 
-  it("architecture gate 覆盖 package/image/topology 与 retry 默认接线", () => {
+  it("architecture gate 覆盖 package/image/topology 与 retry/job 默认接线", () => {
     const paths = [
       "package.json",
       "Dockerfile",
@@ -86,6 +86,7 @@ describe("canonical production worker topology", () => {
       "deploy/production/compose.yaml",
       "scripts/workers/worker-entrypoint.ts",
       "lib/runtime/retry/runtime-dispatch-retry-worker.ts",
+      "lib/job/job-worker.ts",
     ];
     const documents: SourceDocument[] = paths.map((path) => ({ path, source: read(path) }));
     expect(checkWorkerProductionTopologyGate(documents)).toEqual({ passed: true, failures: [] });

@@ -68,7 +68,7 @@ import {
 } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeEach(async () => {
@@ -133,6 +133,8 @@ async function emitExecutionStarted(
   const authority = body.authority as { invocationId?: string };
   const invocationId = String(authority?.invocationId ?? "");
   if (!invocationId) return;
+  // R02 §7：Resume 会换新 Ownership 代际与**新** SessionBinding，旧代际落到 lost。
+  // 这里必须挑当前仍处于 dispatching 的那一代，否则会把事件投到已关闭的旧 Session 上。
   const [session] = await db
     .select()
     .from(runtimeSessionBindingTable)
@@ -140,10 +142,12 @@ async function emitExecutionStarted(
       and(
         eq(runtimeSessionBindingTable.tenantId, tenantId),
         eq(runtimeSessionBindingTable.invocationId, invocationId),
+        eq(runtimeSessionBindingTable.bindingState, "dispatching"),
       ),
     )
+    .orderBy(desc(runtimeSessionBindingTable.versionNo))
     .limit(1);
-  if (!session || session.bindingState !== "dispatching" || !session.semanticRequestDigest) return;
+  if (!session || !session.semanticRequestDigest) return;
   const [invocation] = await db
     .select()
     .from(invocationTable)
@@ -180,6 +184,7 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
   const acceptedStartKeys = new Set<string>();
   let startFailureStatus: number | null = null;
   let disconnectNextAcceptedStart = false;
+  let suppressExecutionStarted = false;
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -228,7 +233,7 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
       // 形成 ExecutionOwnership 行锁交叉导致 InnoDB 死锁。
       const contextTenantId = (body?.context as { common?: { tenantId?: string } } | undefined)
         ?.common?.tenantId;
-      if (contextTenantId) {
+      if (contextTenantId && !suppressExecutionStarted) {
         await emitExecutionStarted(
           contextTenantId,
           body as Record<string, unknown>,
@@ -283,6 +288,9 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
     },
     disconnectNextStartAfterAccept() {
       disconnectNextAcceptedStart = true;
+    },
+    setSuppressExecutionStarted(value: boolean) {
+      suppressExecutionStarted = value;
     },
     acceptedExecutionCount() {
       return acceptedStartKeys.size;
@@ -1065,6 +1073,8 @@ describe("dispatchEmployeeTurn", () => {
     });
 
     expect(requested).toMatchObject({ turnState: "waiting_user", resumeState: "requested" });
+    // R02 §7：Turn/Invocation 回到 running 的唯一来源是合法 `execution.started`
+    // （waiting_user → running 的正式恢复转换），不是 Resume 的 HTTP ACK。
     expect(await getTurnById(fixture.tenantId, fixture.turn.id)).toMatchObject({
       turnState: "running",
       activeInvocationId: invocationId,
@@ -1080,6 +1090,64 @@ describe("dispatchEmployeeTurn", () => {
     expect(fixture.server.requests.map((request) => request.url)).toEqual([
       `/runtime/invocations/${invocationId}/resume`,
     ]);
+  });
+
+  it("R02 §7：Resume 的 HTTP ACK 只表示 Transport 交付，不把 Invocation/Turn 推进到 running", async () => {
+    const fixture = await seedReadyExternalEmployeeTurn("ack-only-resume");
+    await dispatchEmployeeTurn({
+      tenantId: fixture.tenantId,
+      threadId: fixture.thread.id,
+      turnId: fixture.turn.id,
+      executionSubject: {
+        tenantId: fixture.tenantId,
+        subjectType: "user",
+        subjectId: fixture.ownerId,
+      },
+    });
+    const turnRow = await getTurnById(fixture.tenantId, fixture.turn.id);
+    const invocationId = turnRow?.activeInvocationId;
+    if (!invocationId) throw new Error("缺少 active Invocation");
+    await db
+      .update(invocationTable)
+      .set({ executionState: "waiting_user", updatedAt: new Date() })
+      .where(eq(invocationTable.id, invocationId));
+    await db
+      .update(turnTable)
+      .set({ turnState: "waiting_user", errorCode: "USER_PAUSED", waitingAt: new Date() })
+      .where(eq(turnTable.id, fixture.turn.id));
+    await db
+      .update(invocationAttemptTable)
+      .set({ attemptState: "suspended" })
+      .where(eq(invocationAttemptTable.invocationId, invocationId));
+    const requested = await requestPausedTurnResume({
+      tenantId: fixture.tenantId,
+      ownerUserId: fixture.ownerId,
+      turnId: fixture.turn.id,
+      idempotencyKey: "ack-only-resume-command",
+    });
+    // Runtime 接纳 Resume 但**没有**发送 execution.started（对端只在 Transport 层回执）。
+    fixture.server.setSuppressExecutionStarted(true);
+    fixture.server.requests.length = 0;
+    const resumed = await dispatchResumeCommandToRuntime({
+      tenantId: fixture.tenantId,
+      commandId: requested.command.id,
+      actorId: fixture.ownerId,
+    });
+    expect(resumed).toMatchObject({
+      dispatched: true,
+      command: { commandState: "acknowledged" },
+    });
+    expect(fixture.server.requests.map((request) => request.url)).toEqual([
+      `/runtime/invocations/${invocationId}/resume`,
+    ]);
+    expect(await getTurnById(fixture.tenantId, fixture.turn.id)).toMatchObject({
+      turnState: "waiting_user",
+      activeInvocationId: invocationId,
+      errorCode: "USER_PAUSED",
+    });
+    expect(await getInvocationById(fixture.tenantId, invocationId)).toMatchObject({
+      executionState: "waiting_user",
+    });
   });
 
   it("External session 声明 resume=false 时 fail closed，网络请求为零", async () => {

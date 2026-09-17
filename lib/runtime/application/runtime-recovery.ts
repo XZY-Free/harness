@@ -14,7 +14,7 @@ import {
 import { InvocationAlreadyTerminalError, InvocationNotFoundError } from "@/lib/runtime/errors";
 import { markSessionBindingLostInSession } from "@/lib/runtime/recovery-queries";
 /** Durable recovery of an Invocation whose current ExecutionOwnership expired. */
-import { and, asc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -26,8 +26,8 @@ const recoverableStates: readonly InvocationExecutionState[] = [
 const terminalTurnStates = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 export interface FindStaleInvocationsParams {
-  tenantId: string;
-  thresholdMs: number;
+  /** 省略 = 全租户扫描（常驻 authority recovery lane）；给出时限定单一租户。 */
+  tenantId?: string;
   now?: Date;
   limit?: number;
 }
@@ -42,13 +42,28 @@ export interface StaleInvocationSummary {
   lastHeartbeatAt: Date | null;
   ownershipId: string | null;
   sessionBindingId: string | null;
+  /**
+   * R03 §5：扫描必须把**观察到的完整 Owner tuple** 交给收口路径
+   * （`markInvocationLost` 会带着它在根锁内复核；陈旧观察只丢弃）。
+   */
+  observedOwner: ObservedOwnerTuple | null;
 }
 
+/**
+ * 发现「Current Owner 租约已到期」的 Invocation（R01 §3 `Owner expired` 的发现入口）。
+ *
+ * 判定依据是 **`leaseExpiresAt <= now`**，不是"心跳看起来旧了"：续租是唯一延长租约的路径，
+ * 因此租约到期就是"该代际不再持有执行权"的正式事实。心跳陈旧但租约仍在有效期内**不算过期**
+ * （`evaluateStaleObservation` 同样只在租约未过期时拒绝收口）；反过来，扫描因为与收口之间
+ * 的竞争而多选了几行也不会误杀——收口在根锁内会带着 tuple 逐项复核，续租/换代的观察一律丢弃。
+ *
+ * 扫描本身只读、不加任何锁（R04 §5）：候选身份是 `(tenantId, invocationId)` 加完整
+ * observed tuple，结论一律在 `markInvocationLost` 的根锁内做出。
+ */
 export async function findStaleInvocations(
-  input: FindStaleInvocationsParams,
+  input: FindStaleInvocationsParams = {},
 ): Promise<StaleInvocationSummary[]> {
   const now = input.now ?? new Date();
-  const threshold = new Date(now.getTime() - input.thresholdMs);
   const rows = await db
     .select({
       invocationId: invocationTable.id,
@@ -58,6 +73,9 @@ export async function findStaleInvocations(
       jobId: invocationTable.jobId,
       executionState: invocationTable.executionState,
       ownershipId: executionOwnershipTable.id,
+      ownershipAttemptId: executionOwnershipTable.attemptId,
+      ownershipLeaseEpoch: executionOwnershipTable.leaseEpoch,
+      ownershipLeaseExpiresAt: executionOwnershipTable.leaseExpiresAt,
       lastHeartbeatAt: executionOwnershipTable.lastHeartbeatAt,
       sessionBindingId: runtimeSessionBindingTable.id,
     })
@@ -66,7 +84,7 @@ export async function findStaleInvocations(
       executionOwnershipTable,
       and(
         eq(executionOwnershipTable.invocationId, invocationTable.id),
-        eq(executionOwnershipTable.tenantId, input.tenantId),
+        eq(executionOwnershipTable.tenantId, invocationTable.tenantId),
         eq(executionOwnershipTable.ownershipState, "active"),
       ),
     )
@@ -74,26 +92,50 @@ export async function findStaleInvocations(
       runtimeSessionBindingTable,
       and(
         eq(runtimeSessionBindingTable.ownershipId, executionOwnershipTable.id),
-        eq(runtimeSessionBindingTable.tenantId, input.tenantId),
+        eq(runtimeSessionBindingTable.tenantId, executionOwnershipTable.tenantId),
       ),
     )
     .where(
       and(
-        eq(invocationTable.tenantId, input.tenantId),
         inArray(invocationTable.executionState, [...recoverableStates]),
-        isNotNull(executionOwnershipTable.lastHeartbeatAt),
-        lt(executionOwnershipTable.lastHeartbeatAt, threshold),
+        lte(executionOwnershipTable.leaseExpiresAt, now),
+        ...(input.tenantId ? [eq(invocationTable.tenantId, input.tenantId)] : []),
       ),
     )
-    .orderBy(asc(executionOwnershipTable.lastHeartbeatAt))
+    .orderBy(asc(executionOwnershipTable.leaseExpiresAt))
     .limit(Math.min(input.limit ?? 100, 500));
-  return rows;
+  return rows.map((row) => ({
+    invocationId: row.invocationId,
+    tenantId: row.tenantId,
+    threadId: row.threadId,
+    turnId: row.turnId,
+    jobId: row.jobId,
+    executionState: row.executionState,
+    lastHeartbeatAt: row.lastHeartbeatAt,
+    ownershipId: row.ownershipId,
+    sessionBindingId: row.sessionBindingId,
+    observedOwner: {
+      ownershipId: row.ownershipId,
+      attemptId: row.ownershipAttemptId,
+      leaseEpoch: row.ownershipLeaseEpoch,
+      leaseExpiresAt: row.ownershipLeaseExpiresAt,
+      lastHeartbeatAt: row.lastHeartbeatAt,
+    },
+  }));
 }
 
 export interface MarkInvocationLostParams {
   tenantId: string;
   invocationId: string;
   reasonCode: string;
+  /**
+   * R03 §5：本次失联/失败处理所**依据的观察事实**。
+   *
+   * `null` 表示调用方观察到「当时没有 Current Owner」。函数会在根锁内重新读取当前状态并
+   * 与该观察逐项比对：Owner 已被替换或已续租（含 lease/heartbeat 前移）→ 本次是陈旧观察，
+   * 只丢弃、不改新 Owner 与 Invocation。
+   */
+  observedOwner: ObservedOwnerTuple | null;
   errorSummary?: string | null;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
@@ -101,11 +143,56 @@ export interface MarkInvocationLostParams {
   idempotencyKey?: string | null;
 }
 
+/** 一次 Owner 观察的完整身份与到期事实（R03 §4/§5 tuple）。 */
+export interface ObservedOwnerTuple {
+  ownershipId: string;
+  attemptId: string;
+  leaseEpoch: number;
+  leaseExpiresAt: Date;
+  lastHeartbeatAt: Date;
+}
+
+export type MarkInvocationLostOutcome =
+  | "lost"
+  /** 陈旧观察：当前 Owner 与观察不符或已续租延长，本次不改任何状态。 */
+  | "stale_observation";
+
 export interface MarkInvocationLostResult {
+  outcome: MarkInvocationLostOutcome;
+  /** 陈旧观察时给出原因，便于调用方记录观察而非只静默丢弃。 */
+  staleReason?: "owner_replaced" | "owner_renewed";
   invocation: Awaited<ReturnType<typeof transitionInvocation>>;
   invocationLostEvent: ThreadEvent | null;
   turnFailedEvent: ThreadEvent | null;
   sessionBinding: RuntimeSessionBinding | null;
+}
+
+/** 读取当前 Current Owner 的观察 tuple（异步扫描/失败路径必须携带）。 */
+export async function readObservedOwner(input: {
+  tenantId: string;
+  invocationId: string;
+  executor?: Tx;
+}): Promise<ObservedOwnerTuple | null> {
+  const executor = input.executor ?? db;
+  const [owner] = await executor
+    .select()
+    .from(executionOwnershipTable)
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, input.tenantId),
+        eq(executionOwnershipTable.invocationId, input.invocationId),
+        eq(executionOwnershipTable.ownershipState, "active"),
+      ),
+    )
+    .limit(1);
+  if (!owner) return null;
+  return {
+    ownershipId: owner.id,
+    attemptId: owner.attemptId,
+    leaseEpoch: owner.leaseEpoch,
+    leaseExpiresAt: owner.leaseExpiresAt,
+    lastHeartbeatAt: owner.lastHeartbeatAt,
+  };
 }
 
 /** Close the expired authority and Invocation atomically; never infer success. */
@@ -148,6 +235,18 @@ export async function markInvocationLost(
       .for("update")
       .limit(1);
     const now = new Date();
+    // R03 §5：在根锁内重新读当前状态，与观察逐项比对。
+    const stale = evaluateStaleObservation(input.observedOwner, owner, now);
+    if (stale) {
+      return {
+        outcome: "stale_observation" as const,
+        staleReason: stale,
+        invocation: current,
+        invocationLostEvent: null,
+        turnFailedEvent: null,
+        sessionBinding: null,
+      };
+    }
     let sessionBinding: RuntimeSessionBinding | null = null;
     if (owner) {
       await tx
@@ -236,8 +335,45 @@ export async function markInvocationLost(
         });
       }
     }
-    return { invocation, invocationLostEvent, turnFailedEvent, sessionBinding };
+    return {
+      outcome: "lost" as const,
+      invocation,
+      invocationLostEvent,
+      turnFailedEvent,
+      sessionBinding,
+    };
   });
+}
+
+/**
+ * R03 §5：判断本次失联观察是否已经陈旧。
+ *
+ * - 观察到「没有 Current Owner」但现在有 → Owner 已被替换。
+ * - 观察到的 tuple 与当前 Owner 不一致 → Owner 已被替换（只丢弃，不改新 Owner）。
+ * - 同一代际但已续租（heartbeat/lease 前移）或 lease 尚未过期 → 陈旧扫描失效，不判 lost。
+ */
+function evaluateStaleObservation(
+  observed: ObservedOwnerTuple | null,
+  current: typeof executionOwnershipTable.$inferSelect | undefined,
+  now: Date,
+): "owner_replaced" | "owner_renewed" | null {
+  if (!observed) return current ? "owner_replaced" : null;
+  if (!current) return "owner_replaced";
+  if (
+    current.id !== observed.ownershipId ||
+    current.attemptId !== observed.attemptId ||
+    current.leaseEpoch !== observed.leaseEpoch
+  ) {
+    return "owner_replaced";
+  }
+  if (
+    current.lastHeartbeatAt > observed.lastHeartbeatAt ||
+    current.leaseExpiresAt > observed.leaseExpiresAt ||
+    current.leaseExpiresAt > now
+  ) {
+    return "owner_renewed";
+  }
+  return null;
 }
 
 export async function getLatestProducerSequence(

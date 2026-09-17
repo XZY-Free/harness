@@ -333,6 +333,8 @@ function checkWorkerProductionTopology(): void {
     "deploy/production/compose.yaml",
     "scripts/workers/worker-entrypoint.ts",
     "lib/runtime/retry/runtime-dispatch-retry-worker.ts",
+    // R01 §4：job-worker 的两条 lane 必须真实接线；不给它文档就等于规则永远读空串。
+    "lib/job/job-worker.ts",
   ];
   const documents = paths.map((path) => ({
     path,

@@ -1,5 +1,6 @@
 import { createToolExecutionWorker } from "@/lib/capability/tool-execution-worker";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
+import { createJobWorker } from "@/lib/job/job-worker";
 import { createUserActionExpiryWorker } from "@/lib/permission/user-action-expiry-worker";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
@@ -14,6 +15,7 @@ export const CANONICAL_PRODUCTION_ROLES = [
   "hosted-provisioning-worker",
   "control-plane-outbox-worker",
   "runtime-dispatch-retry-worker",
+  "job-worker",
   "tool-execution-worker",
 ] as const;
 
@@ -45,6 +47,10 @@ export function createProductionWorkerRole(role: DurableWorkerRole): ProductionW
   if (role === "runtime-dispatch-retry-worker") {
     const worker = createRuntimeDispatchRetryWorker();
     return { role, pollOnce: () => worker.tick(), stop: () => worker.stop() };
+  }
+  if (role === "job-worker") {
+    const worker = createJobWorker();
+    return { role, pollOnce: () => worker.pollOnce(), stop: () => worker.stop() };
   }
   if (role === "tool-execution-worker") {
     const worker = createToolExecutionWorker();
@@ -89,6 +95,44 @@ export const WORKER_REQUIRED_TABLES: Record<DurableWorkerRole, readonly string[]
     "Turn",
     "Invocation",
   ],
-  "runtime-dispatch-retry-worker": ["InvocationAttempt", "InvocationCommand"],
+  // R04 §5：本 Worker 承载四条 lane —— Session dispatch（RuntimeSessionBinding）、
+  // InvocationCommand dispatch、Workspace Writer 物理释放（WorkspaceWriteLock +
+  // WorkspaceBinding）、Owner 过期收口（Invocation + ExecutionOwnership + Thread/Turn/ThreadEvent）。
+  // 启动就绪检查必须覆盖它真实读写的全部对象，否则缺表环境会"启动成功"却在首次 tick 才失败。
+  "runtime-dispatch-retry-worker": [
+    "Invocation",
+    "InvocationAttempt",
+    "InvocationCommand",
+    "ExecutionOwnership",
+    "RuntimeSessionBinding",
+    "Thread",
+    "Turn",
+    "ThreadEvent",
+    "WorkspaceWriteLock",
+    "WorkspaceBinding",
+  ],
+  "job-worker": [
+    "Job",
+    "JobCommand",
+    "JobEvent",
+    "Invocation",
+    "InvocationAttempt",
+    "ExecutionBinding",
+    "WorkspaceBinding",
+    "DeploymentRoute",
+    "DeploymentRouteSet",
+    "RouteActivation",
+    "RouteRevision",
+    "Runtime",
+    "RuntimeRevision",
+    "PublicationRecord",
+    "RuntimeConformanceRun",
+    "RuntimeConformanceCaseResult",
+    "PolicySet",
+    "PolicyRevision",
+    "GovernanceConfigSet",
+    "GovernanceConfigRevision",
+    "RouteEligibilityProjection",
+  ],
   "tool-execution-worker": ["ToolCall", "ToolExecutionAttempt"],
 };

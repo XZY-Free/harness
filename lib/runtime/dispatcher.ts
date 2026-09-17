@@ -1,16 +1,11 @@
 /** Canonical dispatcher for thread executions. */
 import { randomUUID } from "node:crypto";
-import { aiConfig, runtimeConfig } from "@/lib/config";
+import { aiConfig } from "@/lib/config";
 import { allocateEventSequences } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
-import {
-  getEnvironmentDefinitionById,
-  getEnvironmentRevisionById,
-} from "@/lib/environment/environment-definition-store";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
-import { createDefaultEnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
-import { getPendingEnvironmentSelection } from "@/lib/environment/environment-selection";
+import { recordEnvironmentSelectionFirstApplied } from "@/lib/environment/environment-selection";
 import {
   type CreateExecutionBindingCommand,
   createCreateExecutionBinding,
@@ -27,19 +22,23 @@ import {
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
-import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
 import type {
   ExecutionBinding,
   Invocation,
   InvocationAttempt,
   RuntimeSessionBinding,
 } from "@/lib/persistence/schema/executions";
-import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { RouteResolutionAttribute } from "@/lib/routes/domain/route-resolution-policy";
-import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
-import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import {
+  canonicalRouteResolver,
+  resolveExecutionResources,
+} from "@/lib/runtime/application/execution-resources";
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import {
+  resolveEnvironmentRevisionForInvocation,
+  resolveThreadWorkspaceFacts,
+} from "@/lib/runtime/application/thread-execution-context";
 import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { DispatchTurnStateError, RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { buildProductionCapabilityCatalog } from "@/lib/runtime/harness-loop/build-production-capability-catalog";
@@ -47,38 +46,25 @@ import {
   type RuntimeRouteResolution,
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
-import { recordAttemptDispatchTransientFailure } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  recordAttemptDispatchTransientFailure,
+  sessionDispatchIdentityForAttempt,
+} from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { CallbackEndpoints, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
 import {
   type ExecutionSubject,
   freezeTrustedExecutionSubject,
 } from "@/lib/runtime/transport/execution-subject";
-import { resolveWorkspaceBindingId } from "@/lib/workspace/desktop-workspace-queries";
-import type {
-  WorkspaceBackend,
-  WorkspaceExecutionResources,
-} from "@/lib/workspace/workspace-backend";
+import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { and, eq } from "drizzle-orm";
 
 export const DEFAULT_ROUTE_SCOPE_KEY = "default";
 
-const configuredResolver = createConfiguredRouteResolver({
-  projectionStore: mysqlRouteEligibilityResolutionStore,
-});
-const defaultRouteResolver: RouteResolver = async (input) =>
-  (
-    await configuredResolver({
-      tenantId: input.tenantId,
-      target: input.target,
-      routeScopeKey: input.routeScopeKey,
-      businessKey: input.businessKey,
-      attributes: input.attributes,
-      threadDefaultModelRef: input.threadDefaultModelRef,
-    })
-  ).outcome;
+/** 正式 Route Resolver 的唯一实例来自组合层（R01 §1），此处不另建一份。 */
+const defaultRouteResolver: RouteResolver = canonicalRouteResolver;
 const createExecutionBinding = createCreateExecutionBinding({ store: mysqlExecutionBindingStore });
 
 export interface RuntimeEndpointResolution {
@@ -136,10 +122,11 @@ export async function dispatchInvocationForTurn(params: {
    * Start 网络重试复用已冻结的 Binding，不会重新挑选。
    */
   initialContextCheckpointId?: string | null;
+  /**
+   * 受管 Environment Backend 的**边界适配器**（部署/测试注入）。
+   * 缺省由唯一组合层给出生产默认；它不是"是否携带 Workspace/Environment"的开关。
+   */
   environmentProvisioner?: EnvironmentProvisioner;
-  workspaceBackendResolver?: (
-    binding: WorkspaceBinding,
-  ) => Promise<Omit<WorkspaceExecutionResources, "binding">>;
 }): Promise<DispatchResult> {
   const actorType = params.actorType ?? "system";
   // Trusted subject 是 dispatch contract 的入口校验：在任何 Turn/DB 事实读取之前
@@ -169,31 +156,27 @@ export async function dispatchInvocationForTurn(params: {
   );
   if (!plan.resolved) return { dispatched: false, reason: plan.reason };
 
-  const resolvedWorkspaceBindingId = thread.defaultWorkspaceId
-    ? await resolveWorkspaceBindingId(
-        params.tenantId,
-        thread.defaultWorkspaceId,
-        thread.ownerUserId,
-      )
-    : null;
-  // 桌面绑定冻结：Thread 固定的 Workspace 事实不回滚。设备撤销/绑定失效只降级
-  // Workspace 能力（catalog 记 unavailableFacts），不阻断基础聊天调度。
-  const workspaceUnavailable = Boolean(thread.defaultWorkspaceId) && !resolvedWorkspaceBindingId;
-  // ExecutionBinding 冻结「本执行实际使用的 Workspace 事实」：Turn 调度不携带平台
-  // Workspace writer（工具写文件由 capability action 执行期按需 fence），按冻结设计
-  // （schema-design §ExecutionBinding.workspaceBindingId「不使用文件也引用显式
-  // NO_PLATFORM_WORKSPACE 契约」）引用显式 NO_PLATFORM 契约 Binding；只有调用方
-  // 提供 WorkspaceBackendResolver（执行携带 writer）时才引用 resolved Binding。
-  // Thread 的桌面绑定事实不回滚，能力可用性由 catalog unavailableFacts 冻结。
-  const workspaceBindingId =
-    resolvedWorkspaceBindingId && params.workspaceBackendResolver
-      ? resolvedWorkspaceBindingId
-      : (await createNoPlatformWorkspaceBinding(params.tenantId, frozenPrincipal.principalId)).id;
-  const environmentRevision = await resolveEnvironmentRevisionForInvocation(
+  const { workspaceBindingId: resolvedWorkspaceBindingId, workspaceUnavailable } =
+    await resolveThreadWorkspaceFacts(params.tenantId, thread);
+  const environment = await resolveEnvironmentRevisionForInvocation(
     params.tenantId,
     thread.id,
     thread.defaultEnvironmentDefinitionId,
   );
+  const environmentRevision = environment.revision;
+  // ExecutionBinding 冻结「本执行实际使用的 Workspace 事实」（R01 §1）。
+  //
+  // 不再存在 `resolvedWorkspaceBindingId && workspaceBackendResolver ? real : NONE` 降级：
+  // 引用哪一份 Workspace 合同只由**冻结契约**决定，不由某个注入项是否存在决定。
+  // - NO_PLATFORM_ENVIRONMENT ⇒ WorkspaceBinding 必须是显式 NO_PLATFORM_WORKSPACE 合同
+  //   （schema-design §ExecutionBinding SERVICE 约束），与平台环境成对。
+  // - MANAGED 且 Thread 有真实 Workspace 绑定 ⇒ 引用该真实合同；Workspace 执行资源由
+  //   唯一组合层解析，解析不出即 `WorkspaceNotReady`（保留可恢复失败事实），绝不静默
+  //   退化成一个"引用真实 Workspace 却没有 Writer"的 Binding。
+  const workspaceBindingId =
+    environmentRevision && resolvedWorkspaceBindingId
+      ? resolvedWorkspaceBindingId
+      : (await createNoPlatformWorkspaceBinding(params.tenantId, frozenPrincipal.principalId)).id;
   const workspaceBinding = await getWorkspaceBindingById(params.tenantId, workspaceBindingId);
   if (!workspaceBinding) throw new Error("WorkspaceBinding 不存在，无法证明 Workspace Continuity");
   const invocationResult = await createInvocation({
@@ -266,36 +249,37 @@ export async function dispatchInvocationForTurn(params: {
     },
   };
   const binding = await createExecutionBinding(bindingCommand);
+  // 环境选择的「首次应用记录」（schema-design §5.2.20）：Binding 冻结了该选择声明的
+  // Revision，即该选择已被本 Invocation 真实使用 → 推进 `applied` 并回填一次性首用锚点。
+  // `applied` 之后本行仍是后续默认选择（`getEffectiveEnvironmentSelection` 会继续命中），
+  // 因此这里只写「首次」，重复调度是幂等重放。
+  if (environment.selection) {
+    await recordEnvironmentSelectionFirstApplied({
+      tenantId: params.tenantId,
+      selectionId: environment.selection.id,
+      invocationId: invocation.id,
+    });
+  }
   const endpoint =
     params.runtimeClient && params.runtimeEndpointResolver
       ? await params.runtimeEndpointResolver(binding)
       : null;
-  const environmentProvisioner = params.environmentProvisioner ?? endpoint?.environmentProvisioner;
-  if (environmentRevision && !environmentProvisioner) {
+  // R01 §1：Workspace 执行资源与 Environment Provisioner 全部由唯一组合层从 Binding 解析。
+  // 调用方提供的 Provisioner 只是**部署/边界适配器**，缺省由组合层给出生产默认。
+  const resources = await resolveExecutionResources({
+    tenantId: params.tenantId,
+    binding,
+    purpose: "thread",
+    overrides: { environmentProvisioner: params.environmentProvisioner ?? null },
+  });
+  const resolvedEnvironmentProvisioner = resources.environmentProvisioner;
+  if (environmentRevision && !resolvedEnvironmentProvisioner) {
     throw new Error("EnvironmentComplianceFailed: 未配置受管 EnvironmentProvisioner");
   }
-  let workspaceResources: WorkspaceExecutionResources | undefined;
-  if (workspaceBinding.continuityMode !== "NO_PLATFORM_WORKSPACE") {
-    if (endpoint?.workspace) {
-      if (endpoint.workspace.binding.id !== workspaceBinding.id)
-        throw new Error("WorkspaceNotReady");
-      workspaceResources = endpoint.workspace;
-    } else if (params.workspaceBackendResolver) {
-      workspaceResources = {
-        binding: workspaceBinding,
-        ...(await params.workspaceBackendResolver(workspaceBinding)),
-      };
-    }
-    // 无受管 WorkspaceBackend 时按 Binding 冻结事实启动（桌面绑定冻结语义）；
-    // Workspace Writer/准备证据由 capability action 执行期按需取得，
-    // 不在 dispatch 处阻断基础聊天。
-  }
+  // BOUND 且服务端为 Writer 时组合层已解析出真实执行资源；解析不出即 WorkspaceNotReady，
+  // 不会退化成一个"引用真实 Workspace 却没有 Writer"的 Binding。
+  const workspaceResources: WorkspaceExecutionResources | undefined = resources.workspace;
   const attempt = await createAttempt({ invocationId: invocation.id, tenantId: params.tenantId });
-  const resolvedEnvironmentProvisioner =
-    environmentProvisioner ??
-    (environmentRevision
-      ? createDefaultEnvironmentProvisioner({ runtimeType: runtimeConfig.defaultType })
-      : null);
   const environmentLease =
     environmentRevision && resolvedEnvironmentProvisioner
       ? await resolvedEnvironmentProvisioner.provision({
@@ -345,12 +329,20 @@ export async function dispatchInvocationForTurn(params: {
           error.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
         // 暂态失败只排定 durable retry（SessionBinding 承载稳定启动意图的重试事实），
         // 绝不 fallback Hosted、绝不丢失 Attempt 重试状态。
-        await recordAttemptDispatchTransientFailure({
+        // R04 §5：完成身份是 Session（不是 Attempt ID）。
+        // 取不到 Session 时不写 retry timestamp —— Attempt 仍保持 queued，
+        // 维护 lane 的"无 retry timestamp 安全窗口"会继续推进它，不会永久不可见。
+        const dispatchIdentity = await sessionDispatchIdentityForAttempt({
+          tenantId: params.tenantId,
           attemptId: attempt.id,
-          errorCode: skipReason,
-          now: new Date(),
-          counted: true,
         });
+        if (dispatchIdentity) {
+          await recordAttemptDispatchTransientFailure(dispatchIdentity, {
+            errorCode: skipReason,
+            now: new Date(),
+            counted: true,
+          });
+        }
         runtimeDispatch = {
           sessionBindingCreated: true,
           skipped: true,
@@ -370,24 +362,6 @@ export async function dispatchInvocationForTurn(params: {
     turnQueuedEvent: transition.event,
     runtimeDispatch,
   };
-}
-
-async function resolveEnvironmentRevisionForInvocation(
-  tenantId: string,
-  threadId: string,
-  environmentDefinitionId: string | null,
-): Promise<EnvironmentDefinitionRevision | null> {
-  if (!environmentDefinitionId) return null;
-  const definition = await getEnvironmentDefinitionById(tenantId, environmentDefinitionId);
-  if (!definition || definition.lifecycleState !== "active")
-    throw new Error("EnvironmentRevisionUnavailable");
-  const pending = await getPendingEnvironmentSelection(tenantId, threadId);
-  const revisionId = pending?.requestedRevisionId ?? definition.currentRevisionId;
-  if (!revisionId) throw new Error("EnvironmentRevisionUnavailable");
-  const revision = await getEnvironmentRevisionById(tenantId, revisionId);
-  if (!revision || revision.definitionId !== definition.id)
-    throw new Error("EnvironmentRevisionUnavailable");
-  return revision;
 }
 
 async function loadSession(

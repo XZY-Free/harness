@@ -230,6 +230,10 @@ export async function dispatchEmployeeTurn(params: {
         hosted_artifact: () =>
           createInProcessHostedRuntimeClient({
             tenantId: params.tenantId,
+            publishedCapabilityEvidence: {
+              runtimeRevisionId: runtimeRevision.id,
+              runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
+            },
             applicationService:
               params.decisionPort || params.finalResponsePort || params.actionExecutors
                 ? createConfiguredHostedRuntimeApplicationService({

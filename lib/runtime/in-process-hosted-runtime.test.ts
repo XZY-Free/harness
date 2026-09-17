@@ -1,4 +1,5 @@
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import type {
   AuthorityIdentity,
@@ -18,6 +19,11 @@ const authority: AuthorityIdentity = {
   sessionBindingId: "00000000-0000-4000-8000-000000000005",
 };
 const digest = `sha256:${"0".repeat(64)}`;
+// R02 §3：Hosted 接纳回执的摘要来自冻结发布证据（夹具与请求的 runtimeRevisionId 一致）。
+const frozenCapabilityEvidence = {
+  runtimeRevisionId: authority.runtimeRevisionId,
+  runtimeCapabilitiesJson: ["event_stream"],
+};
 
 function applicationService(): HostedRuntimeApplicationService {
   return {
@@ -136,6 +142,7 @@ describe("InProcessHostedRuntimeClient", () => {
     const service = applicationService();
     const first = createInProcessHostedRuntimeClient({
       tenantId: authority.invocationId,
+      publishedCapabilityEvidence: frozenCapabilityEvidence,
       applicationService: service,
     });
     const response = await first.startInvocation({
@@ -144,10 +151,13 @@ describe("InProcessHostedRuntimeClient", () => {
       request: startRequest(),
     });
     expect(response.accepted).toBe(true);
+    // R02 §2：交付的是 **准确 authority 与 Session 启动身份**，不是让应用层按
+    // invocationId 重新加载当前 Owner。
     expect(service.start).toHaveBeenCalledWith({
       tenantId: authority.invocationId,
       invocationId: authority.invocationId,
       idempotencyKey: `start:${authority.ownershipId}`,
+      authority,
     });
   });
 
@@ -155,6 +165,7 @@ describe("InProcessHostedRuntimeClient", () => {
     const service = applicationService();
     const client = createInProcessHostedRuntimeClient({
       tenantId: authority.invocationId,
+      publishedCapabilityEvidence: frozenCapabilityEvidence,
       applicationService: service,
     });
     const cancel = {
@@ -173,6 +184,14 @@ describe("InProcessHostedRuntimeClient", () => {
     expect(service.cancel).toHaveBeenCalledOnce();
     expect(service.resume).toHaveBeenCalledOnce();
     expect(service.steer).toHaveBeenCalledOnce();
+    // R03 §6：Cancel/Steer 必须把请求携带的**目标 Authority** 原样交下去，
+    // 应用层据此关门；不得只给 invocationId 让它再查"现在的 Owner"。
+    expect(service.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ invocationId: authority.invocationId, authority }),
+    );
+    expect(service.steer).toHaveBeenCalledWith(
+      expect.objectContaining({ invocationId: authority.invocationId, authority }),
+    );
   });
 
   it("resume 先确认恢复，再由后台继续同一 Invocation", async () => {
@@ -187,6 +206,7 @@ describe("InProcessHostedRuntimeClient", () => {
     );
     const client = createInProcessHostedRuntimeClient({
       tenantId: authority.invocationId,
+      publishedCapabilityEvidence: frozenCapabilityEvidence,
       applicationService: service,
     });
 
@@ -207,6 +227,7 @@ describe("InProcessHostedRuntimeClient", () => {
   it("尚未启动时不暴露 Agent Loop Promise", () => {
     const client = createInProcessHostedRuntimeClient({
       tenantId: authority.invocationId,
+      publishedCapabilityEvidence: frozenCapabilityEvidence,
       applicationService: applicationService(),
     });
     expect(client.getLastLaunchPromise()).toBeNull();

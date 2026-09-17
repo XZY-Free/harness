@@ -10,7 +10,7 @@ import { getEnvironmentLeaseByAttempt } from "@/lib/environment/environment-leas
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { transitionInvocation } from "@/lib/executions/application/transition-invocation";
 import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
-import { getAttemptById } from "@/lib/executions/persistence/attempt-store";
+import { getAttemptById, getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   closeExecutionOwnership,
@@ -22,6 +22,8 @@ import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identit
 import { threadItemTable } from "@/lib/persistence/schema/conversation";
 import {
   type ExecutionBinding,
+  INVOCATION_ATTEMPT_TERMINAL_STATES,
+  INVOCATION_TERMINAL_STATES,
   type Invocation,
   type InvocationAttempt,
   invocationAttemptTable,
@@ -31,16 +33,14 @@ import {
   type HostedHarnessLoopResult,
   type TransientEventBatchSink,
 } from "@/lib/runtime/adapters/hosted-adapter";
-import { buildRuntimeStartRequestForInvocation } from "@/lib/runtime/application/build-runtime-start-request";
+import { resolveExecutionResources } from "@/lib/runtime/application/execution-resources";
 import type {
   HostedRuntimeApplicationService,
   HostedRuntimeResumeResult,
 } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
-import {
-  buildExecutionCredentials,
-  startRuntimeInvocation,
-} from "@/lib/runtime/application/runtime-start";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
+import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import {
@@ -54,17 +54,32 @@ import type {
 } from "@/lib/runtime/harness-loop/loop";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { getRuntimeSessionBindingByOwnership } from "@/lib/runtime/persistence/runtime-session-store";
+import {
+  getRuntimeSessionBindingById,
+  getRuntimeSessionBindingByOwnership,
+} from "@/lib/runtime/persistence/runtime-session-store";
 import type { RuntimeHttpClient, RuntimeStartTransportRequest } from "@/lib/runtime/runtime-client";
-import type { CallbackEndpoints, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import type {
+  AuthorityIdentity,
+  CallbackEndpoints,
+  RuntimeStartResponse,
+} from "@/lib/runtime/runtime-protocol";
+import { decimalStringToNumber, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { and, desc, eq } from "drizzle-orm";
 
-/** Formal Resume keeps the suspended Attempt but always creates a fresh ownership generation and SessionBinding. */
+/**
+ * 正式 Resume 入口（R02 §7）。
+ *
+ * 前置只要求"该 Attempt 属于本 Invocation 且非终态"：
+ * - 用户暂停后的受控恢复 = `suspended` Attempt（**用户暂停恢复命令**的契约，由
+ *   `command-dispatcher` 在调度前显式校验）；
+ * - 子调用等待后的 continuation 唤醒 = 同一代际的存活 Supervisor，Attempt 仍在
+ *   queued/running，"子调用 pending 不等于人工暂停"，不得因此拒绝重放原意图。
+ */
 export async function resumeRuntimeInvocation(input: {
   tenantId: string;
   invocation: Invocation;
@@ -89,7 +104,7 @@ export async function resumeRuntimeInvocation(input: {
     !["waiting_user", "running"].includes(invocation.executionState) ||
     !attempt ||
     attempt.invocationId !== input.invocation.id ||
-    attempt.attemptState !== "suspended"
+    INVOCATION_ATTEMPT_TERMINAL_STATES.includes(attempt.attemptState)
   ) {
     throw new Error("AttemptMismatch");
   }
@@ -177,179 +192,244 @@ interface HostedOverrides {
 }
 
 const hostedOverrides = new Map<string, HostedOverrides>();
-const liveRunners = new Map<
-  string,
-  { controller: AbortController; promise: Promise<HostedHarnessLoopResult> }
->();
 
-async function loadCurrentAuthority(tenantId: string, invocationId: string) {
-  const owner = await getActiveExecutionOwnership({ tenantId, invocationId });
-  if (!owner) throw new Error("NotCurrentExecutor");
-  const session = await getRuntimeSessionBindingByOwnership(tenantId, owner.id);
-  if (!session || session.invocationId !== invocationId) throw new Error("RuntimeSessionMismatch");
-  return {
-    owner,
-    session,
-    authority: authorityIdentity({
-      invocationId,
-      runtimeRevisionId: session.runtimeRevisionId,
-      attemptId: owner.attemptId,
-      ownershipId: owner.id,
-      leaseEpoch: owner.leaseEpoch,
-      sessionBindingId: session.id,
-    }),
-  };
+/**
+ * R02 §2：每个 Ownership generation 在**本进程内**的活跃 Supervisor 索引。
+ *
+ * 它只索引「已由持久状态授权」的活任务：键是 Ownership id，进入前会先按权威 tuple 复核
+ * 该代际仍是当前 active Owner（`loadAuthorityFromTuple`）。去重的持久来源始终是
+ * `RuntimeSessionBinding.bindingState` + Ownership 事实，这张表只避免同代际起第二个 Loop。
+ */
+type LiveRunner = {
+  controller: AbortController;
+  promise: Promise<HostedHarnessLoopResult> | null;
+};
+const liveRunners = new Map<string, LiveRunner>();
+
+/**
+ * R02 §2：按 Start/Resume **携带的准确 authority** 复核当前状态。
+ *
+ * 不允许「收到旧 Start 后按 invocationId 重新加载当前 Owner 再运行」：
+ * 请求里的 (attemptId, ownershipId, leaseEpoch, sessionBindingId, runtimeRevisionId)
+ * 必须逐项匹配当前 Owner 与该 Ownership 的唯一 Session，否则 fail closed。
+ */
+async function loadAuthorityFromTuple(tenantId: string, authority: AuthorityIdentity) {
+  const owner = await getActiveExecutionOwnership({
+    tenantId,
+    invocationId: authority.invocationId,
+  });
+  if (
+    !owner ||
+    owner.id !== authority.ownershipId ||
+    owner.attemptId !== authority.attemptId ||
+    owner.leaseEpoch !== decimalStringToNumber(authority.leaseEpoch)
+  ) {
+    throw new Error("NotCurrentExecutor");
+  }
+  const session = await getRuntimeSessionBindingById(tenantId, authority.sessionBindingId);
+  if (
+    !session ||
+    session.invocationId !== authority.invocationId ||
+    session.ownershipId !== owner.id ||
+    session.attemptId !== authority.attemptId ||
+    session.leaseEpoch !== decimalStringToNumber(authority.leaseEpoch) ||
+    session.runtimeRevisionId !== authority.runtimeRevisionId
+  ) {
+    throw new Error("RuntimeSessionMismatch");
+  }
+  return { owner, session, authority };
 }
 
 async function runHostedInvocation(input: {
   tenantId: string;
   invocation: Invocation;
   binding: ExecutionBinding;
+  /** R02 §2：Hosted 启动必须携带 Start/Resume 的准确 authority 与 Session 启动身份。 */
+  authority: AuthorityIdentity;
   overrides?: HostedOverrides;
 }): Promise<HostedHarnessLoopResult> {
-  const current = await loadCurrentAuthority(input.tenantId, input.invocation.id);
-  if (current.session.bindingState === "dispatching") {
-    if (!current.session.semanticRequestDigest) throw new Error("RuntimeSessionMismatch");
-    const capabilitiesDigest =
-      current.session.transportAcknowledgement &&
-      typeof current.session.transportAcknowledgement === "object" &&
-      !Array.isArray(current.session.transportAcknowledgement) &&
-      typeof (current.session.transportAcknowledgement as Record<string, unknown>)
-        .capabilitiesDigest === "string"
-        ? ((current.session.transportAcknowledgement as Record<string, unknown>)
-            .capabilitiesDigest as string)
-        : `sha256:${"0".repeat(64)}`;
-    await ingressRuntimeEvents({
-      tenantId: input.tenantId,
-      invocationId: input.invocation.id,
-      batch: {
-        protocolVersion: 3,
-        authority: current.authority,
-        events: [
-          {
-            eventId: randomUUID(),
-            producerSequence: String(input.invocation.lastProducerSequence + 1),
-            type: "execution.started",
-            schemaVersion: 1,
-            payload: {
-              intentKey: current.session.startIntentKey,
-              semanticRequestDigest: current.session.semanticRequestDigest,
-              remoteSessionRef:
-                current.session.remoteSessionRef ?? `hosted-session:${current.session.id}`,
-              remoteExecutionRef:
-                current.session.remoteExecutionRef ??
-                `hosted-execution:${input.invocation.id}:${current.owner.id}`,
-              capabilitiesDigest,
-            },
-          },
-        ],
-      },
-    });
-  } else if (current.session.bindingState !== "active") {
-    throw new Error("RuntimeSessionMismatch");
-  }
-  if (!input.invocation.threadId || !input.invocation.turnId) {
+  const current = await loadAuthorityFromTuple(input.tenantId, input.authority);
+  const runnerKey = current.owner.id;
+  // R02 §2：相同 generation 最多一个 Supervisor 运行用户任务。重复交付的 Start（丢 ACK
+  // 重发）或重复唤醒不得再起第二个 Loop —— 直接回答"该代际仍在跑"。
+  if (liveRunners.has(runnerKey)) {
     return { completed: false, pending: true, responseText: "", sentEvents: [] };
   }
-  const turn = await getTurnById(input.tenantId, input.invocation.turnId);
-  if (!turn) throw new Error("Turn 不存在");
-  const trigger = input.invocation.triggerItemId
-    ? await getItemById(input.tenantId, input.invocation.triggerItemId)
-    : null;
-  const workspaceBinding = await getWorkspaceBindingById(
-    input.tenantId,
-    input.binding.workspaceBindingId,
-  );
-  if (!workspaceBinding) throw new Error("WorkspaceBinding 不存在");
-  const workspace =
-    workspaceBinding.continuityMode === "NO_PLATFORM_WORKSPACE"
-      ? { mode: "NONE" as const }
-      : {
-          mode: "BOUND" as const,
-          bindingId: workspaceBinding.id,
-          contractDigest: workspaceBinding.contractDigest,
-          continuityMode: workspaceBinding.continuityMode,
-          activationEvidenceRef: `ownership:${current.owner.id}`,
-        };
-  const tokenFacts = {
-    contractVersion: 3 as const,
-    type: "execution" as const,
-    tenantId: input.tenantId,
-    ...current.authority,
-    expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-  };
-  const runtimeToken = issueWorkloadToken({ ...tokenFacts, audience: "runtime" });
-  const controller = new AbortController();
-  const heartbeat = setInterval(() => {
-    void renewExecutionOwnership({
-      tenantId: input.tenantId,
-      invocationId: input.invocation.id,
-      ownershipId: current.owner.id,
-      attemptId: current.owner.attemptId,
-      leaseEpoch: current.owner.leaseEpoch,
-    }).catch(() => controller.abort(new Error("OwnershipExpired")));
-  }, 20_000);
-  const loop = new HostedHarnessLoop({
-    invocationId: input.invocation.id,
-    authority: current.authority,
-    tenantId: input.tenantId,
-    threadId: input.invocation.threadId,
-    turnId: input.invocation.turnId,
-    inputItems: trigger ? [{ type: "user_message", content: trigger.contentJson }] : [],
-    gatewayEndpoints: buildGatewayEndpoints({ external: false, invocationId: input.invocation.id }),
-    runtimeEndpoint: "in-process://hosted",
-    authToken: runtimeToken,
-    workspace,
-    executionLimits: {
-      maxEventBytes: 262_144,
-      maxBatchEvents: 100,
-      maxBatchBytes: 1_048_576,
-      dispatchDeadlineMs: 120_000,
-      executionTimeoutMs: 600_000,
-    },
-    traceContext: { traceId: input.invocation.id, spanId: input.invocation.id },
-    decisionPort:
-      input.overrides?.decisionPort ??
-      configuredDecisionPort(input.binding.modelId ?? aiConfig.chatModel),
-    finalResponsePort:
-      input.overrides?.finalResponsePort ??
-      configuredFinalResponsePort(input.binding.modelId ?? aiConfig.chatModel),
-    actionExecutors: input.overrides?.actionExecutors ?? {},
-    recoveryPort: createMySqlHarnessLoopRecoveryPort(input.tenantId),
-    ingressClient: {
-      postEventBatch: async (invocationId, authority, events) => {
-        await ingressRuntimeEvents({
-          tenantId: input.tenantId,
-          invocationId,
-          batch: { protocolVersion: 3, authority, events },
-        });
-      },
-    },
-    transientEventBatchSink:
-      input.overrides?.transientEventBatchSink ??
-      (async ({ invocationId, transientSequenceStart, events }) => {
-        // 默认 transient 通道：response.delta 等不持久化事件经正式 ingress 投影到
-        // Thread transient 总线（SSE 订阅者），绝不黑洞。
-        await ingressTransientBatch({
-          tenantId: input.tenantId,
-          invocationId,
-          transientSequenceStart,
-          events,
-        });
-      }),
-    modelRef: input.overrides?.modelRef ?? input.binding.modelId,
-    abortSignal: controller.signal,
-    deadlineAt: new Date(Date.now() + 600_000),
-  });
-  const running = loop.run();
-  liveRunners.set(input.invocation.id, { controller, promise: running });
+  // 同步占位：检查与写入之间不能有 await，否则并发交付会各自越过检查各起一个 Loop。
+  const slot: LiveRunner = { controller: new AbortController(), promise: null };
+  liveRunners.set(runnerKey, slot);
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
   try {
+    if (current.session.bindingState === "dispatching") {
+      if (!current.session.semanticRequestDigest) throw new Error("RuntimeSessionMismatch");
+      // R02 §3：capability 摘要的唯一比对源是发布证据（Session 冻结了 RuntimeRevision
+      // 引用与其能力 JSON，故摘要恒可重算）。**不再**回落到零摘要。
+      const capabilitiesDigest = expectedCapabilityManifestDigest({
+        runtimeRevisionId: current.session.runtimeRevisionId,
+        runtimeCapabilitiesJson: current.session.runtimeCapabilitiesJson,
+      });
+      await ingressRuntimeEvents({
+        tenantId: input.tenantId,
+        invocationId: input.invocation.id,
+        batch: {
+          protocolVersion: 3,
+          authority: current.authority,
+          events: [
+            {
+              eventId: randomUUID(),
+              producerSequence: String(input.invocation.lastProducerSequence + 1),
+              type: "execution.started",
+              schemaVersion: 1,
+              payload: {
+                intentKey: current.session.startIntentKey,
+                semanticRequestDigest: current.session.semanticRequestDigest,
+                remoteSessionRef:
+                  current.session.remoteSessionRef ?? `hosted-session:${current.session.id}`,
+                remoteExecutionRef:
+                  current.session.remoteExecutionRef ??
+                  `hosted-execution:${input.invocation.id}:${current.owner.id}`,
+                capabilitiesDigest,
+              },
+            },
+          ],
+        },
+      });
+    } else if (current.session.bindingState !== "active") {
+      throw new Error("RuntimeSessionMismatch");
+    }
+    if (!input.invocation.threadId || !input.invocation.turnId) {
+      return { completed: false, pending: true, responseText: "", sentEvents: [] };
+    }
+    const turn = await getTurnById(input.tenantId, input.invocation.turnId);
+    if (!turn) throw new Error("Turn 不存在");
+    const trigger = input.invocation.triggerItemId
+      ? await getItemById(input.tenantId, input.invocation.triggerItemId)
+      : null;
+    const workspaceBinding = await getWorkspaceBindingById(
+      input.tenantId,
+      input.binding.workspaceBindingId,
+    );
+    if (!workspaceBinding) throw new Error("WorkspaceBinding 不存在");
+    // R01 §5：Hosted 的默认 Action Executors 必须由 Binding 冻结的能力目录装配，
+    // 不能默认 `{}`（那会把已有 Tool/Agent/Knowledge 工作回归成纯文本回答）。
+    const actionExecutors =
+      input.overrides?.actionExecutors ??
+      (
+        await resolveExecutionResources({
+          tenantId: input.tenantId,
+          binding: input.binding,
+          purpose: "resume",
+        })
+      ).actionExecutors;
+    const workspace =
+      workspaceBinding.continuityMode === "NO_PLATFORM_WORKSPACE"
+        ? { mode: "NONE" as const }
+        : {
+            mode: "BOUND" as const,
+            bindingId: workspaceBinding.id,
+            contractDigest: workspaceBinding.contractDigest,
+            continuityMode: workspaceBinding.continuityMode,
+            activationEvidenceRef: `ownership:${current.owner.id}`,
+          };
+    const tokenFacts = {
+      contractVersion: 3 as const,
+      type: "execution" as const,
+      tenantId: input.tenantId,
+      ...current.authority,
+      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+    };
+    const runtimeToken = issueWorkloadToken({ ...tokenFacts, audience: "runtime" });
+    const controller = slot.controller;
+    heartbeat = setInterval(() => {
+      void renewExecutionOwnership({
+        tenantId: input.tenantId,
+        invocationId: input.invocation.id,
+        ownershipId: current.owner.id,
+        attemptId: current.owner.attemptId,
+        leaseEpoch: current.owner.leaseEpoch,
+      }).catch(() => controller.abort(new Error("OwnershipExpired")));
+    }, 20_000);
+    const loop = new HostedHarnessLoop({
+      invocationId: input.invocation.id,
+      authority: current.authority,
+      tenantId: input.tenantId,
+      threadId: input.invocation.threadId,
+      turnId: input.invocation.turnId,
+      inputItems: trigger ? [{ type: "user_message", content: trigger.contentJson }] : [],
+      gatewayEndpoints: buildGatewayEndpoints({
+        external: false,
+        invocationId: input.invocation.id,
+      }),
+      runtimeEndpoint: "in-process://hosted",
+      authToken: runtimeToken,
+      workspace,
+      executionLimits: {
+        maxEventBytes: 262_144,
+        maxBatchEvents: 100,
+        maxBatchBytes: 1_048_576,
+        dispatchDeadlineMs: 120_000,
+        executionTimeoutMs: 600_000,
+      },
+      traceContext: { traceId: input.invocation.id, spanId: input.invocation.id },
+      decisionPort:
+        input.overrides?.decisionPort ??
+        configuredDecisionPort(input.binding.modelId ?? aiConfig.chatModel),
+      finalResponsePort:
+        input.overrides?.finalResponsePort ??
+        configuredFinalResponsePort(input.binding.modelId ?? aiConfig.chatModel),
+      actionExecutors,
+      recoveryPort: createMySqlHarnessLoopRecoveryPort(input.tenantId),
+      ingressClient: {
+        postEventBatch: async (invocationId, authority, events) => {
+          await ingressRuntimeEvents({
+            tenantId: input.tenantId,
+            invocationId,
+            batch: { protocolVersion: 3, authority, events },
+          });
+        },
+      },
+      transientEventBatchSink:
+        input.overrides?.transientEventBatchSink ??
+        (async ({ invocationId, transientSequenceStart, events }) => {
+          // 默认 transient 通道：response.delta 等不持久化事件经正式 ingress 投影到
+          // Thread transient 总线（SSE 订阅者），绝不黑洞。
+          await ingressTransientBatch({
+            tenantId: input.tenantId,
+            invocationId,
+            transientSequenceStart,
+            events,
+          });
+        }),
+      modelRef: input.overrides?.modelRef ?? input.binding.modelId,
+      abortSignal: controller.signal,
+      deadlineAt: new Date(Date.now() + 600_000),
+    });
+    const running = loop.run();
+    slot.promise = running;
     return await running;
   } finally {
-    clearInterval(heartbeat);
-    if (liveRunners.get(input.invocation.id)?.promise === running)
-      liveRunners.delete(input.invocation.id);
+    if (heartbeat) clearInterval(heartbeat);
+    // 只清理自己占的槽位：代际被替换后新 Supervisor 已占位时不得误删。
+    if (liveRunners.get(runnerKey) === slot) liveRunners.delete(runnerKey);
   }
+}
+
+/**
+ * R02 §2：Hosted 分支的 authority 是**必需**输入。缺失或与 Invocation/Binding 不符即 fail closed。
+ */
+function requireHostedAuthority(
+  authority: AuthorityIdentity | undefined,
+  invocationId: string,
+  runtimeRevisionId: string,
+): AuthorityIdentity {
+  if (!authority) throw new Error("RuntimeSessionMismatch");
+  if (
+    authority.invocationId !== invocationId ||
+    authority.runtimeRevisionId !== runtimeRevisionId
+  ) {
+    throw new Error("RuntimeSessionMismatch");
+  }
+  return authority;
 }
 
 export async function resumeHarnessInvocation(input: {
@@ -358,24 +438,50 @@ export async function resumeHarnessInvocation(input: {
   sourceType?: HarnessResumeSourceType;
   agentCallId: string;
   sourceVersion: number;
+  /**
+   * R02 §2：Hosted 分支必须由调用方（Hosted Adapter）给出 Start/Resume 携带的准确
+   * authority 与 Session 启动身份，运行期只复核该代际，不按 invocationId 跟随 current。
+   */
+  authority?: AuthorityIdentity;
 }): Promise<HostedRuntimeResumeResult> {
   const invocation = await getInvocationById(input.tenantId, input.invocationId);
   if (!invocation) throw new Error("Invocation 不存在");
-  if (["completed", "failed", "cancelled", "lost"].includes(invocation.executionState))
+  if (INVOCATION_TERMINAL_STATES.includes(invocation.executionState))
     return { status: "handled_noop", invocationId: invocation.id };
   const binding = await getExecutionBindingByInvocation(input.tenantId, invocation.id);
   if (!binding) throw new Error("ExecutionBinding 不存在");
   const revision = await getRuntimeRevisionById(binding.runtimeRevisionId);
   if (!revision) throw new Error(`RuntimeRevision 不存在: ${binding.runtimeRevisionId}`);
-  // External Runtime 的 Parent resume 必须经正式协议 POST 到外部端点；
-  // in-process Hosted Loop 只服务 hosted_artifact Binding。
+  // External Runtime 的 Parent resume 同样必须经正式 Start 服务（`runtime-resume`）进入，
+  // 由 Session 冻结稳定启动意图；in-process Hosted Loop 只服务 hosted_artifact Binding。
   if (revision.runtimeEvidenceKind === "external_endpoint") {
-    await resumeExternalRuntime({
+    const attempt = await getLatestAttempt(invocation.id);
+    if (!attempt || INVOCATION_ATTEMPT_TERMINAL_STATES.includes(attempt.attemptState)) {
+      throw new Error("AttemptMismatch");
+    }
+    const endpoint = revision.endpointRef;
+    const auth = await resolveOutboundRuntimeAuth({
+      tenantId: input.tenantId,
+      identityMode: revision.identityMode,
+      credentialRefId: revision.credentialRefId,
+    });
+    const anchor = attempt.filesystemCheckpointId
+      ? `checkpoint:${attempt.filesystemCheckpointId}`
+      : `invocation:${invocation.id}:recovery:${invocation.recoveryVersion}`;
+    await resumeRuntimeInvocation({
       tenantId: input.tenantId,
       invocation,
       binding,
-      revision,
-      idempotencyKey: `continuation-resume:${input.agentCallId}:${input.sourceVersion}`,
+      attempt,
+      runtimeClient: createHttpHarnessRuntimeTransport({ endpoint, auth }),
+      runtimeEndpoint: endpoint,
+      auth,
+      callbackEndpoints: buildGatewayEndpoints({
+        external: true,
+        invocationId: invocation.id,
+      }),
+      anchor,
+      anchorDigest: attempt.resumeAnchorDigest ?? protocolDigest(anchor),
     });
     return {
       status: "resumed",
@@ -390,6 +496,9 @@ export async function resumeHarnessInvocation(input: {
     tenantId: input.tenantId,
     invocation,
     binding,
+    // R02 §2：没有准确 authority 就不能启动 Hosted 执行——绝不回落到「按 invocationId
+    // 加载当前 Owner」，那会让旧 Start 驱动新代际运行。
+    authority: requireHostedAuthority(input.authority, invocation.id, binding.runtimeRevisionId),
     overrides: hostedOverrides.get(invocation.id),
   });
   return {
@@ -402,67 +511,6 @@ export async function resumeHarnessInvocation(input: {
   };
 }
 
-/** External Runtime 的 Parent resume：用冻结事实构造 canonical Resume 请求并 POST。 */
-async function resumeExternalRuntime(input: {
-  tenantId: string;
-  invocation: Invocation;
-  binding: ExecutionBinding;
-  revision: NonNullable<Awaited<ReturnType<typeof getRuntimeRevisionById>>>;
-  idempotencyKey: string;
-}): Promise<void> {
-  const current = await loadCurrentAuthority(input.tenantId, input.invocation.id);
-  const endpoint = input.revision.endpointRef;
-  const auth = await resolveOutboundRuntimeAuth({
-    tenantId: input.tenantId,
-    identityMode: input.revision.identityMode,
-    credentialRefId: input.revision.credentialRefId,
-  });
-  const attempt = await getAttemptById(
-    (await getLatestAttemptId(input.tenantId, input.invocation.id)) ?? "",
-  );
-  const anchor = attempt?.filesystemCheckpointId
-    ? `checkpoint:${attempt.filesystemCheckpointId}`
-    : `invocation:${input.invocation.id}:recovery:${input.invocation.recoveryVersion}`;
-  const anchorDigest = attempt?.resumeAnchorDigest ?? protocolDigest(anchor);
-  const { request } = await buildRuntimeStartRequestForInvocation({
-    tenantId: input.tenantId,
-    invocation: input.invocation,
-    binding: input.binding,
-    authority: current.authority,
-    credentials: buildExecutionCredentials(input.tenantId, current.authority),
-    runtimeEndpoint: endpoint,
-    callbackEndpoints: buildGatewayEndpoints({
-      external: true,
-      invocationId: input.invocation.id,
-    }),
-    intentType: "resume",
-    recovery: { kind: "resume", anchor, anchorDigest },
-    activationEvidenceRef: `ownership:${current.owner.id}`,
-    attempt: {
-      producerSequenceStart: input.invocation.lastProducerSequence + 1,
-      checkpointId: attempt?.filesystemCheckpointId ?? undefined,
-      anchor,
-      anchorDigest,
-    },
-  });
-  const transport = createHttpHarnessRuntimeTransport({ endpoint, auth });
-  await transport.resumeInvocation({
-    runtimeEndpoint: endpoint,
-    auth,
-    idempotencyKey: input.idempotencyKey,
-    request,
-  });
-}
-
-async function getLatestAttemptId(tenantId: string, invocationId: string): Promise<string | null> {
-  const attempts = await db
-    .select({ id: invocationAttemptTable.id })
-    .from(invocationAttemptTable)
-    .where(eq(invocationAttemptTable.invocationId, invocationId))
-    .orderBy(desc(invocationAttemptTable.createdAt));
-  return attempts[0]?.id ?? null;
-}
-
 export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = {
   start: (input) =>
     resumeHarnessInvocation({
@@ -471,6 +519,7 @@ export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = 
       sourceType: "hosted_start",
       agentCallId: input.idempotencyKey,
       sourceVersion: 1,
+      authority: input.authority,
     }),
   resume: (input) =>
     resumeHarnessInvocation({
@@ -479,32 +528,30 @@ export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = 
       sourceType: "user_action",
       agentCallId: input.idempotencyKey,
       sourceVersion: 1,
+      authority: input.authority,
     }),
   async cancel(input) {
-    const live = liveRunners.get(input.invocationId);
+    // R03 §6：Cancel 只针对**请求携带的目标代际**关门。旧目标的 Cancel 既不能停掉
+    // 新代际的 Supervisor，也不能把新代际的 Ownership 撤销掉。
+    const current = await loadAuthorityFromTuple(input.tenantId, input.authority).catch(() => null);
+    if (!current) return; // 目标代际已失效：无副作用，不重定向到当前 Owner。
+    const live = liveRunners.get(current.owner.id);
     if (live) live.controller.abort(new Error(input.reason ?? "Invocation cancelled"));
     await cancelActiveAgentCalls({
       tenantId: input.tenantId,
       parentInvocationId: input.invocationId,
     });
-    const invocation = await getInvocationById(input.tenantId, input.invocationId);
-    if (
-      !invocation ||
-      ["completed", "failed", "cancelled", "lost"].includes(invocation.executionState)
-    )
-      return;
-    const active = await getActiveExecutionOwnership({
+    await closeExecutionOwnership({
       tenantId: input.tenantId,
       invocationId: input.invocationId,
+      ownershipId: current.owner.id,
+      attemptId: current.owner.attemptId,
+      leaseEpoch: current.owner.leaseEpoch,
+      state: "revoked",
+      reasonCode: "cancel_requested",
     });
-    if (active)
-      await closeExecutionOwnership({
-        tenantId: input.tenantId,
-        invocationId: input.invocationId,
-        ownershipId: active.id,
-        state: "revoked",
-        reasonCode: "cancel_requested",
-      });
+    const invocation = await getInvocationById(input.tenantId, input.invocationId);
+    if (!invocation || INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) return;
     await db.transaction((tx) =>
       transitionInvocation(tx, {
         tenantId: input.tenantId,
@@ -516,6 +563,10 @@ export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = 
     );
   },
   async steer(input) {
+    // R03 §6：Steer 只对目标代际的 pending guidance 生效；代际已失效即空操作，
+    // 不把旧命令的引导投递给新 Owner。
+    const current = await loadAuthorityFromTuple(input.tenantId, input.authority).catch(() => null);
+    if (!current) return;
     const payload =
       input.steerPayload && typeof input.steerPayload === "object"
         ? (input.steerPayload as Record<string, unknown>)

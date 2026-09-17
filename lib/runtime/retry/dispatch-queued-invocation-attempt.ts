@@ -11,7 +11,7 @@ import type {
   InvocationExecutionState,
   RuntimeSessionBinding,
 } from "@/lib/persistence/schema/executions";
-import { markInvocationLost } from "@/lib/runtime/application/runtime-recovery";
+import { markInvocationLost, readObservedOwner } from "@/lib/runtime/application/runtime-recovery";
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import type { RuntimeEndpointResolution } from "@/lib/runtime/dispatcher";
 import {
@@ -19,7 +19,12 @@ import {
   RedispatchNotAllowedError,
   RuntimeHttpClientError,
 } from "@/lib/runtime/errors";
-import { recordAttemptDispatchTransientFailure } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  type SessionDispatchIdentity,
+  assertSessionDispatchClaimHeld,
+  recordAttemptDispatchTransientFailure,
+} from "@/lib/runtime/retry/dispatch-retry-queries";
+import { sessionDispatchIdentityForAttempt } from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { TransientDispatchErrorCode } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import { isTransientRuntimeError } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
@@ -34,6 +39,11 @@ export const REDISPATCH_ALLOWED_STATES: readonly InvocationExecutionState[] = [
 export interface DispatchQueuedAttemptParams {
   tenantId: string;
   attemptId: string;
+  /**
+   * 领取身份（R04 §5）：来自 Session dispatch claim 时，所有完成确认都按该身份复核；
+   * 请求内联路径为 `null`（无 lease，只按 Session 自身冻结 tuple 复核）。
+   */
+  claim?: SessionDispatchIdentity | null;
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
   actorType?: ThreadEventActorType;
@@ -153,23 +163,33 @@ export async function dispatchQueuedInvocationAttempt(
         errorCode,
         errorSummary: error instanceof Error ? error.message : String(error),
         now: params.now ?? new Date(),
+        claim: params.claim ?? null,
       });
       return { status: "terminal_failed", attempt: failedAttempt, errorCode };
     }
     const skipReason: TransientDispatchErrorCode =
       error.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
-    const outcome = await recordAttemptDispatchTransientFailure({
-      attemptId: attempt.id,
-      errorCode: skipReason,
-      now: params.now ?? new Date(),
-      counted: true,
-    });
+    // R04 §5：暂态重试排定必须带 **Session + Ownership + claim token** 身份。
+    const outcome = await recordAttemptDispatchTransientFailure(
+      params.claim ?? (await requireInlineDispatchIdentity(params.tenantId, attempt.id)),
+      {
+        errorCode: skipReason,
+        now: params.now ?? new Date(),
+        counted: true,
+      },
+    );
     if (outcome.outcome === "exhausted") {
+      // R03 §5：携带本次观察到的 Owner tuple；由 markInvocationLost 在根锁内复核，
+      // 陈旧观察（已换代/已续租）只丢弃，不误杀新 Owner。
       await markInvocationLost({
         tenantId: params.tenantId,
         invocationId: invocation.id,
         reasonCode: "dispatch_retry_exhausted",
         errorSummary: `Attempt dispatch retry exhausted（lastTransient=${skipReason}）`,
+        observedOwner: await readObservedOwner({
+          tenantId: params.tenantId,
+          invocationId: invocation.id,
+        }),
         actorType: params.actorType,
         actorId: params.actorId ?? null,
         correlationId: params.correlationId ?? null,
@@ -186,6 +206,23 @@ export async function dispatchQueuedInvocationAttempt(
   }
 }
 
+/**
+ * 请求内联调度（无 lease）的完成身份：按 Attempt 定位它当前的 Session generation。
+ *
+ * 这不是"按 attemptId 直接更新"：定位得到的 tuple 会作为完成更新的条件逐项复核，
+ * 因此并发的新 generation 不会被迟到结论污染。
+ */
+async function requireInlineDispatchIdentity(
+  tenantId: string,
+  attemptId: string,
+): Promise<SessionDispatchIdentity> {
+  const identity = await sessionDispatchIdentityForAttempt({ tenantId, attemptId });
+  if (!identity) {
+    throw new Error(`RuntimeSessionBinding 不存在（attemptId=${attemptId}）`);
+  }
+  return identity;
+}
+
 export async function failAttemptAndInvokeRecoveryAuthority(params: {
   tenantId: string;
   attempt: InvocationAttempt;
@@ -196,7 +233,10 @@ export async function failAttemptAndInvokeRecoveryAuthority(params: {
   actorId?: string | null;
   correlationId?: string | null;
   now: Date;
+  /** 领取身份：给出时先复核 claim 仍被持有，否则拒绝写完成事实。 */
+  claim?: SessionDispatchIdentity | null;
 }): Promise<InvocationAttempt> {
+  if (params.claim) await assertSessionDispatchClaimHeld(params.claim);
   const current = await getAttemptById(params.attempt.id);
   if (current?.attemptState === "queued" || current?.attemptState === "running") {
     await db.transaction((tx) =>
@@ -212,6 +252,11 @@ export async function failAttemptAndInvokeRecoveryAuthority(params: {
     invocationId: params.invocation.id,
     reasonCode: params.errorCode,
     errorSummary: params.errorSummary,
+    // R03 §5：旧 Attempt 的失败结论必须携带它当时观察到的 Owner tuple。
+    observedOwner: await readObservedOwner({
+      tenantId: params.tenantId,
+      invocationId: params.invocation.id,
+    }),
     actorType: params.actorType,
     actorId: params.actorId ?? null,
     correlationId: params.correlationId ?? null,

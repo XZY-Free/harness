@@ -2335,13 +2335,19 @@ CREATE TABLE `WorkspaceWriteLock` (
 	`backendReceipt` json,
 	`leaseExpiresAt` datetime(6),
 	`releaseReasonCode` varchar(64),
+	`releaseAttemptCount` int unsigned NOT NULL DEFAULT 0,
+	`releaseNextAttemptAt` datetime(6),
+	`releaseLeaseOwner` varchar(96),
+	`releaseLeaseExpiresAt` datetime(6),
+	`releaseErrorCode` varchar(64),
+	`releaseReceipt` json,
 	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
 	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `WorkspaceWriteLock_id` PRIMARY KEY(`id`),
 	CONSTRAINT `WorkspaceWriteLock_tenant_id_uq` UNIQUE(`tenantId`,`id`),
 	CONSTRAINT `WorkspaceWriteLock_tenant_scope_uq` UNIQUE(`tenantId`,`storageScopeDigest`),
-	CONSTRAINT `WorkspaceWriteLock_state_allowed` CHECK(`lockState` IN ('released', 'reserved', 'active', 'releasing', 'quarantined')),
+	CONSTRAINT `WorkspaceWriteLock_state_allowed` CHECK(`lockState` IN ('released', 'reserved', 'active', 'releasing')),
 	CONSTRAINT `WorkspaceWriteLock_generation_non_negative` CHECK(`writerGeneration` >= 0),
 	CONSTRAINT `WorkspaceWriteLock_released_shape` CHECK(`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `backendOperationId` IS NULL AND `backendReceipt` IS NULL AND `leaseExpiresAt` IS NULL)),
 	CONSTRAINT `WorkspaceWriteLock_active_evidence_shape` CHECK(`lockState` <> 'active' OR (`holderInvocationId` IS NOT NULL AND `holderAttemptId` IS NOT NULL AND `holderOwnershipId` IS NOT NULL AND `workspaceBindingId` IS NOT NULL AND `backendGrantRef` IS NOT NULL AND `backendEvidence` IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(`backendEvidence`, '$.scopeDigest')) = `storageScopeDigest` AND JSON_EXTRACT(`backendEvidence`, '$.writerGeneration') IS NOT NULL))
@@ -3222,6 +3228,7 @@ CREATE INDEX `WorkloadTokenRevocation_tenant_invocation_idx` ON `WorkloadTokenRe
 CREATE INDEX `WorkloadTokenRevocation_expiry_idx` ON `WorkloadTokenRevocation` (`tokenExpiresAt`);--> statement-breakpoint
 CREATE INDEX `WorkspaceWriteLock_tenant_holder_idx` ON `WorkspaceWriteLock` (`tenantId`,`holderInvocationId`);--> statement-breakpoint
 CREATE INDEX `WorkspaceWriteLock_state_expiry_idx` ON `WorkspaceWriteLock` (`lockState`,`leaseExpiresAt`);--> statement-breakpoint
+CREATE INDEX `WorkspaceWriteLock_release_due_idx` ON `WorkspaceWriteLock` (`lockState`,`releaseNextAttemptAt`);--> statement-breakpoint
 CREATE INDEX `Workspace_tenant_owner_idx` ON `Workspace` (`tenantId`,`ownerUserId`);--> statement-breakpoint
 CREATE INDEX `Workspace_tenant_lifecycle_idx` ON `Workspace` (`tenantId`,`lifecycleState`);--> statement-breakpoint
 CREATE INDEX `WorkspaceAttachment_tenant_thread_idx` ON `WorkspaceAttachment` (`tenantId`,`threadId`);--> statement-breakpoint

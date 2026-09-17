@@ -6,7 +6,14 @@ import {
   executionOwnershipTable,
   invocationCommandTable,
 } from "@/lib/persistence/schema/executions";
-import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
+import type {
+  ExecutionBinding,
+  ExecutionOwnership,
+  Invocation,
+  InvocationCommand,
+  RuntimeSessionBinding,
+} from "@/lib/persistence/schema/executions";
+import type { RuntimeRevisionRow } from "@/lib/persistence/schema/runtimes";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { hostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
@@ -27,6 +34,7 @@ import {
   getRuntimeSessionBindingById,
   getRuntimeSessionBindingsByInvocation,
 } from "@/lib/runtime/persistence/runtime-session-store";
+import { settleSupersededInvocationCommand } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import type { RuntimeTransport } from "@/lib/runtime/transport/runtime-transport";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
@@ -43,9 +51,33 @@ export function setCommandGatewayHostedApplicationServiceForTest(
 
 export type CommandGatewayResult =
   | { dispatched: true; command: CommandDispatchResult }
-  | { dispatched: false; reason: "command_not_found" | "unsupported_capability" };
+  | {
+      dispatched: false;
+      reason: "command_not_found" | "unsupported_capability" | "target_superseded";
+    };
 
-async function loadContext(tenantId: string, commandId: string) {
+type CommandContextLoad =
+  | {
+      ok: true;
+      command: InvocationCommand;
+      invocation: Invocation;
+      binding: ExecutionBinding;
+      owner: ExecutionOwnership | null;
+      session: RuntimeSessionBinding | null;
+      revision: RuntimeRevisionRow;
+    }
+  | { ok: false; reason: "command_not_found" | "target_superseded" };
+
+/**
+ * R03 §6：命令的目标在**正式接受时**固定。
+ *
+ * - `cancel`/`steer`/`checkpoint`：只按 `targetOwnershipId` + `targetSessionId` 读取冻结
+ *   目标，绝不回落到"当前 active ownership"；目标缺失或已失效 → `target_superseded`
+ *   （不把同一命令重定向新 Owner）。
+ * - `resume`：目标是 Invocation 本身而非某一代际，Session 仅用于读 effective capability，
+ *   因此允许按 Invocation 取最近一条 SessionBinding。
+ */
+async function loadContext(tenantId: string, commandId: string): Promise<CommandContextLoad> {
   const [command] = await db
     .select()
     .from(invocationCommandTable)
@@ -53,13 +85,14 @@ async function loadContext(tenantId: string, commandId: string) {
       and(eq(invocationCommandTable.tenantId, tenantId), eq(invocationCommandTable.id, commandId)),
     )
     .limit(1);
-  if (!command) return null;
+  if (!command) return { ok: false, reason: "command_not_found" };
   const invocation = await getInvocationById(tenantId, command.invocationId);
   const binding = invocation
     ? await getExecutionBindingByInvocation(tenantId, invocation.id)
     : null;
-  const ownerRows = invocation
-    ? command.targetOwnershipId
+  const isResume = command.commandType === "resume";
+  const ownerRows =
+    invocation && command.targetOwnershipId
       ? await db
           .select()
           .from(executionOwnershipTable)
@@ -71,36 +104,35 @@ async function loadContext(tenantId: string, commandId: string) {
             ),
           )
           .limit(1)
-      : await db
-          .select()
-          .from(executionOwnershipTable)
-          .where(
-            and(
-              eq(executionOwnershipTable.tenantId, tenantId),
-              eq(executionOwnershipTable.invocationId, invocation.id),
-              eq(executionOwnershipTable.ownershipState, "active"),
-            ),
-          )
-          .orderBy(sql`${executionOwnershipTable.leaseEpoch} DESC`)
-          .limit(1)
-    : [];
-  const [owner] = ownerRows;
-  // Session 与 Current Authority 绑定：targetSessionId 缺省时按 invocation 解析
-  // 最近一条 SessionBinding，供 effective capability 事实读取。
+      : [];
+  const owner = ownerRows[0] ?? null;
   const session = invocation
     ? command.targetSessionId
       ? await getRuntimeSessionBindingById(tenantId, command.targetSessionId)
-      : ((await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id))[0] ?? null)
+      : isResume
+        ? ((await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id))[0] ?? null)
+        : null
     : null;
   const revision = binding ? await getRuntimeRevisionById(binding.runtimeRevisionId) : null;
-  if (!invocation || !binding || !revision) return null;
-  if (command.commandType !== "resume" && (!owner || !session)) return null;
-  return { command, invocation, binding, owner, session, revision };
+  if (!invocation || !binding || !revision) return { ok: false, reason: "command_not_found" };
+  if (!isResume) {
+    // 冻结目标必须仍然有效：Owner 属于本 Invocation、仍 active，Session 与它一一对应。
+    if (
+      !owner ||
+      owner.ownershipState !== "active" ||
+      !session ||
+      session.ownershipId !== owner.id ||
+      session.leaseEpoch !== owner.leaseEpoch
+    ) {
+      return { ok: false, reason: "target_superseded" };
+    }
+  }
+  return { ok: true, command, invocation, binding, owner, session, revision };
 }
 
 async function resolveTransport(
   tenantId: string,
-  context: NonNullable<Awaited<ReturnType<typeof loadContext>>>,
+  context: Extract<CommandContextLoad, { ok: true }>,
 ): Promise<{ client: RuntimeTransport; endpoint: CommandRuntimeEndpointResolution }> {
   const external = context.revision.runtimeEvidenceKind === "external_endpoint";
   const endpoint = external ? context.revision.endpointRef : "http://127.0.0.1";
@@ -140,6 +172,10 @@ async function resolveTransport(
         hosted_artifact: () =>
           createInProcessHostedRuntimeClient({
             tenantId,
+            publishedCapabilityEvidence: {
+              runtimeRevisionId: context.revision.id,
+              runtimeCapabilitiesJson: context.revision.runtimeCapabilitiesJson,
+            },
             applicationService: hostedApplicationServiceForTest ?? hostedRuntimeApplicationService,
           }),
         external_endpoint: ({ endpoint: externalEndpoint, auth: externalAuth }) =>
@@ -162,14 +198,39 @@ async function resolveTransport(
   };
 }
 
+/**
+ * R03 §6：目标失效（`target_superseded`）的唯一终态收口入口。
+ *
+ * 目标失效在到达 dispatcher 之前就可能被判出；此时必须同样落终态，否则
+ * `queued` 行无人扫描、`dispatched` 行会被维护 lane 每 30s 反复领取，永不排空。
+ */
+async function settleIfSuperseded(
+  params: CommandGatewayInput,
+  reason: "command_not_found" | "target_superseded",
+): Promise<void> {
+  if (reason !== "target_superseded") return;
+  await settleSupersededInvocationCommand({
+    tenantId: params.tenantId,
+    commandId: params.commandId,
+    claimToken: params.claimToken ?? null,
+  });
+}
+
 async function dispatchCommand(params: {
   tenantId: string;
   commandId: string;
   type: "cancel" | "resume" | "steer" | "checkpoint";
   retry?: boolean;
+  /** R04 §5：维护 lane 领取到的 claim 令牌；请求内联路径为 undefined。 */
+  claimToken?: string;
 }): Promise<CommandGatewayResult> {
-  const context = await loadContext(params.tenantId, params.commandId);
-  if (!context || context.command.commandType !== params.type)
+  const loaded = await loadContext(params.tenantId, params.commandId);
+  if (!loaded.ok) {
+    await settleIfSuperseded(params, loaded.reason);
+    return { dispatched: false, reason: loaded.reason };
+  }
+  const context = loaded;
+  if (context.command.commandType !== params.type)
     return { dispatched: false, reason: "command_not_found" };
   // Resume 前置 capability 门控：effective capability（SessionBinding 冻结快照与
   // RuntimeRevision 发布事实的交集；session 缺省时回退发布事实，形状不可识别一律
@@ -190,6 +251,7 @@ async function dispatchCommand(params: {
     commandId: params.commandId,
     runtimeClient: transport.client,
     runtimeEndpointResolver: async (_binding: ExecutionBinding) => transport.endpoint,
+    ...(params.claimToken ? { claimToken: params.claimToken } : {}),
   };
   const command = params.retry
     ? await retryDispatchedInvocationCommand(input)
@@ -208,6 +270,8 @@ type CommandGatewayInput = {
   commandId: string;
   actorId?: string;
   correlationId?: string;
+  /** R04 §5：维护 lane 领取到的 claim 令牌（重投时用于复核完成身份）。 */
+  claimToken?: string;
 };
 
 export function dispatchInterruptCommandToRuntime(
@@ -233,15 +297,15 @@ export function dispatchCheckpointCommandToRuntime(
 export async function retryDispatchedCommandToRuntime(
   params: CommandGatewayInput,
 ): Promise<CommandGatewayResult> {
-  const context = await loadContext(params.tenantId, params.commandId);
-  if (
-    !context ||
-    !["cancel", "resume", "steer", "checkpoint"].includes(context.command.commandType)
-  )
-    return { dispatched: false, reason: "command_not_found" };
-  const type = context.command.commandType;
+  const loaded = await loadContext(params.tenantId, params.commandId);
+  if (!loaded.ok) {
+    await settleIfSuperseded(params, loaded.reason);
+    return { dispatched: false, reason: loaded.reason };
+  }
+  const type = loaded.command.commandType;
   if (type !== "cancel" && type !== "resume" && type !== "steer" && type !== "checkpoint") {
     return { dispatched: false, reason: "unsupported_capability" };
   }
+  // 重投沿用冻结目标；目标失效同样返回 target_superseded，不追随 current。
   return dispatchCommand({ ...params, type, retry: true });
 }

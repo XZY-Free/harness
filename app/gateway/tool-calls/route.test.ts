@@ -79,12 +79,12 @@ import {
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { createInvocationContinuationHandler } from "@/lib/runtime/continuation/invocation-continuation";
 import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
-import {
-  createRuntimeSessionBinding,
-  updateRuntimeSessionDispatch,
-} from "@/lib/runtime/persistence/runtime-session-store";
 import { resolveToolExecutionTarget } from "@/lib/runtime/resolve-tool-execution-target";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  applyRuntimeSessionDispatchForTest,
+  createRuntimeSessionBindingForTest,
+} from "@/lib/runtime/test-support/session-write-fixtures";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import {
@@ -448,7 +448,7 @@ async function seedBinding(
     acquiredByType: "service",
     acquiredById: "tool-gateway-test",
   });
-  const session = await createRuntimeSessionBinding({
+  const session = await createRuntimeSessionBindingForTest({
     tenantId: TENANT,
     invocationId,
     attemptId: attempt.id,
@@ -459,7 +459,7 @@ async function seedBinding(
     startIntentKey: `start:${acquired.ownership.id}`,
   });
   // canonical 约束：bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
-  await updateRuntimeSessionDispatch(TENANT, session.id, {
+  await applyRuntimeSessionDispatchForTest(TENANT, session.id, {
     bindingState: "active",
     semanticRequestJson: { kind: "tool-gateway-test" },
     semanticRequestDigest: `sha256:${"0".repeat(64)}`,
@@ -481,8 +481,11 @@ async function seedBinding(
     });
     await activateWorkspaceWriter({
       tenantId: TENANT,
+      invocationId,
+      attemptId: attempt.id,
       lockId: reserved.lock.id,
       ownershipId: acquired.ownership.id,
+      leaseEpoch: acquired.ownership.leaseEpoch,
       writerGeneration: reserved.writerGeneration,
       backendGrantRef: "test-desktop-grant",
       backendEvidence: {

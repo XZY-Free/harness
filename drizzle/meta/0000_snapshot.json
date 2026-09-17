@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "5b56de63-7568-4005-9082-aab45f4b8082",
+  "id": "ec7a5ef8-d859-4cf5-bcc6-46a4ac3c6bd2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -19256,6 +19256,49 @@
           "notNull": false,
           "autoincrement": false
         },
+        "releaseAttemptCount": {
+          "name": "releaseAttemptCount",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "releaseNextAttemptAt": {
+          "name": "releaseNextAttemptAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "releaseLeaseOwner": {
+          "name": "releaseLeaseOwner",
+          "type": "varchar(96)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "releaseLeaseExpiresAt": {
+          "name": "releaseLeaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "releaseErrorCode": {
+          "name": "releaseErrorCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "releaseReceipt": {
+          "name": "releaseReceipt",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "versionNo": {
           "name": "versionNo",
           "type": "bigint unsigned",
@@ -19313,6 +19356,14 @@
             "leaseExpiresAt"
           ],
           "isUnique": false
+        },
+        "WorkspaceWriteLock_release_due_idx": {
+          "name": "WorkspaceWriteLock_release_due_idx",
+          "columns": [
+            "lockState",
+            "releaseNextAttemptAt"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -19357,7 +19408,7 @@
       "checkConstraint": {
         "WorkspaceWriteLock_state_allowed": {
           "name": "WorkspaceWriteLock_state_allowed",
-          "value": "`lockState` IN ('released', 'reserved', 'active', 'releasing', 'quarantined')"
+          "value": "`lockState` IN ('released', 'reserved', 'active', 'releasing')"
         },
         "WorkspaceWriteLock_generation_non_negative": {
           "name": "WorkspaceWriteLock_generation_non_negative",

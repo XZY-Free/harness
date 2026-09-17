@@ -1,12 +1,10 @@
 /** Durable InvocationCommand delivery to the current Runtime authority. */
-import { createHash } from "node:crypto";
-import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
-import { type ThreadEvent, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
 import {
   type ExecutionBinding,
   type ExecutionOwnership,
@@ -23,7 +21,10 @@ import {
   getRuntimeSessionBindingById,
   getRuntimeSessionBindingByOwnership,
 } from "@/lib/runtime/persistence/runtime-session-store";
-import { scheduleCommandTransientRetry } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  scheduleCommandTransientRetry,
+  settleSupersededInvocationCommand,
+} from "@/lib/runtime/retry/dispatch-retry-queries";
 import type {
   RuntimeCancelTransportRequest,
   RuntimeHttpClient,
@@ -59,6 +60,8 @@ export interface CommandDispatchResult {
   commandState: "acknowledged" | "failed" | "dispatched";
   skipped?: boolean;
   skipReason?: "runtime_network_unavailable" | "runtime_unavailable";
+  /** R03 §6：命令目标在派发时已失效；命令被收口为 failed，未被重定向到新 Owner。 */
+  targetSuperseded?: true;
   pendingRetry?: { nextDispatchAt: Date; dispatchAttemptCount: number };
   retryExhausted?: boolean;
   response?: CancelResponse | RuntimeStartResponse | unknown;
@@ -71,6 +74,20 @@ export class CommandNotFoundError extends Error {}
 export class CommandAlreadyDispatchedError extends Error {}
 export class CommandInvocationNotFoundError extends Error {}
 export class ResumeInvocationNotWaitingError extends Error {}
+
+/**
+ * R03 §6：命令的目标代际已失效（旧 Owner 已关闭 / 不属于该 Invocation / 目标 Session 不匹配）。
+ *
+ * 语义是**返回 target superseded，不把同一命令重定向新 Owner**：控制面若要取消"当时的
+ * Current Authority"，必须生成针对新目标的**新命令**，而不是让旧 Transport 请求追随 current。
+ */
+export class CommandTargetSupersededError extends Error {
+  readonly code = "CommandTargetSuperseded";
+  constructor(reason: string) {
+    super(reason);
+    this.name = "CommandTargetSuperseded";
+  }
+}
 
 type CommandContext = {
   command: InvocationCommand;
@@ -95,10 +112,6 @@ function isPostAuthorityResume(context: CommandContext): boolean {
   );
 }
 
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex")}`;
-}
-
 async function loadCommand(
   tenantId: string,
   commandId: string,
@@ -118,8 +131,9 @@ async function loadCommand(
   if (!invocation) throw new CommandInvocationNotFoundError(command.invocationId);
   const binding = await getExecutionBindingByInvocation(tenantId, invocation.id);
   if (!binding) throw new CommandInvocationNotFoundError(invocation.id);
-  // Command 目标是 Invocation 的 Current Authority：targetOwnershipId 缺省时
-  // 解析当前 active ownership，保证共享 command gateway 对任何命令来源都成立。
+  // R03 §6：命令的目标在**正式接受时**（`createInvocationCommandInTransaction`）就固定为
+  // targetOwnershipId/targetSessionId。派发时只读这份冻结事实，**绝不**回落到"当前 active
+  // ownership"——那正是"旧命令重定向新 Owner"。目标失效由调用方按 superseded 返回。
   const [resolvedOwner] = command.targetOwnershipId
     ? await db
         .select()
@@ -132,18 +146,7 @@ async function loadCommand(
           ),
         )
         .limit(1)
-    : await db
-        .select()
-        .from(executionOwnershipTable)
-        .where(
-          and(
-            eq(executionOwnershipTable.tenantId, tenantId),
-            eq(executionOwnershipTable.invocationId, invocation.id),
-            eq(executionOwnershipTable.ownershipState, "active"),
-          ),
-        )
-        .orderBy(sql`${executionOwnershipTable.leaseEpoch} DESC`)
-        .limit(1);
+    : [];
   return { command, invocation, binding, owner: resolvedOwner ?? null };
 }
 
@@ -183,14 +186,15 @@ async function markDispatched(tenantId: string, commandId: string): Promise<Invo
 }
 
 /**
- * Resume ACK 原子收口：CAS dispatched → acknowledged + Invocation/Turn
- * waiting_user → running + turn.resumed 事件。transport 事件流可能已在网络调用
- * 期间把 Invocation/Turn 推进到别的状态，CAS 绝不回退。
+ * Resume ACK 收口：CAS dispatched → acknowledged 并记录 Transport 回执。
+ *
+ * R02 §7：**不**在这里推进 Invocation/Turn。`running` 只由合法 `execution.started`
+ * 事件映射（含 waiting_user→running 的正式恢复转换）；控制命令 ACK 仅表示
+ * Transport 交付事实，不能独立推进状态。
  */
-async function acknowledgeResumeAndAdvanceStates(params: {
+async function acknowledgeResumeCommand(params: {
   tenantId: string;
   commandId: string;
-  invocation: Invocation;
   response: unknown;
 }): Promise<void> {
   await db.transaction(async (tx) => {
@@ -206,67 +210,16 @@ async function acknowledgeResumeAndAdvanceStates(params: {
       .for("update")
       .limit(1);
     if (!command) throw new CommandNotFoundError(params.commandId);
-    if (command.commandState === "dispatched") {
-      await tx
-        .update(invocationCommandTable)
-        .set({
-          commandState: "acknowledged",
-          receiptJson: params.response,
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(invocationCommandTable.id, params.commandId));
-    }
-    const [invocation] = await tx
-      .select()
-      .from(invocationTable)
-      .where(
-        and(
-          eq(invocationTable.tenantId, params.tenantId),
-          eq(invocationTable.id, params.invocation.id),
-        ),
-      )
-      .for("update")
-      .limit(1);
-    if (!invocation) throw new CommandInvocationNotFoundError(params.invocation.id);
-    if (invocation.executionState === "waiting_user") {
-      await tx
-        .update(invocationTable)
-        .set({
-          executionState: "running",
-          errorCode: null,
-          errorSummary: null,
-          versionNo: invocation.versionNo + 1,
-          updatedAt: new Date(),
-        })
-        .where(eq(invocationTable.id, invocation.id));
-    }
-    if (!invocation.threadId || !invocation.turnId) return;
-    const [turn] = await tx
-      .select()
-      .from(turnTable)
-      .where(eq(turnTable.id, invocation.turnId))
-      .for("update")
-      .limit(1);
-    if (turn && turn.turnState === "waiting_user") {
-      await tx
-        .update(turnTable)
-        .set({
-          turnState: "running",
-          errorCode: null,
-          waitingAt: null,
-          versionNo: turn.versionNo + 1,
-        })
-        .where(eq(turnTable.id, turn.id));
-    }
-    const sequence = await allocateEventSequences(tx, invocation.threadId, 1);
-    await insertThreadEvent(tx, invocation.threadId, sequence, {
-      eventType: "turn.resumed",
-      turnId: invocation.turnId,
-      invocationId: invocation.id,
-      actorType: "system",
-      payload: { command_id: params.commandId },
-    });
+    if (command.commandState !== "dispatched") return;
+    await tx
+      .update(invocationCommandTable)
+      .set({
+        commandState: "acknowledged",
+        receiptJson: params.response,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(invocationCommandTable.id, params.commandId));
   });
 }
 
@@ -316,6 +269,8 @@ async function dispatchCommand(params: {
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
   expectedState?: "queued" | "dispatched";
+  /** R04 §5：维护 lane 的 claim 令牌；请求内联调度不带（undefined → null）。 */
+  claimToken?: string;
 }): Promise<CommandDispatchResult> {
   const context = await loadCommand(
     params.tenantId,
@@ -365,25 +320,28 @@ async function dispatchCommand(params: {
         runtimeClient: params.runtimeClient,
       });
     } else {
-      if (!context.owner)
-        throw new CommandInvocationNotFoundError(`owner:${context.invocation.id}`);
-      // Session 与 Current Authority 绑定：targetSessionId 缺省时按 ownership 解析。
+      // R03 §6：目标代际在命令接受时冻结；此处只读这份事实，**不**回落到当前 Owner。
+      // 目标缺失/已关闭 → target superseded，不重定向、不发网络请求。
+      const owner = context.owner;
+      if (!owner || owner.ownershipState !== "active") {
+        throw new CommandTargetSupersededError(
+          `目标代际不可用（${owner ? owner.ownershipState : "missing"}）：${context.invocation.id}`,
+        );
+      }
+      // Session 与已冻结的 Authority 一一绑定（每 Ownership generation 唯一 Session）：
+      // targetSessionId 缺省时按 ownership 解析；两者不一致即目标已失效。
       const session = command.targetSessionId
         ? await getRuntimeSessionBindingById(params.tenantId, command.targetSessionId)
-        : await getRuntimeSessionBindingByOwnership(params.tenantId, context.owner.id);
-      if (
-        !session ||
-        session.ownershipId !== context.owner.id ||
-        session.leaseEpoch !== context.owner.leaseEpoch
-      ) {
-        throw new Error("RuntimeSessionMismatch");
+        : await getRuntimeSessionBindingByOwnership(params.tenantId, owner.id);
+      if (!session || session.ownershipId !== owner.id || session.leaseEpoch !== owner.leaseEpoch) {
+        throw new CommandTargetSupersededError(`目标代际的 Session 不匹配：ownership=${owner.id}`);
       }
       const authority = {
         invocationId: context.invocation.id,
         runtimeRevisionId: context.binding.runtimeRevisionId,
-        attemptId: context.owner.attemptId,
-        ownershipId: context.owner.id,
-        leaseEpoch: String(context.owner.leaseEpoch),
+        attemptId: owner.attemptId,
+        ownershipId: owner.id,
+        leaseEpoch: String(owner.leaseEpoch),
         sessionBindingId: session.id,
       } as const;
       if (params.expectedType === "cancel") {
@@ -408,12 +366,18 @@ async function dispatchCommand(params: {
           command.payloadJson && typeof command.payloadJson === "object"
             ? (command.payloadJson as Record<string, unknown>)
             : {};
+        // R03 §6：Steer 的正式引用就是接受时持久化的正式输入（guidance ThreadItem）。
+        // 旧实现的 `<inputRef|invocation-command:{id}>` 与产品入口写入的 `guidance_item_id`
+        // 不同名，导致 Hosted Steer 退化为静默空操作。
         const inputRef =
-          typeof payload.inputRef === "string"
-            ? payload.inputRef
-            : `invocation-command:${command.id}`;
+          typeof payload.guidance_item_id === "string"
+            ? payload.guidance_item_id
+            : typeof payload.inputRef === "string"
+              ? payload.inputRef
+              : `invocation-command:${command.id}`;
+        // 稳定 payload digest = 命令正式接受时冻结的 payloadDigest（不在重试时重算）。
         const inputDigest =
-          typeof payload.inputDigest === "string" ? payload.inputDigest : digest(payload);
+          typeof payload.inputDigest === "string" ? payload.inputDigest : command.payloadDigest;
         const request: SteerRequest = {
           protocolVersion: 3,
           commandId: command.id,
@@ -431,12 +395,10 @@ async function dispatchCommand(params: {
       }
     }
     if (params.expectedType === "resume") {
-      // Resume ACK 原子收口：CAS dispatched→acknowledged + waiting_user→running
-      // + turn.resumed 事件；其余命令维持通用 acknowledge。
-      await acknowledgeResumeAndAdvanceStates({
+      // Resume ACK 收口：CAS dispatched→acknowledged；状态推进留给 execution.started。
+      await acknowledgeResumeCommand({
         tenantId: params.tenantId,
         commandId: params.commandId,
-        invocation: context.invocation,
         response,
       });
       resumeAcknowledged = true;
@@ -447,11 +409,14 @@ async function dispatchCommand(params: {
     if (error instanceof RuntimeHttpClientError && error.retryable) {
       const errorCode =
         error.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
-      const outcome = await scheduleCommandTransientRetry({
-        commandId: params.commandId,
-        errorCode,
-        now: new Date(),
-      });
+      const outcome = await scheduleCommandTransientRetry(
+        {
+          tenantId: params.tenantId,
+          commandId: params.commandId,
+          claimToken: params.claimToken ?? null,
+        },
+        { errorCode, now: new Date() },
+      );
       return outcome.outcome === "scheduled"
         ? {
             commandId: params.commandId,
@@ -487,10 +452,22 @@ async function dispatchCommand(params: {
         }).catch(() => undefined);
       }
     }
-    await reject(params.tenantId, params.commandId, error);
+    // R03 §6：目标失效是**可判定的稳定结果**，与普通投递失败区分开：它不重试、不重定向，
+    // 按 claim 身份直接收口为终态；控制面据此决定是否要生成针对新 Current Authority 的新命令。
+    const superseded = error instanceof CommandTargetSupersededError;
+    if (superseded) {
+      await settleSupersededInvocationCommand({
+        tenantId: params.tenantId,
+        commandId: params.commandId,
+        claimToken: params.claimToken ?? null,
+      });
+    } else {
+      await reject(params.tenantId, params.commandId, error);
+    }
     return {
       commandId: params.commandId,
       commandState: "failed",
+      ...(superseded ? { targetSuperseded: true as const } : {}),
       events: [],
       errorCode: error instanceof Error ? error.name : "RUNTIME_COMMAND_FAILED",
       errorMessage: error instanceof Error ? error.message : String(error),
@@ -574,8 +551,13 @@ async function dispatchFilesystemCheckpoint(input: {
   endpoint: CommandRuntimeEndpointResolution;
   runtimeClient: RuntimeHttpClient;
 }): Promise<unknown> {
-  if (!input.context.owner)
-    throw new CommandInvocationNotFoundError(`owner:${input.context.invocation.id}`);
+  // R03 §6：Checkpoint 目标同样固定于命令接受时；目标缺失/已关闭即 superseded。
+  const owner = input.context.owner;
+  if (!owner || owner.ownershipState !== "active") {
+    throw new CommandTargetSupersededError(
+      `Checkpoint 目标代际不可用（${owner ? owner.ownershipState : "missing"}）：${input.context.invocation.id}`,
+    );
+  }
   const payload = readCheckpointPayload(input.command.payloadJson);
   if (!payload || protocolDigest(input.command.payloadJson) !== input.command.payloadDigest) {
     throw new Error("CheckpointStale");
@@ -585,11 +567,11 @@ async function dispatchFilesystemCheckpoint(input: {
     : null;
   if (
     !session ||
-    session.ownershipId !== input.context.owner.id ||
-    session.leaseEpoch !== input.context.owner.leaseEpoch ||
+    session.ownershipId !== owner.id ||
+    session.leaseEpoch !== owner.leaseEpoch ||
     session.bindingState !== "active"
   ) {
-    throw new Error("RuntimeSessionMismatch");
+    throw new CommandTargetSupersededError(`Checkpoint 目标 Session 不匹配：ownership=${owner.id}`);
   }
   const workspace = input.endpoint.workspace;
   if (
@@ -601,9 +583,9 @@ async function dispatchFilesystemCheckpoint(input: {
   const authority = {
     invocationId: input.context.invocation.id,
     runtimeRevisionId: input.context.binding.runtimeRevisionId,
-    attemptId: input.context.owner.attemptId,
-    ownershipId: input.context.owner.id,
-    leaseEpoch: String(input.context.owner.leaseEpoch),
+    attemptId: owner.attemptId,
+    ownershipId: owner.id,
+    leaseEpoch: String(owner.leaseEpoch),
     sessionBindingId: session.id,
   } as const;
   const request: SafePointRequest = {
@@ -626,7 +608,7 @@ async function dispatchFilesystemCheckpoint(input: {
     const checkpoint = await produceFilesystemCheckpoint({
       tenantId: input.tenantId,
       invocationId: input.context.invocation.id,
-      ownershipId: input.context.owner.id,
+      ownershipId: owner.id,
       backend: workspace.backend,
       storageRoot: workspace.snapshotStorageRoot,
       checkpointIntentId: payload.checkpointIntentId,

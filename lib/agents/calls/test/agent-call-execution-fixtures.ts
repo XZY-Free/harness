@@ -66,11 +66,11 @@ import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
-import {
-  createRuntimeSessionBinding,
-  updateRuntimeSessionDispatch,
-} from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  applyRuntimeSessionDispatchForTest,
+  createRuntimeSessionBindingForTest,
+} from "@/lib/runtime/test-support/session-write-fixtures";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
@@ -660,7 +660,7 @@ export async function acquireExecutionAuthorityForInvocation(input: {
     acquiredByType: "service",
     acquiredById: "agent-call-test",
   });
-  const session = await createRuntimeSessionBinding({
+  const session = await createRuntimeSessionBindingForTest({
     tenantId: input.tenantId,
     invocationId: input.invocationId,
     attemptId: attempt.id,
@@ -671,7 +671,7 @@ export async function acquireExecutionAuthorityForInvocation(input: {
     startIntentKey: `start:${acquired.ownership.id}`,
   });
   // canonical 约束：bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
-  await updateRuntimeSessionDispatch(input.tenantId, session.id, {
+  await applyRuntimeSessionDispatchForTest(input.tenantId, session.id, {
     bindingState: "active",
     semanticRequestJson: { kind: "agent-call-test" },
     semanticRequestDigest: `sha256:${"0".repeat(64)}`,

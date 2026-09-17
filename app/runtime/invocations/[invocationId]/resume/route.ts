@@ -15,9 +15,11 @@ import {
   workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
 import type { RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
   getRuntimeSessionBindingByStartIntent,
-  updateRuntimeSessionDispatch,
+  updateRuntimeSessionDispatchInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import {
   RuntimeStartRequestSchema,
@@ -96,11 +98,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       if (current.bindingState === "active") return current;
       const remoteSessionRef = current.remoteSessionRef ?? `runtime-session:${current.id}`;
       const remoteExecutionRef = current.remoteExecutionRef ?? `runtime-execution:${current.id}`;
-      return updateRuntimeSessionDispatch(
-        claims.tenantId,
-        current.id,
-        {
-          bindingState: "dispatching",
+      // R02 §8：ACK 写入只经仓储方法（行锁 + 版本 CAS）；迟到 ACK 不能覆盖新状态。
+      return updateRuntimeSessionDispatchInTransaction(tx, {
+        tenantId: claims.tenantId,
+        id: current.id,
+        expectedVersionNo: current.versionNo,
+        patch: {
           semanticRequestJson: buildStartSemanticDigestInput(resume),
           semanticRequestDigest: resume.semanticRequestDigest,
           remoteSessionRef,
@@ -108,8 +111,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           transportAcknowledgement: { protocolVersion: 3, acceptedAt },
           acknowledgedAt: new Date(acceptedAt),
         },
-        tx,
-      );
+      });
     });
   } catch (error) {
     const code = error instanceof Error ? error.message : "NotCurrentExecutor";
@@ -121,6 +123,15 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   }
   const remoteSessionRef = session.remoteSessionRef ?? `runtime-session:${session.id}`;
   const remoteExecutionRef = session.remoteExecutionRef ?? `runtime-execution:${session.id}`;
+  // R02 §3：回执的 capabilitiesDigest 必须等于**发布证据**（RuntimeRevision manifest）摘要，
+  // 不存在零摘要占位——调用方（runtime-start）会逐字比对同一来源。
+  const runtimeRevision = await getRuntimeRevisionById(claims.runtimeRevisionId);
+  if (!runtimeRevision)
+    return apiError("RESOURCE_NOT_FOUND", "RuntimeRevision 不存在或不可见", { requestId });
+  const capabilitiesDigest = expectedCapabilityManifestDigest({
+    runtimeRevisionId: runtimeRevision.id,
+    runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
+  });
   const response: RuntimeStartResponse = {
     protocolVersion: 3,
     authority: resume.authority,
@@ -128,7 +139,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     accepted: true,
     remoteSessionRef,
     remoteExecutionRef,
-    capabilitiesDigest: `sha256:${"0".repeat(64)}`,
+    capabilitiesDigest,
     acceptedAt,
   };
   return apiSuccess(response, { status: 202, headers: { [REQUEST_ID_HEADER]: requestId } });

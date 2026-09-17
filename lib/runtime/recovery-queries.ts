@@ -12,6 +12,7 @@ import { and, eq } from "drizzle-orm";
  *
  * 与 markInvocationLost 同一串行化范围使用（caller-owned 事务内版本），
  * 禁止在此之外引入全局 db 连接版本（markSessionBindingLost）。
+ * R02 §8：状态写入本身收敛到仓储方法；这里只做 (Invocation, Ownership) 定位。
  */
 export async function markSessionBindingLostInSession(
   executor: SessionTx,
@@ -30,5 +31,9 @@ export async function markSessionBindingLostInSession(
     .for("update")
     .limit(1);
   if (!session) return null;
-  return markRuntimeSessionLostInTransaction(executor, session.id);
+  return markRuntimeSessionLostInTransaction(executor, {
+    tenantId: session.tenantId,
+    id: session.id,
+    expectedVersionNo: session.versionNo,
+  });
 }

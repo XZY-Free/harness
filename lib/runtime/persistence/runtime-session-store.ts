@@ -1,6 +1,18 @@
-/** RuntimeSessionBinding persistence: one logical session per ownership generation. */
+/**
+ * RuntimeSessionBinding persistence: one logical session per ownership generation.
+ *
+ * R02 §8（Session 写入规范）：
+ * - **本模块是 Session 的唯一写入口**。所有写方法都必需真实事务（`SessionTx`），
+ *   没有 `executor = db` 的自动提交路径；调用方必须先持有 Invocation 根锁。
+ * - 每次写入都 `SELECT ... FOR UPDATE` 锁当前行，并用调用方读到的 `versionNo`
+ *   做 CAS；迟到的 ACK/旧代际 Worker 因此不可能覆盖新状态
+ *   （不匹配抛 `RuntimeSessionVersionConflictError`）。
+ * - 生命周期是**单向**的声明式转换表（`assertSessionTransition`），
+ *   不再用散落的 `if (state === ...)` 修补无条件 UPDATE。
+ */
 import { randomUUID } from "node:crypto";
-import { type DbOrTx, db } from "@/lib/db/client";
+import type { DbOrTx } from "@/lib/db/client";
+import { db } from "@/lib/db/client";
 import {
   type RuntimeSessionBinding,
   type RuntimeSessionBindingState,
@@ -9,9 +21,63 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { RuntimeSessionBindingNotFoundError } from "@/lib/runtime/errors";
 import { canonicalizeJson } from "@/lib/runtime/runtime-protocol";
-import { and, desc, eq } from "drizzle-orm";
+import { type SQL, and, desc, eq, sql } from "drizzle-orm";
 
 export type SessionTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** 迟到写入被版本 CAS 拒绝：调用方持有的行版本已经不是当前行版本。 */
+export class RuntimeSessionVersionConflictError extends Error {
+  constructor(
+    readonly sessionBindingId: string,
+    readonly expectedVersionNo: number,
+    readonly actualVersionNo: number,
+  ) {
+    super(
+      `RuntimeSessionBinding 版本冲突（id=${sessionBindingId} expected=${expectedVersionNo} actual=${actualVersionNo}）`,
+    );
+    this.name = "RuntimeSessionVersionConflictError";
+  }
+}
+
+/**
+ * 单向生命周期转换表（R02 §8）。
+ *
+ * `dispatching` 自转换为重发/重试；`active` 只允许自转换与收口；
+ * `closed`/`lost` 是终态，只能自转换（幂等），
+ * 因此「把 active/closed/lost Session 改回 dispatching」在类型层面就不可能成立。
+ */
+const SESSION_TRANSITIONS: Record<RuntimeSessionBindingState, RuntimeSessionBindingState[]> = {
+  // `prepared → active` 允许：平台可能在一个事务内完成「派发接纳 + execution.started」，
+  // 中间态没有单独的写入。反向（active → dispatching/prepared）永不允许。
+  prepared: ["prepared", "dispatching", "active", "lost", "closed"],
+  dispatching: ["dispatching", "active", "lost", "closed"],
+  active: ["active", "lost", "closed"],
+  closed: ["closed"],
+  lost: ["lost"],
+};
+
+/** 终态代际不接受任何派发/ACK 写入（R02 §1）。 */
+const TERMINAL_SESSION_STATES = new Set<RuntimeSessionBindingState>(["closed", "lost"]);
+
+function assertSessionTransition(
+  current: RuntimeSessionBindingState,
+  next: RuntimeSessionBindingState,
+): void {
+  if (!SESSION_TRANSITIONS[current].includes(next)) {
+    throw new Error(`RuntimeSessionMismatch: ${current} → ${next}`);
+  }
+}
+
+/**
+ * 派发尝试的目标状态：只允许前进到 `dispatching`，或保持当前已接纳状态。
+ * 「active 回 dispatching」在类型层面不可能出现——丢 ACK 的重发不得把已启动代际降级。
+ */
+function dispatchTargetState(current: RuntimeSessionBindingState): RuntimeSessionBindingState {
+  if (TERMINAL_SESSION_STATES.has(current)) {
+    throw new Error(`RuntimeSessionMismatch: ${current} 已收口，不接受派发写入`);
+  }
+  return current === "prepared" ? "dispatching" : current;
+}
 
 export interface CreateRuntimeSessionBindingInput {
   tenantId: string;
@@ -27,9 +93,72 @@ export interface CreateRuntimeSessionBindingInput {
   runtimeCapabilitiesJson?: unknown;
 }
 
-export async function createRuntimeSessionBinding(
+/**
+ * 读 + 行锁。所有写方法的第一步；也供调用方在比较后决定下一步转换。
+ */
+export async function lockRuntimeSessionBindingInTransaction(
+  tx: SessionTx,
+  tenantId: string,
+  id: string,
+): Promise<RuntimeSessionBinding> {
+  const [row] = await tx
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(eq(runtimeSessionBindingTable.tenantId, tenantId), eq(runtimeSessionBindingTable.id, id)),
+    )
+    .for("update")
+    .limit(1);
+  if (!row) throw new RuntimeSessionBindingNotFoundError(id);
+  return row;
+}
+
+async function applySessionWrite(
+  tx: SessionTx,
+  current: RuntimeSessionBinding,
+  patch: SessionWritePatch,
+): Promise<RuntimeSessionBinding> {
+  const next = patch.bindingState ?? current.bindingState;
+  assertSessionTransition(current.bindingState, next);
+  await tx
+    .update(runtimeSessionBindingTable)
+    .set({ ...patch, bindingState: next, versionNo: current.versionNo + 1, updatedAt: new Date() })
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, current.tenantId),
+        eq(runtimeSessionBindingTable.id, current.id),
+      ),
+    );
+  const [updated] = await tx
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, current.tenantId),
+        eq(runtimeSessionBindingTable.id, current.id),
+      ),
+    )
+    .limit(1);
+  if (!updated) throw new RuntimeSessionBindingNotFoundError(current.id);
+  return updated;
+}
+
+function assertVersion(current: RuntimeSessionBinding, expectedVersionNo: number): void {
+  if (current.versionNo !== expectedVersionNo) {
+    throw new RuntimeSessionVersionConflictError(current.id, expectedVersionNo, current.versionNo);
+  }
+}
+
+/** 写入补丁：列值可以是字面量，也可以是 SQL 表达式（如计数自增）。 */
+type SessionWritePatch = {
+  [K in keyof typeof runtimeSessionBindingTable.$inferInsert]?:
+    | (typeof runtimeSessionBindingTable.$inferInsert)[K]
+    | SQL;
+} & { bindingState?: RuntimeSessionBindingState };
+
+export async function createRuntimeSessionBindingInTransaction(
+  tx: SessionTx,
   input: CreateRuntimeSessionBindingInput,
-  executor: DbOrTx = db,
 ): Promise<RuntimeSessionBinding> {
   if (input.startIntentKey !== `start:${input.ownershipId}`) {
     throw new Error("StartIntentConflict");
@@ -42,7 +171,7 @@ export async function createRuntimeSessionBinding(
   }
   const id = randomUUID();
   const intentFrozenAt = input.semanticRequestJson === undefined ? null : new Date();
-  await executor.insert(runtimeSessionBindingTable).values({
+  await tx.insert(runtimeSessionBindingTable).values({
     id,
     tenantId: input.tenantId,
     invocationId: input.invocationId,
@@ -71,7 +200,7 @@ export async function createRuntimeSessionBinding(
     closedAt: null,
     versionNo: 1,
   });
-  const row = await getRuntimeSessionBindingById(input.tenantId, id, executor);
+  const row = await getRuntimeSessionBindingById(input.tenantId, id, tx);
   if (!row) throw new RuntimeSessionBindingNotFoundError(id);
   return row;
 }
@@ -162,27 +291,54 @@ export async function getRuntimeSessionBindingsByInvocation(
     .orderBy(desc(runtimeSessionBindingTable.createdAt));
 }
 
-export async function updateRuntimeSessionDispatch(
-  tenantId: string,
-  id: string,
-  patch: {
-    bindingState?: RuntimeSessionBindingState;
-    semanticRequestJson?: unknown;
-    semanticRequestDigest?: string | null;
-    remoteSessionRef?: string | null;
-    remoteExecutionRef?: string | null;
-    transportAcknowledgement?: unknown;
-    acknowledgedAt?: Date | null;
-    startedEventId?: string | null;
-    nextDispatchAt?: Date | null;
-    dispatchLeaseOwner?: string | null;
-    dispatchLeaseExpiresAt?: Date | null;
-    lastErrorCode?: string | null;
-  },
-  executor: DbOrTx = db,
+export interface RuntimeSessionDispatchPatch {
+  bindingState?: RuntimeSessionBindingState;
+  semanticRequestJson?: unknown;
+  semanticRequestDigest?: string | null;
+  remoteSessionRef?: string | null;
+  remoteExecutionRef?: string | null;
+  transportAcknowledgement?: unknown;
+  acknowledgedAt?: Date | null;
+  startedEventId?: string | null;
+  nextDispatchAt?: Date | null;
+  dispatchLeaseOwner?: string | null;
+  dispatchLeaseExpiresAt?: Date | null;
+  lastErrorCode?: string | null;
+}
+
+export interface UpdateRuntimeSessionDispatchInput {
+  tenantId: string;
+  id: string;
+  /**
+   * 调用方**决策所依据**的行版本；给出时必须严格相等，否则拒绝迟到写入。
+   *
+   * 何时给：网络侧 ACK（`app/runtime/invocations/**`）——读与写之间存在真实竞争者。
+   * 何时省略：进程内派发/ACK（`runtime-start`）——该写入是**单调合并**
+   * （转换表不回退、语义请求冻结后不可改写、远端引用写一次），
+   * 因此「execution.started 先于 HTTP 202 到达」这类合法前移不得被判成迟到冲突。
+   */
+  expectedVersionNo?: number;
+  patch: RuntimeSessionDispatchPatch;
+}
+
+/**
+ * 唯一 dispatch 意图 / ACK 写入口（`runtime-start` 与两个 HTTP ACK 路由共用）。
+ *
+ * 语义不变量（R02 §1 / §2 / §8）：
+ * - 语义请求成对冻结，且**一旦冻结不得改写**（不同内容抛 `StartIntentConflict`）；
+ *   即「同 Key 同 digest 返回原接纳、同 Key 不同 digest 冲突」。
+ * - 远端不可变引用一旦写入不得改写（`ProtocolViolation`）。
+ * - 目标状态只允许「前进到 dispatching 或保持已接纳状态」，**绝不回退**
+ *   （`active` 不会因为丢 ACK 的重发被改回 `dispatching`）。
+ * - `closed`/`lost` 代际拒绝任何派发/ACK 写入。
+ */
+export async function updateRuntimeSessionDispatchInTransaction(
+  tx: SessionTx,
+  input: UpdateRuntimeSessionDispatchInput,
 ): Promise<RuntimeSessionBinding> {
-  const current = await getRuntimeSessionBindingById(tenantId, id, executor);
-  if (!current) throw new RuntimeSessionBindingNotFoundError(id);
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  if (input.expectedVersionNo !== undefined) assertVersion(current, input.expectedVersionNo);
+  const patch = input.patch;
   const semanticRequestChanged =
     patch.semanticRequestJson !== undefined || patch.semanticRequestDigest !== undefined;
   if (semanticRequestChanged) {
@@ -216,91 +372,170 @@ export async function updateRuntimeSessionDispatch(
   ) {
     throw new Error("ProtocolViolation");
   }
-  if (
-    ["closed", "lost"].includes(current.bindingState) &&
-    patch.bindingState &&
-    patch.bindingState !== current.bindingState
-  ) {
-    throw new Error("RuntimeSessionMismatch");
-  }
-  const bindingState =
-    current.bindingState === "active" && patch.bindingState === "dispatching"
-      ? "active"
-      : patch.bindingState;
   const intentFrozenAt = semanticRequestChanged && !current.intentFrozenAt ? new Date() : undefined;
-  await executor
-    .update(runtimeSessionBindingTable)
-    .set({
-      ...patch,
-      ...(bindingState ? { bindingState } : {}),
-      ...(intentFrozenAt ? { intentFrozenAt } : {}),
-      versionNo: current.versionNo + 1,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(runtimeSessionBindingTable.tenantId, tenantId), eq(runtimeSessionBindingTable.id, id)),
-    );
-  const updated = await getRuntimeSessionBindingById(tenantId, id, executor);
-  if (!updated) throw new RuntimeSessionBindingNotFoundError(id);
-  return updated;
+  return applySessionWrite(tx, current, {
+    ...patch,
+    // 显式状态按单向转换表校验；缺省时推导前向目标（`prepared → dispatching`，或保持已接纳状态）。
+    // 两者都不会让 `active` 回退——这正是「丢 ACK 的重发不得降级已启动代际」的保证。
+    bindingState: patch.bindingState ?? dispatchTargetState(current.bindingState),
+    ...(intentFrozenAt ? { intentFrozenAt } : {}),
+  });
 }
 
-export async function closeRuntimeSessionBinding(id: string): Promise<RuntimeSessionBinding> {
-  const [current] = await db
-    .select()
-    .from(runtimeSessionBindingTable)
-    .where(eq(runtimeSessionBindingTable.id, id))
-    .limit(1);
-  if (!current) throw new RuntimeSessionBindingNotFoundError(id);
-  if (current.bindingState === "closed") return current;
-  await db
-    .update(runtimeSessionBindingTable)
-    .set({
-      bindingState: "closed",
-      closedAt: new Date(),
-      versionNo: current.versionNo + 1,
-      updatedAt: new Date(),
-    })
-    .where(eq(runtimeSessionBindingTable.id, id));
-  const [updated] = await db
-    .select()
-    .from(runtimeSessionBindingTable)
-    .where(eq(runtimeSessionBindingTable.id, id))
-    .limit(1);
-  if (!updated) throw new RuntimeSessionBindingNotFoundError(id);
-  return updated;
-}
-
-export async function markRuntimeSessionLostInTransaction(
-  executor: SessionTx,
-  id: string,
+/**
+ * 正式启动事实写入（`execution.started`）。
+ *
+ * 同时补齐远端引用与 `startedEventId`；`active` 是唯一允许的下一步，
+ * 「closed/lost 回 active」被转换表拒绝。行锁本身已是最强 CAS，`expectedVersionNo`
+ * 只作为额外的代际一致性断言（同事务内下游写入可按需省略）。
+ */
+export async function activateRuntimeSessionBindingInTransaction(
+  tx: SessionTx,
+  input: {
+    tenantId: string;
+    id: string;
+    expectedVersionNo?: number;
+    startedEventId: string;
+    remoteSessionRef?: string | null;
+    remoteExecutionRef?: string | null;
+  },
 ): Promise<RuntimeSessionBinding> {
-  const [current] = await executor
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  if (input.expectedVersionNo !== undefined) assertVersion(current, input.expectedVersionNo);
+  if (
+    current.remoteSessionRef &&
+    input.remoteSessionRef &&
+    current.remoteSessionRef !== input.remoteSessionRef
+  ) {
+    throw new Error("ProtocolViolation");
+  }
+  if (
+    current.remoteExecutionRef &&
+    input.remoteExecutionRef &&
+    current.remoteExecutionRef !== input.remoteExecutionRef
+  ) {
+    throw new Error("ProtocolViolation");
+  }
+  return applySessionWrite(tx, current, {
+    bindingState: "active",
+    startedEventId: input.startedEventId,
+    ...(input.remoteSessionRef ? { remoteSessionRef: input.remoteSessionRef } : {}),
+    ...(input.remoteExecutionRef ? { remoteExecutionRef: input.remoteExecutionRef } : {}),
+  });
+}
+
+/** 收口为 closed（暂停/终态）。幂等：已 closed/lost 时原样返回。 */
+export async function closeRuntimeSessionBindingInTransaction(
+  tx: SessionTx,
+  input: { tenantId: string; id: string; expectedVersionNo?: number },
+): Promise<RuntimeSessionBinding> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  if (current.bindingState === "closed" || current.bindingState === "lost") return current;
+  if (input.expectedVersionNo !== undefined) assertVersion(current, input.expectedVersionNo);
+  return applySessionWrite(tx, current, { bindingState: "closed", closedAt: new Date() });
+}
+
+/**
+ * 标记代际失联（R03 §4/§5：替换/接管/过期时收口旧代际）。
+ * 幂等：已 lost/closed 时原样返回；同时释放 dispatch lease。
+ */
+export async function markRuntimeSessionLostInTransaction(
+  tx: SessionTx,
+  input: { tenantId: string; id: string; expectedVersionNo?: number },
+): Promise<RuntimeSessionBinding> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  if (current.bindingState === "lost" || current.bindingState === "closed") return current;
+  if (input.expectedVersionNo !== undefined) assertVersion(current, input.expectedVersionNo);
+  return applySessionWrite(tx, current, {
+    bindingState: "lost",
+    closedAt: new Date(),
+    dispatchLeaseOwner: null,
+    dispatchLeaseExpiresAt: null,
+  });
+}
+
+/** 按 Ownership 收口整代 Session（Resume 换代/接管路径）。 */
+export async function markRuntimeSessionLostByOwnershipInTransaction(
+  tx: SessionTx,
+  tenantId: string,
+  ownershipId: string,
+): Promise<RuntimeSessionBinding | null> {
+  const [current] = await tx
     .select()
     .from(runtimeSessionBindingTable)
-    .where(eq(runtimeSessionBindingTable.id, id))
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, tenantId),
+        eq(runtimeSessionBindingTable.ownershipId, ownershipId),
+      ),
+    )
     .for("update")
     .limit(1);
-  if (!current) throw new RuntimeSessionBindingNotFoundError(id);
+  if (!current) return null;
   if (current.bindingState === "lost" || current.bindingState === "closed") return current;
-  await executor
-    .update(runtimeSessionBindingTable)
-    .set({
-      bindingState: "lost",
-      closedAt: new Date(),
-      versionNo: current.versionNo + 1,
-      updatedAt: new Date(),
-    })
-    .where(eq(runtimeSessionBindingTable.id, id));
-  const [updated] = await executor
-    .select()
-    .from(runtimeSessionBindingTable)
-    .where(eq(runtimeSessionBindingTable.id, id))
-    .limit(1);
-  if (!updated) throw new RuntimeSessionBindingNotFoundError(id);
-  return updated;
+  return applySessionWrite(tx, current, {
+    bindingState: "lost",
+    closedAt: new Date(),
+    dispatchLeaseOwner: null,
+    dispatchLeaseExpiresAt: null,
+  });
 }
 
-export async function markRuntimeSessionLost(id: string): Promise<RuntimeSessionBinding> {
-  return db.transaction((tx) => markRuntimeSessionLostInTransaction(tx, id));
+// ───────────────────────────────────────────────────────────────────────────
+// Dispatch lease（R04 §5 / R02 §2）：授权、计数与退避排定都走同一行 CAS。
+// ───────────────────────────────────────────────────────────────────────────
+
+/** 授予一次 dispatch lease。`expectedVersionNo` 不匹配说明代际已被接管 → 拒绝。 */
+export async function claimRuntimeSessionDispatchInTransaction(
+  tx: SessionTx,
+  input: {
+    tenantId: string;
+    id: string;
+    expectedVersionNo: number;
+    leaseOwner: string;
+    leaseExpiresAt: Date;
+  },
+): Promise<RuntimeSessionBinding> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  assertVersion(current, input.expectedVersionNo);
+  return applySessionWrite(tx, current, {
+    dispatchLeaseOwner: input.leaseOwner,
+    dispatchLeaseExpiresAt: input.leaseExpiresAt,
+  });
+}
+
+/** 计数一次真实派发（网络发送前）。 */
+export async function recordRuntimeSessionDispatchInTransaction(
+  tx: SessionTx,
+  input: { tenantId: string; id: string; expectedVersionNo: number; now: Date },
+): Promise<RuntimeSessionBinding> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  assertVersion(current, input.expectedVersionNo);
+  return applySessionWrite(tx, current, {
+    dispatchCount: sql`${runtimeSessionBindingTable.dispatchCount} + 1`,
+    lastDispatchAt: input.now,
+  });
+}
+
+/** 记录一次暂态失败并排定 durable retry（释放 lease）。 */
+export async function rescheduleRuntimeSessionDispatchInTransaction(
+  tx: SessionTx,
+  input: {
+    tenantId: string;
+    id: string;
+    expectedVersionNo: number;
+    dispatchCount: number;
+    nextDispatchAt: Date | null;
+    lastErrorCode: string | null;
+  },
+): Promise<RuntimeSessionBinding> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  assertVersion(current, input.expectedVersionNo);
+  return applySessionWrite(tx, current, {
+    dispatchCount: input.dispatchCount,
+    nextDispatchAt: input.nextDispatchAt,
+    lastErrorCode: input.lastErrorCode,
+    dispatchLeaseOwner: null,
+    dispatchLeaseExpiresAt: null,
+  });
 }

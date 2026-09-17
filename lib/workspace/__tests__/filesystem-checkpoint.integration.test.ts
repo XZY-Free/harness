@@ -31,8 +31,9 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { filesystemCheckpointTable } from "@/lib/persistence/schema/filesystem-checkpoint";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
-import { updateRuntimeSessionDispatch } from "@/lib/runtime/persistence/runtime-session-store";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import {
   abandonFilesystemCheckpoint,
   produceFilesystemCheckpoint,
@@ -52,6 +53,9 @@ import {
 } from "@/lib/workspace/workspace-writer";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
+
+/** R02 §3：该夹具 Session 冻结的发布能力证据（Hosted Revision 的能力名列表）。 */
+const RUNTIME_CAPABILITIES_JSON = ["event_stream"];
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000000";
 
@@ -174,6 +178,7 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
     attemptId: fixture.attempt.id,
     runtimeRevisionId: fixture.binding.runtimeRevisionId,
     environmentLeaseId: environmentLease.id,
+    runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
   });
   const backend = createWorkspaceBackend(
     createWorkspaceHostBroker({ root: hostRoot, managedRoot: writerRoot }),
@@ -223,8 +228,12 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
   const semanticRequestDigest = protocolDigest(semanticRequest);
   const remoteSessionRef = `checkpoint-session:${acquired.session.id}`;
   const remoteExecutionRef = `checkpoint-execution:${fixture.invocation.id}`;
-  const capabilitiesDigest = protocolDigest({ capabilities: "checkpoint-test" });
-  await updateRuntimeSessionDispatch(TENANT_ID, acquired.session.id, {
+  // R02 §3：Hosted 接纳回执的摘要来自冻结发布证据。夹具的 Session 与事件必须同源。
+  const capabilitiesDigest = expectedCapabilityManifestDigest({
+    runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+  });
+  await applyRuntimeSessionDispatchForTest(TENANT_ID, acquired.session.id, {
     bindingState: "dispatching",
     semanticRequestJson: semanticRequest,
     semanticRequestDigest,

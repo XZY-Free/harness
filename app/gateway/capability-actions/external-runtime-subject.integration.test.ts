@@ -24,11 +24,11 @@ import {
   governanceConfigRevisionTable,
   governanceConfigSetTable,
 } from "@/lib/persistence/schema/governance-config";
-import {
-  createRuntimeSessionBinding,
-  updateRuntimeSessionDispatch,
-} from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  applyRuntimeSessionDispatchForTest,
+  createRuntimeSessionBindingForTest,
+} from "@/lib/runtime/test-support/session-write-fixtures";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -79,7 +79,7 @@ async function seedRuntimeAuthority(input: {
     acquiredByType: "service",
     acquiredById: "external-runtime-subject-test",
   });
-  const session = await createRuntimeSessionBinding({
+  const session = await createRuntimeSessionBindingForTest({
     tenantId: input.tenantId,
     invocationId: input.invocationId,
     attemptId: attempt.id,
@@ -90,7 +90,7 @@ async function seedRuntimeAuthority(input: {
     startIntentKey: `start:${acquired.ownership.id}`,
   });
   // canonical 约束：bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
-  await updateRuntimeSessionDispatch(input.tenantId, session.id, {
+  await applyRuntimeSessionDispatchForTest(input.tenantId, session.id, {
     bindingState: "active",
     semanticRequestJson: { kind: "external-runtime-subject-test" },
     semanticRequestDigest: `sha256:${"0".repeat(64)}`,

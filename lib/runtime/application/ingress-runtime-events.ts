@@ -29,6 +29,11 @@ import { filesystemCheckpointTable } from "@/lib/persistence/schema/filesystem-c
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { workspaceBinding } from "@/lib/persistence/schema/workspace";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
+import {
+  activateRuntimeSessionBindingInTransaction,
+  closeRuntimeSessionBindingInTransaction,
+} from "@/lib/runtime/persistence/runtime-session-store";
 import {
   type AuthorityIdentity,
   type EventReceipt,
@@ -36,10 +41,7 @@ import {
   RuntimeEventBatchSchema,
   computeEventPayloadHash,
 } from "@/lib/runtime/runtime-protocol";
-import {
-  getActiveLocksByInvocation,
-  releaseWorkspaceWriteLock,
-} from "@/lib/workspace/workspace-write-lock-queries";
+import { getActiveLocksByInvocation } from "@/lib/workspace/workspace-write-lock-queries";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 export type IngressTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -593,6 +595,15 @@ function validateExecutionStarted(
   ) {
     throw new IngressAuthorityMismatchError(session.invocationId);
   }
+  // R02 §3：发布证据是唯一比对源。ACK 之前到达的 execution.started 也必须与
+  // Session 冻结的 RuntimeRevision manifest 摘要一致，不能只按"可选 ACK"校验。
+  const expectedCapabilities = expectedCapabilityManifestDigest({
+    runtimeRevisionId: session.runtimeRevisionId,
+    runtimeCapabilitiesJson: session.runtimeCapabilitiesJson,
+  });
+  if (capabilitiesDigest !== expectedCapabilities) {
+    throw new IngressAuthorityMismatchError(session.invocationId);
+  }
   const acknowledgedCapabilities =
     session.transportAcknowledgement &&
     typeof session.transportAcknowledgement === "object" &&
@@ -754,15 +765,21 @@ async function applyLifecycle(
   ownershipId: string,
   sessionBindingId: string,
   binding: typeof executionBindingTable.$inferSelect,
+  /** 本事件 `requireIngressAuthority` 锁到的 Session 行版本（R02 §8 CAS 依据）。 */
+  sessionVersionNo: number,
 ): Promise<Invocation> {
   if (event.type === "execution.started") {
     const started = event.payload;
-    if (invocation.executionState === "queued") {
+    // R02 §7：`running` 只能由合法 `execution.started` 映射。既包含首次 queued→running，
+    // 也包含受控暂停后的正式恢复转换 waiting_user→running；控制命令 ACK 不推进状态。
+    if (invocation.executionState === "queued" || invocation.executionState === "waiting_user") {
       await tx
         .update(invocationTable)
         .set({
           executionState: "running",
-          startedAt: now,
+          errorCode: null,
+          errorSummary: null,
+          ...(invocation.executionState === "queued" ? { startedAt: now } : {}),
           versionNo: invocation.versionNo + 1,
           updatedAt: now,
         })
@@ -770,7 +787,12 @@ async function applyLifecycle(
       if (invocation.turnId)
         await tx
           .update(turnTable)
-          .set({ turnState: "running" })
+          .set({
+            turnState: "running",
+            errorCode: null,
+            waitingAt: null,
+            versionNo: sql`${turnTable.versionNo} + 1`,
+          })
           .where(eq(turnTable.id, invocation.turnId));
     }
     await tx
@@ -787,24 +809,17 @@ async function applyLifecycle(
       .update(invocationAttemptTable)
       .set({ attemptState: "running", startedAt: now, updatedAt: now })
       .where(eq(invocationAttemptTable.id, attemptId));
-    await tx
-      .update(runtimeSessionBindingTable)
-      .set({
-        bindingState: "active",
-        remoteSessionRef:
-          typeof started.remoteSessionRef === "string" ? started.remoteSessionRef : undefined,
-        remoteExecutionRef:
-          typeof started.remoteExecutionRef === "string" ? started.remoteExecutionRef : undefined,
-        startedEventId: event.eventId,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(runtimeSessionBindingTable.tenantId, invocation.tenantId),
-          eq(runtimeSessionBindingTable.id, sessionBindingId),
-          eq(runtimeSessionBindingTable.invocationId, invocation.id),
-        ),
-      );
+    // R02 §8：Session 状态写入收敛到仓储方法（行锁 + 单向转换表；closed/lost 不可回 active）。
+    await activateRuntimeSessionBindingInTransaction(tx, {
+      tenantId: invocation.tenantId,
+      id: sessionBindingId,
+      expectedVersionNo: sessionVersionNo,
+      startedEventId: event.eventId,
+      remoteSessionRef:
+        typeof started.remoteSessionRef === "string" ? started.remoteSessionRef : null,
+      remoteExecutionRef:
+        typeof started.remoteExecutionRef === "string" ? started.remoteExecutionRef : null,
+    });
     const [updated] = await tx
       .select()
       .from(invocationTable)
@@ -877,18 +892,11 @@ async function applyLifecycle(
           .update(turnTable)
           .set({ turnState: "waiting_user" })
           .where(eq(turnTable.id, invocation.turnId));
-      const locks = await getActiveLocksByInvocation(invocation.tenantId, invocation.id, tx);
-      for (const lock of locks) {
-        await releaseWorkspaceWriteLock(
-          {
-            tenantId: invocation.tenantId,
-            lockId: lock.id,
-            ownershipId,
-            reasonCode: "execution_suspended",
-          },
-          tx,
-        );
-      }
+      // R04 §3：**不**在已持有 I 根锁时调用 WorkspaceWriteLock 撤销/释放。
+      // 本事务只失效 Authority、关闭 Session；Writer 的物理 stop/drain 由持久
+      // Workspace Writer 释放 lane 按 W→I 顺序处理（`workspace-writer-release.ts`）。
+      // 释放请求的持久事实就是这里写的 "Ownership 已非 current + W 行仍被其持有"，
+      // 崩溃后仍可被扫描发现，不依赖任何内存定时器。
       await tx
         .update(executionOwnershipTable)
         .set({
@@ -906,21 +914,12 @@ async function applyLifecycle(
             eq(executionOwnershipTable.invocationId, invocation.id),
           ),
         );
-      await tx
-        .update(runtimeSessionBindingTable)
-        .set({
-          bindingState: "closed",
-          closedAt: now,
-          versionNo: sql`${runtimeSessionBindingTable.versionNo} + 1`,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(runtimeSessionBindingTable.tenantId, invocation.tenantId),
-            eq(runtimeSessionBindingTable.id, sessionBindingId),
-            eq(runtimeSessionBindingTable.invocationId, invocation.id),
-          ),
-        );
+      // R02 §8：暂停收口同样只经仓储方法（行锁 + 单向转换表）。
+      await closeRuntimeSessionBindingInTransaction(tx, {
+        tenantId: invocation.tenantId,
+        id: sessionBindingId,
+        expectedVersionNo: sessionVersionNo,
+      });
       const [owner] = await tx
         .select({ environmentLeaseId: executionOwnershipTable.environmentLeaseId })
         .from(executionOwnershipTable)
@@ -991,18 +990,8 @@ async function applyLifecycle(
             finishedAt: now,
           })
           .where(eq(turnTable.id, invocation.turnId));
-      const locks = await getActiveLocksByInvocation(invocation.tenantId, invocation.id, tx);
-      for (const lock of locks) {
-        await releaseWorkspaceWriteLock(
-          {
-            tenantId: invocation.tenantId,
-            lockId: lock.id,
-            ownershipId,
-            reasonCode: "execution_terminal",
-          },
-          tx,
-        );
-      }
+      // R04 §3：同上——终态事务不释放 WorkspaceWriteLock，只把 Authority 置为终态；
+      // 物理 Writer 由持久释放 lane 按 W→I 顺序撤销并留存真实 stop/drain 回执。
       await tx
         .update(executionOwnershipTable)
         .set({
@@ -1019,16 +1008,12 @@ async function applyLifecycle(
             eq(executionOwnershipTable.invocationId, invocation.id),
           ),
         );
-      await tx
-        .update(runtimeSessionBindingTable)
-        .set({ bindingState: "closed", closedAt: now, updatedAt: now })
-        .where(
-          and(
-            eq(runtimeSessionBindingTable.tenantId, invocation.tenantId),
-            eq(runtimeSessionBindingTable.id, sessionBindingId),
-            eq(runtimeSessionBindingTable.invocationId, invocation.id),
-          ),
-        );
+      // R02 §8：终态收口同样只经仓储方法（行锁 + 单向转换表）。
+      await closeRuntimeSessionBindingInTransaction(tx, {
+        tenantId: invocation.tenantId,
+        id: sessionBindingId,
+        expectedVersionNo: sessionVersionNo,
+      });
       await tx
         .update(invocationTable)
         .set({
@@ -1287,6 +1272,7 @@ export async function ingressRuntimeEvents(
         authority.owner.id,
         parsed.authority.sessionBindingId,
         authority.binding,
+        authority.session.versionNo,
       );
     }
     return {

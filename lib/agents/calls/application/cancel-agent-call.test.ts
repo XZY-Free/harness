@@ -3,6 +3,7 @@ import { cancelActiveAgentCalls } from "@/lib/agents/calls/application/cancel-ac
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import {
   EXECUTION_FIXTURE_CONTRACT,
+  acquireExecutionAuthorityForInvocation,
   seedAgentCallExecutionScenario,
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
@@ -66,10 +67,17 @@ describe("cancelAgentCall 冻结能力真值", () => {
   it("cancel=true 调用 tasks/cancel 并把 AgentCall 置为 cancelled", async () => {
     const scenario = await seed(true);
 
+    // R03 §6：Cancel 必须携带目标 Authority（生产中由 InvocationCommand 在接受时
+    // 快照 targetOwnershipId/targetSessionId）。这里为父 Invocation 建出真实执行权，
+    // 否则"停谁"根本无从确定。
     await hostedRuntimeApplicationService.cancel({
       tenantId: scenario.tenantId,
       invocationId: scenario.parentInvocationId,
       idempotencyKey: `test-cancel:${scenario.parentInvocationId}`,
+      authority: await acquireExecutionAuthorityForInvocation({
+        tenantId: scenario.tenantId,
+        invocationId: scenario.parentInvocationId,
+      }),
     });
     const [call] = await db
       .select()

@@ -8,7 +8,7 @@ import { getInvocationById } from "@/lib/executions/persistence/invocation-store
 import { recordAuditEvent } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/audit";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
-import { markInvocationLost } from "@/lib/runtime/application/runtime-recovery";
+import { markInvocationLost, readObservedOwner } from "@/lib/runtime/application/runtime-recovery";
 import { resumeHarnessInvocation } from "@/lib/runtime/application/runtime-resume";
 import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import {
@@ -169,6 +169,8 @@ export function createProductionInvocationContinuationWorker(workerId?: string) 
           invocationId,
           reasonCode: `CONTINUATION_DEAD_LETTER:${errorCode}`,
           errorSummary,
+          // R03 §5：投递失败结论必须携带当时观察到的 Owner tuple。
+          observedOwner: await readObservedOwner({ tenantId: event.tenantId, invocationId }),
           idempotencyKey: `continuation-dead-letter:${event.id}`,
         });
       },

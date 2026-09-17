@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -18,7 +19,9 @@ import {
 } from "@/lib/environment/environment-lease-store";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import {
-  getPendingEnvironmentSelection,
+  getEffectiveEnvironmentSelection,
+  getEnvironmentChangeRequestById,
+  recordEnvironmentSelectionFirstApplied,
   requestEnvironmentSelection,
 } from "@/lib/environment/environment-selection";
 import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
@@ -505,8 +508,134 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
     expect(active[0]?.ownershipState).toBe("active");
     expect(fixture.binding.environmentDefinitionRevisionId).toBe(r1!.id);
     // 待生效选择只对下一个 Invocation 可见。
-    const pending = await getPendingEnvironmentSelection(fixture.tenantId, fixture.threadId);
+    const pending = await getEffectiveEnvironmentSelection(fixture.tenantId, fixture.threadId);
     expect(pending?.requestedRevisionId).toBe(r2.id);
+  });
+
+  it("ENV-13: selectionSequence is MAX+1 under the Thread lock and the newest request is the effective one", async () => {
+    const definition = await createEnvironmentDefinition({
+      tenantId: DEFAULT_TENANT_ID,
+      environmentKey: "selection-order-env",
+      displayName: "选择顺序环境",
+      revision: revisionInput(),
+    });
+    const fixture = await seedPreparedRuntimeAttempt({
+      environmentDefinitionRevisionId: definition.currentRevisionId!,
+    });
+    const r2 = await createEnvironmentRevision(
+      DEFAULT_TENANT_ID,
+      definition.id,
+      revisionInput({ environmentType: "cloud" }),
+    );
+    const r3 = await createEnvironmentRevision(
+      DEFAULT_TENANT_ID,
+      definition.id,
+      revisionInput({
+        environmentType: "cloud",
+        resourceLimitsJson: { cpu: 4, memoryMb: 4096 },
+      }),
+    );
+    const first = await requestEnvironmentSelection({
+      tenantId: fixture.tenantId,
+      threadId: fixture.threadId,
+      requestedRevisionId: r2.id,
+      requestedBy: "test-user",
+    });
+    const second = await requestEnvironmentSelection({
+      tenantId: fixture.tenantId,
+      threadId: fixture.threadId,
+      requestedRevisionId: r3.id,
+      requestedBy: "test-user",
+    });
+    // MAX+1（不是 MIN+1）：第二条不会撞上 `tenant_thread_sequence_uq`。
+    expect(first.selectionSequence).toBe(1);
+    expect(second.selectionSequence).toBe(2);
+    // 契约「新请求取代」：生效选择是最新一条。
+    const effective = await getEffectiveEnvironmentSelection(fixture.tenantId, fixture.threadId);
+    expect(effective?.id).toBe(second.id);
+    expect(effective?.requestedRevisionId).toBe(r3.id);
+  });
+
+  it("ENV-14: first application is recorded exactly once as applied + firstAppliedInvocationId", async () => {
+    const definition = await createEnvironmentDefinition({
+      tenantId: DEFAULT_TENANT_ID,
+      environmentKey: "selection-apply-env",
+      displayName: "首用记录环境",
+      revision: revisionInput(),
+    });
+    const fixture = await seedPreparedRuntimeAttempt({
+      environmentDefinitionRevisionId: definition.currentRevisionId!,
+    });
+    const r2 = await createEnvironmentRevision(
+      DEFAULT_TENANT_ID,
+      definition.id,
+      revisionInput({ environmentType: "cloud" }),
+    );
+    const selection = await requestEnvironmentSelection({
+      tenantId: fixture.tenantId,
+      threadId: fixture.threadId,
+      requestedRevisionId: r2.id,
+      requestedBy: "test-user",
+    });
+    expect(selection.requestState).toBe("accepted_for_next_invocation");
+    expect(selection.firstAppliedInvocationId).toBeNull();
+
+    expect(
+      await recordEnvironmentSelectionFirstApplied({
+        tenantId: fixture.tenantId,
+        selectionId: selection.id,
+        invocationId: fixture.invocation.id,
+      }),
+    ).toBe(true);
+    const applied = await getEnvironmentChangeRequestById(fixture.tenantId, selection.id);
+    expect(applied?.requestState).toBe("applied");
+    expect(applied?.firstAppliedInvocationId).toBe(fixture.invocation.id);
+    expect(applied?.versionNo).toBe(2);
+
+    // 重复调度是幂等重放：不改写首用锚点，也不推进版本。
+    expect(
+      await recordEnvironmentSelectionFirstApplied({
+        tenantId: fixture.tenantId,
+        selectionId: selection.id,
+        invocationId: randomUUID(),
+      }),
+    ).toBe(false);
+    const replay = await getEnvironmentChangeRequestById(fixture.tenantId, selection.id);
+    expect(replay?.firstAppliedInvocationId).toBe(fixture.invocation.id);
+    expect(replay?.versionNo).toBe(2);
+  });
+
+  it("ENV-15: an applied selection stays the effective default for later invocations", async () => {
+    const definition = await createEnvironmentDefinition({
+      tenantId: DEFAULT_TENANT_ID,
+      environmentKey: "selection-persist-env",
+      displayName: "长期生效环境",
+      revision: revisionInput(),
+    });
+    const fixture = await seedPreparedRuntimeAttempt({
+      environmentDefinitionRevisionId: definition.currentRevisionId!,
+    });
+    const r2 = await createEnvironmentRevision(
+      DEFAULT_TENANT_ID,
+      definition.id,
+      revisionInput({ environmentType: "cloud" }),
+    );
+    const selection = await requestEnvironmentSelection({
+      tenantId: fixture.tenantId,
+      threadId: fixture.threadId,
+      requestedRevisionId: r2.id,
+      requestedBy: "test-user",
+    });
+    await recordEnvironmentSelectionFirstApplied({
+      tenantId: fixture.tenantId,
+      selectionId: selection.id,
+      invocationId: fixture.invocation.id,
+    });
+    // `applied` 之后仍是生效选择（不是"用过一次就失效"）。
+    const effective = await getEffectiveEnvironmentSelection(fixture.tenantId, fixture.threadId);
+    expect(effective?.id).toBe(selection.id);
+    expect(effective?.requestState).toBe("applied");
+    expect(effective?.requestedRevisionId).toBe(r2.id);
   });
 
   it("ENV-11: NO_PLATFORM_ENVIRONMENT rejects platform-managed environment combinations", async () => {

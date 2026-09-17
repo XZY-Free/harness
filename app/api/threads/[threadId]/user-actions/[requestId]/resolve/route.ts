@@ -62,7 +62,7 @@ import {
 } from "@/lib/identity/idempotency";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
-import { markInvocationLost } from "@/lib/runtime/application/runtime-recovery";
+import { markInvocationLost, readObservedOwner } from "@/lib/runtime/application/runtime-recovery";
 import { dispatchResumeCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { InvocationAlreadyTerminalError } from "@/lib/runtime/errors";
 import { and, eq } from "drizzle-orm";
@@ -362,6 +362,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
           invocationId: result.invocation.id,
           reasonCode: "resume_dispatch_failed",
           errorSummary: "Resume 命令未被运行服务接受",
+          // R03 §5：Resume 失败结论携带当时观察到的 Owner tuple。
+          observedOwner: await readObservedOwner({
+            tenantId: principal.tenantId,
+            invocationId: result.invocation.id,
+          }),
           actorType: "system",
           actorId: principal.userIdentityId,
           correlationId: requestId,
@@ -472,6 +477,11 @@ async function finalizeResumeFailure(params: {
         invocationId: params.invocation.id,
         reasonCode: params.reasonCode,
         errorSummary: params.errorSummary,
+        // R03 §5：Resume 失败结论携带当时观察到的 Owner tuple。
+        observedOwner: await readObservedOwner({
+          tenantId: params.tenantId,
+          invocationId: params.invocation.id,
+        }),
         actorType: "system",
         actorId: params.actorId,
         correlationId: params.correlationId,

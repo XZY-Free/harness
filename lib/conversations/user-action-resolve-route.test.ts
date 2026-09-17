@@ -46,12 +46,12 @@ import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-
 import { createConfiguredHostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
-import {
-  createRuntimeSessionBinding,
-  updateRuntimeSessionDispatch,
-} from "@/lib/runtime/persistence/runtime-session-store";
 import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  applyRuntimeSessionDispatchForTest,
+  createRuntimeSessionBindingForTest,
+} from "@/lib/runtime/test-support/session-write-fixtures";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
@@ -228,7 +228,7 @@ async function attachA2ABinding(params: {
     acquiredByType: "service",
     acquiredById: "a2a-resume-route-test",
   });
-  const session = await createRuntimeSessionBinding({
+  const session = await createRuntimeSessionBindingForTest({
     tenantId: params.tenantId,
     invocationId: params.invocationId,
     attemptId: attempt.id,
@@ -282,7 +282,7 @@ async function attachA2ABinding(params: {
     boundAt: new Date(),
   });
   const semanticRequest = { fixture: "a2a-resume-route", invocationId: params.invocationId };
-  await updateRuntimeSessionDispatch(params.tenantId, session.id, {
+  await applyRuntimeSessionDispatchForTest(params.tenantId, session.id, {
     bindingState: "active",
     semanticRequestJson: semanticRequest,
     semanticRequestDigest: protocolDigest(semanticRequest),

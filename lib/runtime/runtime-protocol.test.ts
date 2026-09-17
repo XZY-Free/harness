@@ -831,6 +831,34 @@ describe("Start digest exclusion domains (§7.1)", () => {
     expect(digestA).toBe(digestB);
   });
 
+  it("ContextHandle 签名时间/jti 轮换不影响 semanticRequestDigest（业务内容不变）", () => {
+    const base = RuntimeStartRequestSchema.parse(validStartRequest);
+    const digestA = computeSemanticRequestDigest(base);
+    // R02 §1：可轮换的只有 issuedAt / expiresAt / jti 这类签名时间材料。
+    const rotated = RuntimeStartRequestSchema.parse({
+      ...validStartRequest,
+      context: {
+        ...validContext,
+        common: {
+          ...validContext.common,
+          issuedAt: validContext.common.issuedAt + 60_000,
+          expiresAt: validContext.common.expiresAt + 60_000,
+          jti: TENANT_ID,
+        },
+      },
+    });
+    expect(computeSemanticRequestDigest(rotated)).toBe(digestA);
+    // 业务内容（ContextHandle 的稳定事实）一起变则必须被发现。
+    const businessChanged = RuntimeStartRequestSchema.parse({
+      ...validStartRequest,
+      context: {
+        ...validContext,
+        common: { ...validContext.common, contextSourceDigest: DIGEST_B },
+      },
+    });
+    expect(computeSemanticRequestDigest(businessChanged)).not.toBe(digestA);
+  });
+
   it("稳定资源身份变化必须改变 semanticRequestDigest（invocationId / threadId / producerSequenceStart）", () => {
     const base = RuntimeStartRequestSchema.parse(validStartRequest);
     const digestA = computeSemanticRequestDigest(base);

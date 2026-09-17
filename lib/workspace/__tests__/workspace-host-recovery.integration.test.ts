@@ -38,7 +38,6 @@ import {
   listenWorkspaceHostRpc,
 } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
-import { revokeWorkspaceWriteLocksForInvocation } from "@/lib/workspace/workspace-write-lock-queries";
 import {
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
@@ -191,17 +190,12 @@ describe("Workspace host recovery integration", () => {
       expect(processAlive(spawned.pid)).toBe(true);
       await waitForGrowth(activityFile, 64);
 
-      // 换代：Owner 失联 → 新 Attempt 取得下一代 writer。
+      // 换代：Owner 失联即为持久事实（R04 §3：I 侧不释放 W 行）→ 新 Attempt 取得下一代。
       await closeExecutionOwnership({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
         ownershipId: firstAuthority.ownership.id,
         state: "lost",
-        reasonCode: "runtime_process_lost",
-      });
-      await revokeWorkspaceWriteLocksForInvocation({
-        tenantId: TENANT_ID,
-        invocationId: first.invocation.id,
         reasonCode: "runtime_process_lost",
       });
       const attempt2 = await createAttempt({
@@ -375,7 +369,7 @@ describe("Workspace host recovery integration", () => {
           authority: authorityB.authority,
           candidate: candidateB,
         }),
-      ).rejects.toThrow("Workspace writer 已被其他 Invocation 占用");
+      ).rejects.toThrow("父 Owner 仍然健康");
       expect(activatedA.writerGeneration).toBe(1);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -594,17 +588,12 @@ describe("Workspace host recovery integration", () => {
       });
       expect(authorized.root).toBe(generation1.grant.root);
 
-      // 换代后旧 grant 的写入在真正 IO 之前被拒绝。
+      // 换代后旧 grant 的写入在真正 IO 之前被拒绝（换代只由父 Owner 失权 + W 路径复核驱动）。
       await closeExecutionOwnership({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
         ownershipId: firstAuthority.ownership.id,
         state: "lost",
-        reasonCode: "writer_superseded",
-      });
-      await revokeWorkspaceWriteLocksForInvocation({
-        tenantId: TENANT_ID,
-        invocationId: first.invocation.id,
         reasonCode: "writer_superseded",
       });
       const attempt2 = await createAttempt({

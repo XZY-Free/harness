@@ -29,6 +29,7 @@ import {
 import { queueSteer } from "@/lib/conversations/steer-queries";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
+import { getInvocationCommandById } from "@/lib/executions/persistence/invocation-command-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -161,6 +162,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       correlationId: requestId,
     });
 
+    // R03 §6：冻结目标失效时命令被收口为终态（`CommandTargetSuperseded`）。响应里的
+    // `command_state` 必须是**持久事实**，不能是派发前的内存快照（否则会报 `queued`
+    // 而库里已是 `failed`）。
+    const settledCommand = gatewayResult.dispatched
+      ? null
+      : await getInvocationCommandById(principal.tenantId, result.command.id);
+
     const responseBody = {
       turn_id: result.turnId,
       turn_state: result.turnState,
@@ -170,7 +178,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         id: result.command.id,
         command_state: gatewayResult.dispatched
           ? gatewayResult.command.commandState
-          : result.command.commandState,
+          : (settledCommand?.commandState ?? result.command.commandState),
       },
       event_id: result.eventId,
     };

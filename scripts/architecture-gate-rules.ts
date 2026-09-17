@@ -125,6 +125,7 @@ export function checkWorkerProductionTopologyGate(
     "hosted-provisioning-worker",
     "control-plane-outbox-worker",
     "runtime-dispatch-retry-worker",
+    "job-worker",
     "tool-execution-worker",
   ];
   const packageJson = source("package.json");
@@ -133,6 +134,7 @@ export function checkWorkerProductionTopologyGate(
   const webImage = source("Dockerfile");
   const entrypoint = source("scripts/workers/worker-entrypoint.ts");
   const retryWorker = stripComments(source("lib/runtime/retry/runtime-dispatch-retry-worker.ts"));
+  const jobWorker = stripComments(source("lib/job/job-worker.ts"));
 
   if (!packageJson.includes('"worker:start"')) failures.push("package 缺少统一 worker:start");
   if (!entrypoint.includes("runProductionWorkerProcess"))
@@ -156,6 +158,23 @@ export function checkWorkerProductionTopologyGate(
     retryWorker.includes("recordAttemptDispatchTransientFailure")
   ) {
     failures.push("Runtime retry 默认 lane 未调用 canonical persisted dispatch service");
+  }
+  // R04 §3：Writer 的物理撤销必须由常驻 lane 按 W→I 处理，不能只在测试里调用。
+  if (!retryWorker.includes("runDueWorkspaceWriterReleases")) {
+    failures.push("Runtime retry worker 未接线 Workspace Writer 物理释放 lane");
+  }
+  // R01 §3 `Owner expired`：租约到期的 Owner 必须有持久发现者，否则无人收口。
+  if (!retryWorker.includes("runDueExpiredOwnerRecoveries")) {
+    failures.push("Runtime retry worker 未接线 Owner 过期收口 lane");
+  }
+  // R01 §4：job-worker 必须真的同时跑 Job admission 与 JobCommand 两条 lane，
+  // 只在测试里调用消费者不算接线。
+  if (
+    !jobWorker.includes("admitQueuedJob") ||
+    !jobWorker.includes("scanQueuedJobsWithoutInvocation") ||
+    !jobWorker.includes("runDueJobCommands")
+  ) {
+    failures.push("job-worker 未接线 Job admission 与 JobCommand 两条 lane");
   }
   return { passed: failures.length === 0, failures };
 }

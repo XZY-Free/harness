@@ -22,10 +22,14 @@ import {
   ProducerSequenceGapError,
   ingressRuntimeEvents,
 } from "@/lib/runtime/application/ingress-runtime-events";
-import { updateRuntimeSessionDispatch } from "@/lib/runtime/persistence/runtime-session-store";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
+
+/** R02 §3：该夹具 Session 冻结的发布能力证据（Hosted Revision 的能力名列表）。 */
+const RUNTIME_CAPABILITIES_JSON = ["event_stream"];
 
 async function createActiveRuntime() {
   const fixture = await seedPreparedRuntimeAttempt();
@@ -34,6 +38,7 @@ async function createActiveRuntime() {
     invocationId: fixture.invocation.id,
     attemptId: fixture.attempt.id,
     runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
   });
   const activationEvidence = {
     kind: "runtime-ingress-test",
@@ -52,8 +57,12 @@ async function createActiveRuntime() {
   const semanticRequestDigest = protocolDigest(semanticRequest);
   const remoteSessionRef = `runtime-session:${acquired.session.id}`;
   const remoteExecutionRef = `runtime-execution:${fixture.invocation.id}`;
-  const capabilitiesDigest = protocolDigest({ fixture: "runtime-ingress" });
-  await updateRuntimeSessionDispatch(fixture.tenantId, acquired.session.id, {
+  // R02 §3：Hosted 接纳回执的摘要来自冻结发布证据（Session 与事件必须同源）。
+  const capabilitiesDigest = expectedCapabilityManifestDigest({
+    runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+  });
+  await applyRuntimeSessionDispatchForTest(fixture.tenantId, acquired.session.id, {
     bindingState: "dispatching",
     semanticRequestJson: semanticRequest,
     semanticRequestDigest,
@@ -137,6 +146,7 @@ describe("RuntimeEventIngress database fencing", () => {
       invocationId: fixture.invocation.id,
       attemptId: fixture.attempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
     });
     const [before] = await db
       .select()

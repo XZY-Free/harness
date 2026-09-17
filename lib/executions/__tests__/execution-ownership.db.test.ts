@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
+  createEnvironmentDefinition,
+  getEnvironmentRevisionById,
+} from "@/lib/environment/environment-definition-store";
+import { ENVIRONMENT_PREPARED_TTL_MS } from "@/lib/environment/environment-prepared-evidence";
+import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
+import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
+import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
@@ -21,13 +28,35 @@ import {
   isTokenRevoked,
   revokeWorkloadToken,
 } from "@/lib/identity/workload-token-revocation-queries";
-import { executionOwnershipTable } from "@/lib/persistence/schema/executions";
+import {
+  executionOwnershipTable,
+  invocationAttemptTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { handleRuntimeHeartbeat } from "@/lib/runtime/application/runtime-heartbeat";
 import { resolveRuntimePrincipal } from "@/lib/runtime/route-helpers";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+/** R02 §4：Acquire 侧环境前置复验所需的最小 Revision 输入。 */
+function environmentRevisionInput(
+  overrides: Partial<EnvironmentRevisionInput> = {},
+): EnvironmentRevisionInput {
+  return {
+    environmentType: "sandbox",
+    filesystemPolicyJson: { writeRoots: ["workspace"] },
+    networkPolicyJson: { egress: "deny_all" },
+    resourceLimitsJson: { cpu: 2, memoryMb: 2048 },
+    secretPolicyJson: { inject: "none" },
+    executionTarget: { kind: "container", image: "snowharness/test:latest" },
+    requiredCapabilities: { isolation: true },
+    createdByType: "user",
+    createdById: "test-admin",
+    ...overrides,
+  };
+}
 
 describe("ExecutionOwnership database fencing", () => {
   let originalSigningKeyId: string | undefined;
@@ -625,5 +654,202 @@ describe("ExecutionOwnership database fencing", () => {
       invocationId: fixture.invocation.id,
     });
     expect(active?.id).toBe(first.ownership.id);
+  });
+
+  it("FENCE-17: 终态 Invocation 不可 Acquire，不复活代际也不推进 epoch", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const before = await db
+      .select({
+        lastOwnershipEpoch: invocationTable.lastOwnershipEpoch,
+        executionState: invocationTable.executionState,
+      })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id))
+      .limit(1);
+    await db
+      .update(invocationTable)
+      .set({ executionState: "cancelled", finishedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(invocationTable.tenantId, fixture.tenantId),
+          eq(invocationTable.id, fixture.invocation.id),
+        ),
+      );
+
+    await expect(
+      acquireExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "late-runtime",
+      }),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+
+    expect(
+      await getActiveExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+      }),
+    ).toBeNull();
+    const after = await db
+      .select({
+        lastOwnershipEpoch: invocationTable.lastOwnershipEpoch,
+        executionState: invocationTable.executionState,
+      })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id))
+      .limit(1);
+    expect(after).toEqual([
+      { lastOwnershipEpoch: before[0]?.lastOwnershipEpoch, executionState: "cancelled" },
+    ]);
+  });
+
+  it("FENCE-18: 终态 Attempt 不可 Acquire（换实例必须新建 Attempt）", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    await db
+      .update(invocationAttemptTable)
+      .set({ attemptState: "lost", finishedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, fixture.tenantId),
+          eq(invocationAttemptTable.id, fixture.attempt.id),
+        ),
+      );
+
+    await expect(
+      acquireExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "late-runtime",
+      }),
+    ).rejects.toMatchObject({ code: "AttemptMismatch" });
+    expect(
+      await getActiveExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+      }),
+    ).toBeNull();
+  });
+
+  it("FENCE-19: Acquire 复核 Lease 冻结的 Revision，换 Revision 的预备证据不可执行", async () => {
+    const tenant = await ensureDefaultTenant();
+    const environment = await createEnvironmentDefinition({
+      tenantId: tenant.id,
+      environmentKey: `ownership-managed-${randomUUID()}`,
+      displayName: "执行权环境",
+      revision: environmentRevisionInput(),
+    });
+    const other = await createEnvironmentDefinition({
+      tenantId: tenant.id,
+      environmentKey: `ownership-other-${randomUUID()}`,
+      displayName: "另一个环境",
+      revision: environmentRevisionInput({ networkPolicyJson: { egress: "allow_https" } }),
+    });
+    const pinned = await getEnvironmentRevisionById(tenant.id, environment.currentRevisionId!);
+    const otherRevision = await getEnvironmentRevisionById(tenant.id, other.currentRevisionId!);
+    if (!pinned || !otherRevision) throw new Error("EnvironmentRevision fixture missing");
+    const fixture = await seedPreparedRuntimeAttempt({
+      tenantId: tenant.id,
+      environmentDefinitionRevisionId: pinned.id,
+    });
+    // 事实上的"另一 Revision 的已核验准备证据"：形状完好，但不是 Binding 冻结的那一份。
+    const foreignLease = await seedPreparedEnvironmentLease({
+      tenantId: tenant.id,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      revision: otherRevision,
+      workspaceBindingId: fixture.binding.workspaceBindingId,
+    });
+
+    await expect(
+      acquireExecutionOwnership({
+        tenantId: tenant.id,
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        environmentLeaseId: foreignLease.id,
+        acquiredByType: "service",
+        acquiredById: "late-runtime",
+      }),
+    ).rejects.toThrow("EnvironmentRevisionMismatch");
+    expect(
+      await getActiveExecutionOwnership({
+        tenantId: tenant.id,
+        invocationId: fixture.invocation.id,
+      }),
+    ).toBeNull();
+
+    // 正对照：Binding 冻结 Revision 与 Lease 一致时可以取得执行权（证明上面的拒绝来自
+    // Revision 不匹配，而不是该路径恒失败）。`EnvironmentLease` 对
+    // `(tenantId, invocationId, attemptId)` 唯一（同 Attempt 复用同一 Lease），
+    // 因此正对照用独立夹具而不是同一 Attempt 的第二条 Lease。
+    const matching = await seedPreparedRuntimeAttempt({
+      tenantId: tenant.id,
+      environmentDefinitionRevisionId: pinned.id,
+    });
+    const matchingLease = await seedPreparedEnvironmentLease({
+      tenantId: tenant.id,
+      invocationId: matching.invocation.id,
+      attemptId: matching.attempt.id,
+      revision: pinned,
+      workspaceBindingId: matching.binding.workspaceBindingId,
+    });
+    const acquired = await acquireTestRuntimeAuthority({
+      tenantId: tenant.id,
+      invocationId: matching.invocation.id,
+      attemptId: matching.attempt.id,
+      runtimeRevisionId: matching.binding.runtimeRevisionId,
+      environmentLeaseId: matchingLease.id,
+    });
+    expect(acquired.ownership.environmentLeaseId).toBe(matchingLease.id);
+  });
+
+  it("FENCE-20: Acquire 复核 Prepared 证据有效期，过期证据不可执行", async () => {
+    const tenant = await ensureDefaultTenant();
+    const environment = await createEnvironmentDefinition({
+      tenantId: tenant.id,
+      environmentKey: `ownership-expiry-${randomUUID()}`,
+      displayName: "过期证据环境",
+      revision: environmentRevisionInput(),
+    });
+    const revision = await getEnvironmentRevisionById(tenant.id, environment.currentRevisionId!);
+    if (!revision) throw new Error("EnvironmentRevision fixture missing");
+    const fixture = await seedPreparedRuntimeAttempt({
+      tenantId: tenant.id,
+      environmentDefinitionRevisionId: revision.id,
+    });
+    // 写入时有效（`now` 在窗口内），Acquire 时才过期——Acquire 必须用 DB Authority 时间
+    // 判有效期，不能只信 Lease 的 readinessState 字段。
+    const staleLease = await seedPreparedEnvironmentLease({
+      tenantId: tenant.id,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      revision,
+      workspaceBindingId: fixture.binding.workspaceBindingId,
+      now: new Date(Date.now() - ENVIRONMENT_PREPARED_TTL_MS - 60_000),
+    });
+
+    await expect(
+      acquireExecutionOwnership({
+        tenantId: tenant.id,
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        environmentLeaseId: staleLease.id,
+        acquiredByType: "service",
+        acquiredById: "late-runtime",
+      }),
+    ).rejects.toThrow("PreparedEvidence 已过期");
+    expect(
+      await getActiveExecutionOwnership({
+        tenantId: tenant.id,
+        invocationId: fixture.invocation.id,
+      }),
+    ).toBeNull();
   });
 });

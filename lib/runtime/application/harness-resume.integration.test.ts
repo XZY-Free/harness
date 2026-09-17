@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   getExecutionBindingByInvocation: vi.fn<() => Promise<ExecutionBinding>>(),
   getActiveExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
   getRuntimeSessionBindingByOwnership: vi.fn<() => Promise<RuntimeSessionBinding>>(),
+  getRuntimeSessionBindingById: vi.fn<() => Promise<RuntimeSessionBinding>>(),
   getRuntimeRevisionById: vi.fn(),
   renewExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
   hostedLoopOptions: [] as Array<Record<string, unknown>>,
@@ -52,6 +53,7 @@ vi.mock("@/lib/executions/persistence/execution-ownership-store", () => ({
 }));
 vi.mock("@/lib/runtime/persistence/runtime-session-store", () => ({
   getRuntimeSessionBindingByOwnership: mocks.getRuntimeSessionBindingByOwnership,
+  getRuntimeSessionBindingById: mocks.getRuntimeSessionBindingById,
 }));
 vi.mock("@/lib/runtime/persistence/runtime-revision-queries", () => ({
   getRuntimeRevisionById: mocks.getRuntimeRevisionById,
@@ -103,6 +105,7 @@ vi.mock("@/lib/runtime/harness-loop/mysql-recovery-port", () => ({
   createMySqlHarnessLoopRecoveryPort: vi.fn(() => ({ load: async () => null })),
 }));
 
+import { frozenCapabilityCatalogForInvocation } from "@/lib/test-support/frozen-capability-catalog";
 import { resumeHarnessInvocation } from "./runtime-resume";
 
 function fixture(executionState: Invocation["executionState"]) {
@@ -124,6 +127,13 @@ function fixture(executionState: Invocation["executionState"]) {
     workspaceBindingId: "workspace-1",
     modelId: "test-model",
     environmentMode: "NO_PLATFORM_ENVIRONMENT",
+    // R01 §1：执行主体必须来自 Binding 冻结的可信 principal 事实。
+    principalType: "user",
+    principalId: "user-1",
+    principalSource: "authenticated_user",
+    principalFrozenAt: new Date(0),
+    // R01 §5：Hosted 执行必须从 Binding 冻结的能力目录装配，夹具给出一份可重验的空目录。
+    ...frozenCapabilityCatalogForInvocation("invocation-1"),
   } as ExecutionBinding;
   const ownership = {
     id: "ownership-1",
@@ -153,12 +163,28 @@ function stubAuthority(f: ReturnType<typeof fixture>) {
   mocks.getExecutionBindingByInvocation.mockResolvedValue(f.binding);
   mocks.getActiveExecutionOwnership.mockResolvedValue(f.ownership);
   mocks.getRuntimeSessionBindingByOwnership.mockResolvedValue(f.session);
+  mocks.getRuntimeSessionBindingById.mockResolvedValue(f.session);
   mocks.getRuntimeRevisionById.mockResolvedValue({
     id: "runtime-revision-1",
     tenantId: "tenant-1",
     runtimeEvidenceKind: "hosted_artifact",
   });
   mocks.renewExecutionOwnership.mockResolvedValue(f.ownership);
+}
+
+/**
+ * R02 §2：Hosted 分支必须携带 Start/Resume 的准确 authority —— 测试从夹具的
+ * Owner/Session 事实推导，手工抄字段会在代际变更时静默失真。
+ */
+function authorityOf(f: ReturnType<typeof fixture>) {
+  return {
+    invocationId: f.invocation.id,
+    runtimeRevisionId: f.binding.runtimeRevisionId,
+    attemptId: f.ownership.attemptId,
+    ownershipId: f.ownership.id,
+    leaseEpoch: String(f.ownership.leaseEpoch),
+    sessionBindingId: f.session.id,
+  };
 }
 
 beforeEach(() => {
@@ -187,6 +213,7 @@ describe("Resume Harness Invocation", () => {
       invocationId: "invocation-1",
       agentCallId: "call-1",
       sourceVersion: 2,
+      authority: authorityOf(f),
     });
     expect(first).toMatchObject({ status: "resumed", completed: true });
     expect(mocks.hostedLoopOptions).toHaveLength(1);
@@ -200,6 +227,7 @@ describe("Resume Harness Invocation", () => {
         sourceType: "user_action",
         agentCallId: "uar-1",
         sourceVersion: 1,
+        authority: authorityOf(f),
       }),
     ).rejects.toThrow("NotCurrentExecutor");
     expect(mocks.hostedLoopOptions).toHaveLength(1);
@@ -233,6 +261,7 @@ describe("Resume Harness Invocation", () => {
         sourceType: "user_pause",
         agentCallId: "resume-1",
         sourceVersion: 1,
+        authority: authorityOf(f),
       }),
     ).resolves.toMatchObject({ status: "resumed", completed: true });
     expect(mocks.hostedLoopOptions).toHaveLength(1);
@@ -241,6 +270,40 @@ describe("Resume Harness Invocation", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+  });
+
+  it("R02 §2：同一 generation 最多一个 Supervisor，重复交付不再起第二个 Loop", async () => {
+    const f = fixture("running");
+    stubAuthority(f);
+    // 让第一个 Loop 保持存活（只在 abort 时结束），模拟长任务进行中。
+    mocks.hostedLoopResolveOnAbort = true;
+
+    const first = resumeHarnessInvocation({
+      tenantId: "tenant-1",
+      invocationId: "invocation-1",
+      agentCallId: "call-1",
+      sourceVersion: 1,
+      authority: authorityOf(f),
+    });
+    await vi.waitFor(() => expect(mocks.hostedLoopOptions).toHaveLength(1));
+
+    // 同一代际（同 authority）再次交付：不得起第二个 Loop，直接回答"仍在跑"。
+    await expect(
+      resumeHarnessInvocation({
+        tenantId: "tenant-1",
+        invocationId: "invocation-1",
+        sourceType: "agent_call",
+        agentCallId: "call-1",
+        sourceVersion: 1,
+        authority: authorityOf(f),
+      }),
+    ).resolves.toMatchObject({ status: "resumed", completed: false, pending: true });
+    expect(mocks.hostedLoopOptions).toHaveLength(1);
+
+    // 收尾：中止存活 Loop，让第一个 promise 结束后再退出用例。
+    const options = mocks.hostedLoopOptions[0] as { abortSignal: AbortSignal };
+    options.abortSignal.dispatchEvent(new Event("abort"));
+    await expect(first).resolves.toMatchObject({ status: "resumed", completed: false });
   });
 
   it("执行权续约失败时向 Hosted Loop 发出 fail-closed 中止信号", async () => {
@@ -270,6 +333,7 @@ describe("Resume Harness Invocation", () => {
       invocationId: "invocation-1",
       agentCallId: "call-1",
       sourceVersion: 1,
+      authority: authorityOf(f),
     });
     // 心跳续约间隔 20s：推进时钟触发续约失败 → abort。
     await vi.advanceTimersByTimeAsync(20_000);

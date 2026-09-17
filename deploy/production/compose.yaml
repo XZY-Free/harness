@@ -69,6 +69,14 @@ services:
     deploy:
       replicas: 1
 
+  job-worker:
+    <<: *worker
+    environment:
+      <<: *shared-environment
+      WORKER_ROLE: job-worker
+    deploy:
+      replicas: 1
+
   tool-execution-worker:
     <<: *worker
     environment:

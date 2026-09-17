@@ -8,14 +8,14 @@
   },
   "counts": {
     "unit": 320,
-    "db": 123,
+    "db": 130,
     "integration": 13,
     "contract": 31,
     "e2e-web": 4,
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 495,
+  "total": 502,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -4121,11 +4121,44 @@
       ]
     },
     {
+      "file": "lib/runtime/__tests__/authority-recovery-lane.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/command-target-authority.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/__tests__/dev-server-preview-runtime.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
       "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/environment-selection-application.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4187,7 +4220,29 @@
       ]
     },
     {
+      "file": "lib/runtime/__tests__/runtime-recovery-stale-observation.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/__tests__/runtime-start-recovery.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/session-dispatch-intent.db.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -4770,6 +4825,17 @@
       ]
     },
     {
+      "file": "lib/runtime/retry/__tests__/session-dispatch-claim.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/retry/runtime-dispatch-retry-policy.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
@@ -5178,6 +5244,17 @@
     },
     {
       "file": "lib/workspace/__tests__/workspace-host-recovery.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/__tests__/workspace-writer-release.integration.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,

@@ -3,6 +3,13 @@
  * Attempt preparation is an execution fact. Dispatch retry state belongs to
  * RuntimeSessionBinding (the stable start/resume intent), while control
  * command retry state belongs to InvocationCommand.
+ *
+ * R04 §5：**领取的工作身份是 Session**（不是一个 Attempt ID）。一个 Attempt 可以有多个
+ * Resume generation，因此
+ * - 扫描只取候选 ID（不加锁、不 join 锁 Session/Attempt）；
+ * - 领取时按对象自身根重新验证 due / state / lease，并锁定 Session 行；
+ * - 所有完成确认（计数、失败排定、attempt 置终态）都带 **Session + Ownership +
+ *   claim token** 条件，过期 Worker 不能改新 claim 的结果。
  */
 import { db } from "@/lib/db/client";
 import type { InvocationAttempt, InvocationCommand } from "@/lib/persistence/schema/executions";
@@ -12,103 +19,346 @@ import {
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import {
+  claimRuntimeSessionDispatchInTransaction,
+  recordRuntimeSessionDispatchInTransaction,
+  rescheduleRuntimeSessionDispatchInTransaction,
+} from "@/lib/runtime/persistence/runtime-session-store";
+import {
   type TransientDispatchErrorCode,
   backoffDelayMs,
   isRetryExhausted,
 } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
-import { and, asc, eq, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export async function claimDueInvocationAttempts(params: {
+/** 领取身份与持久行不一致（新 claim 已接管，或代际已变化）。 */
+export class SessionDispatchClaimSupersededError extends Error {
+  readonly stableCode = "SessionDispatchClaimSuperseded";
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionDispatchClaimSuperseded";
+  }
+}
+
+/** 可以承载 dispatch 工作的 Session 状态（`active` 已由 Runtime 接纳，不再由本 lane 重投）。 */
+const DISPATCHABLE_SESSION_STATES = ["prepared", "dispatching"] as const;
+
+/**
+ * "已持久但进程在写完 retry timestamp 前 Crash"的安全截止时间（R01 §3）。
+ *
+ * `nextDispatchAt IS NULL` 的 Session / `commandState='queued'` 的 InvocationCommand
+ * 不能在创建/ACK 的同一瞬间被本 lane 抢走（那会和请求内联调度竞争），
+ * 但也不能永久不可见：静默超过该窗口即视为到期。两类对象共用同一规则。
+ */
+export const DISPATCH_STUCK_GRACE_MS = 30_000;
+
+/** 一次 Session dispatch 工作的稳定身份（扫描 → 领取 → 完成全程携带）。 */
+export interface SessionDispatchIdentity {
+  tenantId: string;
+  sessionBindingId: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: number;
+  /**
+   * 领取令牌（= `dispatchLeaseOwner`）。
+   * 请求内联调度（从未领取 lease）时为 `null`，此时只按 Session 自身冻结的 tuple 复核。
+   */
+  claimToken: string | null;
+}
+
+/** 已领取的 dispatch 工作（`claimToken` 必为真实令牌）。 */
+export interface SessionDispatchClaim extends SessionDispatchIdentity {
+  invocationId: string;
+  claimToken: string;
+  leaseExpiresAt: Date;
+  dispatchCount: number;
+}
+
+/** 扫描结果只有 ID（R04 §5：扫描不做任何写入或加锁判断）。 */
+export interface SessionDispatchCandidate {
+  sessionBindingId: string;
+  attemptId: string;
+}
+
+/**
+ * 扫描到期 dispatch 工作：只取候选 ID。
+ *
+ * 谓词是**廉价过滤**，不是结论：
+ * - Attempt 必须仍 `queued`（工作对象自身状态）；
+ * - Session 必须处于可调度状态；
+ * - `nextDispatchAt` 到期，或（NULL 且已静默超过安全窗口）；
+ * - 没有他人持有的有效 dispatch lease。
+ * 领取事务会按 Session 自身根重新验证全部条件。
+ */
+export async function scanDueSessionDispatches(params: {
   now: Date;
-  leaseOwner: string;
-  leaseDurationMs: number;
   limit: number;
-}): Promise<InvocationAttempt[]> {
-  return db.transaction(async (tx) => {
-    const candidates = await tx
-      .select({ attempt: invocationAttemptTable, session: runtimeSessionBindingTable })
-      .from(invocationAttemptTable)
-      .innerJoin(
-        runtimeSessionBindingTable,
-        and(
-          eq(runtimeSessionBindingTable.attemptId, invocationAttemptTable.id),
-          eq(runtimeSessionBindingTable.bindingState, "dispatching"),
-        ),
-      )
-      .where(
-        and(
-          eq(invocationAttemptTable.attemptState, "queued"),
-          isNotNull(runtimeSessionBindingTable.nextDispatchAt),
-          lte(runtimeSessionBindingTable.nextDispatchAt, params.now),
-          or(
-            isNull(runtimeSessionBindingTable.dispatchLeaseExpiresAt),
-            lte(runtimeSessionBindingTable.dispatchLeaseExpiresAt, params.now),
+}): Promise<SessionDispatchCandidate[]> {
+  const stuckBefore = new Date(params.now.getTime() - DISPATCH_STUCK_GRACE_MS);
+  return db
+    .select({
+      sessionBindingId: runtimeSessionBindingTable.id,
+      attemptId: runtimeSessionBindingTable.attemptId,
+    })
+    .from(runtimeSessionBindingTable)
+    .innerJoin(
+      invocationAttemptTable,
+      eq(invocationAttemptTable.id, runtimeSessionBindingTable.attemptId),
+    )
+    .where(
+      and(
+        eq(invocationAttemptTable.attemptState, "queued"),
+        inArray(runtimeSessionBindingTable.bindingState, [...DISPATCHABLE_SESSION_STATES]),
+        or(
+          and(
+            isNotNull(runtimeSessionBindingTable.nextDispatchAt),
+            lte(runtimeSessionBindingTable.nextDispatchAt, params.now),
+          ),
+          and(
+            isNull(runtimeSessionBindingTable.nextDispatchAt),
+            lte(runtimeSessionBindingTable.updatedAt, stuckBefore),
           ),
         ),
+        or(
+          isNull(runtimeSessionBindingTable.dispatchLeaseExpiresAt),
+          lte(runtimeSessionBindingTable.dispatchLeaseExpiresAt, params.now),
+        ),
+      ),
+    )
+    .orderBy(
+      asc(runtimeSessionBindingTable.nextDispatchAt),
+      asc(runtimeSessionBindingTable.updatedAt),
+    )
+    .limit(params.limit);
+}
+
+/**
+ * 领取一条 dispatch 工作（锁定 Session 行后重新验证）。
+ *
+ * 重新验证项：tenant / Session 自身 tuple（Attempt、Ownership、leaseEpoch）、
+ * 可调度状态、due、无有效 lease，并且 Attempt 仍然 `queued`。
+ * 任一不满足 → 返回 `null`（放弃该候选，不改任何行）。
+ */
+export async function claimSessionDispatch(params: {
+  sessionBindingId: string;
+  leaseOwner: string;
+  leaseDurationMs: number;
+  now: Date;
+  /** 扫描候选里的 Attempt，仅用于避免无谓的锁竞争；结论以行内状态为准。 */
+  attemptId?: string;
+}): Promise<SessionDispatchClaim | null> {
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select()
+      .from(runtimeSessionBindingTable)
+      .where(eq(runtimeSessionBindingTable.id, params.sessionBindingId))
+      .for("update")
+      .limit(1);
+    if (!session) return null;
+    if (params.attemptId && session.attemptId !== params.attemptId) return null;
+    if (
+      !DISPATCHABLE_SESSION_STATES.includes(
+        session.bindingState as (typeof DISPATCHABLE_SESSION_STATES)[number],
       )
-      .orderBy(asc(runtimeSessionBindingTable.nextDispatchAt))
-      .limit(params.limit)
-      .for("update", { skipLocked: true });
-    const leaseExpiresAt = new Date(params.now.getTime() + params.leaseDurationMs);
-    const claimed: InvocationAttempt[] = [];
-    for (const candidate of candidates) {
-      await tx
-        .update(runtimeSessionBindingTable)
-        .set({
-          dispatchLeaseOwner: params.leaseOwner,
-          dispatchLeaseExpiresAt: leaseExpiresAt,
-          updatedAt: params.now,
-          versionNo: candidate.session.versionNo + 1,
-        })
-        .where(eq(runtimeSessionBindingTable.id, candidate.session.id));
-      claimed.push(candidate.attempt);
+    ) {
+      return null;
     }
-    return claimed;
+    const due =
+      session.nextDispatchAt !== null
+        ? session.nextDispatchAt <= params.now
+        : session.updatedAt <= new Date(params.now.getTime() - DISPATCH_STUCK_GRACE_MS);
+    if (!due) return null;
+    if (session.dispatchLeaseExpiresAt && session.dispatchLeaseExpiresAt > params.now) return null;
+    const [attempt] = await tx
+      .select({ attemptState: invocationAttemptTable.attemptState })
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, session.attemptId))
+      .limit(1);
+    if (!attempt || attempt.attemptState !== "queued") return null;
+    const leaseExpiresAt = new Date(params.now.getTime() + params.leaseDurationMs);
+    // R02 §8：Session 写入只经仓储方法（行锁 + 版本 CAS）。
+    await claimRuntimeSessionDispatchInTransaction(tx, {
+      tenantId: session.tenantId,
+      id: session.id,
+      expectedVersionNo: session.versionNo,
+      leaseOwner: params.leaseOwner,
+      leaseExpiresAt,
+    });
+    return {
+      tenantId: session.tenantId,
+      sessionBindingId: session.id,
+      attemptId: session.attemptId,
+      ownershipId: session.ownershipId,
+      leaseEpoch: session.leaseEpoch,
+      claimToken: params.leaseOwner,
+      invocationId: session.invocationId,
+      leaseExpiresAt,
+      dispatchCount: session.dispatchCount,
+    };
   });
 }
 
-/** Count a dispatch attempt on the stable session intent before transport. */
-export async function recordAttemptDispatchAttemptStarted(params: {
-  sessionBindingId: string;
-  now: Date;
-}): Promise<InvocationAttempt> {
-  const [current] = await db
+/** 读取 attempt 关联的最近一个 Session generation 的稳定身份（用于请求内联路径）。 */
+export async function sessionDispatchIdentityForAttempt(input: {
+  tenantId: string;
+  attemptId: string;
+}): Promise<SessionDispatchIdentity | null> {
+  const [session] = await db
     .select()
     .from(runtimeSessionBindingTable)
-    .where(eq(runtimeSessionBindingTable.id, params.sessionBindingId))
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, input.tenantId),
+        eq(runtimeSessionBindingTable.attemptId, input.attemptId),
+        inArray(runtimeSessionBindingTable.bindingState, [...DISPATCHABLE_SESSION_STATES]),
+      ),
+    )
+    .orderBy(asc(runtimeSessionBindingTable.createdAt))
     .limit(1);
-  if (!current) throw new Error(`RuntimeSessionBinding 不存在（id=${params.sessionBindingId}）`);
-  await db
-    .update(runtimeSessionBindingTable)
-    .set({
-      dispatchCount: sql`${runtimeSessionBindingTable.dispatchCount} + 1`,
-      lastDispatchAt: params.now,
-      updatedAt: params.now,
-      versionNo: current.versionNo + 1,
-    })
-    .where(eq(runtimeSessionBindingTable.id, current.id));
-  const [attempt] = await db
-    .select()
-    .from(invocationAttemptTable)
-    .where(eq(invocationAttemptTable.id, current.attemptId))
-    .limit(1);
-  if (!attempt) throw new Error(`InvocationAttempt 不存在（id=${current.attemptId}）`);
-  return attempt;
+  if (!session) return null;
+  return {
+    tenantId: session.tenantId,
+    sessionBindingId: session.id,
+    attemptId: session.attemptId,
+    ownershipId: session.ownershipId,
+    leaseEpoch: session.leaseEpoch,
+    claimToken: null,
+  };
 }
 
-export async function claimDueInvocationCommands(params: {
+/**
+ * 按 claim 身份锁定 Session 并复核（R04 §5）。
+ *
+ * 这是所有完成确认的唯一入口：`DispatchLeaseOwner` 必须等于本次 claim 的令牌，
+ * 且 Ownership / leaseEpoch / Attempt 全部一致。过期 Worker 因此不可能改到新 claim 的结果。
+ * 导出版本供需要与 Session 写入同事务的调用方（`runtime-start` 的 Start 冻结）复用。
+ */
+export async function lockClaimedSessionInTransaction(
+  tx: Tx,
+  identity: SessionDispatchIdentity,
+): Promise<typeof runtimeSessionBindingTable.$inferSelect> {
+  const [session] = await tx
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, identity.tenantId),
+        eq(runtimeSessionBindingTable.id, identity.sessionBindingId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!session) throw new SessionDispatchClaimSupersededError("RuntimeSessionBinding 不存在");
+  if (
+    session.attemptId !== identity.attemptId ||
+    session.ownershipId !== identity.ownershipId ||
+    session.leaseEpoch !== identity.leaseEpoch
+  ) {
+    throw new SessionDispatchClaimSupersededError("Session dispatch 身份代际已变化");
+  }
+  if (identity.claimToken !== null && session.dispatchLeaseOwner !== identity.claimToken) {
+    throw new SessionDispatchClaimSupersededError("Session dispatch claim 已被接管");
+  }
+  return session;
+}
+
+/**
+ * 只读复核：本次 claim 是否仍被该 Session 持有（R04 §5 完成确认门禁）。
+ *
+ * 用于"完成/失败确认"这类发生在事务之外的写之前：过期 Worker 的迟到结论必须被拒。
+ */
+export async function assertSessionDispatchClaimHeld(
+  identity: SessionDispatchIdentity,
+): Promise<void> {
+  const [session] = await db
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, identity.tenantId),
+        eq(runtimeSessionBindingTable.id, identity.sessionBindingId),
+      ),
+    )
+    .limit(1);
+  if (!session) throw new SessionDispatchClaimSupersededError("RuntimeSessionBinding 不存在");
+  if (
+    session.attemptId !== identity.attemptId ||
+    session.ownershipId !== identity.ownershipId ||
+    session.leaseEpoch !== identity.leaseEpoch
+  ) {
+    throw new SessionDispatchClaimSupersededError("Session dispatch 身份代际已变化");
+  }
+  if (identity.claimToken !== null && session.dispatchLeaseOwner !== identity.claimToken) {
+    throw new SessionDispatchClaimSupersededError("Session dispatch claim 已被接管");
+  }
+}
+
+/**
+ * Count a dispatch attempt on the stable session intent before transport.
+ *
+ * R02 §8：Session 计数走仓储方法（行锁 + 版本 CAS）；本函数是薄包装，
+ * 需要与其它 Session 写入合并到一个事务的调用方用 `...InTransaction`。
+ */
+export async function recordSessionDispatchAttemptStartedInTransaction(
+  tx: Tx,
+  identity: SessionDispatchIdentity,
+  now: Date,
+): Promise<{
+  attempt: InvocationAttempt;
+  session: typeof runtimeSessionBindingTable.$inferSelect;
+}> {
+  const session = await lockClaimedSessionInTransaction(tx, identity);
+  const updated = await recordRuntimeSessionDispatchInTransaction(tx, {
+    tenantId: session.tenantId,
+    id: session.id,
+    expectedVersionNo: session.versionNo,
+    now,
+  });
+  const [attempt] = await tx
+    .select()
+    .from(invocationAttemptTable)
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, identity.tenantId),
+        eq(invocationAttemptTable.id, identity.attemptId),
+      ),
+    )
+    .limit(1);
+  if (!attempt) throw new Error(`InvocationAttempt 不存在（id=${identity.attemptId}）`);
+  return { attempt, session: updated };
+}
+
+export async function recordSessionDispatchAttemptStarted(
+  identity: SessionDispatchIdentity,
+  now: Date,
+): Promise<InvocationAttempt> {
+  const result = await db.transaction((tx) =>
+    recordSessionDispatchAttemptStartedInTransaction(tx, identity, now),
+  );
+  return result.attempt;
+}
+
+/** 已领取的 Command dispatch 工作（带 claim 身份）。 */
+export interface CommandDispatchClaim {
+  tenantId: string;
+  command: InvocationCommand;
+  claimToken: string;
+  leaseExpiresAt: Date;
+}
+
+/** 扫描到期 Command dispatch：只取候选 ID（R04 §5）。 */
+export async function scanDueInvocationCommandDispatches(params: {
   now: Date;
-  leaseOwner: string;
-  leaseDurationMs: number;
   limit: number;
-}): Promise<InvocationCommand[]> {
-  return db.transaction(async (tx) => {
-    const candidates = await tx
-      .select()
-      .from(invocationCommandTable)
-      .where(
+}): Promise<string[]> {
+  const stuckBefore = new Date(params.now.getTime() - DISPATCH_STUCK_GRACE_MS);
+  const rows = await db
+    .select({ id: invocationCommandTable.id })
+    .from(invocationCommandTable)
+    .where(
+      or(
+        // 已进入交付状态：租约空缺/过期，且已到 nextDispatchAt（缺失时按 updatedAt 兜底）。
         and(
           eq(invocationCommandTable.commandState, "dispatched"),
           or(
@@ -121,34 +371,78 @@ export async function claimDueInvocationCommands(params: {
               lte(invocationCommandTable.nextDispatchAt, params.now),
             ),
             and(
-              isNotNull(invocationCommandTable.dispatchLeaseExpiresAt),
-              lte(invocationCommandTable.dispatchLeaseExpiresAt, params.now),
+              isNull(invocationCommandTable.nextDispatchAt),
+              lte(invocationCommandTable.updatedAt, params.now),
             ),
           ),
         ),
-      )
-      .orderBy(asc(invocationCommandTable.nextDispatchAt))
-      .limit(params.limit)
-      .for("update", { skipLocked: true });
+        // 已持久但**首次交付从未发生**（进程在请求内联派发前 Crash）：`queued` 不能
+        // 永久不可见——静默超过安全窗口即视为到期，否则用户的停止/引导命令会被静默丢弃。
+        and(
+          eq(invocationCommandTable.commandState, "queued"),
+          lte(invocationCommandTable.updatedAt, stuckBefore),
+        ),
+      ),
+    )
+    .orderBy(asc(invocationCommandTable.nextDispatchAt), asc(invocationCommandTable.updatedAt))
+    .limit(params.limit);
+  return rows.map((row) => row.id);
+}
+
+/**
+ * 领取一条 Command dispatch（锁行后按对象自身根重新验证 state/lease/due）。
+ *
+ * 见 `scanDueInvocationCommandDispatches`：`queued`（首次交付从未发生）与
+ * `dispatched`（交付已发起）都可由本 lane 领取；领取即进入 `dispatched`，
+ * 使后续 `markDispatched` / 收口语义与既有路径完全一致。
+ */
+export async function claimInvocationCommandDispatch(params: {
+  commandId: string;
+  leaseOwner: string;
+  leaseDurationMs: number;
+  now: Date;
+}): Promise<CommandDispatchClaim | null> {
+  return db.transaction(async (tx) => {
+    const [candidate] = await tx
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, params.commandId))
+      .for("update")
+      .limit(1);
+    if (!candidate) return null;
+    if (candidate.commandState !== "queued" && candidate.commandState !== "dispatched") return null;
+    if (candidate.dispatchLeaseExpiresAt && candidate.dispatchLeaseExpiresAt > params.now) {
+      return null;
+    }
+    const due =
+      candidate.commandState === "queued"
+        ? candidate.updatedAt <= new Date(params.now.getTime() - DISPATCH_STUCK_GRACE_MS)
+        : candidate.nextDispatchAt !== null
+          ? candidate.nextDispatchAt <= params.now
+          : candidate.updatedAt <= params.now;
+    if (!due) return null;
     const leaseExpiresAt = new Date(params.now.getTime() + params.leaseDurationMs);
-    const claimed: InvocationCommand[] = [];
-    for (const candidate of candidates) {
-      await tx
-        .update(invocationCommandTable)
-        .set({
-          dispatchLeaseOwner: params.leaseOwner,
-          dispatchLeaseExpiresAt: leaseExpiresAt,
-          updatedAt: params.now,
-          versionNo: candidate.versionNo + 1,
-        })
-        .where(eq(invocationCommandTable.id, candidate.id));
-      claimed.push({
-        ...candidate,
+    await tx
+      .update(invocationCommandTable)
+      .set({
+        commandState: "dispatched",
         dispatchLeaseOwner: params.leaseOwner,
         dispatchLeaseExpiresAt: leaseExpiresAt,
-      });
-    }
-    return claimed;
+        updatedAt: params.now,
+        versionNo: candidate.versionNo + 1,
+      })
+      .where(eq(invocationCommandTable.id, candidate.id));
+    return {
+      tenantId: candidate.tenantId,
+      command: {
+        ...candidate,
+        commandState: "dispatched",
+        dispatchLeaseOwner: params.leaseOwner,
+        dispatchLeaseExpiresAt: leaseExpiresAt,
+      },
+      claimToken: params.leaseOwner,
+      leaseExpiresAt,
+    };
   });
 }
 
@@ -161,47 +455,54 @@ export type AttemptTransientFailureOutcome =
     }
   | { outcome: "exhausted"; dispatchCount: number; attempt: InvocationAttempt };
 
-export async function recordAttemptDispatchTransientFailure(params: {
-  attemptId: string;
-  errorCode: TransientDispatchErrorCode;
-  now: Date;
-  retryReasonCode?: string | null;
-  counted?: boolean;
-}): Promise<AttemptTransientFailureOutcome> {
+/**
+ * 记录一次暂态 dispatch 失败并排定 durable retry（R04 §5：**必须**带 claim 身份）。
+ *
+ * 计数与排定都按 Session + Ownership + claim token 条件执行；Attempt 的状态写入也
+ * 限定在本次 claim 的 Attempt 上，过期 Worker 的迟到失败不会污染新代际。
+ */
+export async function recordAttemptDispatchTransientFailure(
+  identity: SessionDispatchIdentity,
+  params: {
+    errorCode: TransientDispatchErrorCode;
+    now: Date;
+    retryReasonCode?: string | null;
+    counted?: boolean;
+  },
+): Promise<AttemptTransientFailureOutcome> {
   return db.transaction(async (tx) => {
+    const session = await lockClaimedSessionInTransaction(tx, identity);
     const [currentAttempt] = await tx
       .select()
       .from(invocationAttemptTable)
-      .where(eq(invocationAttemptTable.id, params.attemptId))
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, identity.tenantId),
+          eq(invocationAttemptTable.id, identity.attemptId),
+        ),
+      )
       .for("update")
       .limit(1);
-    if (!currentAttempt) throw new Error(`InvocationAttempt 不存在（id=${params.attemptId}）`);
-    if (currentAttempt.attemptState !== "queued")
-      throw new Error(`Attempt 已非 queued（id=${params.attemptId}）`);
-    const [session] = await tx
-      .select()
-      .from(runtimeSessionBindingTable)
-      .where(eq(runtimeSessionBindingTable.attemptId, params.attemptId))
-      .for("update")
-      .limit(1);
-    if (!session) throw new Error(`RuntimeSessionBinding 不存在（attemptId=${params.attemptId}）`);
+    if (!currentAttempt) throw new Error(`InvocationAttempt 不存在（id=${identity.attemptId}）`);
+    if (currentAttempt.attemptState !== "queued") {
+      throw new SessionDispatchClaimSupersededError(
+        `Attempt 已非 queued（id=${identity.attemptId}）`,
+      );
+    }
     const dispatchCount = params.counted ? session.dispatchCount : session.dispatchCount + 1;
     const exhausted = isRetryExhausted(dispatchCount);
     const nextDispatchAt = exhausted
       ? null
       : new Date(params.now.getTime() + backoffDelayMs(dispatchCount));
-    await tx
-      .update(runtimeSessionBindingTable)
-      .set({
-        dispatchCount,
-        nextDispatchAt,
-        lastErrorCode: params.errorCode,
-        dispatchLeaseOwner: null,
-        dispatchLeaseExpiresAt: null,
-        updatedAt: params.now,
-        versionNo: session.versionNo + 1,
-      })
-      .where(eq(runtimeSessionBindingTable.id, session.id));
+    // R02 §8：Session 写入只经仓储方法（行锁 + 版本 CAS）。
+    await rescheduleRuntimeSessionDispatchInTransaction(tx, {
+      tenantId: session.tenantId,
+      id: session.id,
+      expectedVersionNo: session.versionNo,
+      dispatchCount,
+      nextDispatchAt,
+      lastErrorCode: params.errorCode,
+    });
     if (exhausted) {
       await tx
         .update(invocationAttemptTable)
@@ -214,19 +515,19 @@ export async function recordAttemptDispatchTransientFailure(params: {
           updatedAt: params.now,
           versionNo: currentAttempt.versionNo + 1,
         })
-        .where(eq(invocationAttemptTable.id, params.attemptId));
+        .where(eq(invocationAttemptTable.id, identity.attemptId));
     } else if (currentAttempt.retryReasonCode === null && params.retryReasonCode) {
       await tx
         .update(invocationAttemptTable)
         .set({ retryReasonCode: params.retryReasonCode, updatedAt: params.now })
-        .where(eq(invocationAttemptTable.id, params.attemptId));
+        .where(eq(invocationAttemptTable.id, identity.attemptId));
     }
     const [attempt] = await tx
       .select()
       .from(invocationAttemptTable)
-      .where(eq(invocationAttemptTable.id, params.attemptId))
+      .where(eq(invocationAttemptTable.id, identity.attemptId))
       .limit(1);
-    if (!attempt) throw new Error(`InvocationAttempt 更新后回查失败（id=${params.attemptId}）`);
+    if (!attempt) throw new Error(`InvocationAttempt 更新后回查失败（id=${identity.attemptId}）`);
     return exhausted
       ? { outcome: "exhausted" as const, dispatchCount, attempt }
       : {
@@ -247,21 +548,37 @@ export type CommandTransientRetryOutcome =
     }
   | { outcome: "exhausted"; dispatchCount: number; command: InvocationCommand };
 
-export async function scheduleCommandTransientRetry(params: {
-  commandId: string;
-  errorCode: TransientDispatchErrorCode;
-  now: Date;
-}): Promise<CommandTransientRetryOutcome> {
+/**
+ * 排定一次 Command 暂态重试（R04 §5：带 claim 身份）。
+ *
+ * `claimToken` 给出时必须仍是本行 `dispatchLeaseOwner`，否则拒绝（过期 Worker 的
+ * 迟到结论不能改新 claim 的结果）；请求内联路径从未领取 lease，传 `null`。
+ */
+export async function scheduleCommandTransientRetry(
+  identity: { tenantId: string; commandId: string; claimToken: string | null },
+  params: {
+    errorCode: TransientDispatchErrorCode;
+    now: Date;
+  },
+): Promise<CommandTransientRetryOutcome> {
   return db.transaction(async (tx) => {
     const [current] = await tx
       .select()
       .from(invocationCommandTable)
-      .where(eq(invocationCommandTable.id, params.commandId))
+      .where(
+        and(
+          eq(invocationCommandTable.tenantId, identity.tenantId),
+          eq(invocationCommandTable.id, identity.commandId),
+        ),
+      )
       .for("update")
       .limit(1);
-    if (!current) throw new Error(`InvocationCommand 不存在（id=${params.commandId}）`);
+    if (!current) throw new Error(`InvocationCommand 不存在（id=${identity.commandId}）`);
     if (current.commandState !== "dispatched")
-      throw new Error(`Command 已非 dispatched（id=${params.commandId}）`);
+      throw new Error(`Command 已非 dispatched（id=${identity.commandId}）`);
+    if (identity.claimToken !== null && current.dispatchLeaseOwner !== identity.claimToken) {
+      throw new SessionDispatchClaimSupersededError("Command dispatch claim 已被接管");
+    }
     const exhausted = isRetryExhausted(current.dispatchCount);
     const nextDispatchAt = exhausted
       ? null
@@ -278,13 +595,13 @@ export async function scheduleCommandTransientRetry(params: {
         updatedAt: params.now,
         versionNo: current.versionNo + 1,
       })
-      .where(eq(invocationCommandTable.id, params.commandId));
+      .where(eq(invocationCommandTable.id, identity.commandId));
     const [command] = await tx
       .select()
       .from(invocationCommandTable)
-      .where(eq(invocationCommandTable.id, params.commandId))
+      .where(eq(invocationCommandTable.id, identity.commandId))
       .limit(1);
-    if (!command) throw new Error(`InvocationCommand 更新后回查失败（id=${params.commandId}）`);
+    if (!command) throw new Error(`InvocationCommand 更新后回查失败（id=${identity.commandId}）`);
     return exhausted
       ? { outcome: "exhausted" as const, dispatchCount: command.dispatchCount, command }
       : {
@@ -296,71 +613,63 @@ export async function scheduleCommandTransientRetry(params: {
   });
 }
 
-export async function recordCommandRetryAttemptStarted(params: {
-  commandId: string;
-  now: Date;
-}): Promise<void> {
-  const [current] = await db
-    .select()
-    .from(invocationCommandTable)
-    .where(eq(invocationCommandTable.id, params.commandId))
-    .limit(1);
-  if (!current) throw new Error(`InvocationCommand 不存在（id=${params.commandId}）`);
-  await db
-    .update(invocationCommandTable)
-    .set({
-      dispatchCount: sql`${invocationCommandTable.dispatchCount} + 1`,
-      lastErrorCode: null,
-      updatedAt: params.now,
-      versionNo: current.versionNo + 1,
-    })
-    .where(eq(invocationCommandTable.id, params.commandId));
-}
+/**
+ * R03 §6：冻结目标失效的**终态收口**。
+ *
+ * 目标失效（`target_superseded`）是稳定可判定结果——既不重定向新 Owner，也不该重试，
+ * 因此必须落到终态。否则同一事实会留下两种未收口残留：
+ * - `queued` 行：没有扫描者（本 lane 只扫 `dispatched`），永不交付也永不结束；
+ * - `dispatched` 行：每次 30s 租约到期都被重新领取，形成永不排空的 durable work。
+ *
+ * 幂等：已在终态（`acknowledged`/`failed`）直接返回不改写；
+ * `claimToken` 非空时要求行仍由本次领取持有，过期 Worker 的迟到结论不会覆盖被接管后的结论（R04 §5）。
+ */
+export type SupersededCommandSettlement =
+  | { settled: true }
+  | { settled: false; reason: "not_found" | "already_terminal" | "claim_taken_over" };
 
-export async function transitionCommandToDispatchedWithLease(params: {
+export async function settleSupersededInvocationCommand(identity: {
+  tenantId: string;
   commandId: string;
-  leaseOwner: string;
-  now: Date;
-  leaseDurationMs: number;
-}): Promise<boolean> {
-  const leaseExpiresAt = new Date(params.now.getTime() + params.leaseDurationMs);
-  const result = await db
-    .update(invocationCommandTable)
-    .set({
-      commandState: "dispatched",
-      dispatchCount: 1,
-      dispatchLeaseOwner: params.leaseOwner,
-      dispatchLeaseExpiresAt: leaseExpiresAt,
-      nextDispatchAt: null,
-      updatedAt: params.now,
-    })
-    .where(
-      and(
-        eq(invocationCommandTable.id, params.commandId),
-        eq(invocationCommandTable.commandState, "queued"),
-      ),
-    );
-  return result[0].affectedRows > 0;
-}
-
-export async function clearCommandDispatchLease(params: {
-  commandId: string;
-  now: Date;
-}): Promise<void> {
-  await db
-    .update(invocationCommandTable)
-    .set({
-      dispatchLeaseOwner: null,
-      dispatchLeaseExpiresAt: null,
-      nextDispatchAt: null,
-      updatedAt: params.now,
-    })
-    .where(
-      and(
-        eq(invocationCommandTable.id, params.commandId),
-        sql`${invocationCommandTable.commandState} IN ('acknowledged','failed')`,
-      ),
-    );
+  claimToken?: string | null;
+}): Promise<SupersededCommandSettlement> {
+  const claimToken = identity.claimToken ?? null;
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(invocationCommandTable)
+      .where(
+        and(
+          eq(invocationCommandTable.tenantId, identity.tenantId),
+          eq(invocationCommandTable.id, identity.commandId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!current) return { settled: false as const, reason: "not_found" as const };
+    if (current.commandState === "acknowledged" || current.commandState === "failed") {
+      return { settled: false as const, reason: "already_terminal" as const };
+    }
+    if (claimToken !== null && current.dispatchLeaseOwner !== claimToken) {
+      return { settled: false as const, reason: "claim_taken_over" as const };
+    }
+    const now = new Date();
+    await tx
+      .update(invocationCommandTable)
+      .set({
+        commandState: "failed",
+        lastErrorCode: "CommandTargetSuperseded",
+        receiptJson: { code: "CommandTargetSuperseded" },
+        completedAt: now,
+        nextDispatchAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+        updatedAt: now,
+        versionNo: current.versionNo + 1,
+      })
+      .where(eq(invocationCommandTable.id, identity.commandId));
+    return { settled: true as const };
+  });
 }
 
 export type { Tx };

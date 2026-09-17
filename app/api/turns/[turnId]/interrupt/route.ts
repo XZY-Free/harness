@@ -31,6 +31,7 @@ import {
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { getInvocationCommandById } from "@/lib/executions/persistence/invocation-command-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -210,13 +211,17 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         })
       : [];
 
+    // R03 §6：冻结目标失效时命令被收口为终态（`CommandTargetSuperseded`）。响应里的
+    // `command_state` 取持久事实，不报派发前的内存快照（否则会报 `queued` 而库里已 `failed`）。
+    const settledCommand = await getInvocationCommandById(principal.tenantId, result.command.id);
+
     const responseBody = {
       turn_id: result.turnId,
       turn_state: result.turnState,
       interrupt_state: result.interruptState,
       command: {
         id: result.command.id,
-        command_state: result.command.commandState,
+        command_state: settledCommand?.commandState ?? result.command.commandState,
       },
       already_completed_effects_preserved: result.alreadyCompletedEffectsPreserved,
       active_agent_calls: agentCallCancellations.map((entry) => ({

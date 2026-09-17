@@ -110,6 +110,19 @@ export const positiveDecimalStringSchema = z
   .string()
   .regex(/^[1-9][0-9]*$/, "expected positive decimal string");
 
+/**
+ * 十进制字符串 → 本地安全整数（跨 JS/JSON 边界的唯一转换入口）。
+ *
+ * 超出 `Number.MAX_SAFE_INTEGER` 即拒绝：静默降精度会让 Authority/序列号比较
+ * 出现假相等，宁可 fail closed。
+ */
+export function decimalStringToNumber(value: string): number {
+  const result = Number(value);
+  if (!Number.isSafeInteger(result))
+    throw new RangeError(`decimal value exceeds local safe integer boundary: ${value}`);
+  return result;
+}
+
 /** `sha256:<64 lowercase hex>` 摘要字符串。 */
 export const sha256DigestSchema = z
   .string()

@@ -13,10 +13,11 @@ import {
   dispatchQueuedInvocationAttempt,
   failAttemptAndInvokeRecoveryAuthority,
 } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
+import type { SessionDispatchClaim } from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export interface PersistedAttemptDispatcherDependencies {
   hostedApplicationService?: HostedRuntimeApplicationService;
@@ -30,13 +31,18 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
   const createExternalTransport =
     dependencies.createExternalTransport ?? createHttpHarnessRuntimeTransport;
 
-  return async function dispatchPersistedQueuedInvocationAttempt(attemptId: string) {
-    const attempt = await getAttemptById(attemptId);
+  return async function dispatchPersistedQueuedInvocationAttempt(claim: SessionDispatchClaim) {
+    const attempt = await getAttemptById(claim.attemptId);
     if (!attempt || attempt.attemptState !== "queued") return;
     const [invocation] = await db
       .select()
       .from(invocationTable)
-      .where(eq(invocationTable.id, attempt.invocationId))
+      .where(
+        and(
+          eq(invocationTable.tenantId, claim.tenantId),
+          eq(invocationTable.id, claim.invocationId),
+        ),
+      )
       .limit(1);
     if (!invocation) {
       await db.transaction((tx) =>
@@ -71,6 +77,7 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
         errorCode: "EnvironmentRevisionMismatch",
         errorSummary: "冻结的 ExecutionBinding 与 RuntimeRevision 不一致",
         now: new Date(),
+        claim,
       });
       return;
     }
@@ -89,6 +96,10 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
           hosted_artifact: () =>
             createInProcessHostedRuntimeClient({
               tenantId: invocation.tenantId,
+              publishedCapabilityEvidence: {
+                runtimeRevisionId: revision.id,
+                runtimeCapabilitiesJson: revision.runtimeCapabilitiesJson,
+              },
               applicationService: hostedService,
             }),
           external_endpoint: ({ endpoint: externalEndpoint, auth: externalAuth }) =>
@@ -105,6 +116,7 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
       return await dispatchQueuedInvocationAttempt({
         tenantId: invocation.tenantId,
         attemptId: attempt.id,
+        claim,
         runtimeClient,
         runtimeEndpointResolver: async (frozenBinding) => ({
           runtimeEndpoint: endpoint,
@@ -125,6 +137,7 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
           errorCode: error instanceof Error ? error.name : "RuntimeDispatchFailed",
           errorSummary: error instanceof Error ? error.message : String(error),
           now: new Date(),
+          claim,
         });
       }
     }

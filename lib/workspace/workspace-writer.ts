@@ -1,5 +1,4 @@
 import { db } from "@/lib/db/client";
-import { executionOwnershipTable } from "@/lib/persistence/schema/executions";
 import type { ExecutionOwnership } from "@/lib/persistence/schema/executions";
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
@@ -8,14 +7,13 @@ import {
   type WorkspaceContinuityContract,
   validateWorkspaceContract,
 } from "@/lib/workspace/workspace-contract";
-import type { WorkspaceHost, WorkspaceWriterGrant } from "@/lib/workspace/workspace-host";
+import type { WorkspaceWriterGrant } from "@/lib/workspace/workspace-host";
 import {
   activateWorkspaceWriter,
   getActiveLocksByInvocation,
-  releaseWorkspaceWriteLock,
+  requestWorkspaceWriterRelease,
   reserveWorkspaceWriter,
 } from "@/lib/workspace/workspace-write-lock-queries";
-import { and, eq } from "drizzle-orm";
 
 export interface ActivatedWorkspaceWriter {
   grant: WorkspaceWriterGrant;
@@ -123,47 +121,36 @@ export async function activatePreparedWorkspaceWriter(input: {
       operationId,
       root: input.candidate.root,
     });
-    const active = await db.transaction(async (tx) => {
-      // 复核 Current Ownership：调用方先前读到的 row 不能绕过复核。
-      const [current] = await tx
-        .select()
-        .from(executionOwnershipTable)
-        .where(
-          and(
-            eq(executionOwnershipTable.tenantId, input.tenantId),
-            eq(executionOwnershipTable.id, input.ownership.id),
-            eq(executionOwnershipTable.invocationId, input.invocationId),
-            eq(executionOwnershipTable.ownershipState, "active"),
-          ),
-        )
-        .for("update")
-        .limit(1);
-      if (!current || current.leaseEpoch !== input.ownership.leaseEpoch) {
-        throw new Error("NotCurrentExecutor");
-      }
-      if (current.leaseExpiresAt <= new Date()) throw new Error("NotCurrentExecutor");
-      return activateWorkspaceWriter(
+    const active = await db.transaction((tx) =>
+      // W→I 顺序（R04 §2/§4）：先锁 WorkspaceWriteLock，再按 Invocation → Attempt →
+      // Ownership 复核 Current Ownership 与代际；不能用"先读到的 ownership row"绕过复核，
+      // 也不能先锁 Ownership 再锁 W。
+      activateWorkspaceWriter(
         {
           tenantId: input.tenantId,
+          invocationId: input.invocationId,
+          attemptId: input.attemptId,
           lockId: reserved.lock.id,
-          ownershipId: input.ownership.id,
           writerGeneration: reserved.writerGeneration,
+          ownershipId: input.ownership.id,
+          leaseEpoch: input.ownership.leaseEpoch,
           backendGrantRef: grant.grantRef,
           backendEvidence: grant.backendEvidence,
           backendOperationId: operationId,
           backendReceipt: grant.backendEvidence,
         },
         tx,
-      );
-    });
+      ),
+    );
     return { grant, lockId: active.id, writerGeneration: active.writerGeneration };
   } catch (error) {
-    // 先让 Backend 真实撤销该 generation 的 Writer，再写控制面状态：
-    // 不允许"先写 released 再吞掉 Backend 错误"。
+    // 先让 Backend 真实撤销该 generation 的 Writer（尽力而为，失败也会被释放 lane 重做），
+    // 再写**持久**释放请求；控制面不直接写 released、也不清空 Backend 定位字段
+    // （§7：不能先清空回执定位再失去清理能力）。
     await input.candidate.backend.host
       .revokeWriterGeneration(scopeDigest, reserved.writerGeneration)
       .catch(() => undefined);
-    await releaseWorkspaceWriteLock({
+    await requestWorkspaceWriterRelease({
       tenantId: input.tenantId,
       lockId: reserved.lock.id,
       ownershipId: input.ownership.id,
@@ -195,34 +182,6 @@ export async function prepareWorkspaceWriter(input: {
     ownership: input.ownership,
     authority: input.authority,
     candidate,
-  });
-}
-
-/** 释放 Writer：先让 Backend 真实撤销，再落控制面 released。 */
-export async function releaseWorkspaceWriter(input: {
-  tenantId: string;
-  lockId: string;
-  ownershipId: string;
-  reasonCode: string;
-  backend?: WorkspaceHost | null;
-  scopeDigest?: string | null;
-  writerGeneration?: number | null;
-}): Promise<void> {
-  if (
-    input.backend &&
-    input.scopeDigest &&
-    input.writerGeneration !== undefined &&
-    input.writerGeneration !== null
-  ) {
-    await input.backend
-      .revokeWriterGeneration(input.scopeDigest, input.writerGeneration)
-      .catch(() => undefined);
-  }
-  await releaseWorkspaceWriteLock({
-    tenantId: input.tenantId,
-    lockId: input.lockId,
-    ownershipId: input.ownershipId,
-    reasonCode: input.reasonCode,
   });
 }
 

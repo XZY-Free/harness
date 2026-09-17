@@ -763,14 +763,17 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           "Hosted cancel 未配置正式应用服务",
         );
       }
+      // R03 §6：Cancel 必须按请求携带的**目标 Authority**关门——不得只给 invocationId
+      // 让应用层再查"现在的 Owner"，否则旧目标的 Cancel 会误杀新代际。
+      const authority = cancelParams.authority ?? failMissingAuthority();
       await params.applicationService.cancel({
         tenantId: params.tenantId ?? "",
         invocationId: cancelParams.invocationId,
         idempotencyKey: `hosted-cancel:${cancelParams.invocationId}`,
+        authority,
         reason: cancelParams.reason,
       });
 
-      const authority = cancelParams.authority ?? failMissingAuthority();
       return {
         response: {
           accepted: true,
@@ -787,13 +790,14 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           "Hosted resume 未配置正式应用服务",
         );
       }
+      const authority = resumeParams.authority ?? failMissingAuthority();
       await params.applicationService.resume({
         tenantId: params.tenantId ?? "",
         invocationId: resumeParams.invocationId,
         idempotencyKey: `hosted-resume:${resumeParams.invocationId}`,
+        authority,
         resumePayload: resumeParams.resumePayload,
       });
-      const authority = resumeParams.authority ?? failMissingAuthority();
       return {
         response: {
           protocolVersion: 3,
@@ -819,13 +823,14 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           "Hosted steer 未配置正式应用服务",
         );
       }
+      const authority = steerParams.authority ?? failMissingAuthority();
       await params.applicationService.steer({
         tenantId: params.tenantId ?? "",
         invocationId: steerParams.invocationId,
         idempotencyKey: `hosted-steer:${steerParams.invocationId}`,
+        authority,
         steerPayload: steerParams.steerPayload,
       });
-      const authority = steerParams.authority ?? failMissingAuthority();
       return {
         response: {
           accepted: true,

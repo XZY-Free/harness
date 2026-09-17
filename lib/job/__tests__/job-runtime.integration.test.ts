@@ -1,28 +1,27 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { transitionInvocation } from "@/lib/executions/application/transition-invocation";
 import { sameAuthority } from "@/lib/executions/domain/execution-authority";
 import { createAttempt } from "@/lib/executions/persistence/attempt-store";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { admitQueuedJob } from "@/lib/job/job-admission";
 import { consumeJobCommand } from "@/lib/job/job-command-consumer";
 import { createCancelCommand, createRetryCommand } from "@/lib/job/job-command-queries";
 import { processRetryCommand } from "@/lib/job/job-control-queries";
-import {
-  JobExecutionConflictError,
-  createJobInvocation,
-  createJobInvocationInTransaction,
-} from "@/lib/job/job-execution";
 import { createJob, getJobById } from "@/lib/job/job-queries";
 import { threadTable } from "@/lib/persistence/schema/conversation";
-import { invocationTable } from "@/lib/persistence/schema/executions";
-import type { NewExecutionBinding } from "@/lib/persistence/schema/executions";
+import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { jobCommandTable, jobEventTable } from "@/lib/persistence/schema/job";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { RuntimeStartRequest, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
-import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
+import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
+import { seedRuntimeRouteAuthority } from "@/lib/test-support/seed-runtime-route-authority";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -39,110 +38,63 @@ const callbackEndpoints = {
   userActions: "http://127.0.0.1/gateway/user-actions",
 };
 
-function jobBindingFingerprintInput(): Omit<NewExecutionBinding, "tenantId" | "invocationId"> {
-  const digest = (value: string) => protocolDigest(value);
-  return {
-    runtimeRevisionId: randomUUID(),
-    deploymentRouteId: "job-test-route",
-    routeRevisionId: randomUUID(),
-    routeActivationId: randomUUID(),
-    routeContentDigest: digest("route-content"),
-    modelProvider: "test",
-    modelId: "test-model",
-    modelRevisionRef: null,
-    workspaceBindingId: "",
-    policyRevisionId: randomUUID(),
-    policyRulesDigest: digest("policy-rules"),
-    governanceConfigRevisionId: randomUUID(),
-    governanceConfigDigest: digest("governance-config"),
-    runtimeArtifactId: null,
-    runtimeArtifactDigest: null,
-    runtimeEvidenceKind: "external_endpoint",
-    runtimeTargetDigest: digest("target"),
-    runtimeConfigDigest: digest("runtime-config"),
-    capabilityManifestDigest: digest("manifest"),
-    runtimeAttestationIds: [],
-    runtimePublicationRecordId: randomUUID(),
-    conformanceRunId: randomUUID(),
-    resolutionInputDigest: digest("resolution"),
-    projectionVersionNo: 1,
-    environmentDefinitionRevisionId: null,
-    environmentMode: "NO_PLATFORM_ENVIRONMENT",
-    principalType: "service",
-    principalId: "job-scheduler",
-    principalSource: "trusted_service",
-    principalFrozenAt: new Date(),
-    capabilityCatalogDigest: digest("catalog"),
-    capabilityCatalogJson: { fixture: "job-test" },
-    capabilityCatalogCreatedAt: new Date(),
-    capabilityCatalogVersion: "1",
-    capabilityCatalogSourceRefs: [],
-    configHash: digest("binding-config"),
-    controlPlaneEvidence: {
-      kind: "job-binding",
-      routeRevisionId: digest("route-revision"),
-      routeActivationId: digest("route-activation"),
-      routeContentDigest: digest("route-content"),
-      resolutionInputDigest: digest("resolution"),
-    },
-  } as Omit<NewExecutionBinding, "tenantId" | "invocationId">;
+/** Job 夹具使用的 Runtime 能力集（与发布证据一起冻结进 Binding）。 */
+const JOB_RUNTIME_CAPABILITIES = ["event_stream"];
+
+/** 幂等建出默认租户 + 默认 owner（Job admission 需要可信 principal 事实）。 */
+async function ensureDefaultTenantOwner(): Promise<string> {
+  await ensureDefaultTenant();
+  const identity = await upsertUserIdentity({
+    tenantId: TENANT_ID,
+    externalSubject: DEFAULT_USER_ID,
+    email: DEFAULT_USER_EMAIL,
+    displayName: DEFAULT_USER_NAME,
+  });
+  return identity.id;
 }
 
-async function seedPublishedRuntimeRevision(): Promise<string> {
-  const { runtimeTable, runtimeRevisionTable } = await import("@/lib/persistence/schema/runtimes");
-  const runtimeId = randomUUID();
-  const revisionId = randomUUID();
-  const digest = protocolDigest({
-    runtimeId,
-    runtimeRevisionId: revisionId,
-    fixture: "job-runtime",
-  });
-  await db.insert(runtimeTable).values({
-    id: runtimeId,
+/**
+ * 建出可直接被默认 Route Resolver 解析的 RuntimeRevision（真实发布链 + Route 权威）。
+ *
+ * §27/§2：Job 的 Binding 走与 Thread 同一个 Binding Authority，因此夹具必须提供真实
+ * Route/Publication/Conformance/Projection 证据，不能伪造 Projection 或直接插台账行。
+ */
+async function seedJobRuntimeAuthority(): Promise<{
+  runtimeRevisionId: string;
+  capabilities: string[];
+}> {
+  const ownerId = await ensureDefaultTenantOwner();
+  const suffix = randomUUID().slice(0, 8);
+  const { revision } = await seedPublishedRuntimeRevision(
+    TENANT_ID,
+    ownerId,
+    `job-runtime-${suffix}`,
+    JOB_RUNTIME_CAPABILITIES,
+    suffix,
+  );
+  await seedRuntimeRouteAuthority({
     tenantId: TENANT_ID,
-    runtimeKey: `job-runtime-${runtimeId}`,
-    displayName: "Job Runtime",
-    runtimeKind: "external",
-    ownerUserId: "test-user",
-    lifecycleState: "enabled",
-    currentRevisionId: revisionId,
-    versionNo: 1,
+    runtimeRevisionId: revision.id,
+    actorId: "job-fixture",
   });
-  const { defaultRuntimeCapabilities } = await import("@/lib/runtime/runtime-client");
-  await db.insert(runtimeRevisionTable).values({
-    id: revisionId,
-    tenantId: TENANT_ID,
-    runtimeId,
-    revisionNo: 1,
-    protocolType: "harness_runtime_protocol",
-    protocolVersion: 3,
-    protocolContractDigest: digest,
-    runtimeEvidenceKind: "external_endpoint",
-    runtimeTargetDigest: digest,
-    endpointRef: "http://127.0.0.1/job-runtime",
-    runtimeArtifactRef: null,
-    artifactId: null,
-    artifactDigest: null,
-    runtimeCapabilitiesJson: defaultRuntimeCapabilities(),
-    identityMode: "none",
-    networkZone: "external",
-    configHash: digest,
-    credentialRefId: null,
-    revisionState: "published",
-    createdBy: "test-service",
-  });
-  return revisionId;
+  return { runtimeRevisionId: revision.id, capabilities: JOB_RUNTIME_CAPABILITIES };
 }
 
+/**
+ * 建出"已接纳"的纯 Job：Job → 唯一 Invocation → 完整 Binding，全部走
+ * `admitQueuedJob`（R01 §2/§3）。测试不自行拼装 Binding 台账行。
+ */
 async function seedJobFixture(
   input: {
     inputJson?: unknown;
     creationKey?: string;
     triggerRef?: string;
-    runtimeRevisionId?: string;
+    /** 复用已建好的 Runtime 权威（含 capabilities，供 Start 一致性断言使用）。 */
+    runtime?: { runtimeRevisionId: string; capabilities: string[] };
   } = {},
 ) {
   const inputJson = input.inputJson ?? { task: "job-fixture" };
+  const runtime = input.runtime ?? (await seedJobRuntimeAuthority());
   const { job } = await createJob({
     tenantId: TENANT_ID,
     agentId: randomUUID(),
@@ -152,15 +104,19 @@ async function seedJobFixture(
     completionPolicyJson: { policy: "all_success" },
     inputJson,
   });
-  const workspace = await createNoPlatformWorkspaceBinding(TENANT_ID, "test-service");
-  const bindingInput = { ...jobBindingFingerprintInput(), workspaceBindingId: workspace.id };
-  if (input.runtimeRevisionId) bindingInput.runtimeRevisionId = input.runtimeRevisionId;
-  const created = await createJobInvocation({
-    tenantId: TENANT_ID,
-    jobId: job.id,
-    binding: bindingInput,
-  });
-  return { workspace, bindingInput, ...created };
+  const admitted = await admitQueuedJob({ tenantId: TENANT_ID, jobId: job.id });
+  if (admitted.outcome !== "admitted") {
+    throw new Error(`seedJobFixture: Job admission 未接纳（${admitted.outcome}）`);
+  }
+  const [invocation] = await db
+    .select()
+    .from(invocationTable)
+    .where(eq(invocationTable.id, admitted.invocationId))
+    .limit(1);
+  const binding = await getExecutionBindingByInvocation(TENANT_ID, admitted.invocationId);
+  if (!invocation || !binding)
+    throw new Error("seedJobFixture: 接纳后回读 Invocation/Binding 失败");
+  return { job, invocation, binding, runtime };
 }
 
 function startResponseStub(
@@ -244,21 +200,17 @@ describe("Thread-independent Job runtime integration", () => {
   it("JOB-02: two racing scheduler deliveries return the identical frozen Invocation and Binding", async () => {
     const fixture = await seedJobFixture();
     const { job } = fixture;
-    const bindingInput = fixture.bindingInput;
-    const firstDelivery = createJobInvocation({
-      tenantId: TENANT_ID,
-      jobId: job.id,
-      binding: bindingInput,
-    });
-    const secondDelivery = createJobInvocation({
-      tenantId: TENANT_ID,
-      jobId: job.id,
-      binding: bindingInput,
-    });
-    const [firstResult, secondResult] = await Promise.all([firstDelivery, secondDelivery]);
-    expect(firstResult.invocation.id).toBe(secondResult.invocation.id);
-    expect(firstResult.binding.invocationId).toBe(secondResult.binding.invocationId);
-    // seedJobFixture 已创建过一次，重复投递是幂等重放：created=false，ID 不变。
+    // 两条 lane 并发接纳同一 Job：Job 根锁序列化，只能有一条建图。
+    const [firstResult, secondResult] = await Promise.all([
+      admitQueuedJob({ tenantId: TENANT_ID, jobId: job.id }),
+      admitQueuedJob({ tenantId: TENANT_ID, jobId: job.id }),
+    ]);
+    expect(firstResult.outcome).toBe("admitted");
+    expect(secondResult.outcome).toBe("admitted");
+    if (firstResult.outcome !== "admitted" || secondResult.outcome !== "admitted") return;
+    expect(firstResult.invocationId).toBe(fixture.invocation.id);
+    expect(secondResult.invocationId).toBe(fixture.invocation.id);
+    // seedJobFixture 已接纳过一次，重复投递是幂等重放：created=false，ID 不变。
     expect(firstResult.created).toBe(false);
     expect(secondResult.created).toBe(false);
     const invocations = await db
@@ -266,6 +218,12 @@ describe("Thread-independent Job runtime integration", () => {
       .from(invocationTable)
       .where(and(eq(invocationTable.tenantId, TENANT_ID), eq(invocationTable.jobId, job.id)));
     expect(invocations).toHaveLength(1);
+    const bindings = await db
+      .select()
+      .from(executionBindingTable)
+      .where(eq(executionBindingTable.invocationId, fixture.invocation.id));
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]?.configHash).toBe(fixture.binding.configHash);
   });
 
   it("JOB-03: the same creationKey with a different input hash conflicts and never overwrites the input", async () => {
@@ -336,8 +294,8 @@ describe("Thread-independent Job runtime integration", () => {
 
   it("JOB-05: a transport retry of the same start intent keeps Invocation, Attempt, Ownership and StartKey identical", async () => {
     const { startRuntimeInvocation } = await import("@/lib/runtime/application/runtime-start");
-    const revisionId = await seedPublishedRuntimeRevision();
-    const fixture = await seedJobFixture({ runtimeRevisionId: revisionId });
+    const runtimeAuthority = await seedJobRuntimeAuthority();
+    const fixture = await seedJobFixture({ runtime: runtimeAuthority });
     const attempt = await createAttempt({
       tenantId: TENANT_ID,
       invocationId: fixture.invocation.id,
@@ -348,10 +306,9 @@ describe("Thread-independent Job runtime integration", () => {
     const { computeCapabilityManifestDigest } = await import(
       "@/lib/routes/domain/route-resolution-policy"
     );
-    const { defaultRuntimeCapabilities } = await import("@/lib/runtime/runtime-client");
     const publishedDigest = computeCapabilityManifestDigest({
-      runtimeRevisionId: revisionId,
-      runtimeCapabilities: defaultRuntimeCapabilities(),
+      runtimeRevisionId: runtimeAuthority.runtimeRevisionId,
+      runtimeCapabilities: runtimeAuthority.capabilities,
     });
     const client: RuntimeHttpClient = {
       probeCapabilities: async () => {

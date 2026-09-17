@@ -12,13 +12,14 @@ import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import { environmentDefinitionRevisionTable } from "@/lib/persistence/schema/environment-definition-revision";
 import {
   type ExecutionOwnership,
+  INVOCATION_ATTEMPT_TERMINAL_STATES,
+  INVOCATION_TERMINAL_STATES,
   executionBindingTable,
   executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
-  runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
-import { revokeWorkspaceWriteLocksForInvocation } from "@/lib/workspace/workspace-write-lock-queries";
+import { markRuntimeSessionLostByOwnershipInTransaction } from "@/lib/runtime/persistence/runtime-session-store";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 export type OwnershipTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -81,6 +82,15 @@ async function prepareChecks(executor: OwnershipTx, input: AcquireExecutionOwner
     .limit(1);
   if (!attempt || attempt.preparationState !== "prepared") {
     throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不存在或尚未 Prepared");
+  }
+  // R02 §4「Attempt 属于 Invocation 并处于允许阶段」：属于关系已由上面的 invocationId
+  // 过滤保证；阶段上只接受非终态 Attempt——终态 Attempt 不可再承载任何执行权，换个实例
+  // 必须新建 Attempt（§7），不能靠 Acquire 复活一个已收口的代际。
+  if (INVOCATION_ATTEMPT_TERMINAL_STATES.includes(attempt.attemptState)) {
+    throw new ExecutionAuthorityError(
+      "AttemptMismatch",
+      `Attempt 已终态（${attempt.attemptState}），不可取得执行权`,
+    );
   }
   if (input.environmentLeaseId) {
     const [lease] = await executor
@@ -163,6 +173,14 @@ export async function acquireExecutionOwnershipInTransaction(
   input: AcquireExecutionOwnershipInput,
 ): Promise<OwnershipResult> {
   const invocation = await lockInvocation(tx, input.tenantId, input.invocationId);
+  // R02 §4「Invocation 非 terminal」：终态 Invocation 不再接受新执行权，Acquire 必须在此
+  // fail closed——否则终态 Invocation 会被新 Ownership 复活（还会顺带推进 lastOwnershipEpoch）。
+  if (INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
+    throw new ExecutionAuthorityError(
+      "NotCurrentExecutor",
+      `Invocation 已终态（${invocation.executionState}），不可取得执行权`,
+    );
+  }
   await prepareChecks(tx, input);
   const now = await getAuthorityDatabaseTime(tx);
   const [active] = await tx
@@ -196,22 +214,8 @@ export async function acquireExecutionOwnershipInTransaction(
         updatedAt: now,
       })
       .where(eq(executionOwnershipTable.id, active.id));
-    await tx
-      .update(runtimeSessionBindingTable)
-      .set({
-        bindingState: "lost",
-        closedAt: now,
-        dispatchLeaseOwner: null,
-        dispatchLeaseExpiresAt: null,
-        versionNo: sql`${runtimeSessionBindingTable.versionNo} + 1`,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(runtimeSessionBindingTable.tenantId, input.tenantId),
-          eq(runtimeSessionBindingTable.ownershipId, active.id),
-        ),
-      );
+    // R02 §8：接管旧代际时 Session 状态写入收敛到仓储方法（行锁 + 单向转换表）。
+    await markRuntimeSessionLostByOwnershipInTransaction(tx, input.tenantId, active.id);
     const [staleAttempt] = await tx
       .select()
       .from(invocationAttemptTable)
@@ -257,14 +261,10 @@ export async function acquireExecutionOwnershipInTransaction(
           ),
         );
     }
-    await revokeWorkspaceWriteLocksForInvocation(
-      {
-        tenantId: input.tenantId,
-        invocationId: input.invocationId,
-        reasonCode: "OwnershipExpired",
-      },
-      tx,
-    );
+    // R04 §3：**不**在已持有 I 根锁时撤销/释放 WorkspaceWriteLock。
+    // 旧 Owner 被置为 lost 之后，其 Writer 的物理 stop/drain 与 W 行收口由持久
+    // Workspace Writer 释放 lane 按 W→I 顺序完成（`workspace-writer-release.ts`）；
+    // 新 Writer 的接管由 `reserveWorkspaceWriter` 在 W 路径中复核"父 Owner 已失权"。
   }
   const leaseEpoch = invocation.lastOwnershipEpoch + 1;
   const ownershipId = randomUUID();
@@ -366,7 +366,8 @@ export async function renewExecutionOwnershipInTransaction(
     leaseEpoch: number;
   },
 ): Promise<ExecutionOwnership> {
-  const invocation = await lockInvocation(tx, input.tenantId, input.invocationId);
+  // 锁序不变量：任何 Owner 操作先锁 Invocation 根。
+  await lockInvocation(tx, input.tenantId, input.invocationId);
   const [owner] = await tx
     .select()
     .from(executionOwnershipTable)
@@ -386,15 +387,18 @@ export async function renewExecutionOwnershipInTransaction(
     throw new ExecutionAuthorityError("NotCurrentExecutor", "Owner 已关闭");
   if (owner.leaseExpiresAt <= now)
     throw new ExecutionAuthorityError("OwnershipExpired", "Owner lease 已过期");
-  // 未 Start（Invocation 尚未 running）的 Owner 续租受 dispatchDeadline 封顶：
-  // 平台无法通过反复续租把 Start 阶段无限占用；一旦 deadline 已过且未 Start，续租失败。
-  const executionStarted = invocation.executionState === "running";
-  if (!executionStarted && owner.dispatchDeadline <= now) {
+  // R02 §4：dispatch deadline 按 **owner.executionPhase** 判定，不看 Invocation 是否 running。
+  // `activating`/`dispatching`（尚未 Start）受固定 dispatchDeadline 封顶——平台无法通过
+  // 反复续租无限占用 Start 阶段；`executing`/`suspending` 只受任务 Lease 与暂停安全点
+  // deadline 约束（后者由 Checkpoint Gate 自己的 safePointDeadline 表达）。
+  const withinDispatchWindow =
+    owner.executionPhase === "activating" || owner.executionPhase === "dispatching";
+  if (withinDispatchWindow && owner.dispatchDeadline <= now) {
     throw new ExecutionAuthorityError("OwnershipExpired", "Dispatch deadline 已过且执行尚未启动");
   }
   const desiredLeaseExpiresAt = new Date(now.getTime() + OWNERSHIP_LEASE_MS);
   const leaseExpiresAt =
-    !executionStarted && desiredLeaseExpiresAt > owner.dispatchDeadline
+    withinDispatchWindow && desiredLeaseExpiresAt > owner.dispatchDeadline
       ? owner.dispatchDeadline
       : desiredLeaseExpiresAt;
   await tx
@@ -447,10 +451,20 @@ export async function requireCurrentExecutionOwnership(input: {
   return owner;
 }
 
+/**
+ * 关闭 Current Owner（R02 §4 Release/Revoke/Lost）。
+ *
+ * **必须**复核 `tenantId + invocationId + ownershipId + attemptId + leaseEpoch` 的完整所属关系：
+ * 「关闭输入 Owner ID」绝不允许锁错 Invocation，也不允许把某个同租户但属于另一代际的
+ * ownershipId 当成当前代际关闭。
+ */
 export async function closeExecutionOwnership(input: {
   tenantId: string;
   invocationId: string;
   ownershipId: string;
+  /** 调用方持有的 Owner 代际 tuple（缺一不可）。 */
+  attemptId?: string;
+  leaseEpoch?: number;
   state: "released" | "lost" | "revoked";
   reasonCode: string;
 }): Promise<ExecutionOwnership> {
@@ -468,6 +482,17 @@ export async function closeExecutionOwnership(input: {
       .for("update")
       .limit(1);
     if (!owner) throw new ExecutionAuthorityError("NotCurrentExecutor", "Owner 不存在");
+    // 所属关系复核：ownershipId 必须真的属于本次要锁的 Invocation，且代际 tuple 一致。
+    if (
+      owner.invocationId !== input.invocationId ||
+      (input.attemptId !== undefined && owner.attemptId !== input.attemptId) ||
+      (input.leaseEpoch !== undefined && owner.leaseEpoch !== input.leaseEpoch)
+    ) {
+      throw new ExecutionAuthorityError(
+        "NotCurrentExecutor",
+        "Owner 不属于该 Invocation/代际（拒绝跨 Invocation 关闭）",
+      );
+    }
     if (owner.ownershipState !== "active") return owner;
     const now = await getAuthorityDatabaseTime(tx);
     await tx

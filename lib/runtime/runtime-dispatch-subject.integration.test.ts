@@ -17,6 +17,11 @@ const authority = {
   sessionBindingId: "00000000-0000-4000-8000-000000000015",
 } as const;
 const digest = `sha256:${"0".repeat(64)}`;
+// R02 §3：Hosted 接纳回执的摘要来自冻结发布证据（与请求的 runtimeRevisionId 一致）。
+const frozenCapabilityEvidence = {
+  runtimeRevisionId: authority.runtimeRevisionId,
+  runtimeCapabilitiesJson: ["event_stream"],
+};
 
 function request(): RuntimeStartRequest {
   const now = Date.now();
@@ -104,7 +109,7 @@ describe("runtime dispatch trusted subject", () => {
     expect(await db.select().from(executionBindingTable)).toHaveLength(0);
   });
 
-  it("Hosted launch 只向 application service 转交 durable invocation identity", async () => {
+  it("R02 §2：Hosted launch 向 application service 转交准确的 authority 与 Session 启动身份", async () => {
     const start = vi.fn(async ({ invocationId: value }: { invocationId: string }) => ({
       status: "resumed" as const,
       invocationId: value,
@@ -112,6 +117,7 @@ describe("runtime dispatch trusted subject", () => {
     }));
     const client = createInProcessHostedRuntimeClient({
       tenantId: invocationId,
+      publishedCapabilityEvidence: frozenCapabilityEvidence,
       applicationService: { start, resume: vi.fn(), cancel: vi.fn(), steer: vi.fn() },
     });
     await client.startInvocation({
@@ -121,11 +127,22 @@ describe("runtime dispatch trusted subject", () => {
       request: request(),
     });
 
-    await client.launchAcceptedInvocation(invocationId);
-    expect(start).toHaveBeenCalledWith({
-      tenantId: invocationId,
-      invocationId,
-      idempotencyKey: `start:${invocationId}`,
-    });
+    // 应用层拿到的是 Start 请求里的完整 authority（含 Attempt/Ownership/epoch/Session），
+    // 而不是只有 invocationId——运行期据此复核代际，不按 invocationId 跟随 current。
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: invocationId,
+        invocationId,
+        idempotencyKey: `start:${authority.ownershipId}`,
+        authority: expect.objectContaining({
+          invocationId,
+          attemptId: authority.attemptId,
+          ownershipId: authority.ownershipId,
+          leaseEpoch: authority.leaseEpoch,
+          sessionBindingId: authority.sessionBindingId,
+          runtimeRevisionId: authority.runtimeRevisionId,
+        }),
+      }),
+    );
   });
 });

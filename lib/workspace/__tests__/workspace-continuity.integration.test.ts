@@ -31,11 +31,7 @@ import { type WorkspaceHost, createManagedWorkspaceHost } from "@/lib/workspace/
 import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import { requireWorkspaceReadiness } from "@/lib/workspace/workspace-readiness";
-import {
-  activateWorkspaceWriter,
-  reserveWorkspaceWriter,
-  revokeWorkspaceWriteLocksForInvocation,
-} from "@/lib/workspace/workspace-write-lock-queries";
+import { reserveWorkspaceWriter } from "@/lib/workspace/workspace-write-lock-queries";
 import {
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
@@ -199,17 +195,13 @@ describe("Workspace continuity integration", () => {
         "utf8",
       );
 
-      // Runtime 进程死亡：Owner 关闭、物理 writer 锁进入隔离态（与 takeover 恢复路径一致）。
+      // Runtime 进程死亡：Owner 关闭即为持久事实（R04 §3：I 侧**不**释放 W 行）。
+      // 接管必须仅凭"父 Owner 已失权 + W 路径复核"成立，不依赖任何显式撤销调用。
       await closeExecutionOwnership({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
         ownershipId: firstRun.acquired.ownership.id,
         state: "lost",
-        reasonCode: "runtime_process_lost",
-      });
-      await revokeWorkspaceWriteLocksForInvocation({
-        tenantId: TENANT_ID,
-        invocationId: first.invocation.id,
         reasonCode: "runtime_process_lost",
       });
       // 同 Invocation 新 Attempt：同 Host 磁盘与 Workspace 身份不变，恢复取得合法下一代 writer。
@@ -339,7 +331,8 @@ describe("Workspace continuity integration", () => {
         root: temporaryRoot,
       });
       expect(firstRun.activated.writerGeneration).toBe(1);
-      // 不同 Invocation（更高 epoch 语义上互不相干）并发申请同一物理 scope 的 writer。
+      // 不同 Invocation 申请同一物理 scope 的 writer：持有者父 Owner 仍健康，
+      // 必须在 W 路径复核后拒绝（R04 §4：不能用 slot 上的 leaseExpiresAt 推断）。
       await expect(
         reserveWorkspaceWriter({
           tenantId: TENANT_ID,
@@ -352,7 +345,7 @@ describe("Workspace continuity integration", () => {
           backendGrantRef: null,
           backendEvidence: { phase: "reserved" },
         }),
-      ).rejects.toThrow("Workspace writer 已被其他 Invocation 占用");
+      ).rejects.toThrow("父 Owner 仍然健康");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -388,7 +381,7 @@ describe("Workspace continuity integration", () => {
           workspaceBindingId: aliasB.id,
           leaseExpiresAt: new Date(Date.now() + 60_000),
         }),
-      ).rejects.toThrow("Workspace writer 已被其他 Invocation 占用");
+      ).rejects.toThrow("父 Owner 仍然健康");
       expect(runA.activated.writerGeneration).toBe(1);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -410,17 +403,13 @@ describe("Workspace continuity integration", () => {
         root: temporaryRoot,
       });
       const oldGrant = firstRun.activated.grant;
-      // 换代：旧锁隔离，新 Owner（同 Invocation 新 Attempt 的 takeover）取得下一代。
+      // 换代：旧 Owner 失权即为持久事实，新 Owner（同 Invocation 新 Attempt 的 takeover）
+      // 直接取得下一代，不需要任何 I 侧显式撤销 W 行（R04 §3）。
       await closeExecutionOwnership({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
         ownershipId: firstRun.acquired.ownership.id,
         state: "lost",
-        reasonCode: "takeover",
-      });
-      await revokeWorkspaceWriteLocksForInvocation({
-        tenantId: TENANT_ID,
-        invocationId: first.invocation.id,
         reasonCode: "takeover",
       });
       const attempt2 = await createAttempt({

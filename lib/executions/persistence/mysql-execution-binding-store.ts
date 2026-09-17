@@ -79,117 +79,133 @@ export const EXECUTION_BINDING_AUTHORITY_LOCK_ORDER = [
   "RouteEligibilityProjection",
 ] as const;
 
+/**
+ * R01 §2：Binding 唯一创建 Authority 的**事务内**入口。
+ *
+ * 需要把 Binding 创建与别的根事实（如 Job 根锁）放进同一个事务的调用方，必须显式传入
+ * 自己已持有的事务 —— 不给 `db` 默认值，避免"看起来在事务里、实际另开一条连接"的假象。
+ * Thread 与 Job 走的都是这一个流程（资格校验 + 逐条行级锁 + TOCTOU 复验 + Insert）。
+ */
+export function createExecutionBindingStoreInTransaction(tx: Transaction): ExecutionBindingStore {
+  return { create: (input) => createExecutionBindingInTransaction(tx, input) };
+}
+
+/**
+ * Binding 唯一创建 Authority 的主体：资格校验 + 锁定证据复验 + Insert 全在同一事务内。
+ */
+export async function createExecutionBindingInTransaction(
+  tx: Transaction,
+  input: StoreExecutionBindingInput,
+): Promise<ExecutionBinding> {
+  // 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
+  const [invocation] = await tx
+    .select({ id: invocationTable.id })
+    .from(invocationTable)
+    .where(
+      and(eq(invocationTable.id, input.invocationId), eq(invocationTable.tenantId, input.tenantId)),
+    )
+    .limit(1)
+    .for("update");
+  if (!invocation) throw evidenceError("Invocation 不存在或租户不匹配");
+
+  const [existing] = await tx
+    .select({ id: executionBindingTable.invocationId })
+    .from(executionBindingTable)
+    .where(eq(executionBindingTable.invocationId, input.invocationId))
+    .limit(1);
+  if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
+
+  // 2. /: 统一资格校验（tx 必须传入，复用 Store 事务）
+  const evidence = input.controlPlaneEvidence;
+  const eligibility = await validateBindingEligibility(tx, {
+    tenantId: input.tenantId,
+    routeId: input.deploymentRouteId,
+    routeRevisionId: evidence.routeRevisionId,
+    routeActivationId: evidence.routeActivationId,
+    runtimeRevisionId: input.runtimeRevisionId,
+    policyRevisionId: input.policyRevisionId,
+    projectionVersionNo: input.projectionVersionNo,
+    frozenEvidence: {
+      runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+      runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+      conformanceRunId: evidence.conformanceRunId,
+    },
+  });
+  if (!eligibility.valid) {
+    throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
+  }
+
+  // 3. : Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
+  const revisions = await lockAndVerifyRoute(tx, input);
+
+  // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
+  // Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
+  const capabilityManifestDigest = computeCapabilityManifestDigest({
+    runtimeRevisionId: revisions.runtimeRevision.id,
+    runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
+  });
+  if (capabilityManifestDigest !== input.controlPlaneEvidence.capabilityManifestDigest) {
+    throw evidenceError("Capability Manifest Digest 已变化");
+  }
+
+  // 5. Insert
+  await tx.insert(executionBindingTable).values({
+    invocationId: input.invocationId,
+    tenantId: input.tenantId,
+    runtimeRevisionId: input.runtimeRevisionId,
+    deploymentRouteId: input.deploymentRouteId,
+    modelProvider: input.modelProvider,
+    modelId: input.modelId,
+    modelRevisionRef: input.modelRevisionRef,
+    workspaceBindingId: input.workspaceBindingId,
+    policyRevisionId: input.policyRevisionId,
+    policyRulesDigest: input.policyRulesDigest,
+    governanceConfigRevisionId: input.governanceConfigRevisionId,
+    governanceConfigDigest: input.governanceConfigDigest,
+    routeRevisionId: evidence.routeRevisionId,
+    routeActivationId: evidence.routeActivationId,
+    routeContentDigest: evidence.routeContentDigest,
+    runtimeArtifactId: evidence.runtimeArtifactId,
+    runtimeArtifactDigest: evidence.runtimeArtifactDigest,
+    runtimeEvidenceKind: evidence.runtimeEvidenceKind,
+    runtimeConfigDigest: evidence.runtimeConfigDigest,
+    runtimeTargetDigest: evidence.runtimeTargetDigest,
+    capabilityManifestDigest: evidence.capabilityManifestDigest,
+    runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+    runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+    conformanceRunId: evidence.conformanceRunId,
+    resolutionInputDigest: evidence.resolutionInputDigest,
+    projectionVersionNo: input.projectionVersionNo,
+    environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
+    capabilityCatalogJson: input.capabilityCatalogJson,
+    capabilityCatalogDigest: input.capabilityCatalogDigest,
+    capabilityCatalogVersion: input.capabilityCatalogVersion,
+    capabilityCatalogSourceRefs: input.capabilityCatalogSourceRefs,
+    capabilityCatalogCreatedAt: input.capabilityCatalogCreatedAt,
+    principalType: input.principalType,
+    principalId: input.principalId,
+    principalSource: input.principalSource,
+    principalFrozenAt: input.principalFrozenAt,
+    environmentMode: input.environmentMode,
+    configHash: input.configHash,
+    // T33：只落引用列；summaryHash/sourceRangesHash 由 configHash 覆盖并在
+    // 每次 ContextHandle 发放时重新核验，不额外存第二份摘要。
+    initialContextCheckpointId: input.initialContextCompression?.checkpointId ?? null,
+    boundAt: input.boundAt,
+  });
+
+  const [created] = await tx
+    .select()
+    .from(executionBindingTable)
+    .where(eq(executionBindingTable.invocationId, input.invocationId))
+    .limit(1);
+  if (!created) throw new Error("ExecutionBinding 插入后无法回读");
+  return toExecutionBinding(created);
+}
+
+/** 默认入口：自持事务。Thread 调度等不需要与别的根事实同事务的调用方使用。 */
 export const mysqlExecutionBindingStore: ExecutionBindingStore = {
-  create: (input) =>
-    db.transaction(async (tx) => {
-      // 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
-      const [invocation] = await tx
-        .select({ id: invocationTable.id })
-        .from(invocationTable)
-        .where(
-          and(
-            eq(invocationTable.id, input.invocationId),
-            eq(invocationTable.tenantId, input.tenantId),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!invocation) throw evidenceError("Invocation 不存在或租户不匹配");
-
-      const [existing] = await tx
-        .select({ id: executionBindingTable.invocationId })
-        .from(executionBindingTable)
-        .where(eq(executionBindingTable.invocationId, input.invocationId))
-        .limit(1);
-      if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
-
-      // 2. /: 统一资格校验（tx 必须传入，复用 Store 事务）
-      const evidence = input.controlPlaneEvidence;
-      const eligibility = await validateBindingEligibility(tx, {
-        tenantId: input.tenantId,
-        routeId: input.deploymentRouteId,
-        routeRevisionId: evidence.routeRevisionId,
-        routeActivationId: evidence.routeActivationId,
-        runtimeRevisionId: input.runtimeRevisionId,
-        policyRevisionId: input.policyRevisionId,
-        projectionVersionNo: input.projectionVersionNo,
-        frozenEvidence: {
-          runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-          runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
-          conformanceRunId: evidence.conformanceRunId,
-        },
-      });
-      if (!eligibility.valid) {
-        throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
-      }
-
-      // 3. : Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
-      const revisions = await lockAndVerifyRoute(tx, input);
-
-      // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
-      // Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
-      const capabilityManifestDigest = computeCapabilityManifestDigest({
-        runtimeRevisionId: revisions.runtimeRevision.id,
-        runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
-      });
-      if (capabilityManifestDigest !== input.controlPlaneEvidence.capabilityManifestDigest) {
-        throw evidenceError("Capability Manifest Digest 已变化");
-      }
-
-      // 5. Insert
-      await tx.insert(executionBindingTable).values({
-        invocationId: input.invocationId,
-        tenantId: input.tenantId,
-        runtimeRevisionId: input.runtimeRevisionId,
-        deploymentRouteId: input.deploymentRouteId,
-        modelProvider: input.modelProvider,
-        modelId: input.modelId,
-        modelRevisionRef: input.modelRevisionRef,
-        workspaceBindingId: input.workspaceBindingId,
-        policyRevisionId: input.policyRevisionId,
-        policyRulesDigest: input.policyRulesDigest,
-        governanceConfigRevisionId: input.governanceConfigRevisionId,
-        governanceConfigDigest: input.governanceConfigDigest,
-        routeRevisionId: evidence.routeRevisionId,
-        routeActivationId: evidence.routeActivationId,
-        routeContentDigest: evidence.routeContentDigest,
-        runtimeArtifactId: evidence.runtimeArtifactId,
-        runtimeArtifactDigest: evidence.runtimeArtifactDigest,
-        runtimeEvidenceKind: evidence.runtimeEvidenceKind,
-        runtimeConfigDigest: evidence.runtimeConfigDigest,
-        runtimeTargetDigest: evidence.runtimeTargetDigest,
-        capabilityManifestDigest: evidence.capabilityManifestDigest,
-        runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
-        runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-        conformanceRunId: evidence.conformanceRunId,
-        resolutionInputDigest: evidence.resolutionInputDigest,
-        projectionVersionNo: input.projectionVersionNo,
-        environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
-        capabilityCatalogJson: input.capabilityCatalogJson,
-        capabilityCatalogDigest: input.capabilityCatalogDigest,
-        capabilityCatalogVersion: input.capabilityCatalogVersion,
-        capabilityCatalogSourceRefs: input.capabilityCatalogSourceRefs,
-        capabilityCatalogCreatedAt: input.capabilityCatalogCreatedAt,
-        principalType: input.principalType,
-        principalId: input.principalId,
-        principalSource: input.principalSource,
-        principalFrozenAt: input.principalFrozenAt,
-        environmentMode: input.environmentMode,
-        configHash: input.configHash,
-        // T33：只落引用列；summaryHash/sourceRangesHash 由 configHash 覆盖并在
-        // 每次 ContextHandle 发放时重新核验，不额外存第二份摘要。
-        initialContextCheckpointId: input.initialContextCompression?.checkpointId ?? null,
-        boundAt: input.boundAt,
-      });
-
-      const [created] = await tx
-        .select()
-        .from(executionBindingTable)
-        .where(eq(executionBindingTable.invocationId, input.invocationId))
-        .limit(1);
-      if (!created) throw new Error("ExecutionBinding 插入后无法回读");
-      return toExecutionBinding(created);
-    }),
+  create: (input) => db.transaction((tx) => createExecutionBindingInTransaction(tx, input)),
 };
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];

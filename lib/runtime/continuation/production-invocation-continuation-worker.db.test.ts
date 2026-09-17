@@ -31,14 +31,12 @@ import { invocationTable } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
-import {
-  getRuntimeSessionBindingByOwnership,
-  updateRuntimeSessionDispatch,
-} from "@/lib/runtime/persistence/runtime-session-store";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { RuntimeStartRequestSchema, protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, desc, eq } from "drizzle-orm";
@@ -50,11 +48,30 @@ const originalAuthMode = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 interface ExternalRuntimeFixture {
   server: Server;
   endpoint: string;
-  requests: Array<{ invocationId: string; body: unknown }>;
+  requests: Array<{ invocationId: string; idempotencyKey: string; body: unknown }>;
 }
 
-async function startExternalRuntime(tenantId: string): Promise<ExternalRuntimeFixture> {
-  const requests: Array<{ invocationId: string; body: unknown }> = [];
+/**
+ * 真实协议对端的外部 Runtime 桩。
+ *
+ * R02 §7 之后，Parent resume 必须经正式 Start 服务进入并由 Session 冻结稳定启动意图，
+ * 因此本桩必须与真实外部 Runtime 行为一致：
+ * - 只接受 `intentType=resume` 的 `/resume` 请求，且 idempotency key 必须是
+ *   `start:<ownershipId>`（Session 冻结的稳定启动意图，不是临时 Key）；
+ * - 接纳后先回传 `execution.started`（携带同一 intentKey 与语义摘要），再回传终态事件——
+ *   与生产的 DurableReferenceRuntime 同形状；
+ * - 响应体是 canonical `RuntimeStartResponse`（含 capabilitiesDigest）。
+ */
+async function startExternalRuntime(
+  tenantId: string,
+  runtimeRevisionId: string,
+  runtimeCapabilities: unknown,
+): Promise<ExternalRuntimeFixture> {
+  const requests: Array<{ invocationId: string; idempotencyKey: string; body: unknown }> = [];
+  const capabilitiesDigest = computeCapabilityManifestDigest({
+    runtimeRevisionId,
+    runtimeCapabilities,
+  });
   const server = createServer(async (request, response) => {
     if (
       request.method !== "POST" ||
@@ -64,40 +81,55 @@ async function startExternalRuntime(tenantId: string): Promise<ExternalRuntimeFi
       return;
     }
     const invocationId = request.url.split("/")[3] ?? "";
+    const idempotencyKey = request.headers["idempotency-key"];
+    if (typeof idempotencyKey !== "string" || !idempotencyKey) {
+      response.writeHead(400).end();
+      return;
+    }
     const body = await new Promise<string>((resolve, reject) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
       request.on("error", reject);
     });
-    const parsedBody = body ? JSON.parse(body) : null;
-    requests.push({ invocationId, body: parsedBody });
-    // V12：事件回传必须携带当前 ExecutionOwnership 权威（与生产 resume 流程一致）。
-    const owner = await getActiveExecutionOwnership({ tenantId, invocationId });
-    if (!owner) throw new Error("外部 Runtime 模拟：父 Invocation 无活跃 ExecutionOwnership");
-    const session = await getRuntimeSessionBindingByOwnership(tenantId, owner.id);
-    if (!session) throw new Error("外部 Runtime 模拟：父 Invocation 无 RuntimeSessionBinding");
-    const authority = authorityIdentity({
-      invocationId,
-      runtimeRevisionId: session.runtimeRevisionId,
-      attemptId: owner.attemptId,
-      ownershipId: owner.id,
-      leaseEpoch: owner.leaseEpoch,
-      sessionBindingId: session.id,
-    });
-    const invocation = await getInvocationById(tenantId, invocationId);
-    if (!invocation) throw new Error("外部 Runtime 模拟：父 Invocation 不存在");
-    const nextSequence = invocation.lastProducerSequence + 1;
+    const startRequest = RuntimeStartRequestSchema.parse(body ? JSON.parse(body) : null);
+    requests.push({ invocationId, idempotencyKey, body: startRequest });
+    if (startRequest.intentType !== "resume") {
+      response.writeHead(400).end();
+      return;
+    }
+    // R02 §7：稳定意图 = Session 冻结的 `start:<ownershipId>`，不接受任何临时 Key。
+    if (idempotencyKey !== `start:${startRequest.authority.ownershipId}`) {
+      response.writeHead(409).end();
+      return;
+    }
+    const remoteSessionRef = `external-session:${startRequest.authority.sessionBindingId}`;
+    const remoteExecutionRef = `external-execution:${startRequest.authority.ownershipId}`;
+    const sequenceStart = Number(startRequest.producerSequenceStart);
+    // 真实外部 Runtime 在接纳后先回 execution.started，再推进业务终态。
     await ingressRuntimeEvents({
       tenantId,
       invocationId,
       batch: {
         protocolVersion: 3,
-        authority,
+        authority: startRequest.authority,
         events: [
           {
             eventId: randomUUID(),
-            producerSequence: String(nextSequence),
+            producerSequence: String(sequenceStart),
+            type: "execution.started",
+            schemaVersion: 1,
+            payload: {
+              intentKey: idempotencyKey,
+              semanticRequestDigest: startRequest.semanticRequestDigest,
+              remoteSessionRef,
+              remoteExecutionRef,
+              capabilitiesDigest,
+            },
+          },
+          {
+            eventId: randomUUID(),
+            producerSequence: String(sequenceStart + 1),
             type: "execution.completed",
             schemaVersion: 1,
             payload: { finishReason: "execution.completed" },
@@ -105,8 +137,19 @@ async function startExternalRuntime(tenantId: string): Promise<ExternalRuntimeFi
         ],
       },
     });
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ invocationId: invocationId, resumed: true, attempt_no: 1 }));
+    response.writeHead(202, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        protocolVersion: 3,
+        authority: startRequest.authority,
+        semanticRequestDigest: startRequest.semanticRequestDigest,
+        accepted: true,
+        remoteSessionRef,
+        remoteExecutionRef,
+        capabilitiesDigest,
+        acceptedAt: Date.now(),
+      }),
+    );
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -171,11 +214,16 @@ describe("生产 continuation worker durable topology", () => {
         },
       });
       scenarios.push(scenario);
-      const runtime = await startExternalRuntime(scenario.tenantId);
-      runtimes.push(runtime);
-
       const runtimeId = randomUUID();
       const runtimeRevisionId = randomUUID();
+      const runtimeCapabilitiesJson = { resume: true };
+      const runtime = await startExternalRuntime(
+        scenario.tenantId,
+        runtimeRevisionId,
+        runtimeCapabilitiesJson,
+      );
+      runtimes.push(runtime);
+
       const runtimeTargetDigest = `sha256:${"9".repeat(64)}`;
       const now = new Date();
       await db.insert(runtimeTable).values({
@@ -205,7 +253,7 @@ describe("生产 continuation worker durable topology", () => {
         runtimeArtifactRef: null,
         artifactId: null,
         artifactDigest: null,
-        runtimeCapabilitiesJson: { resume: true },
+        runtimeCapabilitiesJson,
         identityMode: "none",
         networkZone: "external",
         configHash: `sha256:${"a".repeat(64)}`,
@@ -291,7 +339,7 @@ describe("生产 continuation worker durable topology", () => {
         fixture: "invocation-continuation-parent-start",
         invocationId: scenario.parentInvocationId,
       };
-      await updateRuntimeSessionDispatch(scenario.tenantId, authority.sessionBindingId, {
+      await applyRuntimeSessionDispatchForTest(scenario.tenantId, authority.sessionBindingId, {
         bindingState: "active",
         semanticRequestJson: parentSemanticRequest,
         semanticRequestDigest: protocolDigest(parentSemanticRequest),

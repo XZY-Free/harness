@@ -75,8 +75,8 @@ import {
   threadTable,
 } from "@/lib/persistence/schema/conversation";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
-import { updateRuntimeSessionDispatch } from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1248,7 +1248,7 @@ describe("子取消 ack 集成（requestChildThreadCancellation + ingress execut
       phase: "executing",
     });
     const semanticRequest = { fixture: "child-cancel", invocationId: childInvocation.id };
-    await updateRuntimeSessionDispatch(tenantId, acquired.session.id, {
+    await applyRuntimeSessionDispatchForTest(tenantId, acquired.session.id, {
       bindingState: "active",
       semanticRequestJson: semanticRequest,
       semanticRequestDigest: protocolDigest(semanticRequest),

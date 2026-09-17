@@ -5,14 +5,14 @@
  * - docs/architecture/runtime-control-plane.md
  *
  * 每轮：
- * 1. claim due InvocationAttempts（FOR UPDATE SKIP LOCKED + lease）
- * 2. dispatchQueuedInvocationAttempt（同一 Attempt、稳定 idempotency key）
- * 3. claim due InvocationCommands（transient nextDispatchAt 到期 / lease 过期接管）
- * 4. retryDispatchedCommandToRuntime（同一 command idempotency key）
+ * 1. 扫描到期 Session dispatch（只取候选 ID）→ 领取 → dispatchPersistedQueuedInvocationAttempt
+ * 2. 扫描到期 InvocationCommand（只取候选 ID）→ 领取 → retryDispatchedCommandToRuntime
+ * 3. 维护 lane：Workspace Writer 物理释放与 W 行收口（R04 §3）
+ * 4. 维护 lane：租约已到期的 Owner 收口（R01 §3 `Owner expired` / R04 §5）
  * 5. sleep poll interval
  *
  * 关键约束：
- * - 两个 lane 共享 Policy / lease 原语；不造第二个 Worker。
+ * - 各 lane 共享 Policy / lease 原语；不造第二个 Worker。
  * - 网络调用在 DB transaction 之外（claim 事务先提交）。
  * - workerId 仅用于 lease owner，不是安全 Principal，不写业务 Event。
  * - 时钟可注入（测试 fake clock）。
@@ -21,30 +21,47 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { logger } from "@/lib/logger";
 import type { InvocationCommand } from "@/lib/persistence/schema/executions";
-import type { InvocationAttempt } from "@/lib/persistence/schema/executions";
+import {
+  type AuthorityRecoverySummary,
+  runDueExpiredOwnerRecoveries,
+} from "@/lib/runtime/application/authority-recovery-lane";
 import { retryDispatchedCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchPersistedQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-persisted-queued-invocation-attempt";
 import {
-  claimDueInvocationAttempts,
-  claimDueInvocationCommands,
+  type SessionDispatchClaim,
+  claimInvocationCommandDispatch,
+  claimSessionDispatch,
+  scanDueInvocationCommandDispatches,
+  scanDueSessionDispatches,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
 import {
   type DispatchClock,
   RUNTIME_DISPATCH_RETRY_POLICY,
   realDispatchClock,
 } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
+import { runDueWorkspaceWriterReleases } from "@/lib/workspace/workspace-writer-release";
 
 /** Worker 依赖（可注入用于测试）。 */
 export interface RuntimeDispatchRetryWorkerDeps {
   clock?: DispatchClock;
   pollIntervalMs?: number;
   workerId?: string;
-  /** Attempt lane 覆盖（测试注入）。 */
-  dispatchAttempt?: (attempt: InvocationAttempt) => Promise<void>;
+  /** Session dispatch lane 覆盖（测试注入）。 */
+  dispatchAttempt?: (claim: SessionDispatchClaim) => Promise<void>;
   /** canonical persisted Attempt service 覆盖（验证默认 lane 接线）。 */
-  dispatchPersistedAttempt?: (attemptId: string) => Promise<unknown>;
+  dispatchPersistedAttempt?: (claim: SessionDispatchClaim) => Promise<unknown>;
   /** Command lane 覆盖（测试注入）。 */
-  dispatchCommand?: (command: InvocationCommand) => Promise<void>;
+  dispatchCommand?: (command: InvocationCommand, claimToken: string) => Promise<void>;
+  /** 维护 lane 覆盖（测试注入）：Workspace Writer 物理释放。 */
+  releaseWorkspaceWriters?: () => Promise<{
+    scanned: number;
+    released: number;
+    superseded: number;
+    retried: number;
+    skipped: number;
+  }>;
+  /** 维护 lane 覆盖（测试注入）：租约到期的 Owner 收口。 */
+  recoverExpiredOwners?: () => Promise<AuthorityRecoverySummary>;
   /** 单轮处理上限覆盖。 */
   batchSize?: number;
 }
@@ -54,7 +71,12 @@ export interface RuntimeDispatchRetryWorker {
   start(): Promise<void>;
   stop(): void;
   /** 执行一轮（测试可单独调用）。 */
-  tick(): Promise<{ attempts: number; commands: number }>;
+  tick(): Promise<{
+    attempts: number;
+    commands: number;
+    writerReleases: number;
+    ownerRecoveries: number;
+  }>;
 }
 
 /** 生成 Worker 身份：hostname:pid:random（仅 lease owner 语义）。 */
@@ -77,62 +99,111 @@ export function createRuntimeDispatchRetryWorker(
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  /** 默认 Attempt lane：从持久化 Authority 重建 transport 并 dispatch 同一 Attempt。 */
+  /** 默认 Session dispatch lane：从持久化 Authority 重建 transport 并 dispatch 同一 Session。 */
   const persistedAttemptDispatcher =
     deps.dispatchPersistedAttempt ?? dispatchPersistedQueuedInvocationAttempt;
-  const defaultDispatchAttempt = async (attempt: InvocationAttempt): Promise<void> => {
-    await persistedAttemptDispatcher(attempt.id);
+  const defaultDispatchAttempt = async (claim: SessionDispatchClaim): Promise<void> => {
+    await persistedAttemptDispatcher(claim);
   };
 
-  /** 默认 Command lane：经命令网关 retry 入口（同一 idempotency key + 能力复核）。 */
-  const defaultDispatchCommand = async (command: InvocationCommand): Promise<void> => {
+  /** 默认 Command lane：经命令网关 retry 入口（同一 idempotency key + claim 身份）。 */
+  const defaultDispatchCommand = async (command: InvocationCommand, claimToken: string) => {
     await retryDispatchedCommandToRuntime({
       tenantId: command.tenantId,
       commandId: command.id,
+      claimToken,
     });
   };
 
   const dispatchAttempt = deps.dispatchAttempt ?? defaultDispatchAttempt;
   const dispatchCommand = deps.dispatchCommand ?? defaultDispatchCommand;
+  const releaseWorkspaceWriters =
+    deps.releaseWorkspaceWriters ??
+    (() => runDueWorkspaceWriterReleases({ leaseOwner: workerId, limit: batchSize }));
+  const recoverExpiredOwners =
+    deps.recoverExpiredOwners ?? (() => runDueExpiredOwnerRecoveries({ limit: batchSize }));
 
-  async function tick(): Promise<{ attempts: number; commands: number }> {
+  async function tick(): Promise<{
+    attempts: number;
+    commands: number;
+    writerReleases: number;
+    ownerRecoveries: number;
+  }> {
     const now = clock();
-    const attempts = await claimDueInvocationAttempts({
-      now,
-      leaseOwner: workerId,
-      leaseDurationMs: RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs,
-      limit: batchSize,
-    });
-    for (const attempt of attempts) {
+    // 扫描只取候选 ID；每条工作在自己的领取事务里按对象自身根重新验证 due/state/lease。
+    const attemptCandidates = await scanDueSessionDispatches({ now, limit: batchSize });
+    let attempts = 0;
+    for (const candidate of attemptCandidates) {
+      const claim = await claimSessionDispatch({
+        sessionBindingId: candidate.sessionBindingId,
+        attemptId: candidate.attemptId,
+        leaseOwner: workerId,
+        leaseDurationMs: RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs,
+        now: clock(),
+      });
+      if (!claim) continue;
+      attempts += 1;
       try {
-        await dispatchAttempt(attempt);
+        await dispatchAttempt(claim);
       } catch (error) {
         // 单个 work 失败不阻断本轮其余 work；lease 过期后可被接管重试。
-        logger.error("[runtime-dispatch-retry-worker] Attempt dispatch 失败", {
-          attemptId: attempt.id,
+        logger.error("[runtime-dispatch-retry-worker] Session dispatch 失败", {
+          sessionBindingId: claim.sessionBindingId,
+          attemptId: claim.attemptId,
           error: String(error),
         });
       }
     }
 
-    const commands = await claimDueInvocationCommands({
+    const commandCandidates = await scanDueInvocationCommandDispatches({
       now: clock(),
-      leaseOwner: workerId,
-      leaseDurationMs: RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs,
       limit: batchSize,
     });
-    for (const command of commands) {
+    let commands = 0;
+    for (const commandId of commandCandidates) {
+      const claim = await claimInvocationCommandDispatch({
+        commandId,
+        leaseOwner: workerId,
+        leaseDurationMs: RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs,
+        now: clock(),
+      });
+      if (!claim) continue;
+      commands += 1;
       try {
-        await dispatchCommand(command);
+        await dispatchCommand(claim.command, claim.claimToken);
       } catch (error) {
         logger.error("[runtime-dispatch-retry-worker] Command retry 失败", {
-          commandId: command.id,
+          commandId: claim.command.id,
           error: String(error),
         });
       }
     }
 
-    return { attempts: attempts.length, commands: commands.length };
+    // 维护 lane（R04 §3）：Workspace Writer 的物理 stop/drain 与 W 行收口。
+    // 单个 work 失败不阻断本轮其余 lane；领取权过期后可被其他 Worker 接管。
+    let writerReleases = 0;
+    try {
+      const summary = await releaseWorkspaceWriters();
+      writerReleases = summary.scanned;
+    } catch (error) {
+      logger.error("[runtime-dispatch-retry-worker] Workspace Writer 释放 lane 失败", {
+        error: String(error),
+      });
+    }
+
+    // 维护 lane（R01 §3 `Owner expired`）：租约已到期的 Owner 由持久发现者收口。
+    // 陈旧观察（续租/换代）在根锁内被丢弃，不误杀新 Owner（R03 §5）。
+    let ownerRecoveries = 0;
+    try {
+      const summary = await recoverExpiredOwners();
+      ownerRecoveries = summary.recovered;
+    } catch (error) {
+      logger.error("[runtime-dispatch-retry-worker] Owner 过期收口 lane 失败", {
+        error: String(error),
+      });
+    }
+
+    return { attempts, commands, writerReleases, ownerRecoveries };
   }
 
   async function loop(): Promise<void> {

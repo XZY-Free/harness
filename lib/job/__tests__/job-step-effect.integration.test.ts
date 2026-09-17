@@ -77,8 +77,8 @@ import {
   EventPayloadHashConflictError,
   ingressRuntimeEvents,
 } from "@/lib/runtime/application/ingress-runtime-events";
-import { updateRuntimeSessionDispatch } from "@/lib/runtime/persistence/runtime-session-store";
 import { PROTOCOL_VERSION, protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -113,7 +113,7 @@ async function seedExecutingJobAuthority(input: { tenantId?: string } = {}): Pro
     runtimeRevisionId: fixture.binding.runtimeRevisionId,
     phase: "executing",
   });
-  await updateRuntimeSessionDispatch(fixture.tenantId, acquired.session.id, {
+  await applyRuntimeSessionDispatchForTest(fixture.tenantId, acquired.session.id, {
     bindingState: "active",
     semanticRequestJson: { kind: "job-step-effect-test" },
     semanticRequestDigest: protocolDigest({ kind: "job-step-effect-test" }),
@@ -147,7 +147,7 @@ async function handOverToNewOwner(input: {
     state: "lost",
     reasonCode: "worker_lost",
   });
-  await updateRuntimeSessionDispatch(input.tenantId, input.previousSessionId, {
+  await applyRuntimeSessionDispatchForTest(input.tenantId, input.previousSessionId, {
     bindingState: "lost",
   });
   const attempt = await createAttempt({
@@ -174,7 +174,7 @@ async function handOverToNewOwner(input: {
     runtimeRevisionId: input.runtimeRevisionId,
     phase: "executing",
   });
-  await updateRuntimeSessionDispatch(input.tenantId, acquired.session.id, {
+  await applyRuntimeSessionDispatchForTest(input.tenantId, acquired.session.id, {
     bindingState: "active",
     semanticRequestJson: { kind: "job-step-effect-test-handover" },
     semanticRequestDigest: protocolDigest({ kind: "job-step-effect-test-handover" }),
@@ -1032,13 +1032,9 @@ describe("T32 Job step Effect 多态 owner", () => {
     ).rejects.toBeInstanceOf(EffectOwnerNotFoundError);
 
     // 跨 tenant：另一租户的 job.step.accepted 事实在本租户不可见。
+    // 租户及其 Governance/Policy baseline 由夹具统一 provision（生产不变量：
+    // 不存在"有 Tenant 但无 Governance/Policy"）。
     const otherTenantId = randomUUID();
-    await db.insert(tenant).values({
-      id: otherTenantId,
-      key: `other-${otherTenantId}`,
-      name: "Other Tenant",
-      status: "active",
-    });
     const other = await seedExecutingJobAuthority({ tenantId: otherTenantId });
     const otherStep = makeStep("parse", "doc-07-other");
     const otherAdmission = await admitJobStep({

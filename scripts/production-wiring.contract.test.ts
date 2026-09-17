@@ -135,7 +135,10 @@ describe("Topic 01 production wiring", () => {
     expect(worker).toContain(
       "deps.dispatchPersistedAttempt ?? dispatchPersistedQueuedInvocationAttempt",
     );
-    expect(worker).toContain("await persistedAttemptDispatcher(attempt.id)");
+    // R04 §5：领取身份是 Session（claim），不是裸 Attempt ID。
+    expect(worker).toContain("await persistedAttemptDispatcher(claim)");
+    expect(worker).toContain("scanDueSessionDispatches");
+    expect(worker).toContain("claimSessionDispatch");
     expect(worker).not.toContain("runtime_unavailable");
     expect(service).toContain("createHttpHarnessRuntimeTransport");
     expect(service).toContain("dispatchQueuedInvocationAttempt");

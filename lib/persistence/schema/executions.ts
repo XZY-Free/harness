@@ -275,6 +275,13 @@ export const INVOCATION_ATTEMPT_STATES = [
   "lost",
 ] as const;
 export type InvocationAttemptState = (typeof INVOCATION_ATTEMPT_STATES)[number];
+/** Attempt 终态：该代际已收口，不可再承载任何执行权（唯一实现，避免各处重抄）。 */
+export const INVOCATION_ATTEMPT_TERMINAL_STATES: readonly InvocationAttemptState[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "lost",
+];
 export const INVOCATION_PREPARATION_STATES = [
   "pending",
   "preparing",

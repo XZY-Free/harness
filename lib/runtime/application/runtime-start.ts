@@ -23,16 +23,21 @@ import {
   invocationTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
-import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { buildRuntimeStartRequestForInvocation } from "@/lib/runtime/application/build-runtime-start-request";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
-  createRuntimeSessionBinding,
+  createRuntimeSessionBindingInTransaction,
   getRuntimeSessionBindingByOwnership,
-  updateRuntimeSessionDispatch,
+  markRuntimeSessionLostByOwnershipInTransaction,
+  markRuntimeSessionLostInTransaction,
+  updateRuntimeSessionDispatchInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
-import { recordAttemptDispatchAttemptStarted } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  type SessionDispatchClaim,
+  recordSessionDispatchAttemptStartedInTransaction,
+} from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { RuntimeHttpClient, RuntimeStartTransportRequest } from "@/lib/runtime/runtime-client";
 import {
   type AuthorityIdentity,
@@ -46,12 +51,13 @@ import {
 import { restoreFilesystemCheckpoint } from "@/lib/workspace/checkpoint-restore";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
+import { requestWorkspaceWriterRelease } from "@/lib/workspace/workspace-write-lock-queries";
 import {
   type PreparedWorkspaceCandidate,
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
-  releaseWorkspaceWriter,
 } from "@/lib/workspace/workspace-writer";
+import { runWorkspaceWriterRelease } from "@/lib/workspace/workspace-writer-release";
 import { and, eq, sql } from "drizzle-orm";
 
 export interface RuntimeStartInput {
@@ -64,6 +70,12 @@ export interface RuntimeStartInput {
   auth: RuntimeStartTransportRequest["auth"];
   callbackEndpoints: CallbackEndpoints;
   environmentLeaseId?: string | null;
+  /**
+   * Session dispatch claim（R04 §5）：由持久维护 lane 领取时提供。
+   * 所有 dispatch 完成确认（计数、暂态失败排定）都按该 claim 身份复核；
+   * 请求内联路径为 `null`（无 lease，只按 Session 自身冻结 tuple 复核）。
+   */
+  sessionDispatchClaim?: SessionDispatchClaim | null;
   /**
    * 受管 EnvironmentProvisioner：用于真实释放该 Lease 已创建的资源。
    * 未提供时环境失败只登记控制面清理工作（不允许伪装成"资源已释放"）。
@@ -147,9 +159,9 @@ export async function startRuntimeInvocation(
   // 在输入冻结与环境校验之后加载——pure 校验失败语义优先。
   const runtimeRevision = await getRuntimeRevisionById(input.binding.runtimeRevisionId);
   if (!runtimeRevision) throw new Error("RuntimeRevision 不存在");
-  const publishedCapabilityManifestDigest = computeCapabilityManifestDigest({
+  const publishedCapabilityManifestDigest = expectedCapabilityManifestDigest({
     runtimeRevisionId: runtimeRevision.id,
-    runtimeCapabilities: runtimeRevision.runtimeCapabilitiesJson,
+    runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
   });
   const needsWorkspaceWriter = workspaceBinding.continuityMode !== "NO_PLATFORM_WORKSPACE";
   // 无受管 WorkspaceBackend 时按 Binding 冻结事实启动（桌面绑定冻结语义）；
@@ -269,15 +281,11 @@ export async function startRuntimeInvocation(
             updatedAt: nowAtAuthority,
           })
           .where(eq(executionOwnershipTable.id, existingOwnership.id));
-        await tx
-          .update(runtimeSessionBindingTable)
-          .set({
-            bindingState: "lost",
-            closedAt: nowAtAuthority,
-            versionNo: existingSession.versionNo + 1,
-            updatedAt: nowAtAuthority,
-          })
-          .where(eq(runtimeSessionBindingTable.id, existingSession.id));
+        await markRuntimeSessionLostByOwnershipInTransaction(
+          tx,
+          input.tenantId,
+          existingOwnership.id,
+        );
         const ownershipResult = await acquireExecutionOwnershipInTransaction(tx, {
           tenantId: input.tenantId,
           invocationId: input.invocation.id,
@@ -322,21 +330,18 @@ export async function startRuntimeInvocation(
     }
     let session = await getRuntimeSessionBindingByOwnership(input.tenantId, ownership.id, tx);
     if (!session) {
-      session = await createRuntimeSessionBinding(
-        {
-          tenantId: input.tenantId,
-          invocationId: input.invocation.id,
-          attemptId: preparedAttempt.id,
-          ownershipId: ownership.id,
-          runtimeRevisionId: input.binding.runtimeRevisionId,
-          leaseEpoch: ownership.leaseEpoch,
-          intentType: input.intentType ?? "start",
-          startIntentKey: `start:${ownership.id}`,
-          // External start capabilities 成为 RuntimeSessionBinding / effective capability 事实。
-          runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
-        },
-        tx,
-      );
+      session = await createRuntimeSessionBindingInTransaction(tx, {
+        tenantId: input.tenantId,
+        invocationId: input.invocation.id,
+        attemptId: preparedAttempt.id,
+        ownershipId: ownership.id,
+        runtimeRevisionId: input.binding.runtimeRevisionId,
+        leaseEpoch: ownership.leaseEpoch,
+        intentType: input.intentType ?? "start",
+        startIntentKey: `start:${ownership.id}`,
+        // External start capabilities 成为 RuntimeSessionBinding / effective capability 事实。
+        runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
+      });
     }
     if (
       session.attemptId !== preparedAttempt.id ||
@@ -486,13 +491,25 @@ export async function startRuntimeInvocation(
     await closeRuntimeSessionAfterActivationFailure(input.tenantId, session.id).catch(
       () => undefined,
     );
-    if (activatedWorkspace)
-      await releaseWorkspaceWriter({
+    if (activatedWorkspace) {
+      // R04 §3：失败补偿也只写**持久**释放请求，不在这里直接写控制面 released。
+      // 物理 stop/drain 由正式 Worker 的释放 lane 按 W→I 顺序完成；这里顺带跑一轮
+      // 让它尽快收敛，失败则留给 lane 退避重试（可见性来自持久状态）。
+      await requestWorkspaceWriterRelease({
         tenantId: input.tenantId,
         lockId: activatedWorkspace.lockId,
         ownershipId: ownership.id,
         reasonCode: "activation_failed",
       }).catch(() => undefined);
+      await runWorkspaceWriterRelease({
+        tenantId: input.tenantId,
+        lockId: activatedWorkspace.lockId,
+        leaseOwner: `activation-failure:${ownership.id}`,
+        deps: workspaceCandidate
+          ? { resolveHost: async () => workspaceCandidate.backend.host }
+          : undefined,
+      }).catch(() => undefined);
+    }
     await closeOwnershipAfterActivationFailure(input, ownership.id).catch(() => undefined);
     if (input.environmentLeaseId) {
       // 真实资源清理优先：控制面 released 必须对应真实释放回执。
@@ -533,14 +550,61 @@ export async function startRuntimeInvocation(
     activationEvidenceRef:
       ownership.activationDigest ?? protocolDigest(ownership.activationEvidence),
     attempt: { producerSequenceStart: input.invocation.lastProducerSequence + 1 },
+    // R02 §1：重试读回已冻结语义请求（首派发时为 null，由水位推导后一次写死）。
+    frozenSemanticRequest: session.semanticRequestJson,
     now,
   });
-  await recordAttemptDispatchAttemptStarted({ sessionBindingId: session.id, now });
-  await updateRuntimeSessionDispatch(input.tenantId, session.id, {
-    bindingState: "dispatching",
-    semanticRequestJson: buildStartSemanticDigestInput(request.request),
-    semanticRequestDigest: request.request.semanticRequestDigest,
-    lastErrorCode: null,
+  const dispatchClaim = input.sessionDispatchClaim ?? null;
+  if (dispatchClaim && dispatchClaim.sessionBindingId !== session.id) {
+    throw new Error("SessionDispatchClaimSuperseded");
+  }
+  // R02 §1：重试/重放会轮换短期凭据、ContextHandle 签名时间与 Trace —— 轮换后**必须**用
+  // 冻结值重新校验语义 digest。相等即证明旋转只动了非语义域（凭据/签名时间/连接）；
+  // 不等则说明业务内容被一起改了，必须 fail closed，绝不带病发出 Start。
+  if (
+    session.semanticRequestDigest &&
+    request.request.semanticRequestDigest !== session.semanticRequestDigest
+  ) {
+    throw new Error("StartIntentConflict");
+  }
+  // R02 §1/§8：锁定 Invocation 根，把「派发尝试计数 + 语义请求一次冻结」写在同一事务里。
+  // 语义请求冻结后，所有重试都读这份已持久事实（不再重新挑选 producerSequenceStart /
+  // Context Subject / Model / Environment / Workspace / Resume Anchor）。
+  await db.transaction(async (tx) => {
+    const [lockedInvocation] = await tx
+      .select({ id: invocationTable.id })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, input.tenantId),
+          eq(invocationTable.id, input.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!lockedInvocation) throw new Error("Invocation 不存在");
+    const recorded = await recordSessionDispatchAttemptStartedInTransaction(
+      tx,
+      {
+        tenantId: input.tenantId,
+        sessionBindingId: session.id,
+        attemptId: preparedAttempt.id,
+        ownershipId: ownership.id,
+        leaseEpoch: ownership.leaseEpoch,
+        claimToken: dispatchClaim?.claimToken ?? null,
+      },
+      now,
+    );
+    await updateRuntimeSessionDispatchInTransaction(tx, {
+      tenantId: input.tenantId,
+      id: session.id,
+      expectedVersionNo: recorded.session.versionNo,
+      patch: {
+        semanticRequestJson: buildStartSemanticDigestInput(request.request),
+        semanticRequestDigest: request.request.semanticRequestDigest,
+        lastErrorCode: null,
+      },
+    });
   });
   const transportRequest = {
     runtimeEndpoint: input.runtimeEndpoint,
@@ -560,14 +624,10 @@ export async function startRuntimeInvocation(
   ) {
     throw new Error("RuntimeSessionMismatch");
   }
-  // External start capability 一致性：Runtime 回执的 capabilitiesDigest 必须等于
-  // 发布事实（RuntimeRevision manifest）摘要，否则 fail-closed（dispatch 可能已开始）。
-  // In-process Hosted Runtime 不适用：其 runtimeCapabilitiesJson 契约是能力名列表，
-  // capability 事实与 revision 同源（同进程写入），无跨网络回执可校验。
-  const isInProcessHosted =
-    typeof (input.runtimeClient as { getLastLaunchPromise?: unknown }).getLastLaunchPromise ===
-    "function";
-  if (!isInProcessHosted && response.capabilitiesDigest !== publishedCapabilityManifestDigest) {
+  // R02 §3：Runtime 回执的 capabilitiesDigest 必须等于**发布证据**（RuntimeRevision
+  // 冻结 manifest）摘要，否则 fail-closed（dispatch 可能已开始）。不区分 in-process：
+  // Hosted 也必须由同一发布事实给出摘要，不存在免校验分支。
+  if (response.capabilitiesDigest !== publishedCapabilityManifestDigest) {
     throw new RuntimeHttpClientError(
       "protocol",
       "RUNTIME_CAPABILITY_MISMATCH",
@@ -580,14 +640,34 @@ export async function startRuntimeInvocation(
       },
     );
   }
-  await updateRuntimeSessionDispatch(input.tenantId, session.id, {
-    bindingState: "dispatching",
-    remoteSessionRef: response.remoteSessionRef,
-    remoteExecutionRef: response.remoteExecutionRef,
-    transportAcknowledgement: response,
-    acknowledgedAt: new Date(response.acceptedAt),
+  // R02 §8：ACK 写入同样走仓储方法并在 Invocation 根锁内完成（CAS 防迟到 ACK）。
+  const sessionAfterAck = await db.transaction(async (tx) => {
+    const [lockedInvocation] = await tx
+      .select({ id: invocationTable.id })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, input.tenantId),
+          eq(invocationTable.id, input.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!lockedInvocation) throw new Error("Invocation 不存在");
+    return updateRuntimeSessionDispatchInTransaction(tx, {
+      tenantId: input.tenantId,
+      id: session.id,
+      // 单调合并：`execution.started` 可能已先于本 ACK 到达（callback-before-ACK），
+      // 此时 Session 已 active 且版本前移——ACK 只补远端引用与 Transport 结果，不判迟到冲突。
+      patch: {
+        remoteSessionRef: response.remoteSessionRef,
+        remoteExecutionRef: response.remoteExecutionRef,
+        transportAcknowledgement: response,
+        acknowledgedAt: new Date(response.acceptedAt),
+      },
+    });
   });
-  return { authority, response, sessionBindingId: session.id };
+  return { authority, response, sessionBindingId: sessionAfterAck.id };
 }
 
 /**
@@ -667,13 +747,8 @@ async function closeRuntimeSessionAfterActivationFailure(
   tenantId: string,
   sessionBindingId: string,
 ): Promise<void> {
-  await db
-    .update(runtimeSessionBindingTable)
-    .set({ bindingState: "lost", closedAt: new Date(), updatedAt: new Date() })
-    .where(
-      and(
-        eq(runtimeSessionBindingTable.tenantId, tenantId),
-        eq(runtimeSessionBindingTable.id, sessionBindingId),
-      ),
-    );
+  // R02 §8：Session 状态写入只经仓储方法（真实事务 + 行锁 + 单向转换表）。
+  await db.transaction((tx) =>
+    markRuntimeSessionLostInTransaction(tx, { tenantId, id: sessionBindingId }),
+  );
 }
