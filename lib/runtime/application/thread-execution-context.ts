@@ -11,7 +11,7 @@ import {
   getEnvironmentRevisionById,
 } from "@/lib/environment/environment-definition-store";
 import { getEffectiveEnvironmentSelection } from "@/lib/environment/environment-selection";
-import type { EnvironmentChangeRequest } from "@/lib/persistence/schema/environment";
+import type { EnvironmentChangeRequest } from "@/lib/persistence/schema/environment-change-request";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
 import { resolveWorkspaceBindingId } from "@/lib/workspace/desktop-workspace-queries";
 

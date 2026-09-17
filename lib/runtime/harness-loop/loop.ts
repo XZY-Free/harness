@@ -82,8 +82,9 @@ export type HarnessActionExecutionResult =
 export interface HarnessActionExecutionContext {
   invocationId: string;
   tenantId: string;
-  threadId: string;
-  turnId: string;
+  /** Thread 主体才有；Job 主体为 null（需要 Thread 的能力应显式返回不支持）。 */
+  threadId: string | null;
+  turnId: string | null;
   actionDigest: string;
   /** Runtime generation that is authorized to create this parent Invocation action. */
   authority?: AuthorityIdentity;
@@ -119,8 +120,17 @@ export interface HarnessLoopParams {
   invocationId: string;
   tenantId: string;
   authority?: AuthorityIdentity;
-  threadId: string;
-  turnId: string;
+  /**
+   * R06 §1：执行主体是**判别联合**。
+   *
+   * Thread 分支提供 threadId + turnId；Job 分支提供 jobId（threadId/turnId 为 null）。
+   * 二者必须恰好满足其一 —— 既不允许多个主体并存，也不允许"都不给"。
+   * 这不只是类型约束：`runHostedInvocation` 不能再把"没有 Thread"静默变成
+   * 永不执行的 pending。
+   */
+  threadId: string | null;
+  turnId: string | null;
+  jobId?: string | null;
   objective: string;
   contextHandle?: string;
   authorizedKnowledgeSourceRefs?: string[];
@@ -175,14 +185,52 @@ const EMPTY_RECOVERY: HarnessLoopRecoverySnapshot = {
   actionHistory: [],
 };
 
+/**
+ * R06 §1：解析并校验 Loop 的执行主体。
+ *
+ * 这里必须 fail-closed：把"缺少 Thread"当成一种正常状态，正是旧实现让无 Thread 的
+ * Job 被静默判定为 pending（既不执行也不失败）的根因。
+ */
+export function resolveHarnessExecutionSubject(input: {
+  threadId: string | null;
+  turnId: string | null;
+  jobId?: string | null;
+}): { kind: "thread"; threadId: string; turnId: string } | { kind: "job"; jobId: string } {
+  const threadId = input.threadId ?? null;
+  const turnId = input.turnId ?? null;
+  const jobId = input.jobId ?? null;
+  if (threadId || turnId) {
+    if (jobId) {
+      throw new HarnessLoopError("HARNESS_SUBJECT_AMBIGUOUS", "Thread 主体与 Job 主体不能同时存在");
+    }
+    if (!threadId || !turnId) {
+      throw new HarnessLoopError(
+        "HARNESS_SUBJECT_INCOMPLETE",
+        "Thread 主体必须同时提供 threadId 与 turnId",
+      );
+    }
+    return { kind: "thread", threadId, turnId };
+  }
+  if (!jobId) {
+    throw new HarnessLoopError(
+      "HARNESS_SUBJECT_MISSING",
+      "必须提供 Thread（threadId+turnId）或 Job（jobId）主体",
+    );
+  }
+  return { kind: "job", jobId };
+}
+
 export class HarnessLoop {
   private readonly params: HarnessLoopParams;
   private readonly limits: HarnessLoopLimits;
+  /** R06 §1：构造时即固定的执行主体，运行期不再回退到"字段缺失"的歧义状态。 */
+  private readonly subject: ReturnType<typeof resolveHarnessExecutionSubject>;
   private observations: HarnessObservation[] = [];
   private actionHistory: HarnessActionHistoryEntry[] = [];
 
   constructor(params: HarnessLoopParams) {
     this.params = params;
+    this.subject = resolveHarnessExecutionSubject(params);
     this.limits = { ...DEFAULT_HARNESS_LOOP_LIMITS };
     for (const [key, value] of Object.entries(params.limits ?? {})) {
       if (typeof value === "number") {
@@ -379,8 +427,8 @@ export class HarnessLoop {
     const execution = await executor(action as never, {
       invocationId: this.params.invocationId,
       tenantId: this.params.tenantId,
-      threadId: this.params.threadId,
-      turnId: this.params.turnId,
+      threadId: this.subject.kind === "thread" ? this.subject.threadId : null,
+      turnId: this.subject.kind === "thread" ? this.subject.turnId : null,
       actionDigest: historyEntry.actionDigest,
       authority: this.params.authority,
       deadlineAt: this.params.actionDeadlineAt,
@@ -572,13 +620,21 @@ export class HarnessLoop {
       ).length,
     };
     return {
-      invocation: {
-        invocationId: this.params.invocationId,
-        tenantId: this.params.tenantId,
-        threadId: this.params.threadId,
-        turnId: this.params.turnId,
-        executionState: "running",
-      },
+      invocation:
+        this.subject.kind === "thread"
+          ? {
+              invocationId: this.params.invocationId,
+              tenantId: this.params.tenantId,
+              threadId: this.subject.threadId,
+              turnId: this.subject.turnId,
+              executionState: "running" as const,
+            }
+          : {
+              invocationId: this.params.invocationId,
+              tenantId: this.params.tenantId,
+              jobId: this.subject.jobId,
+              executionState: "running" as const,
+            },
       objective: this.params.objective,
       context: {
         contextHandle: this.params.contextHandle,

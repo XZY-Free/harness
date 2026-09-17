@@ -239,6 +239,14 @@ export async function archiveWorkspace(
 // ─── WorkspaceBinding CRUD ─────────────────────────────────
 
 export interface CreateWorkspaceBindingInput {
+  /**
+   * 稳定身份（可选）。
+   *
+   * 提供时表示「该 Binding 的身份由调用方派生、可重复解析」：插入走幂等语义
+   * （重复插入不报错，回读已存在行）。用于语义完全由租户级事实决定的退化契约，
+   * 使重复/并发解析落到同一行，而不是每次铸造一条新记录。
+   */
+  id?: string;
   tenantId: string;
   workspaceId?: string | null;
   bindingType?: WorkspaceBindingType | null;
@@ -333,6 +341,7 @@ export async function createWorkspaceBinding(
   }
 
   const insert: WorkspaceBindingInsert = {
+    ...(input.id ? { id: input.id } : {}),
     tenantId: input.tenantId,
     workspaceId: input.workspaceId ?? null,
     bindingType: input.bindingType ?? null,
@@ -360,6 +369,23 @@ export async function createWorkspaceBinding(
     contractDigest: input.contractDigest,
     createdBy: input.createdBy,
   };
+
+  if (input.id) {
+    // 稳定身份：并发/重复解析必须落到同一行。`ON DUPLICATE KEY UPDATE` 让后到者安静
+    // 落在已存在行上（把主键写成自身即无副作用），再用派生 id 回读 ——
+    // 结果是**与解析次数无关**的确定值，这正是退化契约需要的语义。
+    await db
+      .insert(workspaceBinding)
+      .values(insert)
+      .onDuplicateKeyUpdate({ set: { id: input.id } });
+    const [stabilized] = await db
+      .select()
+      .from(workspaceBinding)
+      .where(and(eq(workspaceBinding.tenantId, input.tenantId), eq(workspaceBinding.id, input.id)))
+      .limit(1);
+    if (!stabilized) throw new WorkspaceNotFoundError("WorkspaceBinding 幂等创建后回查失败");
+    return stabilized;
+  }
 
   await db.insert(workspaceBinding).values(insert);
   // 回查最新一条（没有唯一约束，按 createdAt desc）。

@@ -675,28 +675,6 @@ CREATE TABLE `EffectTarget` (
 	CONSTRAINT `EffectTarget_record_targetHash_uq` UNIQUE(`effectRecordId`,`targetHash`)
 );
 --> statement-breakpoint
-CREATE TABLE `EnvironmentChangeRequest` (
-	`id` varchar(36) NOT NULL,
-	`tenantId` varchar(36) NOT NULL,
-	`threadId` varchar(36) NOT NULL,
-	`selectionSequence` bigint unsigned NOT NULL,
-	`requestedRevisionId` varchar(36) NOT NULL,
-	`requestState` varchar(32) NOT NULL DEFAULT 'pending',
-	`requestedBy` varchar(128) NOT NULL,
-	`reasonCode` varchar(64),
-	`firstAppliedInvocationId` varchar(36),
-	`expiresAt` datetime(6),
-	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
-	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-	CONSTRAINT `EnvironmentChangeRequest_id` PRIMARY KEY(`id`),
-	CONSTRAINT `EnvironmentChangeRequest_tenant_id_uq` UNIQUE(`tenantId`,`id`),
-	CONSTRAINT `EnvironmentChangeRequest_tenant_thread_sequence_uq` UNIQUE(`tenantId`,`threadId`,`selectionSequence`),
-	CONSTRAINT `EnvironmentChangeRequest_state_allowed` CHECK(`requestState` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired')),
-	CONSTRAINT `EnvironmentChangeRequest_applied_shape` CHECK(`requestState` <> 'applied' OR `firstAppliedInvocationId` IS NOT NULL),
-	CONSTRAINT `EnvironmentChangeRequest_revision_reference_shape` CHECK(`requestedRevisionId` IS NOT NULL)
-);
---> statement-breakpoint
 CREATE TABLE `EnvironmentDefinition` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
@@ -756,6 +734,27 @@ CREATE TABLE `EnvironmentLease` (
 	CONSTRAINT `EnvironmentLease_readiness_state_allowed` CHECK(`readinessState` IN ('unresolved', 'preparing', 'prepared', 'activating', 'ready', 'blocked')),
 	CONSTRAINT `EnvironmentLease_activation_shape` CHECK((`readinessState` = 'ready' AND `leaseState` = 'active' AND `activationOwnershipId` IS NOT NULL) OR `readinessState` <> 'ready'),
 	CONSTRAINT `EnvironmentLease_compliance_shape` CHECK(`readinessState` NOT IN ('prepared', 'ready') OR (`capabilitiesJson` IS NOT NULL AND `complianceEvidence` IS NOT NULL AND `complianceDigest` IS NOT NULL AND `preparedEvidence` IS NOT NULL AND `preparedDigest` IS NOT NULL AND `preparedAt` IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE TABLE `EnvironmentChangeRequest` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`threadId` varchar(36) NOT NULL,
+	`selectionSequence` bigint unsigned NOT NULL,
+	`requestedRevisionId` varchar(36) NOT NULL,
+	`requestState` varchar(32) NOT NULL DEFAULT 'pending',
+	`requestedBy` varchar(128) NOT NULL,
+	`reasonCode` varchar(64),
+	`firstAppliedInvocationId` varchar(36),
+	`expiresAt` datetime(6),
+	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
+	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+	CONSTRAINT `EnvironmentChangeRequest_id` PRIMARY KEY(`id`),
+	CONSTRAINT `EnvironmentChangeRequest_tenant_id_uq` UNIQUE(`tenantId`,`id`),
+	CONSTRAINT `EnvironmentChangeRequest_tenant_thread_sequence_uq` UNIQUE(`tenantId`,`threadId`,`selectionSequence`),
+	CONSTRAINT `EnvironmentChangeRequest_state_allowed` CHECK(`requestState` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired')),
+	CONSTRAINT `EnvironmentChangeRequest_applied_shape` CHECK(`requestState` <> 'applied' OR `firstAppliedInvocationId` IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE `EnvironmentDefinitionRevision` (
@@ -1794,10 +1793,11 @@ CREATE TABLE `Invocation` (
 	CONSTRAINT `Invocation_subject_allowed` CHECK(`subjectType` IN ('thread', 'job')),
 	CONSTRAINT `Invocation_kind_allowed` CHECK(`invocationKind` IN ('initial', 'regenerate', 'job')),
 	CONSTRAINT `Invocation_state_allowed` CHECK(`executionState` IN ('queued', 'running', 'waiting_user', 'completed', 'failed', 'cancelled', 'lost')),
-	CONSTRAINT `Invocation_checkpoint_gate_allowed` CHECK(`checkpointGate` IN ('open', 'quiescing', 'frozen')),
+	CONSTRAINT `Invocation_checkpoint_gate_allowed` CHECK(`checkpointGate` IN ('open', 'quiescing', 'frozen', 'releasing')),
 	CONSTRAINT `Invocation_subject_shape` CHECK((`subjectType` = 'thread' AND `threadId` IS NOT NULL AND `turnId` IS NOT NULL AND `triggerItemId` IS NOT NULL AND `jobId` IS NULL) OR (`subjectType` = 'job' AND `jobId` IS NOT NULL AND `threadId` IS NULL AND `turnId` IS NULL AND `triggerItemId` IS NULL AND `invocationKind` = 'job' AND `invocationSequence` = 1)),
 	CONSTRAINT `Invocation_result_terminal_shape` CHECK(((`resultRef` IS NULL AND `resultDigest` IS NULL) OR (`resultRef` IS NOT NULL AND `resultDigest` IS NOT NULL)) AND ((`finishedAt` IS NULL AND `executionState` NOT IN ('completed', 'failed', 'cancelled', 'lost')) OR (`finishedAt` IS NOT NULL AND `executionState` IN ('completed', 'failed', 'cancelled', 'lost')))),
-	CONSTRAINT `Invocation_checkpoint_owner_shape` CHECK(`checkpointGate` = 'open' OR `checkpointOwnerId` IS NOT NULL)
+	CONSTRAINT `Invocation_checkpoint_owner_shape` CHECK(`checkpointGate` = 'open' OR `checkpointOwnerId` IS NOT NULL),
+	CONSTRAINT `Invocation_checkpoint_releasing_shape` CHECK(`checkpointGate` <> 'releasing' OR (`checkpointIntentId` IS NOT NULL AND `checkpointPreparedEvidence` IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `RuntimeEventIngress` (
@@ -2885,14 +2885,15 @@ ALTER TABLE `Device` ADD CONSTRAINT `Device_userId_UserIdentity_id_fk` FOREIGN K
 ALTER TABLE `EffectRecord` ADD CONSTRAINT `EffectRecord_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EffectTarget` ADD CONSTRAINT `EffectTarget_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EffectTarget` ADD CONSTRAINT `EffectTarget_effectRecordId_EffectRecord_id_fk` FOREIGN KEY (`effectRecordId`) REFERENCES `EffectRecord`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_thread_fk` FOREIGN KEY (`tenantId`,`threadId`) REFERENCES `Thread`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`firstAppliedInvocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentDefinition` ADD CONSTRAINT `EnvironmentDefinition_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_tenant_invocation_attempt_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`) REFERENCES `InvocationAttempt`(`tenantId`,`invocationId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_thread_fk` FOREIGN KEY (`tenantId`,`threadId`) REFERENCES `Thread`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_revision_fk` FOREIGN KEY (`tenantId`,`requestedRevisionId`) REFERENCES `EnvironmentDefinitionRevision`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`firstAppliedInvocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentDefinitionRevision` ADD CONSTRAINT `EnvironmentDefinitionRevision_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentDefinitionRevision` ADD CONSTRAINT `EnvironmentDefinitionRevision_tenantId_definitionId_fk` FOREIGN KEY (`tenantId`,`definitionId`) REFERENCES `EnvironmentDefinition`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_case` ADD CONSTRAINT `evaluation_case_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -3093,10 +3094,10 @@ CREATE INDEX `EffectRecord_tenant_owner_idx` ON `EffectRecord` (`tenantId`,`owne
 CREATE INDEX `EffectRecord_tenant_state_idx` ON `EffectRecord` (`tenantId`,`effectState`);--> statement-breakpoint
 CREATE INDEX `EffectTarget_tenant_record_idx` ON `EffectTarget` (`tenantId`,`effectRecordId`);--> statement-breakpoint
 CREATE INDEX `EffectTarget_tenant_state_idx` ON `EffectTarget` (`tenantId`,`targetState`);--> statement-breakpoint
-CREATE INDEX `EnvironmentChangeRequest_tenant_thread_state_idx` ON `EnvironmentChangeRequest` (`tenantId`,`threadId`,`requestState`,`selectionSequence`);--> statement-breakpoint
 CREATE INDEX `EnvironmentDefinition_tenant_lifecycle_updated_idx` ON `EnvironmentDefinition` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
 CREATE INDEX `EnvironmentLease_cleanup_idx` ON `EnvironmentLease` (`leaseState`,`nextCleanupAt`,`cleanupLeaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `EnvironmentLease_revision_idx` ON `EnvironmentLease` (`tenantId`,`environmentDefinitionRevisionId`);--> statement-breakpoint
+CREATE INDEX `EnvironmentChangeRequest_tenant_thread_state_idx` ON `EnvironmentChangeRequest` (`tenantId`,`threadId`,`requestState`,`selectionSequence`);--> statement-breakpoint
 CREATE INDEX `EnvironmentDefinitionRevision_tenant_definition_digest_idx` ON `EnvironmentDefinitionRevision` (`tenantId`,`definitionId`,`semanticDigest`);--> statement-breakpoint
 CREATE INDEX `tenant_run_idx` ON `evaluation_case` (`tenant_id`,`run_id`);--> statement-breakpoint
 CREATE INDEX `tenant_case_state_idx` ON `evaluation_case` (`tenant_id`,`case_state`);--> statement-breakpoint

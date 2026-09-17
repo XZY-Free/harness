@@ -41,8 +41,24 @@ export const INVOCATION_TERMINAL_STATES: readonly InvocationExecutionState[] = [
   "cancelled",
   "lost",
 ];
-export const INVOCATION_CHECKPOINT_GATES = ["open", "quiescing", "frozen"] as const;
+/**
+ * Checkpoint Gate（R05 §5 / R09 §2 步骤 8）。
+ *
+ * - open：无安全点在途，新决策/新 Action/新 Workspace 写入正常。
+ * - quiescing：已登记稳定 intent 与 deadline，拒绝新决策/新 Action/新写入。
+ * - frozen：Broker 已冻结文件 Generation，正在持久 Snapshot 与提交。
+ * - releasing：Checkpoint 已提交（或候选已放弃），但 Runtime/Backend 的解冻尚未确认。
+ *   这是"不能只在 finally 里调用 release 并吞异常"的承载点：解冻是**持久工作**，
+ *   在确认完成前 Gate 不放行新执行；进程在解冻途中 Crash 时由维护 lane 按 intentId 续做。
+ */
+export const INVOCATION_CHECKPOINT_GATES = ["open", "quiescing", "frozen", "releasing"] as const;
 export type InvocationCheckpointGate = (typeof INVOCATION_CHECKPOINT_GATES)[number];
+/** 仍持有安全点、拒绝新决策/新写入的 Gate（fail-closed 集合）。 */
+export const INVOCATION_CHECKPOINT_GATE_HELD: readonly InvocationCheckpointGate[] = [
+  "quiescing",
+  "frozen",
+  "releasing",
+];
 
 const ascii = (name: string, length: number) => varchar(name, { length }).$type<string>();
 const bigintUnsigned = (name: string) => bigint(name, { mode: "number", unsigned: true });
@@ -126,7 +142,7 @@ export const invocationTable = mysqlTable(
     ),
     gateAllowed: check(
       "Invocation_checkpoint_gate_allowed",
-      sql`\`checkpointGate\` IN ('open', 'quiescing', 'frozen')`,
+      sql`\`checkpointGate\` IN ('open', 'quiescing', 'frozen', 'releasing')`,
     ),
     subjectShape: check(
       "Invocation_subject_shape",
@@ -139,6 +155,11 @@ export const invocationTable = mysqlTable(
     checkpointOwnerShape: check(
       "Invocation_checkpoint_owner_shape",
       sql`\`checkpointGate\` = 'open' OR \`checkpointOwnerId\` IS NOT NULL`,
+    ),
+    // releasing 必须能定位到"要解冻什么"：intentId（Broker 侧安全点文件）与已持久证据。
+    checkpointReleasingShape: check(
+      "Invocation_checkpoint_releasing_shape",
+      sql`\`checkpointGate\` <> 'releasing' OR (\`checkpointIntentId\` IS NOT NULL AND \`checkpointPreparedEvidence\` IS NOT NULL)`,
     ),
   }),
 );

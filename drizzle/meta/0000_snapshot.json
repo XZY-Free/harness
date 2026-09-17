@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "ec7a5ef8-d859-4cf5-bcc6-46a4ac3c6bd2",
+  "id": "26b57d9d-df2a-4048-8fc5-c9e545dc5a62",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -5470,216 +5470,6 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "EnvironmentChangeRequest": {
-      "name": "EnvironmentChangeRequest",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "threadId": {
-          "name": "threadId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "selectionSequence": {
-          "name": "selectionSequence",
-          "type": "bigint unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "requestedRevisionId": {
-          "name": "requestedRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "requestState": {
-          "name": "requestState",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
-        },
-        "requestedBy": {
-          "name": "requestedBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reasonCode": {
-          "name": "reasonCode",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "firstAppliedInvocationId": {
-          "name": "firstAppliedInvocationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "datetime(6)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "bigint unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(6)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP(6)"
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(6)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP(6)"
-        }
-      },
-      "indexes": {
-        "EnvironmentChangeRequest_tenant_id_uq": {
-          "name": "EnvironmentChangeRequest_tenant_id_uq",
-          "columns": [
-            "tenantId",
-            "id"
-          ],
-          "isUnique": true
-        },
-        "EnvironmentChangeRequest_tenant_thread_sequence_uq": {
-          "name": "EnvironmentChangeRequest_tenant_thread_sequence_uq",
-          "columns": [
-            "tenantId",
-            "threadId",
-            "selectionSequence"
-          ],
-          "isUnique": true
-        },
-        "EnvironmentChangeRequest_tenant_thread_state_idx": {
-          "name": "EnvironmentChangeRequest_tenant_thread_state_idx",
-          "columns": [
-            "tenantId",
-            "threadId",
-            "requestState",
-            "selectionSequence"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "EnvironmentChangeRequest_tenantId_Tenant_id_fk": {
-          "name": "EnvironmentChangeRequest_tenantId_Tenant_id_fk",
-          "tableFrom": "EnvironmentChangeRequest",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "EnvironmentChangeRequest_threadId_Thread_id_fk": {
-          "name": "EnvironmentChangeRequest_threadId_Thread_id_fk",
-          "tableFrom": "EnvironmentChangeRequest",
-          "tableTo": "Thread",
-          "columnsFrom": [
-            "threadId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "EnvironmentChangeRequest_tenant_thread_fk": {
-          "name": "EnvironmentChangeRequest_tenant_thread_fk",
-          "tableFrom": "EnvironmentChangeRequest",
-          "tableTo": "Thread",
-          "columnsFrom": [
-            "tenantId",
-            "threadId"
-          ],
-          "columnsTo": [
-            "tenantId",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "EnvironmentChangeRequest_tenant_invocation_fk": {
-          "name": "EnvironmentChangeRequest_tenant_invocation_fk",
-          "tableFrom": "EnvironmentChangeRequest",
-          "tableTo": "Invocation",
-          "columnsFrom": [
-            "tenantId",
-            "firstAppliedInvocationId"
-          ],
-          "columnsTo": [
-            "tenantId",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "EnvironmentChangeRequest_id": {
-          "name": "EnvironmentChangeRequest_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {
-        "EnvironmentChangeRequest_state_allowed": {
-          "name": "EnvironmentChangeRequest_state_allowed",
-          "value": "`requestState` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired')"
-        },
-        "EnvironmentChangeRequest_applied_shape": {
-          "name": "EnvironmentChangeRequest_applied_shape",
-          "value": "`requestState` <> 'applied' OR `firstAppliedInvocationId` IS NOT NULL"
-        },
-        "EnvironmentChangeRequest_revision_reference_shape": {
-          "name": "EnvironmentChangeRequest_revision_reference_shape",
-          "value": "`requestedRevisionId` IS NOT NULL"
-        }
-      }
-    },
     "EnvironmentDefinition": {
       "name": "EnvironmentDefinition",
       "columns": {
@@ -6168,6 +5958,227 @@
         "EnvironmentLease_compliance_shape": {
           "name": "EnvironmentLease_compliance_shape",
           "value": "`readinessState` NOT IN ('prepared', 'ready') OR (`capabilitiesJson` IS NOT NULL AND `complianceEvidence` IS NOT NULL AND `complianceDigest` IS NOT NULL AND `preparedEvidence` IS NOT NULL AND `preparedDigest` IS NOT NULL AND `preparedAt` IS NOT NULL)"
+        }
+      }
+    },
+    "EnvironmentChangeRequest": {
+      "name": "EnvironmentChangeRequest",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "threadId": {
+          "name": "threadId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "selectionSequence": {
+          "name": "selectionSequence",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestedRevisionId": {
+          "name": "requestedRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestState": {
+          "name": "requestState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "requestedBy": {
+          "name": "requestedBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reasonCode": {
+          "name": "reasonCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "firstAppliedInvocationId": {
+          "name": "firstAppliedInvocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "EnvironmentChangeRequest_tenant_id_uq": {
+          "name": "EnvironmentChangeRequest_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "EnvironmentChangeRequest_tenant_thread_sequence_uq": {
+          "name": "EnvironmentChangeRequest_tenant_thread_sequence_uq",
+          "columns": [
+            "tenantId",
+            "threadId",
+            "selectionSequence"
+          ],
+          "isUnique": true
+        },
+        "EnvironmentChangeRequest_tenant_thread_state_idx": {
+          "name": "EnvironmentChangeRequest_tenant_thread_state_idx",
+          "columns": [
+            "tenantId",
+            "threadId",
+            "requestState",
+            "selectionSequence"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "EnvironmentChangeRequest_tenantId_Tenant_id_fk": {
+          "name": "EnvironmentChangeRequest_tenantId_Tenant_id_fk",
+          "tableFrom": "EnvironmentChangeRequest",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "EnvironmentChangeRequest_threadId_Thread_id_fk": {
+          "name": "EnvironmentChangeRequest_threadId_Thread_id_fk",
+          "tableFrom": "EnvironmentChangeRequest",
+          "tableTo": "Thread",
+          "columnsFrom": [
+            "threadId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "EnvironmentChangeRequest_tenant_thread_fk": {
+          "name": "EnvironmentChangeRequest_tenant_thread_fk",
+          "tableFrom": "EnvironmentChangeRequest",
+          "tableTo": "Thread",
+          "columnsFrom": [
+            "tenantId",
+            "threadId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "EnvironmentChangeRequest_tenant_revision_fk": {
+          "name": "EnvironmentChangeRequest_tenant_revision_fk",
+          "tableFrom": "EnvironmentChangeRequest",
+          "tableTo": "EnvironmentDefinitionRevision",
+          "columnsFrom": [
+            "tenantId",
+            "requestedRevisionId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "EnvironmentChangeRequest_tenant_invocation_fk": {
+          "name": "EnvironmentChangeRequest_tenant_invocation_fk",
+          "tableFrom": "EnvironmentChangeRequest",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "tenantId",
+            "firstAppliedInvocationId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "EnvironmentChangeRequest_id": {
+          "name": "EnvironmentChangeRequest_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "EnvironmentChangeRequest_state_allowed": {
+          "name": "EnvironmentChangeRequest_state_allowed",
+          "value": "`requestState` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired')"
+        },
+        "EnvironmentChangeRequest_applied_shape": {
+          "name": "EnvironmentChangeRequest_applied_shape",
+          "value": "`requestState` <> 'applied' OR `firstAppliedInvocationId` IS NOT NULL"
         }
       }
     },
@@ -14713,7 +14724,7 @@
         },
         "Invocation_checkpoint_gate_allowed": {
           "name": "Invocation_checkpoint_gate_allowed",
-          "value": "`checkpointGate` IN ('open', 'quiescing', 'frozen')"
+          "value": "`checkpointGate` IN ('open', 'quiescing', 'frozen', 'releasing')"
         },
         "Invocation_subject_shape": {
           "name": "Invocation_subject_shape",
@@ -14726,6 +14737,10 @@
         "Invocation_checkpoint_owner_shape": {
           "name": "Invocation_checkpoint_owner_shape",
           "value": "`checkpointGate` = 'open' OR `checkpointOwnerId` IS NOT NULL"
+        },
+        "Invocation_checkpoint_releasing_shape": {
+          "name": "Invocation_checkpoint_releasing_shape",
+          "value": "`checkpointGate` <> 'releasing' OR (`checkpointIntentId` IS NOT NULL AND `checkpointPreparedEvidence` IS NOT NULL)"
         }
       }
     },

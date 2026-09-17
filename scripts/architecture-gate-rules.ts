@@ -176,6 +176,11 @@ export function checkWorkerProductionTopologyGate(
   ) {
     failures.push("job-worker 未接线 Job admission 与 JobCommand 两条 lane");
   }
+  // R05 §5 `stuck gate` / `releasing 资源` + R09 §2 步骤 8：安全点解冻是**持久工作**，
+  // 必须由常驻维护 lane 续做（含 Crash 后的 Gate 收口），不能只在 finally 里调用后吞异常。
+  if (!retryWorker.includes("runCheckpointMaintenanceLane")) {
+    failures.push("Runtime retry worker 未接线 Checkpoint 维护 lane");
+  }
   return { passed: failures.length === 0, failures };
 }
 

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { POST as ingestRuntimeEventsPOST } from "@/app/runtime/invocations/[invocationId]/events/route";
 import { db } from "@/lib/db/client";
+import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
   createAttempt,
@@ -12,10 +14,18 @@ import {
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import {
+  decodeWorkloadToken,
+  issueWorkloadToken,
+  signWorkloadTokenPayload,
+} from "@/lib/identity/workload-token";
+import { revokeWorkloadToken } from "@/lib/identity/workload-token-revocation-queries";
+import { threadEventTable, threadItemTable } from "@/lib/persistence/schema/conversation";
+import {
   executionOwnershipTable,
   invocationTable,
   runtimeEventIngressTable,
 } from "@/lib/persistence/schema/executions";
+import { jobCommandTable } from "@/lib/persistence/schema/job";
 import {
   EventPayloadHashConflictError,
   IngressAuthorityMismatchError,
@@ -25,7 +35,7 @@ import {
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 /** R02 §3：该夹具 Session 冻结的发布能力证据（Hosted Revision 的能力名列表）。 */
@@ -130,6 +140,67 @@ function progressEvent(
     type: "progress" as const,
     schemaVersion: 1,
     payload,
+  };
+}
+
+type ActiveRuntime = Awaited<ReturnType<typeof createActiveRuntime>>;
+
+/** 用当前 Authority 投递一批事件（REPLAY 用例只关心批的语义，不重复拼 batch）。 */
+function ingressBatch(runtime: ActiveRuntime, events: unknown[]) {
+  return ingressRuntimeEvents({
+    tenantId: runtime.fixture.tenantId,
+    invocationId: runtime.fixture.invocation.id,
+    batch: { protocolVersion: 3, authority: runtime.acquired.authority, events },
+  });
+}
+
+/** 该 Invocation 的全部正式 Ledger 事实（按 producerSequence 升序）。 */
+async function readLedger(tenantId: string, invocationId: string) {
+  return db
+    .select()
+    .from(runtimeEventIngressTable)
+    .where(
+      and(
+        eq(runtimeEventIngressTable.tenantId, tenantId),
+        eq(runtimeEventIngressTable.invocationId, invocationId),
+      ),
+    )
+    .orderBy(asc(runtimeEventIngressTable.producerSequence));
+}
+
+/** 执行计数：Replay 必须逐项不变（水位 / 版本 / 恢复水位）。 */
+async function readInvocationCounters(tenantId: string, invocationId: string) {
+  const [row] = await db
+    .select({
+      lastProducerSequence: invocationTable.lastProducerSequence,
+      recoveryVersion: invocationTable.recoveryVersion,
+      versionNo: invocationTable.versionNo,
+    })
+    .from(invocationTable)
+    .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)));
+  return row;
+}
+
+/** 产品侧映射计数（Thread 事件/条目与 Job 命令）：Replay 不得新增任何一条。 */
+async function readProductMappingCounts(tenantId: string, threadId: string) {
+  const [threadEvents, threadItems, jobCommands] = await Promise.all([
+    db
+      .select({ id: threadEventTable.id })
+      .from(threadEventTable)
+      .where(eq(threadEventTable.threadId, threadId)),
+    db
+      .select({ id: threadItemTable.id })
+      .from(threadItemTable)
+      .where(eq(threadItemTable.threadId, threadId)),
+    db
+      .select({ id: jobCommandTable.id })
+      .from(jobCommandTable)
+      .where(eq(jobCommandTable.tenantId, tenantId)),
+  ]);
+  return {
+    threadEvents: threadEvents.length,
+    threadItems: threadItems.length,
+    jobCommands: jobCommands.length,
   };
 }
 
@@ -278,101 +349,254 @@ describe("RuntimeEventIngress database fencing", () => {
     expect(ingress).toEqual([]);
   });
 
-  it("R05: 两个唯一键任一错配都是稳定身份冲突，不能当作精确 Replay", async () => {
+  // ─── REPLAY-01..06（R05 / R04 / R03）──────────────────────────────────────
+  // 编号严格对应 acceptance/replay.md 的场景与必须断言。每条都带"零新增 / 零计数变化"
+  // 的负向断言：身份错配不许被当成 Replay，精确 Replay 不许产生任何副作用。
+
+  it("REPLAY-01: 已接纳 E1 后，另一 eventId + 相同 producerSequence + 相同 Payload 是身份冲突", async () => {
     const runtime = await createActiveRuntime();
-    const stored = progressEvent("2");
-    await ingressRuntimeEvents({
-      tenantId: runtime.fixture.tenantId,
-      invocationId: runtime.fixture.invocation.id,
-      batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [stored] },
-    });
+    const e1 = progressEvent("2");
+    await ingressBatch(runtime, [e1]);
+    const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const countersBefore = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
 
-    // 同 producerSequence、新 eventId：既不是 replay，也不是合法新事件。
-    await expect(
-      ingressRuntimeEvents({
-        tenantId: runtime.fixture.tenantId,
-        invocationId: runtime.fixture.invocation.id,
-        batch: {
-          protocolVersion: 3,
-          authority: runtime.acquired.authority,
-          events: [progressEvent("2", randomUUID(), { message: "same-sequence" })],
-        },
-      }),
-    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+    // producerSequence 命中 E1、payload 逐字相同，但 eventId 不同：两个唯一键必须命中
+    // 同一行才算精确 Replay，否则是稳定身份冲突——绝不能把 E1 当成新 Event 二次成功。
+    await expect(ingressBatch(runtime, [progressEvent("2", randomUUID())])).rejects.toBeInstanceOf(
+      ProducerSequenceGapError,
+    );
 
-    // 同 eventId、新 producerSequence：同样必须 fail closed。
-    await expect(
-      ingressRuntimeEvents({
-        tenantId: runtime.fixture.tenantId,
-        invocationId: runtime.fixture.invocation.id,
-        batch: {
-          protocolVersion: 3,
-          authority: runtime.acquired.authority,
-          events: [progressEvent("3", stored.eventId, { message: "same-event-id" })],
-        },
-      }),
-    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
-
-    // 原事件本身仍然可以精确 Replay（身份与 payload 逐字相同）。
-    const replay = await ingressRuntimeEvents({
-      tenantId: runtime.fixture.tenantId,
-      invocationId: runtime.fixture.invocation.id,
-      batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [stored] },
-    });
-    expect(replay.replayedEventIds).toEqual([stored.eventId]);
-
-    const [invocation] = await db
-      .select()
-      .from(invocationTable)
-      .where(
-        and(
-          eq(invocationTable.tenantId, runtime.fixture.tenantId),
-          eq(invocationTable.id, runtime.fixture.invocation.id),
-        ),
-      );
-    expect(invocation?.lastProducerSequence).toBe(2);
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      ledgerBefore,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(countersBefore);
   });
 
-  it("R05: Batch 内部重复 eventId / producerSequence 在写入前被识别", async () => {
+  it("REPLAY-02: 已接纳 E1 后，原 eventId + 不同 producerSequence + 相同 Payload 冲突且零写入", async () => {
+    const runtime = await createActiveRuntime();
+    const e1 = progressEvent("2");
+    await ingressBatch(runtime, [e1]);
+    const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const countersBefore = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+
+    await expect(ingressBatch(runtime, [progressEvent("3", e1.eventId)])).rejects.toBeInstanceOf(
+      ProducerSequenceGapError,
+    );
+
+    // "无任何写入"：Ledger 行、水位与版本三个计数都必须逐项不变。
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      ledgerBefore,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(countersBefore);
+  });
+
+  it("REPLAY-03: eventId 命中行 A、producerSequence 命中行 B 时必须冲突，不得任选一行", async () => {
+    const runtime = await createActiveRuntime();
+    const ea = progressEvent("2");
+    await ingressBatch(runtime, [ea]);
+    const eb = progressEvent("3", randomUUID(), { message: "second-event" });
+    await ingressBatch(runtime, [eb]);
+    const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+
+    // 交叉错配：eventId 是 A 的、sequence 是 B 的、payload 与 A 相同。
+    await expect(
+      ingressBatch(runtime, [progressEvent("3", ea.eventId, { message: "progress" })]),
+    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+
+    // 不得"按 eventId 判为已重放"，也不得"按 sequence 覆盖 B"：两行都原样保留。
+    const ledgerAfter = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    expect(ledgerAfter).toEqual(ledgerBefore);
+    expect(ledgerAfter.map((row) => row.producerSequence)).toEqual([1, 2, 3]);
+  });
+
+  it("REPLAY-04: 同一 Authority 用仍合法凭据逐字重放同一事件返回原 receipt，计数与产品映射全不变", async () => {
+    const runtime = await createActiveRuntime();
+    const e1 = progressEvent("2");
+    const first = await ingressBatch(runtime, [e1]);
+    const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const countersBefore = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const mappingBefore = await readProductMappingCounts(
+      runtime.fixture.tenantId,
+      runtime.fixture.threadId,
+    );
+
+    const replay = await ingressBatch(runtime, [e1]);
+
+    expect(replay.replayedEventIds).toEqual([e1.eventId]);
+    expect(replay.receipts).toEqual(first.receipts);
+    expect(replay.acceptedThroughProducerSequence).toBe(first.acceptedThroughProducerSequence);
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      ledgerBefore,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(countersBefore);
+    // 全部执行计数、JobCommand 与产品侧映射（Thread 事件/条目）都不得新增。
+    expect(
+      await readProductMappingCounts(runtime.fixture.tenantId, runtime.fixture.threadId),
+    ).toEqual(mappingBefore);
+  });
+
+  it("REPLAY-05: 批内重复 ID/sequence、合法新事件混一个冲突事件都必须整批回滚", async () => {
     const runtime = await createActiveRuntime();
     const sharedEventId = randomUUID();
-    const duplicatedEventId = randomUUID();
+    // (a) 批内 eventId 重复。
     await expect(
-      ingressRuntimeEvents({
-        tenantId: runtime.fixture.tenantId,
-        invocationId: runtime.fixture.invocation.id,
-        batch: {
-          protocolVersion: 3,
-          authority: runtime.acquired.authority,
-          events: [progressEvent("2", sharedEventId), progressEvent("3", sharedEventId)],
-        },
-      }),
+      ingressBatch(runtime, [progressEvent("2", sharedEventId), progressEvent("3", sharedEventId)]),
     ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+    // (b) 批内 producerSequence 重复。
     await expect(
-      ingressRuntimeEvents({
-        tenantId: runtime.fixture.tenantId,
-        invocationId: runtime.fixture.invocation.id,
-        batch: {
-          protocolVersion: 3,
-          authority: runtime.acquired.authority,
-          events: [
-            progressEvent("2", duplicatedEventId),
-            progressEvent("2", randomUUID(), { message: "dup-seq" }),
-          ],
-        },
-      }),
+      ingressBatch(runtime, [
+        progressEvent("2", randomUUID()),
+        progressEvent("2", randomUUID(), { message: "dup-seq" }),
+      ]),
     ).rejects.toBeInstanceOf(ProducerSequenceGapError);
-    // 两个非法批次都不得留下任何新 Ledger 事实（只有 execution.started 一条）。
-    const ingress = await db
-      .select()
-      .from(runtimeEventIngressTable)
-      .where(
-        and(
-          eq(runtimeEventIngressTable.tenantId, runtime.fixture.tenantId),
-          eq(runtimeEventIngressTable.invocationId, runtime.fixture.invocation.id),
-        ),
+    expect(
+      (await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).map(
+        (row) => row.producerSequence,
+      ),
+    ).toEqual([1]);
+
+    // (c) 合法新事件 + 冲突事件同批：冲突把同批的新事件与其产品映射一起回滚。
+    const e1 = progressEvent("2");
+    await ingressBatch(runtime, [e1]);
+    const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const countersBefore = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const mappingBefore = await readProductMappingCounts(
+      runtime.fixture.tenantId,
+      runtime.fixture.threadId,
+    );
+    await expect(
+      ingressBatch(runtime, [
+        progressEvent("3"),
+        // eventId 命中已接纳的 E1、sequence 仍未占用 → 身份冲突（不是合法新事件）。
+        progressEvent("4", e1.eventId),
+      ]),
+    ).rejects.toBeInstanceOf(ProducerSequenceGapError);
+
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      ledgerBefore,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(countersBefore);
+    expect(
+      await readProductMappingCounts(runtime.fixture.tenantId, runtime.fixture.threadId),
+    ).toEqual(mappingBefore);
+  });
+
+  it("REPLAY-06: HTTP 层 Token tuple 与 body Authority 不一致、过期或已撤销凭据一律拒绝", async () => {
+    const runtime = await createActiveRuntime();
+    const { fixture, acquired } = runtime;
+    const invocationId = fixture.invocation.id;
+    const issueToken = (
+      overrides: {
+        expiresAt?: number;
+        invocationId?: string;
+        audience?: "runtime" | "gateway";
+      } = {},
+    ) =>
+      issueWorkloadToken({
+        contractVersion: 3,
+        type: "execution",
+        audience: overrides.audience ?? "runtime",
+        tenantId: fixture.tenantId,
+        invocationId: overrides.invocationId ?? invocationId,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        attemptId: fixture.attempt.id,
+        ownershipId: acquired.ownership.id,
+        leaseEpoch: String(acquired.ownership.leaseEpoch),
+        sessionBindingId: acquired.session.id,
+        expiresAt: overrides.expiresAt ?? Date.now() + 60_000,
+      });
+    // `issueWorkloadToken` 把 issuedAt 固定为 now，因此无法表达"已过期"；这里显式签发一份
+    // 签名有效但 issuedAt=60s 前 / expiresAt=1s 前的正式 claims（过期是事实，不是伪造签名）。
+    const issueExpiredToken = () =>
+      signWorkloadTokenPayload({
+        contractVersion: 3,
+        type: "execution",
+        audience: "runtime",
+        tenantId: fixture.tenantId,
+        invocationId,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        attemptId: fixture.attempt.id,
+        ownershipId: acquired.ownership.id,
+        leaseEpoch: String(acquired.ownership.leaseEpoch),
+        sessionBindingId: acquired.session.id,
+        jti: randomUUID(),
+        issuedAt: Date.now() - 60_000,
+        expiresAt: Date.now() - 1_000,
+      });
+    // 走真实 Route Handler（不绕过 HTTP 层、不直接调用内层 service）。
+    const callRoute = (token: string | null, authority: unknown, pathId = invocationId) =>
+      ingestRuntimeEventsPOST(
+        buildApiRequest({
+          audience: "runtime",
+          method: "POST",
+          path: `/invocations/${pathId}/events`,
+          idempotencyKey: randomUUID(),
+          ...(token ? { token } : {}),
+          body: { protocolVersion: 3, authority, events: [progressEvent("2")] },
+        }),
+        { params: Promise.resolve({ invocationId: pathId }) },
       );
-    expect(ingress.map((row) => row.producerSequence)).toEqual([1]);
+
+    // (a) 凭据有效但 body Authority 与 Token tuple 不一致。
+    const mismatched = await callRoute(issueToken(), {
+      ...acquired.authority,
+      attemptId: randomUUID(),
+    });
+    expect(mismatched.status).toBe(400);
+    expect((await mismatched.json()).error.code).toBe("REQUEST_SCHEMA_INVALID");
+
+    // (b) 过期凭据。
+    const expired = await callRoute(issueExpiredToken(), acquired.authority);
+    expect(expired.status).toBe(401);
+    expect((await expired.json()).error.code).toBe("AUTHENTICATION_REQUIRED");
+
+    // (c) 路径 Invocation 与凭据绑定不一致。
+    const otherPath = await callRoute(issueToken(), acquired.authority, randomUUID());
+    expect(otherPath.status).toBe(401);
+
+    // (d) audience 不匹配。
+    const wrongAudience = await callRoute(issueToken({ audience: "gateway" }), acquired.authority);
+    expect(wrongAudience.status).toBe(401);
+
+    // (e) 真实撤销行提交之后，同一凭据立即失效。
+    const token = issueToken();
+    await revokeWorkloadToken({
+      tenantId: fixture.tenantId,
+      jti: decodeWorkloadToken(token).jti,
+      invocationId,
+      revokedBy: "test-service",
+      reasonCode: "test_revoke",
+      tokenExpiresAt: new Date(Date.now() + 60_000),
+      actor: { tenantId: fixture.tenantId, actorType: "service", actorId: "test-service" },
+    });
+    const revoked = await callRoute(token, acquired.authority);
+    expect(revoked.status).toBe(401);
+    expect((await revoked.json()).error.code).toBe("AUTHENTICATION_REQUIRED");
+
+    // 五次拒绝都不许留下任何 Ledger 事实（只有夹具的 execution.started）。
+    expect(
+      (await readLedger(fixture.tenantId, invocationId)).map((row) => row.producerSequence),
+    ).toEqual([1]);
   });
 
   it("R04: 终态事件是最后一条状态写入，Job 桥版本与批次水位一次归并", async () => {

@@ -31,6 +31,22 @@ export function createToolActionExecutor(params: {
     const { tool } = validateHarnessActionAgainstCatalog(action, params.capabilityCatalog);
     if (!tool) throw new Error("TOOL_ACTION_NOT_ALLOWED");
     if (!context.authority) throw new Error("NotCurrentExecutor");
+    if (!context.threadId || !context.turnId) {
+      // R06 §1：ToolCall 的归属与执行目标都建立在 Thread 事实之上。无 Thread 的 Job
+      // 主体下必须**显式**返回"该能力不支持"，既不能补一个假 Thread，也不能静默丢弃。
+      return {
+        observation: {
+          observationType: "tool",
+          summary: "tool.call 需要 Thread 归属，当前执行主体没有 Thread",
+          sourceRefs: [],
+          data: {
+            actionId: action.actionId,
+            toolId: action.payload.toolId,
+            unsupported: "THREAD_REQUIRED",
+          },
+        },
+      };
+    }
     const result = await executeToolCall({
       tenantId: params.tenantId,
       executionSubject: params.executionSubject,

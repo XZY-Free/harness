@@ -16,6 +16,17 @@ vi.mock("node:fs/promises", () => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
+// url-safety 的 SSRF 守卫（assertSafeExternalUrlResolved）对域名做真实 DNS 解析，
+// 使本文件的耗时取决于沙箱对 example.com / evil.com 的解析超时——实测同一用例
+// 首次 3024ms、模块热态 58ms，满负载下击穿 5s 默认超时。这里与同目录
+// url-safety.test.ts 采用同一模式固定解析结果：安全断言本身仍被真实执行，
+// 只是不再依赖外部 DNS。用例可用 mockImplementation 覆盖为内网地址以验证拒绝路径。
+const dnsMock = vi.hoisted(() => ({ resolve4: vi.fn(), resolve6: vi.fn() }));
+vi.mock("node:dns/promises", () => ({
+  resolve4: dnsMock.resolve4,
+  resolve6: dnsMock.resolve6,
+}));
+
 // 控制域名 allowlist/blacklist（config getter 运行时读 env）
 function setEnv(allow: string, black: string) {
   process.env.WEB_FETCH_DOMAIN_ALLOWLIST = allow;
@@ -25,6 +36,9 @@ function setEnv(allow: string, black: string) {
 beforeEach(() => {
   setEnv("", "");
   vi.clearAllMocks();
+  // 默认所有域名解析到公网 IP；需要验证拒绝路径的用例自行覆盖。
+  dnsMock.resolve4.mockResolvedValue(["93.184.216.34"]);
+  dnsMock.resolve6.mockResolvedValue([]);
 });
 
 function mockFetch(body: string, opts: { status?: number; contentType?: string } = {}) {
@@ -219,6 +233,26 @@ describe("rawFetch 体积/类型/超时", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain("redirect 目标未通过域名治理");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("redirect 目标解析到内网/元数据 IP → fail-closed（生产路径上的 DNS rebinding 守卫）", async () => {
+    setEnv("example.com", "");
+    const { rawFetch } = await import("./fetch");
+    // 入口域名解析到公网（通过 SSRF 入口守卫），redirect 目标解析到云元数据地址。
+    dnsMock.resolve4.mockImplementation(async (host: string) =>
+      host === "evil.com" ? ["169.254.169.254"] : ["93.184.216.34"],
+    );
+    const fetchImpl = mockRedirectFetch();
+    const r = await rawFetch({
+      url: "https://example.com/x",
+      threadId: "tid",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    // DNS 守卫先于域名治理生效：即使目标域名在 allowlist 之外，也必须是"解析到内网"这条
+    // 真实理由，而不是被域名匹配顺手挡住。
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("DNS rebinding");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 

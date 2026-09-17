@@ -177,7 +177,17 @@ export async function startRuntimeInvocation(
           runtimeRevisionId: input.binding.runtimeRevisionId,
         })
       : null;
-  let restoration: { checkpointId: string; manifestDigest: string } | null = null;
+  let restoration: {
+    checkpointId: string;
+    manifestDigest: string;
+    /** 该 Checkpoint 的输入水位：恢复后从这里之后继续消费新输入。 */
+    replayFromProducerSequence: number;
+    /**
+     * 实际恢复落地的目录 —— §4 要求"授权运行的 root 必须与这个目录/generation 一致"，
+     * 因此 ready 回执里必须同时钉住目录与 generation，而不是只记一个 checkpointId。
+     */
+    restoredRoot: string;
+  } | null = null;
   if (
     input.recovery?.kind === "resume" &&
     workspaceBinding.continuityMode === "CHECKPOINT_RESTORABLE"
@@ -206,13 +216,17 @@ export async function startRuntimeInvocation(
           invocationId: input.invocation.id,
           workspaceBindingId: workspaceBinding.id,
           environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId,
-          recoveryAnchorDigest: input.recovery.anchorDigest,
-          recoveryVersion: input.invocation.checkpointRecoveryVersion,
+          // §4：判据是**当前** Invocation 水位，不是 Checkpoint 自己记载的水位。
+          // 用后者会形成"与自身比较"的恒真校验，Checkpoint 之后已应用的新事实
+          // 就再也拦不住，陈旧快照会被当成可恢复。
+          recoveryVersion: input.invocation.recoveryVersion,
         },
       });
       restoration = {
         checkpointId: restored.checkpointId,
         manifestDigest: restored.manifestDigest,
+        replayFromProducerSequence: restored.replayFromProducerSequence,
+        restoredRoot: restored.destination,
       };
     } catch (error) {
       await workspaceCandidate.backend.host

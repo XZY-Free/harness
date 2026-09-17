@@ -41,9 +41,13 @@ import type {
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import {
   abandonFilesystemCheckpoint,
-  computeCheckpointAnchorDigest,
   produceFilesystemCheckpoint,
 } from "@/lib/workspace/checkpoint-producer";
+import {
+  confirmCheckpointRuntimeRelease,
+  recordCheckpointReleaseFailure,
+} from "@/lib/workspace/checkpoint-release";
+import { type RecoveryAnchor, computeRecoveryAnchorDigest } from "@/lib/workspace/recovery-anchor";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { and, eq, sql } from "drizzle-orm";
 
@@ -515,7 +519,7 @@ export function retryDispatchedInvocationCommand(
 type CheckpointCommandPayload = {
   checkpointIntentId: string;
   deadlineMs: number;
-  recoveryAnchor: Record<string, unknown>;
+  recoveryAnchor: RecoveryAnchor;
   recoveryAnchorDigest: string;
 };
 
@@ -533,13 +537,14 @@ function readCheckpointPayload(payload: unknown): CheckpointCommandPayload | nul
     typeof value.recoveryAnchor !== "object" ||
     Array.isArray(value.recoveryAnchor) ||
     typeof value.recoveryAnchorDigest !== "string" ||
-    computeCheckpointAnchorDigest(value.recoveryAnchor) !== value.recoveryAnchorDigest
+    computeRecoveryAnchorDigest(value.recoveryAnchor as RecoveryAnchor) !==
+      value.recoveryAnchorDigest
   )
     return null;
   return {
     checkpointIntentId: value.checkpointIntentId,
     deadlineMs: value.deadlineMs,
-    recoveryAnchor: value.recoveryAnchor as Record<string, unknown>,
+    recoveryAnchor: value.recoveryAnchor as RecoveryAnchor,
     recoveryAnchorDigest: value.recoveryAnchorDigest,
   };
 }
@@ -604,22 +609,23 @@ async function dispatchFilesystemCheckpoint(input: {
   };
   const safePoint = await input.runtimeClient.requestSafePoint(safePointRequest);
   if (!safePoint.accepted) throw new Error("CheckpointStale");
+  // §2 步骤 8：解冻是持久工作。Runtime 腿与 Backend 腿分别确认，两条腿都确认后
+  // Checkpoint Gate 才回到 open；任何一条失败都保持 `releasing`（fail-closed），
+  // 由维护 lane 按 intentId 续做。这里不再用 finally + `.catch(() => undefined)` 吞掉。
+  const checkpoint = await produceFilesystemCheckpoint({
+    tenantId: input.tenantId,
+    invocationId: input.context.invocation.id,
+    ownershipId: owner.id,
+    backend: workspace.backend,
+    storageRoot: workspace.snapshotStorageRoot,
+    checkpointIntentId: payload.checkpointIntentId,
+    safePointEvidence: {
+      checkpointIntentId: safePoint.checkpointIntentId,
+      safePointEvidenceDigest: safePoint.safePointEvidenceDigest,
+      writerQuiescenceAchievedAt: new Date(safePoint.writerQuiescenceAchievedAt),
+    },
+  });
   try {
-    const checkpoint = await produceFilesystemCheckpoint({
-      tenantId: input.tenantId,
-      invocationId: input.context.invocation.id,
-      ownershipId: owner.id,
-      backend: workspace.backend,
-      storageRoot: workspace.snapshotStorageRoot,
-      checkpointIntentId: payload.checkpointIntentId,
-      safePointEvidence: {
-        checkpointIntentId: safePoint.checkpointIntentId,
-        safePointEvidenceDigest: safePoint.safePointEvidenceDigest,
-        writerQuiescenceAchievedAt: new Date(safePoint.writerQuiescenceAchievedAt),
-      },
-    });
-    return { safePoint, checkpoint };
-  } finally {
     const release: RuntimeSafePointReleaseTransportRequest = {
       runtimeEndpoint: input.endpoint.runtimeEndpoint,
       auth: input.endpoint.auth,
@@ -632,6 +638,33 @@ async function dispatchFilesystemCheckpoint(input: {
         checkpointIntentId: payload.checkpointIntentId,
       },
     };
-    await input.runtimeClient.releaseSafePoint(release).catch(() => undefined);
+    await input.runtimeClient.releaseSafePoint(release);
+    const legs = await confirmCheckpointRuntimeRelease({
+      tenantId: input.tenantId,
+      invocationId: input.context.invocation.id,
+      checkpointIntentId: payload.checkpointIntentId,
+    });
+    return { safePoint, checkpoint: { ...checkpoint, release: legs } };
+  } catch (error) {
+    // Runtime 腿未确认：Backend 腿可能已确认（`checkpoint.release`），Gate 仍停在
+    // `releasing`，维护 lane 会续做。失败必须可见，不能静默。
+    const reasonCode = error instanceof Error ? error.message : "RuntimeReleaseFailed";
+    console.error(
+      `Checkpoint Runtime 解冻未确认（intent ${payload.checkpointIntentId}），Gate 保持 releasing：${reasonCode}`,
+    );
+    await recordCheckpointReleaseFailure({
+      tenantId: input.tenantId,
+      invocationId: input.context.invocation.id,
+      checkpointIntentId: payload.checkpointIntentId,
+      reasonCode,
+    }).catch((recordError: unknown) => {
+      console.error("Checkpoint Runtime 解冻失败原因未能落库", recordError);
+    });
+    return {
+      safePoint,
+      checkpoint,
+      releasePending: true as const,
+      releaseReasonCode: reasonCode,
+    };
   }
 }

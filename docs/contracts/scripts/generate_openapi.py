@@ -10,6 +10,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from contract_rules import READ_ONLY_POSTS  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCS_ROOT = REPO_ROOT / "docs" / "architecture"
@@ -465,7 +468,9 @@ def build_contract() -> dict[str, Any]:
             "RESOURCE_NOT_FOUND",
             "RATE_LIMITED",
         }
-        if item["method"] == "POST" and item["path"] != "/gateway/context/query":
+        # 只读 POST 没有可幂等的副作用，声明 IDEMPOTENCY_CONFLICT 会让调用方误以为
+        # 存在重放语义；该判定与 validate_contracts.py 共用同一份清单（contract_rules）。
+        if item["method"] == "POST" and item["path"] not in READ_ONLY_POSTS:
             common_errors.add("IDEMPOTENCY_CONFLICT")
         if item["method"] in {"PUT", "PATCH"}:
             common_errors.add("ETAG_MISMATCH")

@@ -117,13 +117,24 @@ export interface HarnessLoopBudgetView {
 }
 
 export interface HarnessLoopView {
-  invocation: {
-    invocationId: string;
-    tenantId: string;
-    threadId: string;
-    turnId: string;
-    executionState: "running";
-  };
+  /**
+   * R06 §1：Loop 的执行主体是判别联合 —— Thread 分支带 threadId/turnId，
+   * Job 分支带 jobId。Thread 与 Job 字段互斥，不再用「字段缺失」暗示主体类型。
+   */
+  invocation:
+    | {
+        invocationId: string;
+        tenantId: string;
+        threadId: string;
+        turnId: string;
+        executionState: "running";
+      }
+    | {
+        invocationId: string;
+        tenantId: string;
+        jobId: string;
+        executionState: "running";
+      };
   objective: string;
   context: {
     contextHandle?: string;

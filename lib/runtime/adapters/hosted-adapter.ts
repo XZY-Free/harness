@@ -363,8 +363,11 @@ export interface HostedHarnessLoopParams {
   invocationId: string;
   authority?: AuthorityIdentity;
   tenantId: string;
+  /** R06 §1：Thread 主体提供 threadId+turnId；Job 主体两者为 null 并给出 jobId。 */
   threadId: string | null;
   turnId: string | null;
+  /** Job 主体的业务标识（无 Thread 的 Job 执行）。 */
+  jobId?: string | null;
   /** 本 Turn 的能力使用提示；preferred 只供 Harness 决策。 */
   capabilityDirectives?: Array<{
     capability_type: "agent";
@@ -373,6 +376,11 @@ export interface HostedHarnessLoopParams {
   }>;
   capabilityCatalog?: CapabilityCatalogSnapshot;
   inputItems: unknown[];
+  /**
+   * 显式执行目标。Job 主体没有 Thread item，目标直接来自 Job 的正式输入事实；
+   * 提供时优先于从 inputItems 推导，避免为了取目标而伪造一个 user_message。
+   */
+  objective?: string;
   contextHandle?: string;
   workspace?: Workspace;
   executionLimits?: ExecutionLimits;
@@ -491,9 +499,10 @@ export class HostedHarnessLoop {
       invocationId: this.params.invocationId,
       tenantId: this.params.tenantId,
       authority: this.params.authority ?? failMissingAuthority(),
-      threadId: this.params.threadId ?? "",
-      turnId: this.params.turnId ?? "",
-      objective: extractUserMessage(this.params.inputItems),
+      threadId: this.params.threadId ?? null,
+      turnId: this.params.turnId ?? null,
+      jobId: this.params.jobId ?? null,
+      objective: this.params.objective ?? extractUserMessage(this.params.inputItems),
       contextHandle: this.params.contextHandle,
       workspace: this.params.workspace
         ? {

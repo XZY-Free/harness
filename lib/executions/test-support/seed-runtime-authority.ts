@@ -14,6 +14,7 @@ import {
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import { DEFAULT_TENANT_ID } from "@/lib/identity/tenant-bootstrap";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import { admitQueuedJob } from "@/lib/job/job-admission";
 import { createJob } from "@/lib/job/job-queries";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
@@ -55,6 +56,16 @@ export async function seedPreparedJobRuntimeAttempt(
     workspaceBinding?: WorkspaceBinding;
     agentId?: string | null;
     jobType?: JobType;
+    /** 冻结的完成策略；缺省为 all_success。策略在创建时冻结，之后不可 UPDATE。 */
+    completionPolicyJson?: Record<string, unknown>;
+    /**
+     * 复用同一测试内已建立的 Runtime 权威（Route + Revision）。
+     *
+     * `DeploymentRouteSet` 的唯一键是 `(tenantId, targetKind, targetIdentity, routeScopeKey)`，
+     * 因此"一个测试里建多个 Job"必须复用既有权威：重复建 RouteSet 会 ER_DUP_ENTRY，
+     * 而正确的做法不是放宽唯一约束或给每个 Job 造一个假作用域。
+     */
+    reuseRuntimeAuthority?: { runtimeRevisionId: string };
   } = {},
 ) {
   const tenantId = input.tenantId ?? DEFAULT_TENANT_ID;
@@ -62,6 +73,7 @@ export async function seedPreparedJobRuntimeAttempt(
   const suffix = randomUUID().slice(0, 8);
   const runtimeRevisionId =
     input.runtimeRevisionId ??
+    input.reuseRuntimeAuthority?.runtimeRevisionId ??
     (
       await seedPublishedRuntimeRevision(
         tenantId,
@@ -71,14 +83,16 @@ export async function seedPreparedJobRuntimeAttempt(
         suffix,
       )
     ).revision.id;
-  await seedRuntimeRouteAuthority({ tenantId, runtimeRevisionId, actorId: "job-worker-fixture" });
+  if (!input.reuseRuntimeAuthority) {
+    await seedRuntimeRouteAuthority({ tenantId, runtimeRevisionId, actorId: "job-worker-fixture" });
+  }
   const { job } = await createJob({
     tenantId,
     agentId: input.agentId ?? null,
     jobType: input.jobType ?? "knowledge_build",
     triggerRef: `trigger:${randomUUID()}`,
     creationKey: `creation:${randomUUID()}`,
-    completionPolicyJson: { policy: "all_success" },
+    completionPolicyJson: input.completionPolicyJson ?? ALL_SUCCESS_COMPLETION_POLICY,
     inputJson: { task: "job-runtime-ingress-fixture" },
     createdBy: ownerId,
   });
@@ -248,6 +262,16 @@ export async function acquireTestRuntimeAuthority(input: {
    * 并与事件 payload 比对，null 会被 fail-closed 拒绝。
    */
   runtimeCapabilitiesJson?: unknown;
+  /**
+   * R02 生产时序：Start 在**派发前**就固定激活证据（activationEvidence/Digest +
+   * activatedAt），此时 executionPhase 仍是 `dispatching`；只有 Runtime 的
+   * `execution.started` 被接纳时，applyLifecycle 才把 phase 推到 `executing`
+   * （并受 `ExecutionOwnership_executing_activation_shape` 约束）。
+   *
+   * 需要在 dispatching 阶段就带激活证据的用例显式提供；不提供则维持既有行为。
+   */
+  activationEvidence?: unknown;
+  activationDigest?: string | null;
 }) {
   const acquired = await acquireExecutionOwnership({
     tenantId: input.tenantId,
@@ -270,6 +294,22 @@ export async function acquireTestRuntimeAuthority(input: {
     runtimeCapabilitiesJson: input.runtimeCapabilitiesJson ?? null,
   });
   const phase = input.phase ?? "dispatching";
+  if (phase === "dispatching" && input.activationEvidence) {
+    await db
+      .update(executionOwnershipTable)
+      .set({
+        activationEvidence: input.activationEvidence,
+        activationDigest: input.activationDigest ?? protocolDigest(input.activationEvidence),
+        activatedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, input.tenantId),
+          eq(executionOwnershipTable.id, acquired.ownership.id),
+        ),
+      );
+  }
   if (phase === "executing") {
     // canonical ExecutionOwnership_executing_activation_shape：executing 阶段必须
     // 携带 activatedAt + activationEvidence/Digest（镜像生产 startRuntimeInvocation 激活写入）。

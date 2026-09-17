@@ -1,15 +1,11 @@
 /** Thread-independent Job execution creation. */
 import { randomUUID } from "node:crypto";
-import {
-  resolveInitialCompression,
-  toInitialContextCompression,
-} from "@/lib/context/initial-checkpoint-source";
+import { resolveInitialCompression } from "@/lib/context/initial-checkpoint-source";
 import { db } from "@/lib/db/client";
 import {
   type CreateExecutionBindingCommand,
   createCreateExecutionBinding,
 } from "@/lib/executions/application/create-execution-binding";
-import { computeExecutionBindingConfigHash } from "@/lib/executions/domain/execution-binding";
 import { createExecutionBindingStoreInTransaction } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { environmentDefinitionRevisionTable } from "@/lib/persistence/schema/environment-definition-revision";
 import {
@@ -20,9 +16,24 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { type Job, jobTable } from "@/lib/persistence/schema/job";
 import { workspaceBinding } from "@/lib/persistence/schema/workspace";
+import {
+  type CapabilityCatalogSnapshot,
+  computeCapabilityCatalogDigest,
+} from "@/lib/runtime/harness-loop/capability-catalog";
 import { and, eq } from "drizzle-orm";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** 已冻结 Binding 行（回读形态）。 */
+type FrozenBindingRow = typeof executionBindingTable.$inferSelect;
+
+/**
+ * 目录内容判等时用来替换「冻结时刻」的常量。
+ *
+ * 能力目录快照的 `createdAt` 记录的是**本次构建**的时刻，属于冻结动作的证据，
+ * 不属于执行语义；判等时两侧都替换为同一常量，得到与构建时刻无关的内容摘要。
+ */
+const CATALOG_MOMENT_PLACEHOLDER = "1970-01-01T00:00:00.000Z";
 
 export class JobExecutionConflictError extends Error {
   constructor(message: string) {
@@ -128,15 +139,13 @@ export async function createJobInvocationInTransaction(
     }
     // 同一 Job 的重复调度只能**返回**已冻结关联，不能覆盖。
     //
-    // 判等用完整 `configHash`（与 Thread 路径同一个规范化摘要）而不是字段子集：
-    // 只要任一冻结语义（Route/Revision/Publication/Policy/Projection/模型/Workspace/
-    // Environment/能力目录/principal/初始压缩材料）不同，就必须冲突而不是静默替换。
-    const expectedConfigHash = await computeExpectedConfigHash(tx, input, existingInvocation.id);
-    if (existingBinding.configHash !== expectedConfigHash) {
-      throw new JobExecutionConflictError(
-        "同一 Job 的 ExecutionBinding 已冻结，不能覆盖为不同执行语义",
-      );
-    }
+    // R06 §2：判等必须在「执行语义选择」上进行。`computeExecutionBindingConfigHash`
+    // 把**本次冻结动作**的证据时间戳（`principalFrozenAt` /
+    // `capabilityCatalogCreatedAt`）也纳入 digest —— 它们对同一次冻结是有效身份，
+    // 但每次解析都会产生新值。若拿重算的 `configHash` 与已冻结的比，
+    // 「返回已冻结关联」这条路径在任何重投下都会变成语义冲突（等价于该分支不可达）。
+    // 因此这里逐项比对冻结**选择**，冻结**时刻**不参与判等。
+    await assertSameFrozenSemantics(input, existingBinding);
     return { job, invocation: existingInvocation, binding: existingBinding, created: false };
   }
 
@@ -200,32 +209,126 @@ export async function createJobInvocationInTransaction(
 }
 
 /**
- * 重投判等：用与创建时完全相同的输入构造 `configHash`。
+ * 重投判等：本次解析出的执行语义选择是否与已冻结的 Binding 完全一致。
  *
- * 初始压缩材料必须重新真实读取（存在性/tenant/用途/摘要/来源/有效期/访问权限），
- * 不能只看一个 id —— 否则「同一 Job 换了另一个 Checkpoint 的同名引用」会被误判为同一执行语义。
+ * 事实源：R06 §2「重复调度返回已冻结关联，绝不新建第二条」。判等只覆盖**选择**：
+ *
+ * - 参与判等：Runtime/Route/Publication/Policy/Governance/模型/WorkspaceEnvironment/
+ *   Projection/principal/能力目录/初始压缩材料引用，以及控制面四条解析证据。
+ * - 不参与判等：`principalFrozenAt` 与 `capabilityCatalogCreatedAt` —— 它们是
+ *   "本次冻结动作"的证据时间戳，每次解析必然不同。
+ *
+ * 不变量：
+ * - 任一冻结选择不同即冲突，不得静默替换（不是"放宽为字段子集"，被排除的只有时刻）。
+ * - 初始压缩材料与能力目录都必须**真实重建**（存在性/tenant/用途/摘要/来源/权限），
+ *   不能只看 id，否则「同一 Job 换了另一个 Checkpoint 的同名引用」会被误判为等价。
  */
-async function computeExpectedConfigHash(
-  tx: Tx,
+async function assertSameFrozenSemantics(
   input: CreateJobInvocationInput,
-  invocationId: string,
-): Promise<string> {
+  frozen: FrozenBindingRow,
+): Promise<void> {
   const { initialContextCheckpointId, ...config } = input.binding;
-  const compression = initialContextCheckpointId
-    ? toInitialContextCompression(
-        await resolveInitialCompression({
-          tenantId: input.tenantId,
-          checkpointId: initialContextCheckpointId,
-          requester: { type: config.principalType, id: config.principalId },
-        }),
-      )
-    : null;
-  const catalog = await input.capabilityCatalog(invocationId);
-  return computeExecutionBindingConfigHash({
-    ...config,
-    ...catalog,
-    initialContextCompression: compression,
-  });
+  // 初始压缩材料重新真实读取：存在性/tenant/用途/摘要/来源/有效期/访问权限。
+  if (initialContextCheckpointId) {
+    await resolveInitialCompression({
+      tenantId: input.tenantId,
+      checkpointId: initialContextCheckpointId,
+      requester: { type: config.principalType, id: config.principalId },
+    });
+  }
+  const catalog = await input.capabilityCatalog(frozen.invocationId);
+
+  const deviations: string[] = [];
+  const same = (label: string, left: unknown, right: unknown) => {
+    if (left !== right) deviations.push(label);
+  };
+  same("runtimeRevisionId", config.runtimeRevisionId, frozen.runtimeRevisionId);
+  same("deploymentRouteId", config.deploymentRouteId, frozen.deploymentRouteId);
+  same("modelProvider", config.modelProvider, frozen.modelProvider);
+  same("modelId", config.modelId, frozen.modelId);
+  same("modelRevisionRef", config.modelRevisionRef ?? null, frozen.modelRevisionRef ?? null);
+  same("workspaceBindingId", config.workspaceBindingId, frozen.workspaceBindingId);
+  same("policyRevisionId", config.policyRevisionId, frozen.policyRevisionId);
+  same("policyRulesDigest", config.policyRulesDigest, frozen.policyRulesDigest);
+  same(
+    "governanceConfigRevisionId",
+    config.governanceConfigRevisionId,
+    frozen.governanceConfigRevisionId,
+  );
+  same("governanceConfigDigest", config.governanceConfigDigest, frozen.governanceConfigDigest);
+  same(
+    "environmentDefinitionRevisionId",
+    config.environmentDefinitionRevisionId ?? null,
+    frozen.environmentDefinitionRevisionId ?? null,
+  );
+  same("environmentMode", config.environmentMode, frozen.environmentMode);
+  same("projectionVersionNo", config.projectionVersionNo, Number(frozen.projectionVersionNo));
+  same("principalType", config.principalType, frozen.principalType);
+  same("principalId", config.principalId, frozen.principalId);
+  same("principalSource", config.principalSource, frozen.principalSource);
+  same(
+    "initialContextCheckpointId",
+    initialContextCheckpointId ?? null,
+    frozen.initialContextCheckpointId ?? null,
+  );
+  same(
+    "controlPlane.routeRevisionId",
+    config.controlPlaneEvidence.routeRevisionId,
+    frozen.routeRevisionId,
+  );
+  same(
+    "controlPlane.routeActivationId",
+    config.controlPlaneEvidence.routeActivationId,
+    frozen.routeActivationId,
+  );
+  same(
+    "controlPlane.routeContentDigest",
+    config.controlPlaneEvidence.routeContentDigest,
+    frozen.routeContentDigest,
+  );
+  same(
+    "controlPlane.resolutionInputDigest",
+    config.controlPlaneEvidence.resolutionInputDigest,
+    frozen.resolutionInputDigest,
+  );
+  same(
+    "controlPlane.runtimeEvidenceKind",
+    config.controlPlaneEvidence.runtimeEvidenceKind,
+    frozen.runtimeEvidenceKind,
+  );
+  // 能力目录按**内容**判等，而不是按 `capabilityCatalogDigest` —— 该 digest 覆盖了
+  // `snapshot.createdAt`（本次构建的时刻），因此两次解析必然不同。目录里真正属于
+  // "执行语义"的是 version / 授权工具 / Agent / 知识源 / 来源集合 / 不可用事实，
+  // 这些由 `computeCapabilityCatalogDigest` 的规范摘要稳定覆盖：
+  // 把冻结时刻替换为常量后再求摘要，就得到「与构建时刻无关的目录内容摘要」。
+  // （目录快照是 MySQL JSON 列，回读会重排键序；规范摘要本身就按 key 排序，天然免疫。）
+  same(
+    "capabilityCatalog",
+    computeCapabilityCatalogDigest({
+      ...(catalog.capabilityCatalogJson as CapabilityCatalogSnapshot),
+      createdAt: CATALOG_MOMENT_PLACEHOLDER,
+    }),
+    computeCapabilityCatalogDigest({
+      ...(frozen.capabilityCatalogJson as CapabilityCatalogSnapshot),
+      createdAt: CATALOG_MOMENT_PLACEHOLDER,
+    }),
+  );
+  same(
+    "capabilityCatalogVersion",
+    catalog.capabilityCatalogVersion,
+    frozen.capabilityCatalogVersion,
+  );
+  same(
+    "capabilityCatalogSourceRefs",
+    [...catalog.capabilityCatalogSourceRefs].sort().join("\u0000"),
+    [...frozen.capabilityCatalogSourceRefs].sort().join("\u0000"),
+  );
+
+  if (deviations.length > 0) {
+    throw new JobExecutionConflictError(
+      `同一 Job 的 ExecutionBinding 已冻结，不能覆盖为不同执行语义（差异项：${deviations.join(", ")}）`,
+    );
+  }
 }
 
 /**

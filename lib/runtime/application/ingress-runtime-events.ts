@@ -42,7 +42,7 @@ import {
   computeEventPayloadHash,
 } from "@/lib/runtime/runtime-protocol";
 import { getActiveLocksByInvocation } from "@/lib/workspace/workspace-write-lock-queries";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 export type IngressTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -756,6 +756,77 @@ async function mapEvent(
   return { threadEventId: threadEvent.id };
 }
 
+/**
+ * §3 恢复版本推进判定——**唯一来源**。
+ *
+ * 推进（这些"已应用事实"改变了可恢复边界，旧 Checkpoint 因此可能陈旧）：
+ * - 新模型/Action 结果被应用：`response.completed`、`action`
+ * - Agent/Tool/Effect 结果被 Loop 正式采用：`harness.action.completed` / `.failed`
+ * - Job step 完成被应用：`job.step.completed` / `.failed`
+ * - 已解决 UserAction 进入继续执行：`execution.started` 从 `waiting_user` 恢复
+ * - 用户/服务输入被正式接纳为待解决事实：`user-action`
+ * - 正式暂停与终态：`execution.suspended`、`execution.completed|failed|cancelled`
+ *
+ * 不推进：`progress`（无语义变化的展示）、`harness.action.proposed|started` 与
+ * `job.step.accepted`（只是进行中/已接纳，尚无已应用结果）、首次 `execution.started`。
+ * 纯 Replay 根本不进入本判定（`findExisting` 命中 exact 后直接返回）。
+ */
+export function advancesRecoveryVersion(
+  event: RuntimeEvent,
+  previousState: Invocation["executionState"],
+): boolean {
+  switch (event.type) {
+    case "response.completed":
+    case "action":
+    case "harness.action.completed":
+    case "harness.action.failed":
+    case "job.step.completed":
+    case "job.step.failed":
+    case "user-action":
+    case "execution.suspended":
+    case "execution.completed":
+    case "execution.failed":
+    case "execution.cancelled":
+      return true;
+    case "execution.started":
+      // 暂停后的正式恢复就是"已解决 UserAction 进入继续执行"；首次启动不改变恢复边界。
+      return previousState === "waiting_user";
+    default:
+      return false;
+  }
+}
+
+/**
+ * 分支返回前统一推进水位并回读最新行。
+ *
+ * 除终态分支外的所有分支都经过这里；终态分支把水位与终态放在**同一条** UPDATE 里，
+ * 因为 `JobCommand.terminalVersion` 必须等于最终提交版本，桥接 Job 之后不能再写 Invocation。
+ */
+async function advanceRecoveryVersionIfApplied(
+  tx: IngressTx,
+  current: Invocation,
+  previousState: Invocation["executionState"],
+  event: RuntimeEvent,
+  now: Date,
+): Promise<Invocation> {
+  if (!advancesRecoveryVersion(event, previousState)) return current;
+  await tx
+    .update(invocationTable)
+    .set({
+      recoveryVersion: current.recoveryVersion + 1,
+      versionNo: current.versionNo + 1,
+      updatedAt: now,
+    })
+    .where(eq(invocationTable.id, current.id));
+  const [updated] = await tx
+    .select()
+    .from(invocationTable)
+    .where(eq(invocationTable.id, current.id))
+    .limit(1);
+  if (!updated) throw new IngressInvocationNotFoundError(current.id);
+  return updated;
+}
+
 async function applyLifecycle(
   tx: IngressTx,
   invocation: Invocation,
@@ -826,7 +897,7 @@ async function applyLifecycle(
       .where(eq(invocationTable.id, invocation.id))
       .limit(1);
     if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
-    return updated;
+    return advanceRecoveryVersionIfApplied(tx, updated, invocation.executionState, event, now);
   }
   if (event.type === "user-action") {
     if (!["completed", "failed", "cancelled", "lost"].includes(invocation.executionState)) {
@@ -834,7 +905,6 @@ async function applyLifecycle(
         .update(invocationTable)
         .set({
           executionState: "waiting_user",
-          recoveryVersion: invocation.recoveryVersion + 1,
           versionNo: invocation.versionNo + 1,
           updatedAt: now,
         })
@@ -851,7 +921,7 @@ async function applyLifecycle(
       .where(eq(invocationTable.id, invocation.id))
       .limit(1);
     if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
-    return updated;
+    return advanceRecoveryVersionIfApplied(tx, updated, invocation.executionState, event, now);
   }
   if (event.type === "execution.suspended") {
     if (!INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
@@ -867,7 +937,6 @@ async function applyLifecycle(
         .update(invocationTable)
         .set({
           executionState: "waiting_user",
-          recoveryVersion: invocation.recoveryVersion + 1,
           versionNo: invocation.versionNo + 1,
           updatedAt: now,
         })
@@ -955,7 +1024,7 @@ async function applyLifecycle(
       .where(eq(invocationTable.id, invocation.id))
       .limit(1);
     if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
-    return updated;
+    return advanceRecoveryVersionIfApplied(tx, updated, invocation.executionState, event, now);
   }
   if (
     event.type === "execution.completed" ||
@@ -969,10 +1038,39 @@ async function applyLifecycle(
           ? "failed"
           : "cancelled";
     if (!INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
-      const resultRef =
-        typeof event.payload.resultRef === "string" ? event.payload.resultRef : null;
-      const resultDigest =
+      let resultRef = typeof event.payload.resultRef === "string" ? event.payload.resultRef : null;
+      let resultDigest =
         typeof event.payload.resultDigest === "string" ? event.payload.resultDigest : null;
+      // R06 §1：Job 的"真正结果"必须是**已持久内容与 digest**。Job 没有 Thread 可挂
+      // assistant 消息，其产物的唯一事实源就是本 Invocation 已提交的 `response.completed`
+      // Ingress 记录（`payloadHash` 就是该内容的正式摘要）。Runtime 自报的 resultRef
+      // 若已给出则以其为准，绝不覆盖；只有当结果缺失时才从已持久事实推导，
+      // 也从不在测试或生产填一个"没有对应内容"的引用就声明业务完成。
+      if (
+        state === "completed" &&
+        invocation.subjectType === "job" &&
+        (!resultRef || !resultDigest)
+      ) {
+        const [produced] = await tx
+          .select({
+            id: runtimeEventIngressTable.id,
+            payloadHash: runtimeEventIngressTable.payloadHash,
+          })
+          .from(runtimeEventIngressTable)
+          .where(
+            and(
+              eq(runtimeEventIngressTable.tenantId, invocation.tenantId),
+              eq(runtimeEventIngressTable.invocationId, invocation.id),
+              eq(runtimeEventIngressTable.candidateType, "response.completed"),
+            ),
+          )
+          .orderBy(desc(runtimeEventIngressTable.producerSequence))
+          .limit(1);
+        if (produced) {
+          resultRef = resultRef ?? `runtime-event:${produced.id}`;
+          resultDigest = resultDigest ?? produced.payloadHash;
+        }
+      }
       const errorCode =
         typeof event.payload.errorCode === "string" ? event.payload.errorCode : null;
       // 先收口从属事实（Attempt/Turn/Ownership/Session 与物理 Writer），
@@ -1022,6 +1120,9 @@ async function applyLifecycle(
           resultRef,
           resultDigest,
           errorCode,
+          // §3：终态也是"已应用事实"，但水位必须与终态**同一条** UPDATE 提交——
+          // 下面紧跟 bridgeInvocationTerminalToJob，JobCommand.terminalVersion 必须
+          // 等于最终提交版本，桥接之后再写 Invocation 会让它落后。
           recoveryVersion: invocation.recoveryVersion + 1,
           versionNo: invocation.versionNo + 1,
           updatedAt: now,
@@ -1043,7 +1144,7 @@ async function applyLifecycle(
     .where(eq(invocationTable.id, invocation.id))
     .limit(1);
   if (!updated) throw new IngressInvocationNotFoundError(invocation.id);
-  return updated;
+  return advanceRecoveryVersionIfApplied(tx, updated, invocation.executionState, event, now);
 }
 
 async function resolveSuspensionRecovery(input: {
@@ -1227,13 +1328,11 @@ export async function ingressRuntimeEvents(
       validateExecutionStarted(event, authority.session);
       const mapped = await mapEvent(tx, lifecycleInvocation, event);
       const ingressId = randomUUID();
+      // 与 applyLifecycle 共用同一判定，避免"receipt 记了推进、Invocation 却没写"的双轨。
+      // 终态事件同样计入，且 applyLifecycle 把水位与终态放在同一条 UPDATE 提交，二者必然一致。
       const recoveryVersionAfter =
         lifecycleInvocation.recoveryVersion +
-        (event.type === "execution.suspended" ||
-        (event.type.startsWith("execution.") && event.type !== "execution.started") ||
-        event.type === "user-action"
-          ? 1
-          : 0);
+        (advancesRecoveryVersion(event, lifecycleInvocation.executionState) ? 1 : 0);
       const receipt: EventReceipt = {
         eventId: event.eventId,
         producerSequence: event.producerSequence,

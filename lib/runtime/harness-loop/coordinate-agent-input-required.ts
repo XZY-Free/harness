@@ -23,11 +23,20 @@ import {
   computeConfirmationProposalSemanticDigest,
 } from "@/lib/runtime/harness-loop/confirmation-proposal-identity";
 import { getRuntimeSessionBindingByOwnership } from "@/lib/runtime/persistence/runtime-session-store";
+import {
+  type RecoverablePauseCheckpointOutcome,
+  takeRecoverablePauseCheckpoint,
+} from "@/lib/workspace/checkpoint-pause";
 import { and, desc, eq } from "drizzle-orm";
 
 export interface CoordinateAgentInputRequiredResult {
   coordinated: boolean;
   runtimeProducerEventId?: string;
+  /**
+   * R09 §8：CHECKPOINT_RESTORABLE 的 Workspace 在进入可恢复暂停时必须先拿到 Checkpoint。
+   * 非 checkpoint 模式返回 `not_checkpoint_restorable`（显式跳过原因，不是静默）。
+   */
+  checkpoint: RecoverablePauseCheckpointOutcome | null;
 }
 
 interface AgentInputRequiredRuntimePayload {
@@ -118,7 +127,7 @@ export async function coordinateAgentInputRequired(
   callId: string,
 ): Promise<CoordinateAgentInputRequiredResult> {
   const call = await mysqlAgentCallStore.getById({ callId, tenantId });
-  if (!call || call.state !== "waiting_user") return { coordinated: false };
+  if (!call || call.state !== "waiting_user") return { coordinated: false, checkpoint: null };
   if (
     call.sourceType !== "harness_planned" ||
     !call.sourceRef ||
@@ -174,7 +183,8 @@ export async function coordinateAgentInputRequired(
     parsedHostControls?.kind === "confirmation" ? parsedHostControls.proposal : null;
   const producerEventId = randomUUID();
   const existing = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
-  if (existing) return { coordinated: true, runtimeProducerEventId: producerEventId };
+  if (existing)
+    return { coordinated: true, runtimeProducerEventId: producerEventId, checkpoint: null };
   const owner = await getActiveExecutionOwnership({ tenantId, invocationId: parent.id });
   if (!owner) throw new Error(`Parent Invocation ${parent.id} 缺少 Current ExecutionOwnership`);
   const session = await getRuntimeSessionBindingByOwnership(tenantId, owner.id);
@@ -221,14 +231,24 @@ export async function coordinateAgentInputRequired(
           ],
         },
       });
-      return { coordinated: true, runtimeProducerEventId: producerEventId };
+      // §8：暂停事实先落库（它本身是一条正式输入事实，之后必须进锚点），随后立刻
+      // 触发安全点流程——「先拿到 Checkpoint 再宣告 paused」在这里体现为：暂停的
+      // waiting_user 状态与 Checkpoint 指向同一个已提交水位。
+      const checkpoint = await takeRecoverablePauseCheckpoint({
+        tenantId,
+        invocationId: parent.id,
+        requestedById: "agent-input-required",
+        requestedByType: "system",
+      });
+      return { coordinated: true, runtimeProducerEventId: producerEventId, checkpoint };
     } catch (error) {
       const raced = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
-      if (raced) return { coordinated: true, runtimeProducerEventId: producerEventId };
+      if (raced)
+        return { coordinated: true, runtimeProducerEventId: producerEventId, checkpoint: null };
       if (!(error instanceof ProducerSequenceGapError) || retry === 2) throw error;
     }
   }
-  return { coordinated: false };
+  return { coordinated: false, checkpoint: null };
 }
 
 function confirmationPrompt(

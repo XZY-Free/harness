@@ -1,28 +1,61 @@
+/**
+ * Checkpoint 生产链（R09 §2）。
+ *
+ * 安全点顺序（§2 八步）在本文件内逐条落地：
+ * 1. `requestFilesystemCheckpoint` 登记稳定 checkpointIntentId 与 deadline，进入 quiescing。
+ * 2. 已接纳的 Tool/Agent/Job step 完成与 Effect 回执照常落各自 Authority —— 本文件只
+ *    拒绝**新**决策/新 Action/新写入，不因 gate 非 open 丢弃真实完成事实（丢弃发生在
+ *    ingress 层：只有新 proposal 被拒，见 `assertCheckpointWritable`）。
+ * 3. `produceFilesystemCheckpoint` 等到受管 Writer 排空（Host 的 writer 活性采样）。
+ * 4. **排空后**用最新已应用事实重建并冻结 RecoveryAnchor：绝不把请求时的旧水位当最终水位。
+ * 5. Broker 冻结一致文件 Generation 并给出停止/排空证据（SafePointReceipt）。
+ * 6. 持久写 Snapshot，做结构/内容/资源约束验证（snapshot-storage / snapshot-manifest）。
+ * 7. I 根内复核 Current Owner 未变、安全点未失效、恢复事实仍与 Anchor 等价后提交。
+ * 8. 解冻 Runtime 与 Backend 是**持久命令/工作**：Gate 转入 `releasing`，只有解冻被确认
+ *    才回到 open；进程 Crash 时由维护 lane 按 intentId 续做（checkpoint-release.ts），
+ *    不再用 finally + `.catch(() => undefined)` 把失败吞掉。
+ */
 import { randomUUID } from "node:crypto";
 import { type DbOrTx, db } from "@/lib/db/client";
 import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import { getAuthorityDatabaseTime } from "@/lib/executions/persistence/execution-ownership-store";
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import {
+  type Invocation,
   executionBindingTable,
   executionOwnershipTable,
   invocationAttemptTable,
+  invocationCommandTable,
   invocationTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  type CheckpointReleaseLegs,
+  confirmCheckpointBackendRelease,
+  registerCheckpointRuntimeReleasePending,
+} from "@/lib/workspace/checkpoint-release";
 import { insertFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
+import {
+  type RecoveryAnchor,
+  type RecoveryAnchorDeclarations,
+  buildRecoveryAnchor,
+  computeRecoveryAnchorDigest,
+} from "@/lib/workspace/recovery-anchor";
 import { FileSnapshotStorage, type SnapshotStorageReceipt } from "@/lib/workspace/snapshot-storage";
 import type { WorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { validateWorkspaceContract } from "@/lib/workspace/workspace-contract";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { and, eq } from "drizzle-orm";
 
+export type { RecoveryAnchorDeclarations };
+
 export interface CheckpointProductionResult {
   checkpointId: string;
   manifestRef: string;
   manifestDigest: string;
   contentRootDigest: string;
+  /** 解冻各腿的确认状态；只有两腿都确认后 Gate 才回到 open。 */
+  release: CheckpointReleaseLegs;
 }
 
 export interface CheckpointSafePointEvidence {
@@ -36,26 +69,51 @@ export interface CheckpointRequestResult {
   checkpointIntentId: string;
   deadline: Date;
   anchorDigest: string;
+  /** 服务端构建的锚点（夹具与排障用；生产调用方不需要它）。 */
+  recoveryAnchor: RecoveryAnchor;
 }
 
 const CHECKPOINT_TIMEOUT_MS = 120_000;
+/** 允许的窄时钟偏移：判定"排空回执是否落在本次安全点窗口内"用。 */
+const SAFE_POINT_CLOCK_SKEW_MS = 5_000;
 
 /**
- * Installs the durable quiescing gate and its matching checkpoint command atomically.
- * The caller must provide a complete RecoveryAnchor constructed from formal facts;
- * arbitrary process memory is deliberately not accepted as an anchor source.
+ * 排空回执必须被**真正消费**，不能只是参数上存在。
+ *
+ * - digest 必须是 `sha256:<64hex>` 形状（Runtime 回执的证据摘要，不是自报文本）；
+ * - 排空时刻必须落在本次安全点窗口内（不早于请求、不晚于 deadline + 窄偏移），
+ *   否则"排空证明"来自另一个窗口，不能用来冻结这次 Snapshot。
+ */
+function assertSafePointEvidence(evidence: CheckpointSafePointEvidence, deadline: Date): void {
+  if (!/^sha256:[0-9a-f]{64}$/.test(evidence.safePointEvidenceDigest))
+    throw new Error("CheckpointStale");
+  const achievedAt = evidence.writerQuiescenceAchievedAt;
+  if (!(achievedAt instanceof Date) || Number.isNaN(achievedAt.getTime()))
+    throw new Error("CheckpointStale");
+  const earliest = deadline.getTime() - CHECKPOINT_TIMEOUT_MS - SAFE_POINT_CLOCK_SKEW_MS;
+  const latest = deadline.getTime() + SAFE_POINT_CLOCK_SKEW_MS;
+  if (achievedAt.getTime() < earliest || achievedAt.getTime() > latest)
+    throw new Error("CheckpointStale");
+}
+
+/**
+ * 请求一次可恢复安全点：登记持久意图并进入 quiescing。
+ *
+ * 锚点由服务端唯一构建器从正式事实推导（§1）。调用方只能提交**待核验声明**：
+ * - `unconsumedInputWatermark`：与推导水位不一致即拒绝；
+ * - `actionFacts` / `childFacts` / `resolvedUserActionRefs`：只提交引用 id，逐条查库核验。
+ * 任何"把完整锚点数组传进来即接受"的路径都已删除。
  */
 export async function requestFilesystemCheckpoint(input: {
   tenantId: string;
   invocationId: string;
   ownershipId: string;
-  recoveryAnchor: Record<string, unknown>;
+  declarations?: RecoveryAnchorDeclarations;
   requestedByType: "user" | "service" | "system";
   requestedById: string;
   checkpointIntentId?: string;
 }): Promise<CheckpointRequestResult> {
   const checkpointIntentId = input.checkpointIntentId ?? randomUUID();
-  const anchorDigest = computeCheckpointAnchorDigest(input.recoveryAnchor);
   return db.transaction(async (tx) => {
     const facts = await lockCheckpointFacts(
       tx,
@@ -63,12 +121,21 @@ export async function requestFilesystemCheckpoint(input: {
       input.invocationId,
       input.ownershipId,
     );
-    assertRecoveryAnchor(input.recoveryAnchor, facts);
     if (facts.invocation.checkpointGate !== "open") throw new Error("CheckpointStale");
     const now = await getAuthorityDatabaseTime(tx);
     if (facts.owner.leaseExpiresAt <= now || facts.owner.executionPhase !== "executing") {
       throw new Error("NotCurrentExecutor");
     }
+    const anchor = await buildRecoveryAnchor(
+      {
+        tenantId: input.tenantId,
+        invocationId: input.invocationId,
+        ownershipId: input.ownershipId,
+        ...(input.declarations ? { declarations: input.declarations } : {}),
+      },
+      tx,
+    );
+    const anchorDigest = computeRecoveryAnchorDigest(anchor);
     const deadline = new Date(now.getTime() + CHECKPOINT_TIMEOUT_MS);
     await tx
       .update(invocationTable)
@@ -79,7 +146,7 @@ export async function requestFilesystemCheckpoint(input: {
         checkpointDeadline: deadline,
         checkpointProducerSequence: facts.invocation.lastProducerSequence,
         checkpointRecoveryVersion: facts.invocation.recoveryVersion,
-        checkpointAnchor: input.recoveryAnchor,
+        checkpointAnchor: anchor,
         checkpointPreparedEvidence: null,
         versionNo: facts.invocation.versionNo + 1,
         updatedAt: now,
@@ -93,16 +160,24 @@ export async function requestFilesystemCheckpoint(input: {
       payloadJson: {
         checkpointIntentId,
         deadlineMs: deadline.getTime(),
-        recoveryAnchor: input.recoveryAnchor,
+        recoveryAnchor: anchor,
         recoveryAnchorDigest: anchorDigest,
+        declarations: input.declarations ?? {},
       },
       requestedByType: input.requestedByType,
       requestedById: input.requestedById,
     });
-    return { commandId, checkpointIntentId, deadline, anchorDigest };
+    return { commandId, checkpointIntentId, deadline, anchorDigest, recoveryAnchor: anchor };
   });
 }
 
+/**
+ * 排空后生产并提交持久 Checkpoint。
+ *
+ * 关键顺序：freeze 之前先按**最新已应用事实**重建锚点（§2 步骤 4），提交事务里再复核
+ * 该锚点仍与当前正式事实等价（§2 步骤 7）。请求时写入的旧水位只作为"排空前的水位"
+ * 参与比较，不能直接当最终水位。
+ */
 export async function produceFilesystemCheckpoint(input: {
   tenantId: string;
   invocationId: string;
@@ -125,8 +200,22 @@ export async function produceFilesystemCheckpoint(input: {
     !binding.checkpointAnchor
   )
     throw new Error("CheckpointStale");
-  const anchor = binding.checkpointAnchor as Record<string, unknown>;
-  const digest = computeCheckpointAnchorDigest(anchor);
+  // timeout 必须在**任何外部副作用之前**判定：安全点已失效时不允许再去冻结 Writer。
+  if (binding.checkpointDeadline <= (await getAuthorityDatabaseTime(db))) {
+    await abandonFilesystemCheckpoint({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      ownershipId: input.ownershipId,
+      checkpointIntentId,
+      reasonCode: "CheckpointStale",
+    });
+    throw new Error("CheckpointStale");
+  }
+  const declarations = await loadCheckpointDeclarations(
+    input.tenantId,
+    input.invocationId,
+    checkpointIntentId,
+  );
   const workspace = await getWorkspaceBindingById(input.tenantId, binding.workspaceBindingId);
   if (!workspace) throw new Error("WorkspaceNotReady");
   const contract = validateWorkspaceContract({
@@ -159,6 +248,20 @@ export async function produceFilesystemCheckpoint(input: {
   let committed = false;
   let receipt: SnapshotStorageReceipt;
   try {
+    // §2 步骤 4：**排空之后**重建锚点。`safePointEvidence` 是 Runtime 已经走到安全点、
+    // Writer 已排空的回执（由 dispatcher 在调用本函数之前取得），所以这一刻的正式事实
+    // 才是可恢复边界。请求时写入的旧水位只用于"排空前后是否发生变化"的对照。
+    assertSafePointEvidence(input.safePointEvidence, binding.checkpointDeadline);
+    const frozenAnchor = await buildRecoveryAnchor(
+      {
+        tenantId: input.tenantId,
+        invocationId: input.invocationId,
+        ownershipId: input.ownershipId,
+        ...(declarations ? { declarations } : {}),
+      },
+      db,
+    );
+    const digest = computeRecoveryAnchorDigest(frozenAnchor);
     freeze = await input.backend.host.freeze({ grant, checkpointIntentId, anchorDigest: digest });
     await freezeCheckpointGate({
       tenantId: input.tenantId,
@@ -166,6 +269,8 @@ export async function produceFilesystemCheckpoint(input: {
       ownershipId: input.ownershipId,
       checkpointIntentId,
       binding,
+      frozenAnchor,
+      anchorDigest: digest,
       safePointEvidence: input.safePointEvidence,
     });
     receipt = await input.backend.host.snapshot({
@@ -173,6 +278,11 @@ export async function produceFilesystemCheckpoint(input: {
       checkpointIntentId,
       anchorDigest: digest,
       storage: new FileSnapshotStorage(input.storageRoot),
+      // §5：容量上限与已声明 profile 必须来自**已校验的不可变 Binding**，不是调用方入参。
+      requirements: {
+        checkpointPolicy: workspace.checkpointPolicy as Record<string, unknown> | null,
+        filesystemSemantics: workspace.filesystemSemantics as never,
+      },
     });
     await recordCheckpointPreparedEvidence({
       tenantId: input.tenantId,
@@ -201,8 +311,12 @@ export async function produceFilesystemCheckpoint(input: {
         invocation.checkpointOwnerId !== input.ownershipId ||
         invocation.checkpointDeadline === null ||
         invocation.checkpointDeadline <= (await getAuthorityDatabaseTime(tx)) ||
-        invocation.checkpointProducerSequence !== binding.lastProducerSequence ||
-        invocation.checkpointRecoveryVersion !== binding.recoveryVersion
+        invocation.checkpointProducerSequence !== Number(frozenAnchor.producerSequence) ||
+        // §2 步骤 7：**当前**恢复事实必须仍与冻结锚点等价。只跟冻结标记自比不够——
+        // 若 Snapshot 上传期间又有已消费事实被应用，当前水位会前进，该 Checkpoint 必须
+        // 判为陈旧（§3「对 Frozen 期间到达的必要正式子结果，要么让 Checkpoint 失效」）。
+        invocation.lastProducerSequence !== Number(frozenAnchor.producerSequence) ||
+        invocation.recoveryVersion !== Number(frozenAnchor.recoveryVersion)
       )
         throw new Error("CheckpointStale");
       const [owner] = await tx
@@ -225,6 +339,7 @@ export async function produceFilesystemCheckpoint(input: {
       )
         throw new Error("NotCurrentExecutor");
       const checkpointId = randomUUID();
+      const committedAt = await getAuthorityDatabaseTime(tx);
       await insertFilesystemCheckpoint(tx, {
         id: checkpointId,
         tenantId: input.tenantId,
@@ -236,9 +351,9 @@ export async function produceFilesystemCheckpoint(input: {
         leaseEpoch: binding.leaseEpoch,
         checkpointIntentId,
         writerGeneration: binding.writerGeneration,
-        recoveryVersion: binding.recoveryVersion,
-        producerSequence: binding.lastProducerSequence,
-        recoveryAnchor: anchor,
+        recoveryVersion: Number(frozenAnchor.recoveryVersion),
+        producerSequence: Number(frozenAnchor.producerSequence),
+        recoveryAnchor: frozenAnchor,
         recoveryAnchorDigest: digest,
         snapshotFormat: "content_manifest",
         manifestRef: receipt.manifestRef,
@@ -251,22 +366,28 @@ export async function produceFilesystemCheckpoint(input: {
           ...receipt,
           checkpointIntentId,
           writerGeneration: binding.writerGeneration,
+          anchorDigest: digest,
           freeze,
         },
-        committedAt: await getAuthorityDatabaseTime(tx),
+        committedAt,
       });
-      const committedAt = await getAuthorityDatabaseTime(tx);
+      // §2 步骤 8：Gate 转入 `releasing`，双腿（Runtime / Backend）确认后才回 open。
       await tx
         .update(invocationTable)
         .set({
-          checkpointGate: "open",
-          checkpointIntentId: null,
-          checkpointOwnerId: null,
+          checkpointGate: "releasing",
+          checkpointIntentId,
+          checkpointOwnerId: input.ownershipId,
           checkpointDeadline: null,
-          checkpointProducerSequence: binding.lastProducerSequence,
-          checkpointRecoveryVersion: binding.recoveryVersion,
-          checkpointAnchor: anchor,
-          checkpointPreparedEvidence: { ...receipt, checkpointId },
+          checkpointProducerSequence: Number(frozenAnchor.producerSequence),
+          checkpointRecoveryVersion: Number(frozenAnchor.recoveryVersion),
+          checkpointAnchor: frozenAnchor,
+          checkpointPreparedEvidence: {
+            checkpointId,
+            anchorDigest: digest,
+            freeze,
+            release: { runtime: "pending", backend: "pending", registeredAt: committedAt },
+          },
           versionNo: invocation.versionNo + 1,
           updatedAt: committedAt,
         })
@@ -276,22 +397,73 @@ export async function produceFilesystemCheckpoint(input: {
         manifestRef: receipt.manifestRef,
         manifestDigest: receipt.manifestDigest,
         contentRootDigest: receipt.contentRootDigest,
+        anchor: frozenAnchor,
       };
     });
     committed = true;
-    return result;
-  } finally {
+    // §2 步骤 8：解冻是持久工作。先把"Runtime 腿待确认"落库，再真正解冻 Backend；
+    // 任一步失败都不会让 Gate 提前放行，维护 lane 会按 intentId 续做。
+    await registerCheckpointRuntimeReleasePending({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      checkpointIntentId,
+    });
+    const release = await confirmCheckpointBackendRelease({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      checkpointIntentId,
+      freeze,
+      backend: input.backend,
+    });
+    return {
+      checkpointId: result.checkpointId,
+      manifestRef: result.manifestRef,
+      manifestDigest: result.manifestDigest,
+      contentRootDigest: result.contentRootDigest,
+      release,
+    };
+  } catch (error) {
     if (!committed) {
+      // 候选未提交：受控放弃。若已经取到 freeze，放弃同样转入 `releasing` 走持久解冻，
+      // 不能"只清 gate 不还 Writer"。
       await abandonFilesystemCheckpoint({
         tenantId: input.tenantId,
         invocationId: input.invocationId,
         ownershipId: input.ownershipId,
         checkpointIntentId,
-        reasonCode: "CheckpointStale",
-      }).catch(() => undefined);
+        reasonCode: error instanceof Error ? error.message : "CheckpointStale",
+        ...(freeze ? { freeze } : {}),
+      }).catch((abandonError: unknown) => {
+        console.error("Checkpoint 候选放弃失败，等待维护 lane 收口", abandonError);
+      });
     }
-    if (freeze) await input.backend.host.releaseFreeze(freeze).catch(() => undefined);
+    throw error;
   }
+}
+
+/** `releasing` 阶段再次进入安全点请求必须先被解冻收口，否则直接陈旧。 */
+export function assertCheckpointGateOpen(invocation: Invocation): void {
+  if (invocation.checkpointGate !== "open") throw new Error("CheckpointStale");
+}
+
+async function loadCheckpointDeclarations(
+  tenantId: string,
+  invocationId: string,
+  checkpointIntentId: string,
+): Promise<RecoveryAnchorDeclarations | null> {
+  const [command] = await db
+    .select({ payloadJson: invocationCommandTable.payloadJson })
+    .from(invocationCommandTable)
+    .where(
+      and(
+        eq(invocationCommandTable.tenantId, tenantId),
+        eq(invocationCommandTable.invocationId, invocationId),
+        eq(invocationCommandTable.idempotencyKey, `checkpoint:${checkpointIntentId}`),
+      ),
+    )
+    .limit(1);
+  const payload = command?.payloadJson as { declarations?: RecoveryAnchorDeclarations } | undefined;
+  return payload?.declarations ?? null;
 }
 
 async function freezeCheckpointGate(input: {
@@ -300,6 +472,8 @@ async function freezeCheckpointGate(input: {
   ownershipId: string;
   checkpointIntentId: string;
   binding: Awaited<ReturnType<typeof loadCheckpointFacts>>;
+  frozenAnchor: RecoveryAnchor;
+  anchorDigest: string;
   safePointEvidence: CheckpointSafePointEvidence;
 }): Promise<void> {
   await db.transaction(async (tx) => {
@@ -337,18 +511,21 @@ async function freezeCheckpointGate(input: {
       invocation.checkpointIntentId !== input.checkpointIntentId ||
       invocation.checkpointOwnerId !== input.ownershipId ||
       invocation.checkpointDeadline === null ||
-      invocation.checkpointDeadline <= now ||
-      invocation.checkpointProducerSequence !== input.binding.lastProducerSequence ||
-      invocation.checkpointRecoveryVersion !== input.binding.recoveryVersion ||
-      computeCheckpointAnchorDigest(invocation.checkpointAnchor) !==
-        computeCheckpointAnchorDigest(input.binding.checkpointAnchor)
+      invocation.checkpointDeadline <= now
     )
       throw new Error("CheckpointStale");
     await tx
       .update(invocationTable)
       .set({
         checkpointGate: "frozen",
-        checkpointPreparedEvidence: { safePoint: input.safePointEvidence },
+        // 冻结的是**重建后**的锚点；这一刻的水位才是可恢复边界。
+        checkpointAnchor: input.frozenAnchor,
+        checkpointProducerSequence: Number(input.frozenAnchor.producerSequence),
+        checkpointRecoveryVersion: Number(input.frozenAnchor.recoveryVersion),
+        checkpointPreparedEvidence: {
+          safePoint: input.safePointEvidence,
+          anchorDigest: input.anchorDigest,
+        },
         versionNo: invocation.versionNo + 1,
         updatedAt: now,
       })
@@ -394,13 +571,23 @@ async function recordCheckpointPreparedEvidence(input: {
   });
 }
 
+/**
+ * 受控放弃一个未提交的候选。
+ *
+ * 若该候选已经冻结过 Writer（`freeze` 非空），Gate 进入 `releasing` 而不是 `open`：
+ * 文件 Generation 还在冻结中，必须先持久解冻；维护 lane 会按 intentId 续做。
+ * 没有 freeze 的失败路径（deadline 过期、Owner 被取代、Writer 未 fence）没有东西要解冻，
+ * 直接回 open，不留无法退出的屏障。
+ */
 export async function abandonFilesystemCheckpoint(input: {
   tenantId: string;
   invocationId: string;
   ownershipId: string;
   checkpointIntentId: string;
   reasonCode: string;
+  freeze?: Awaited<ReturnType<WorkspaceBackend["host"]["freeze"]>>;
 }): Promise<void> {
+  const nextGate = input.freeze ? "releasing" : "open";
   await db.transaction(async (tx) => {
     const [invocation] = await tx
       .select()
@@ -422,11 +609,17 @@ export async function abandonFilesystemCheckpoint(input: {
     await tx
       .update(invocationTable)
       .set({
-        checkpointGate: "open",
-        checkpointIntentId: null,
-        checkpointOwnerId: null,
+        checkpointGate: nextGate,
+        checkpointIntentId: input.freeze ? input.checkpointIntentId : null,
+        checkpointOwnerId: input.freeze ? input.ownershipId : null,
         checkpointDeadline: null,
-        checkpointPreparedEvidence: { failureCode: input.reasonCode },
+        checkpointPreparedEvidence: input.freeze
+          ? {
+              failureCode: input.reasonCode,
+              freeze: input.freeze,
+              release: { runtime: "pending", backend: "pending" },
+            }
+          : { failureCode: input.reasonCode },
         versionNo: invocation.versionNo + 1,
         updatedAt: await getAuthorityDatabaseTime(tx),
       })
@@ -554,32 +747,4 @@ async function lockCheckpointFacts(
     checkpointDeadline: invocation.checkpointDeadline,
     checkpointAnchor: invocation.checkpointAnchor,
   };
-}
-
-function assertRecoveryAnchor(
-  anchor: Record<string, unknown>,
-  facts: Awaited<ReturnType<typeof lockCheckpointFacts>>,
-): void {
-  const expected = {
-    invocationId: facts.invocation.id,
-    bindingDigest: facts.binding.configHash,
-    recoveryVersion: String(facts.invocation.recoveryVersion),
-    producerSequence: String(facts.invocation.lastProducerSequence),
-  };
-  for (const [field, value] of Object.entries(expected)) {
-    if (anchor[field] !== value) throw new Error("CheckpointStale");
-  }
-  for (const field of [
-    "consumedInputRefs",
-    "actionFacts",
-    "childFacts",
-    "resolvedUserActionRefs",
-  ]) {
-    if (!Array.isArray(anchor[field])) throw new Error("CheckpointStale");
-  }
-  if (typeof anchor.unconsumedInputWatermark !== "string") throw new Error("CheckpointStale");
-}
-
-export function computeCheckpointAnchorDigest(anchor: unknown): string {
-  return protocolDigest(anchor);
 }

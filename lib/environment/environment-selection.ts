@@ -15,8 +15,8 @@
 import { randomUUID } from "node:crypto";
 import { type DbOrTx, db } from "@/lib/db/client";
 import { threadTable } from "@/lib/persistence/schema/conversation";
-import type { EnvironmentChangeRequest } from "@/lib/persistence/schema/environment";
-import { environmentChangeRequestTable } from "@/lib/persistence/schema/environment";
+import type { EnvironmentChangeRequest } from "@/lib/persistence/schema/environment-change-request";
+import { environmentChangeRequestTable } from "@/lib/persistence/schema/environment-change-request";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 /** 仍是「Thread 当前生效选择」的状态集合（顺序无关，仅用于谓词）。 */

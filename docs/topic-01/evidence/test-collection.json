@@ -7,7 +7,7 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 320,
+    "unit": 321,
     "db": 130,
     "integration": 13,
     "contract": 31,
@@ -15,7 +15,7 @@
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 502,
+  "total": 503,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -5226,6 +5226,17 @@
       "command": "pnpm vitest run --project db",
       "needsDB": true,
       "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/__tests__/snapshot-storage.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"

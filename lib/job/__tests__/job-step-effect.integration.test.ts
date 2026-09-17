@@ -71,7 +71,7 @@ import {
   runtimeEventIngressTable,
 } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
-import { jobCommandTable } from "@/lib/persistence/schema/job";
+import { jobCommandTable, jobEventTable } from "@/lib/persistence/schema/job";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import {
   EventPayloadHashConflictError,
@@ -884,20 +884,136 @@ describe("T32 Job step Effect 多态 owner", () => {
     expect(jobStepVerified.effectRecord.effectState).toBe("confirmed_success");
     expect(jobStepVerified.toolCall).toBeNull();
 
-    const applied = await consumeJobCommand({ tenantId: TENANT_ID, commandId: command!.id });
-    expect(applied.outcome).toBe("terminal_applied");
-    expect(applied.job.jobState).toBe("completed");
+    // 两类 Effect 都已收敛，但已接纳的 job step **自己还没有终态结果**。
+    // R06 §5：all_success 要求必要子结果全部确认成功，因此 Job 不能收口 ——
+    // 把"顶层 Invocation completed"直接映射成"Job completed"就是这里被拦下的伪成功。
+    const pendingStep = await consumeJobCommand({ tenantId: TENANT_ID, commandId: command!.id });
+    expect(pendingStep.outcome).toBe("waiting_external");
+    expect(pendingStep.job.jobState).toBe("waiting_external");
+    expect(pendingStep.command.commandState).toBe("waiting");
+    expect(pendingStep.command.lastErrorCode).toBe("RequiredStepPending");
+    // 不伪成功：结果引用保持为空，没有 job.completed 事实。
+    const blockedJob = await getJobById(TENANT_ID, fixture.job.id);
+    expect(blockedJob?.jobState).toBe("waiting_external");
+    expect(blockedJob?.resultRef).toBeNull();
+    const completedEvents = await db
+      .select()
+      .from(jobEventTable)
+      .where(
+        and(
+          eq(jobEventTable.tenantId, TENANT_ID),
+          eq(jobEventTable.jobId, fixture.job.id),
+          eq(jobEventTable.eventType, "job.completed"),
+        ),
+      );
+    expect(completedEvents).toEqual([]);
 
-    const job = await getJobById(TENANT_ID, fixture.job.id);
-    expect(job?.jobState).toBe("completed");
-    expect(job?.resultRef).toBe("job://result/index");
-    const remainingUnknown = await listEffectRecordsByInvocationState(
+    // 收口判定读取的是**本 Invocation 的全部 Effect**（两类 owner 都在），
+    // 而不是 ToolCall join 的结果 —— 无 ToolCall 的 job_step 记录始终可见。
+    const atClosure = await listEffectRecordsByInvocation(TENANT_ID, fixture.invocation.id);
+    expect(atClosure.map((record) => record.ownerKind).sort()).toEqual(["job_step", "tool_call"]);
+    const stillUnknown = await listEffectRecordsByInvocationState(
       TENANT_ID,
       fixture.invocation.id,
       ["unknown_effect"],
     );
-    expect(remainingUnknown).toEqual([]);
+    expect(stillUnknown).toEqual([]);
     expect(await db.select().from(effectRecordTable)).toHaveLength(2);
+  });
+
+  it("EFFECT-08: 必需步骤先收口，Job 才按 all_success 真实完成（不靠顶层 Invocation 猜测）", async () => {
+    const { fixture, authority } = await seedExecutingJobAuthority();
+    const step = makeStep("index", "doc-08");
+    const admission = await admitJobStep({
+      tenantId: TENANT_ID,
+      jobId: fixture.job.id,
+      authority,
+      stepKey: step.stepKey,
+      stage: step.stage,
+      inputRefs: step.inputRefs,
+      processorDigest: step.processorDigest,
+      profileDigest: step.profileDigest,
+      requestDigest: step.requestDigest,
+    });
+    const operationKey = computeJobStepOperationKey({
+      stepKey: step.stepKey,
+      action: "upsert_vectors",
+      target: "index:kb",
+    });
+    const jobStepEffect = await runJobStepEffect({
+      tenantId: TENANT_ID,
+      ownerRef: admission.ownerRef,
+      invocationId: fixture.invocation.id,
+      operationKey,
+      requestDigest: step.requestDigest,
+      effectType: "update",
+      targetRefs: ["index:kb"],
+      targetSummaryJson: { total: 1, description: "upsert vectors" },
+      authority,
+      provider: TEST_PROVIDER,
+    });
+    await reconcileEffect({
+      tenantId: TENANT_ID,
+      effectRecordId: jobStepEffect.effectRecord.id,
+      path: "admin",
+      verificationMethod: "provider_query",
+      targetUpdates: jobStepEffect.effectTargets.map((target) => ({
+        targetHash: target.targetHash,
+        targetState: "confirmed_success" as const,
+      })),
+    });
+    // 步骤自己的终态结果：这是"必要子结果确认成功"的正式事实。
+    await completeJobStep({
+      tenantId: TENANT_ID,
+      authority,
+      ownerRef: admission.ownerRef,
+      invocationId: fixture.invocation.id,
+      stepKey: step.stepKey,
+      stage: step.stage,
+      operationKeys: [operationKey],
+      resultRef: "artifact://kb/index/8",
+      resultDigest: protocolDigest({ step: step.stepKey, documents: 1 }),
+    });
+    // 步骤先收口，顶层 Invocation 才终态。
+    await db.transaction((tx) =>
+      transitionInvocation(tx, {
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+        nextState: "completed",
+        resultRef: "job://result/index",
+        resultDigest: protocolDigest({ result: "index" }),
+      }),
+    );
+    const [command] = await db
+      .select()
+      .from(jobCommandTable)
+      .where(
+        and(
+          eq(jobCommandTable.tenantId, TENANT_ID),
+          eq(jobCommandTable.jobId, fixture.job.id),
+          eq(jobCommandTable.commandType, "execution_terminal"),
+        ),
+      );
+    const applied = await consumeJobCommand({ tenantId: TENANT_ID, commandId: command!.id });
+    expect(applied.outcome).toBe("terminal_applied");
+    expect(applied.job.jobState).toBe("completed");
+    const finished = await getJobById(TENANT_ID, fixture.job.id);
+    expect(finished?.resultRef).toBe("job://result/index");
+    const [completed] = await db
+      .select()
+      .from(jobEventTable)
+      .where(
+        and(
+          eq(jobEventTable.tenantId, TENANT_ID),
+          eq(jobEventTable.jobId, fixture.job.id),
+          eq(jobEventTable.eventType, "job.completed"),
+        ),
+      );
+    // 收口事件记录策略判定理由与必需成员数量，便于事后解释"为什么这次能完成"。
+    expect((completed?.payloadJson as Record<string, unknown>).completionPolicy).toBe(
+      "AllRequiredStepsSucceeded",
+    );
+    expect((completed?.payloadJson as Record<string, unknown>).requiredMembers).toBe(1);
   });
 
   it("EFFECT-06: 旧 Runtime 的晚到 Provider 回执可作为核对证据，但不能由旧 Authority 完成当前 step", async () => {

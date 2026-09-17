@@ -35,6 +35,7 @@ import { createExecutionBinding as seedBinding } from "@/lib/executions/test-sup
 import { TEST_EXECUTION_BINDING_EVIDENCE } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import { resolveJobBindingCommand } from "@/lib/job/job-admission";
 import { JobExecutionConflictError, createJobInvocation } from "@/lib/job/job-execution";
 import { createJob } from "@/lib/job/job-queries";
@@ -389,7 +390,7 @@ async function seedJobWithBinding(initialContextCheckpointId: string | null) {
     jobType: "knowledge_build",
     triggerRef: `trigger:${randomUUID()}`,
     creationKey: `creation:${randomUUID()}`,
-    completionPolicyJson: { policy: "all_success" },
+    completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     inputJson: { task: "t33-job" },
     // Job 的可信 service principal 就是 `createdBy`（R01 §3）；夹具来源 Checkpoint 也由
     // 同一 principal 产生，否则访问权限核验本来就应该失败。
@@ -605,7 +606,7 @@ describe("CONTEXT-02：过期、跨 tenant、撤权、Hash 错误、非 compress
       jobType: "knowledge_build",
       triggerRef: `trigger:${randomUUID()}`,
       creationKey: `creation:${randomUUID()}`,
-      completionPolicyJson: { policy: "all_success" },
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       inputJson: { task: "t33-job-reject" },
       createdBy: "test-service",
     });
@@ -668,7 +669,7 @@ describe("CONTEXT-03：同 Start 重试 / Redispatch 保持同一初始材料身
       jobType: "knowledge_build",
       triggerRef: `trigger:${randomUUID()}`,
       creationKey: `creation:${randomUUID()}`,
-      completionPolicyJson: { policy: "all_success" },
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       inputJson: { task: "t33-job-redispatch" },
       createdBy: "test-service",
     });

@@ -21,7 +21,11 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import path from "node:path";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
-import type { SnapshotStorage, SnapshotStorageReceipt } from "@/lib/workspace/snapshot-storage";
+import type {
+  SnapshotRequirements,
+  SnapshotStorage,
+  SnapshotStorageReceipt,
+} from "@/lib/workspace/snapshot-storage";
 import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import type {
   SafePointReceipt,
@@ -916,10 +920,13 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     checkpointIntentId: string;
     anchorDigest: string;
     storage?: SnapshotStorage;
+    requirements: SnapshotRequirements;
   }): Promise<SnapshotStorageReceipt> {
     await this.assertWriter(input.grant);
     const storage = input.storage ?? this.storage;
-    return (await storage.writeSnapshot(input.grant.root, input.checkpointIntentId)).receipt;
+    return (
+      await storage.writeSnapshot(input.grant.root, input.checkpointIntentId, input.requirements)
+    ).receipt;
   }
 
   async restore(input: {
@@ -927,10 +934,21 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     manifestDigest: string;
     destination: string;
     storage?: SnapshotStorage;
+    operationId?: string;
+    requirements?: SnapshotRequirements;
   }): Promise<void> {
     const storage = input.storage ?? this.storage;
-    const manifest = await storage.readManifest(input.manifestRef, input.manifestDigest);
-    await storage.restoreSnapshot(manifest, input.destination);
+    const manifest = await storage.readManifest(
+      input.manifestRef,
+      input.manifestDigest,
+      input.requirements,
+    );
+    await storage.restoreSnapshot(
+      manifest,
+      input.destination,
+      input.operationId,
+      input.requirements,
+    );
   }
 
   // ── 清理 ───────────────────────────────────────────────

@@ -25,6 +25,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
+import { parseCompletionPolicy } from "@/lib/job/completion-policy";
 import { JobNotFoundError, JobStateConflictError, JobVersionConflictError } from "@/lib/job/errors";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
 import {
@@ -131,6 +132,10 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
   if (!params.completionPolicyJson) {
     throw new Error("createJob: completionPolicyJson 不能为空");
   }
+  // R06 §5：策略在创建时冻结，且必须是**可判定**的策略。把校验放在创建处（而不是
+  // 等到终态消费时才失败）才能保证"冻结的完成条件"从第一天起就有效——否则会存下
+  // 一个永远无法解释的 Job，终态只能靠猜。
+  parseCompletionPolicy(params.completionPolicyJson);
 
   const actorType: JobEventActorType = params.actorType ?? "system";
   const now = new Date();

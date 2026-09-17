@@ -1,12 +1,46 @@
+/**
+ * 内容寻址 Snapshot 存储（R09 §6 并发与崩溃安全写入 / §7 Restore 幂等）。
+ *
+ * §6：
+ * - 候选块使用 **operation 唯一**的 staging 文件，写完 + fsync + hash 校验后原子提交；
+ * - 并发相同 content hash 的竞争者**验证既有块**（读回长度与 digest）后复用，
+ *   不把 EEXIST 当损坏，也不共享一个会被 Crash 遗留堵塞的临时文件；
+ * - 既有块损坏时报错并隔离，不返回持久 Checkpoint 回执；
+ * - Manifest 在所引用块全部持久后提交，返回前对文件与目录做 fsync。
+ *
+ * §7：
+ * - 先恢复到**属于本 operation 的 staging generation**，完成 Hash/树/元数据验证后才
+ *   原子标记该 generation 可用并 rename 到目标；部分失败不污染正式 root，也不会让
+ *   下一次 `wx` 永远 EEXIST；
+ * - 恢复前验证目标不是任意现存目录或 symlink；写入走防跟随链接的安全路径；
+ * - 输出短写必须循环补完；任何错误都保留未 ready 状态，禁止 catch 后返回成功。
+ */
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
 import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  readlink,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import path from "node:path";
+import type { FilesystemSemantics } from "@/lib/runtime/runtime-protocol";
+import {
+  type CheckpointPolicyLimits,
   SNAPSHOT_CHUNK_BYTES,
   type SnapshotChunk,
   type SnapshotEntry,
   type SnapshotManifest,
   digestJson,
+  hashSnapshotBytes,
+  parseCheckpointPolicy,
+  scanWorkspaceRoot,
   validateSnapshotManifest,
 } from "@/lib/workspace/snapshot-manifest";
 
@@ -19,13 +53,35 @@ export interface SnapshotStorageReceipt {
   chunks: string[];
 }
 
+/** CHECKPOINT_RESTORABLE 的写入/读取约束：容量上限 + 已声明的 filesystem profile。 */
+export interface SnapshotRequirements {
+  checkpointPolicy: Record<string, unknown> | null;
+  filesystemSemantics: FilesystemSemantics;
+}
+
 export interface SnapshotStorage {
   writeSnapshot(
     root: string,
     operationId: string,
+    requirements: SnapshotRequirements,
   ): Promise<{ manifest: SnapshotManifest; receipt: SnapshotStorageReceipt }>;
-  readManifest(manifestRef: string, expectedDigest: string): Promise<SnapshotManifest>;
-  restoreSnapshot(manifest: SnapshotManifest, destination: string): Promise<void>;
+  readManifest(
+    manifestRef: string,
+    expectedDigest: string,
+    requirements?: SnapshotRequirements,
+  ): Promise<SnapshotManifest>;
+  restoreSnapshot(
+    manifest: SnapshotManifest,
+    destination: string,
+    operationId?: string,
+    requirements?: SnapshotRequirements,
+  ): Promise<void>;
+}
+
+interface RestoreState {
+  operationId: string;
+  manifestDigest: string;
+  phase: "staging" | "ready";
 }
 
 export class FileSnapshotStorage implements SnapshotStorage {
@@ -35,11 +91,13 @@ export class FileSnapshotStorage implements SnapshotStorage {
     this.root = path.resolve(root);
   }
 
-  async writeSnapshot(root: string, operationId: string) {
-    const { scanWorkspaceRoot } = await import("@/lib/workspace/snapshot-manifest");
+  async writeSnapshot(root: string, operationId: string, requirements: SnapshotRequirements) {
+    const limits = parseCheckpointPolicy(requirements.checkpointPolicy);
     await mkdir(path.join(this.root, "chunks"), { recursive: true });
     await mkdir(path.join(this.root, "manifests"), { recursive: true });
-    const scanned = await scanWorkspaceRoot(root);
+    const scanned = await scanWorkspaceRoot(root, {
+      filesystemSemantics: requirements.filesystemSemantics,
+    });
     const entries: SnapshotEntry[] = [];
     const chunks = new Set<string>();
     for (const entry of scanned.entries) {
@@ -56,15 +114,8 @@ export class FileSnapshotStorage implements SnapshotStorage {
           const buffer = Buffer.allocUnsafe(size);
           const result = await handle.read(buffer, 0, size, offset);
           if (result.bytesRead !== size) throw new Error(`Snapshot 读取长度不一致: ${entry.path}`);
-          const digest = `sha256:${createHash("sha256").update(buffer).digest("hex")}`;
-          const location = path.join(this.root, "chunks", digest.slice("sha256:".length));
-          try {
-            await readFile(location);
-          } catch {
-            await writeFile(`${location}.staging`, buffer, { flag: "wx" }).then(() =>
-              rename(`${location}.staging`, location),
-            );
-          }
+          const digest = hashSnapshotBytes(buffer);
+          await this.persistChunk(digest, buffer, operationId);
           fileChunks.push({ digest, sizeBytes: size });
           chunks.add(digest);
           offset += size;
@@ -84,16 +135,11 @@ export class FileSnapshotStorage implements SnapshotStorage {
       contentRootDigest,
     };
     const manifest: SnapshotManifest = { ...body, manifestDigest: digestJson(body) };
-    validateSnapshotManifest(manifest);
+    validateSnapshotManifest(manifest, limits);
     const manifestRef = `manifests/${manifest.manifestDigest.slice("sha256:".length)}.json`;
-    const location = path.join(this.root, manifestRef);
-    try {
-      await readFile(location);
-    } catch {
-      await writeFile(`${location}.${operationId}.staging`, JSON.stringify(manifest), {
-        flag: "wx",
-      }).then(() => rename(`${location}.${operationId}.staging`, location));
-    }
+    await this.persistManifest(manifest, manifestRef, operationId);
+    // Manifest 只在所引用块全部持久后提交；提交前同步数据与目录项。
+    await this.syncDirectory(path.join(this.root, "manifests"));
     return {
       manifest,
       receipt: {
@@ -107,7 +153,79 @@ export class FileSnapshotStorage implements SnapshotStorage {
     };
   }
 
-  async readManifest(manifestRef: string, expectedDigest: string): Promise<SnapshotManifest> {
+  /**
+   * 落一个内容块。
+   *
+   * 并发同 hash：先按"读回 + digest 校验"确认既有块正确 → 复用；只有已存在但**内容不对**
+   * 时才视为损坏并报错（隔离该块，不返回 Checkpoint 回执）。
+   * 候选写入走 operation 唯一 staging：竞争者不会共享同一个可能被 Crash 遗留堵塞的临时文件。
+   */
+  private async persistChunk(digest: string, buffer: Buffer, operationId: string): Promise<void> {
+    const location = path.join(this.root, "chunks", digest.slice("sha256:".length));
+    const existing = await this.readChunkIfPresent(location);
+    if (existing === "valid") return;
+    if (existing === "corrupt") throw new Error(`Snapshot 既有内容块损坏: ${digest}`);
+    const staging = `${location}.${operationId}.staging`;
+    await rm(staging, { force: true });
+    const handle = await open(staging, "wx", 0o600);
+    try {
+      await writeAll(handle, buffer);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    // staging 内容自检后再原子提交：短写/磁盘错误不会变成"看起来存在的块"。
+    const staged = await readFile(staging);
+    if (staged.length !== buffer.length || hashSnapshotBytes(staged) !== digest)
+      throw new Error(`Snapshot 内容块写入校验失败: ${digest}`);
+    await rename(staging, location);
+    await this.syncDirectory(path.dirname(location));
+  }
+
+  private async readChunkIfPresent(location: string): Promise<"valid" | "corrupt" | "missing"> {
+    try {
+      const bytes = await readFile(location);
+      const expected = `sha256:${path.basename(location)}`;
+      return hashSnapshotBytes(bytes) === expected ? "valid" : "corrupt";
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+      throw error;
+    }
+  }
+
+  private async persistManifest(
+    manifest: SnapshotManifest,
+    manifestRef: string,
+    operationId: string,
+  ): Promise<void> {
+    const location = path.join(this.root, manifestRef);
+    const existing = await readFile(location).then(
+      (bytes) => bytes.toString("utf8"),
+      () => null,
+    );
+    const serialized = JSON.stringify(manifest);
+    if (existing !== null) {
+      // 既有同 digest manifest 必须逐字节等价；否则说明内容寻址被破坏。
+      if (existing !== serialized) throw new Error("Snapshot 既有 manifest 与内容寻址不一致");
+      return;
+    }
+    const staging = `${location}.${operationId}.staging`;
+    await rm(staging, { force: true });
+    const handle = await open(staging, "wx", 0o600);
+    try {
+      await writeAll(handle, Buffer.from(serialized, "utf8"));
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(staging, location);
+  }
+
+  async readManifest(
+    manifestRef: string,
+    expectedDigest: string,
+    requirements?: SnapshotRequirements,
+  ): Promise<SnapshotManifest> {
     if (
       manifestRef.includes("..") ||
       path.isAbsolute(manifestRef) ||
@@ -118,64 +236,274 @@ export class FileSnapshotStorage implements SnapshotStorage {
       await readFile(path.join(this.root, manifestRef), "utf8"),
     ) as SnapshotManifest;
     if (manifest.manifestDigest !== expectedDigest) throw new Error("CheckpointIntegrityFailed");
-    return validateSnapshotManifest(manifest);
+    return validateSnapshotManifest(manifest, resolveLimits(requirements));
   }
 
-  async restoreSnapshot(manifest: SnapshotManifest, destination: string): Promise<void> {
-    validateSnapshotManifest(manifest);
-    await mkdir(destination, { recursive: true });
-    for (const entry of manifest.entries) {
-      const target = path.join(destination, entry.path);
-      if (entry.type === "directory") await mkdir(target, { recursive: true, mode: entry.mode });
-      if (entry.type === "symlink") await this.restoreSymlink(destination, entry, target);
-      if (entry.type === "file") {
-        await mkdir(path.dirname(target), { recursive: true });
-        const output = await open(target, "wx", entry.mode);
-        try {
-          for (const chunk of entry.chunks ?? []) {
-            const bytes = await readFile(
-              path.join(this.root, "chunks", chunk.digest.slice("sha256:".length)),
-            );
-            if (bytes.length !== chunk.sizeBytes || hashBytes(bytes) !== chunk.digest)
-              throw new Error("CheckpointIntegrityFailed");
-            await output.write(bytes);
-          }
-        } finally {
-          await output.close();
-        }
-      }
-      await this.applyMetadata(target, entry);
-    }
-  }
-
-  private async restoreSymlink(
+  /**
+   * 幂等恢复（§7）。
+   *
+   * 步骤：确认目标归属 → 在 staging generation 内重建内容（短写循环、防跟随链接）→
+   * 重算整棵树并比对 manifest → 写 ready 标记并 fsync → 原子 rename 到目标。
+   * 任何失败都留下"未 ready"的 staging，重试时复核归属后安全重建，正式 root 不被污染。
+   */
+  async restoreSnapshot(
+    manifest: SnapshotManifest,
     destination: string,
-    entry: SnapshotEntry,
-    target: string,
+    operationId?: string,
+    requirements?: SnapshotRequirements,
   ): Promise<void> {
-    const resolved = path.resolve(path.dirname(target), entry.target ?? "");
-    if (
-      resolved !== path.resolve(destination) &&
-      !resolved.startsWith(`${path.resolve(destination)}${path.sep}`)
-    )
-      throw new Error("CheckpointIntegrityFailed");
-    await mkdir(path.dirname(target), { recursive: true });
-    await import("node:fs/promises").then(({ symlink }) => symlink(entry.target as string, target));
+    const limits = validateSnapshotManifest(manifest, resolveLimits(requirements));
+    const target = path.resolve(destination);
+    const operation = operationId ?? manifest.manifestDigest;
+    const staging = `${target}.staging`;
+    // 归属/就绪状态放在**树外**：恢复出来的目录树必须与 manifest 逐项相等，不能多出控制文件。
+    const stateFile = `${target}.restore-state.json`;
+    await this.assertRestoreTarget(target, stateFile, manifest.manifestDigest);
+    if (await this.isAlreadyRestored(target, stateFile, manifest.manifestDigest)) return;
+    await this.resetStaging(staging, stateFile, operation, manifest.manifestDigest);
+    await mkdir(staging, { recursive: true });
+    const directories: SnapshotEntry[] = [];
+    for (const entry of manifest.entries) {
+      const entryTarget = resolveInside(staging, entry.path);
+      if (entry.type === "directory") {
+        await mkdir(entryTarget, { recursive: true });
+        directories.push(entry);
+        continue;
+      }
+      if (entry.type === "symlink") {
+        await restoreSymlink(staging, entry, entryTarget);
+        continue;
+      }
+      await mkdir(path.dirname(entryTarget), { recursive: true });
+      await this.restoreFile(entry, entryTarget);
+    }
+    // 目录元数据**最后**应用：readonly 目录不会妨碍子项写入，mtime 也不会被子创建改变。
+    for (const entry of directories) await applyMetadata(resolveInside(staging, entry.path), entry);
+    await this.verifyRestoredTree(staging, manifest);
+    await this.syncDirectory(staging);
+    await this.commitStaging(staging, target, stateFile, {
+      operationId: operation,
+      manifestDigest: manifest.manifestDigest,
+      phase: "ready",
+    });
   }
 
-  private async applyMetadata(target: string, entry: SnapshotEntry): Promise<void> {
-    const { chmod, lutimes, utimes } = await import("node:fs/promises");
-    const stamp = new Date(entry.mtimeMs);
-    if (entry.type === "symlink") {
-      // chmod/utimes 会跟随 symlink 目标并破坏其元数据；symlink 权限不可移植，仅恢复自身 mtime。
-      await lutimes(target, stamp, stamp);
-      return;
+  /** 目标若已存在，必须是我们恢复出来的（有 ready 状态标记）或空目录；否则拒绝。 */
+  private async assertRestoreTarget(
+    target: string,
+    stateFile: string,
+    manifestDigest: string,
+  ): Promise<void> {
+    const info = await lstat(target).catch(() => null);
+    if (!info) return;
+    if (info.isSymbolicLink())
+      throw new Error("CheckpointIntegrityFailed: 恢复目标不能是 symlink（防跟随链接）");
+    if (!info.isDirectory()) throw new Error("CheckpointIntegrityFailed: 恢复目标不是目录");
+    const state = await readRestoreState(stateFile);
+    const children = await readdir(target);
+    if (children.length === 0) return;
+    if (state?.phase === "ready" && state.manifestDigest === manifestDigest) return;
+    throw new Error("CheckpointIntegrityFailed: 恢复目标已被占用且不属于本次恢复");
+  }
+
+  private async isAlreadyRestored(
+    target: string,
+    stateFile: string,
+    manifestDigest: string,
+  ): Promise<boolean> {
+    const state = await readRestoreState(stateFile);
+    if (!state || state.phase !== "ready" || state.manifestDigest !== manifestDigest) return false;
+    const info = await lstat(target).catch(() => null);
+    return info?.isDirectory() ?? false;
+  }
+
+  /**
+   * staging 归属复核：属于本 operation 但未 ready 的候选可以安全重建；
+   * 属于别的 operation 的候选目录一律拒绝（不得互相覆盖）。
+   */
+  private async resetStaging(
+    staging: string,
+    stateFile: string,
+    operation: string,
+    manifestDigest: string,
+  ): Promise<void> {
+    const info = await lstat(staging).catch(() => null);
+    const state = await readRestoreState(stateFile);
+    if (info) {
+      if (!state || state.operationId !== operation || state.manifestDigest !== manifestDigest)
+        throw new Error("CheckpointIntegrityFailed: staging 属于其他恢复操作");
+      if (info.isSymbolicLink())
+        throw new Error("CheckpointIntegrityFailed: staging 不能是 symlink");
+      await rm(staging, { recursive: true, force: true });
     }
-    await chmod(target, entry.mode & 0o777);
-    await utimes(target, stamp, stamp);
+    await writeFile(
+      stateFile,
+      JSON.stringify({ operationId: operation, manifestDigest, phase: "staging" }),
+    );
+  }
+
+  private async restoreFile(entry: SnapshotEntry, target: string): Promise<void> {
+    const handle = await open(target, "wx", entry.mode & 0o777);
+    try {
+      for (const chunk of entry.chunks ?? []) {
+        const bytes = await readFile(path.join(this.root, "chunks", chunk.digest.slice(7)));
+        if (bytes.length !== chunk.sizeBytes || hashSnapshotBytes(bytes) !== chunk.digest)
+          throw new Error("CheckpointIntegrityFailed");
+        // 短写必须循环补完：write 返回的 bytesWritten 可能小于请求长度。
+        await writeAll(handle, bytes);
+      }
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await applyMetadata(target, entry);
+  }
+
+  /**
+   * 重算整棵树（形状、长度、逐块 digest，以及"没有多出来的东西"）并与 manifest 比对；
+   * 不一致则恢复不算完成——恢复出来的树必须与 manifest 逐项相等。
+   */
+  private async verifyRestoredTree(staging: string, manifest: SnapshotManifest): Promise<void> {
+    const expectedPaths = new Set(manifest.entries.map((entry) => entry.path));
+    for (const actualPath of await scanTreePaths(staging)) {
+      if (!expectedPaths.has(actualPath))
+        throw new Error(`CheckpointIntegrityFailed: 恢复出 manifest 之外的内容: ${actualPath}`);
+    }
+    for (const entry of manifest.entries) {
+      const target = resolveInside(staging, entry.path);
+      const info = await lstat(target).catch(() => null);
+      if (!info) throw new Error(`CheckpointIntegrityFailed: 恢复缺少条目: ${entry.path}`);
+      if (entry.type === "directory") {
+        if (!info.isDirectory()) throw new Error("CheckpointIntegrityFailed: 目录缺失");
+        continue;
+      }
+      if (entry.type === "symlink") {
+        if (!info.isSymbolicLink())
+          throw new Error("CheckpointIntegrityFailed: symlink 缺失或被替换");
+        const linkTarget = await readlink(target);
+        if (linkTarget !== entry.target)
+          throw new Error("CheckpointIntegrityFailed: symlink 目标被改写");
+        continue;
+      }
+      if (!info.isFile() || info.size !== entry.sizeBytes)
+        throw new Error("CheckpointIntegrityFailed: 文件长度与 manifest 不一致");
+      for (const chunk of entry.chunks ?? []) {
+        const bytes = await readFile(path.join(this.root, "chunks", chunk.digest.slice(7)));
+        if (bytes.length !== chunk.sizeBytes || hashSnapshotBytes(bytes) !== chunk.digest)
+          throw new Error("CheckpointIntegrityFailed: 内容块校验失败");
+      }
+    }
+  }
+
+  /** 只有 ready 的 generation 才被 rename 到目标；标记写入在 rename 之后并已 fsync。 */
+  private async commitStaging(
+    staging: string,
+    target: string,
+    stateFile: string,
+    state: RestoreState,
+  ): Promise<void> {
+    const existing = await lstat(target).catch(() => null);
+    if (existing) await rm(target, { recursive: true, force: true });
+    await rename(staging, target);
+    await writeFile(stateFile, JSON.stringify(state));
+    await this.syncDirectory(path.dirname(target));
+  }
+
+  private async syncDirectory(directory: string): Promise<void> {
+    const handle = await open(directory, "r").catch(() => null);
+    if (!handle) return;
+    try {
+      await handle.sync();
+    } catch {
+      // 某些平台/文件系统不允许对目录 fsync（EINVAL）；文件本身已 fsync，可接受。
+    } finally {
+      await handle.close();
+    }
   }
 }
 
-function hashBytes(value: Uint8Array): string {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+function resolveLimits(
+  requirements: SnapshotRequirements | undefined,
+): CheckpointPolicyLimits | null {
+  return requirements ? parseCheckpointPolicy(requirements.checkpointPolicy) : null;
+}
+
+async function readRestoreState(stateFile: string): Promise<RestoreState | null> {
+  return readFile(stateFile, "utf8").then(
+    (value) => JSON.parse(value) as RestoreState,
+    () => null,
+  );
+}
+
+/**
+ * 重算整棵树（形状、长度、逐块 digest，以及"没有多出来的东西"）并与 manifest 比对；
+ * 不一致则恢复不算完成——恢复出来的树必须与 manifest 逐项相等。
+ */
+async function scanTreePaths(root: string, relative = ""): Promise<string[]> {
+  const found: string[] = [];
+  for (const child of await readdir(relative ? path.join(root, relative) : root)) {
+    const next = relative ? `${relative}/${child}` : child;
+    const info = await lstat(path.join(root, next));
+    if (info.isDirectory()) {
+      found.push(next);
+      found.push(...(await scanTreePaths(root, next)));
+      continue;
+    }
+    found.push(next);
+  }
+  return found;
+}
+
+/** 目标必须落在 root 内（按路径分量比较，避免前缀伪装）。 */
+function resolveInside(root: string, relative: string): string {
+  const target = path.resolve(root, relative);
+  if (target !== path.resolve(root) && !target.startsWith(`${path.resolve(root)}${path.sep}`))
+    throw new Error("CheckpointIntegrityFailed: 恢复路径逃逸");
+  return target;
+}
+
+async function restoreSymlink(root: string, entry: SnapshotEntry, target: string): Promise<void> {
+  const resolved = path.resolve(path.dirname(target), entry.target ?? "");
+  if (resolved !== path.resolve(root) && !resolved.startsWith(`${path.resolve(root)}${path.sep}`))
+    throw new Error("CheckpointIntegrityFailed");
+  await mkdir(path.dirname(target), { recursive: true });
+  await symlink(entry.target as string, target);
+}
+
+async function applyMetadata(target: string, entry: SnapshotEntry): Promise<void> {
+  const { chmod, lutimes, utimes } = await import("node:fs/promises");
+  const stamp = new Date(entry.mtimeMs);
+  if (entry.type === "symlink") {
+    // chmod/utimes 会跟随 symlink 目标并破坏其元数据；symlink 权限不可移植，仅恢复自身 mtime。
+    await lutimes(target, stamp, stamp);
+    return;
+  }
+  await chmod(target, entry.mode & 0o777);
+  await utimes(target, stamp, stamp);
+}
+
+/** 循环写满；短写（partial write）在这里被补完，不产生被截断的文件。 */
+async function writeAll(handle: Awaited<ReturnType<typeof open>>, buffer: Buffer): Promise<void> {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const written = await handle.write(buffer, offset, buffer.length - offset);
+    if (written.bytesWritten <= 0) throw new Error("Snapshot 写入未取得进展");
+    offset += written.bytesWritten;
+  }
+}
+
+/** 供恢复后树验证复用：对既有目录做一次 manifest 比对。 */
+export async function verifyTreeAgainstManifest(
+  root: string,
+  manifest: SnapshotManifest,
+): Promise<void> {
+  const scanned = await scanWorkspaceRoot(root);
+  const byPath = new Map(scanned.entries.map((entry) => [entry.path, entry] as const));
+  for (const entry of manifest.entries) {
+    const actual = byPath.get(entry.path);
+    if (!actual || actual.type !== entry.type || actual.sizeBytes !== entry.sizeBytes)
+      throw new Error("CheckpointIntegrityFailed: 恢复后文件树与 manifest 不一致");
+  }
+  const info = await stat(root);
+  if (!info.isDirectory()) throw new Error("CheckpointIntegrityFailed: 恢复根不是目录");
 }

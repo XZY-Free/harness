@@ -141,7 +141,8 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/files/agent-attachment-access.ts",
         "lib/observability/harness-execution-trace.ts",
-        "lib/permission/user-action-expiry-queries.ts"
+        "lib/permission/user-action-expiry-queries.ts",
+        "lib/workspace/recovery-anchor.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -184,6 +185,7 @@
         "lib/files/agent-attachment-access.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
+        "lib/workspace/recovery-anchor.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -674,6 +676,7 @@
         "lib/control-plane/events/consumer-registry.ts",
         "lib/control-plane/events/control-plane-event.ts",
         "lib/control-plane/events/event-contracts.ts",
+        "lib/environment/environment-instance-backend.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/i18n.ts",
         "lib/identity/action-codes.ts",
@@ -721,6 +724,7 @@
         "lib/control-plane/events/consumer-registry.ts",
         "lib/control-plane/events/control-plane-event.ts",
         "lib/control-plane/events/event-contracts.ts",
+        "lib/environment/environment-instance-backend.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/i18n.ts",
         "lib/identity/action-codes.ts",
@@ -1292,6 +1296,7 @@
         "`createdAt` datetime(3) NOT NULL",
         "`expiresAt` datetime(3) NOT NULL",
         "CONSTRAINT `ContextCheckpoint_id` PRIMARY KEY(`id`)",
+        "CONSTRAINT `ContextCheckpoint_tenant_id_uq` UNIQUE(`tenantId`,`id`)",
         "CONSTRAINT `ContextCheckpoint_tenant_invocation_type_ranges_uq` UNIQUE(`tenantId`,`invocationId`,`checkpointType`,`sourceRangesHash`)",
         "ALTER TABLE `ContextCheckpoint` ADD CONSTRAINT `ContextCheckpoint_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `ContextCheckpoint_tenant_invocation_created_idx` ON `ContextCheckpoint` (`tenantId`,`invocationId`,`createdAt`)",
@@ -1781,7 +1786,8 @@
         "lib/capability/effect-queries.ts",
         "lib/capability/tool-execution-queries.ts",
         "lib/capability/tool-execution-worker.ts",
-        "lib/job/job-command-consumer.ts"
+        "lib/job/job-command-consumer.ts",
+        "lib/job/job-step-effects.ts"
       ],
       "lifecycle": "由生产写入者创建不可变事实，并按领域保留策略归档或清理",
       "authorityKind": "append-only-fact",
@@ -1792,7 +1798,11 @@
       "constraints": [
         "`id` varchar(36) NOT NULL",
         "`tenantId` varchar(36) NOT NULL",
-        "`toolCallId` varchar(36) NOT NULL",
+        "`ownerKind` enum('tool_call','job_step') NOT NULL",
+        "`ownerRef` varchar(128) NOT NULL",
+        "`invocationId` varchar(36) NOT NULL",
+        "`operationKey` varchar(128) NOT NULL",
+        "`requestDigest` varchar(71) NOT NULL",
         "`effectType` enum('create','update','delete','send','payment','deploy') NOT NULL",
         "`targetSummaryJson` json NOT NULL",
         "`effectState` enum('not_started','confirmed_success','confirmed_partial','confirmed_failure','unknown_effect') NOT NULL DEFAULT 'not_started'",
@@ -1800,9 +1810,17 @@
         "`createdAt` datetime(3) NOT NULL",
         "`updatedAt` datetime(3) NOT NULL",
         "CONSTRAINT `EffectRecord_id` PRIMARY KEY(`id`)",
-        "CONSTRAINT `EffectRecord_toolCall_uq` UNIQUE(`toolCallId`)",
+        "CONSTRAINT `EffectRecord_tenant_owner_operation_uq` UNIQUE(`tenantId`,`ownerKind`,`ownerRef`,`operationKey`)",
+        "CONSTRAINT `EffectRecord_tenant_toolOwner_uq` UNIQUE(`tenantId`,`toolOwnerSlot`)",
+        "CONSTRAINT `EffectRecord_owner_kind_allowed` CHECK(`ownerKind` IN ('tool_call', 'job_step'))",
+        "CONSTRAINT `EffectRecord_owner_ref_non_empty` CHECK(CHAR_LENGTH(`ownerRef`) > 0)",
+        "CONSTRAINT `EffectRecord_operation_key_non_empty` CHECK(CHAR_LENGTH(`operationKey`) > 0)",
+        "CONSTRAINT `EffectRecord_request_digest_format` CHECK(`requestDigest` REGEXP '^sha256:[0-9a-f]{64}$')",
+        "CONSTRAINT `EffectRecord_dispatch_intent_shape` CHECK((`dispatchIntentAt` IS NULL AND `dispatchEvidence` IS NULL) OR (`dispatchIntentAt` IS NOT NULL AND `dispatchEvidence` IS NOT NULL))",
+        "CONSTRAINT `EffectRecord_tool_owner_slot_shape` CHECK((`ownerKind` = 'tool_call' AND `toolOwnerSlot` = `ownerRef`) OR (`ownerKind` = 'job_step' AND `toolOwnerSlot` IS NULL))",
         "ALTER TABLE `EffectRecord` ADD CONSTRAINT `EffectRecord_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
-        "CREATE INDEX `EffectRecord_tenant_toolCall_idx` ON `EffectRecord` (`tenantId`,`toolCallId`)",
+        "CREATE INDEX `EffectRecord_tenant_invocation_idx` ON `EffectRecord` (`tenantId`,`invocationId`)",
+        "CREATE INDEX `EffectRecord_tenant_owner_idx` ON `EffectRecord` (`tenantId`,`ownerKind`,`ownerRef`)",
         "CREATE INDEX `EffectRecord_tenant_state_idx` ON `EffectRecord` (`tenantId`,`effectState`)"
       ],
       "decision": "keep",
@@ -1815,6 +1833,7 @@
         "lib/capability/tool-execution-queries.ts",
         "lib/capability/tool-execution-worker.ts",
         "lib/job/job-command-consumer.ts",
+        "lib/job/job-step-effects.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -1908,11 +1927,11 @@
     },
     {
       "physicalTableName": "EnvironmentChangeRequest",
-      "schemaDeclaration": "lib/persistence/schema/environment.ts#environmentChangeRequestTable",
+      "schemaDeclaration": "lib/persistence/schema/environment-change-request.ts#environmentChangeRequestTable",
       "migrationSource": [
         "drizzle/0000_initial_schema.sql"
       ],
-      "domainOwner": "environment",
+      "domainOwner": "environment-change-request",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
         "lib/environment/environment-selection.ts"
@@ -1922,7 +1941,7 @@
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
-      "authorityStatement": "lib/persistence/schema/environment.ts#environmentChangeRequestTable 是 EnvironmentChangeRequest 的唯一物理 Schema Authority",
+      "authorityStatement": "lib/persistence/schema/environment-change-request.ts#environmentChangeRequestTable 是 EnvironmentChangeRequest 的唯一物理 Schema Authority",
       "accessException": null,
       "duplicateCandidates": [],
       "retentionOrGc": "由 domain owner 的生产保留、删除或投影重建流程负责",
@@ -1942,16 +1961,16 @@
         "CONSTRAINT `EnvironmentChangeRequest_tenant_thread_sequence_uq` UNIQUE(`tenantId`,`threadId`,`selectionSequence`)",
         "CONSTRAINT `EnvironmentChangeRequest_state_allowed` CHECK(`requestState` IN ('pending', 'accepted_for_next_invocation', 'applied', 'rejected', 'expired'))",
         "CONSTRAINT `EnvironmentChangeRequest_applied_shape` CHECK(`requestState` <> 'applied' OR `firstAppliedInvocationId` IS NOT NULL)",
-        "CONSTRAINT `EnvironmentChangeRequest_revision_reference_shape` CHECK(`requestedRevisionId` IS NOT NULL)",
         "ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_thread_fk` FOREIGN KEY (`tenantId`,`threadId`) REFERENCES `Thread`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_revision_fk` FOREIGN KEY (`tenantId`,`requestedRevisionId`) REFERENCES `EnvironmentDefinitionRevision`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`firstAppliedInvocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `EnvironmentChangeRequest_tenant_thread_state_idx` ON `EnvironmentChangeRequest` (`tenantId`,`threadId`,`requestState`,`selectionSequence`)"
       ],
       "decision": "keep",
       "evidence": [
-        "lib/persistence/schema/environment.ts#environmentChangeRequestTable",
+        "lib/persistence/schema/environment-change-request.ts#environmentChangeRequestTable",
         "lib/environment/environment-selection.ts",
         "lib/environment/environment-selection.ts",
         "drizzle/0000_initial_schema.sql"
@@ -2019,6 +2038,7 @@
       "productionReaders": [
         "lib/environment/environment-definition-store.ts",
         "lib/environment/environment-lease-store.ts",
+        "lib/executions/persistence/execution-ownership-store.ts",
         "lib/job/job-execution.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -2061,6 +2081,7 @@
         "lib/environment/environment-definition-store.ts",
         "lib/environment/environment-definition-store.ts",
         "lib/environment/environment-lease-store.ts",
+        "lib/executions/persistence/execution-ownership-store.ts",
         "lib/job/job-execution.ts",
         "drizzle/0000_initial_schema.sql"
       ],
@@ -2235,18 +2256,22 @@
       "domainOwner": "executions",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
-        "lib/executions/persistence/mysql-execution-binding-store.ts",
-        "lib/job/job-execution.ts"
+        "lib/executions/persistence/mysql-execution-binding-store.ts"
       ],
       "productionReaders": [
         "lib/context/context-handle.ts",
+        "lib/context/initial-checkpoint-source.ts",
         "lib/executions/application/require-current-execution-authority.ts",
         "lib/executions/persistence/execution-binding-queries.ts",
+        "lib/executions/persistence/execution-ownership-store.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/capabilities/turn-controls.ts",
-        "lib/workspace/checkpoint-producer.ts"
+        "lib/workspace/checkpoint-pause.ts",
+        "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
+        "lib/workspace/recovery-anchor.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "binding",
@@ -2299,23 +2324,29 @@
         "CONSTRAINT `ExecutionBinding_environment_reference_shape` CHECK((`environmentMode` = 'MANAGED' AND `environmentDefinitionRevisionId` IS NOT NULL) OR (`environmentMode` = 'NO_PLATFORM_ENVIRONMENT' AND `environmentDefinitionRevisionId` IS NULL))",
         "CONSTRAINT `ExecutionBinding_artifact_evidence_shape` CHECK((`runtimeEvidenceKind` = 'hosted_artifact' AND `runtimeArtifactId` IS NOT NULL AND `runtimeArtifactDigest` IS NOT NULL) OR (`runtimeEvidenceKind` = 'external_endpoint' AND `runtimeArtifactId` IS NULL AND `runtimeArtifactDigest` IS NULL))",
         "ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action",
+        "ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_tenant_initial_checkpoint_fk` FOREIGN KEY (`tenantId`,`initialContextCheckpointId`) REFERENCES `ContextCheckpoint`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `ExecutionBinding_tenant_runtime_revision_idx` ON `ExecutionBinding` (`tenantId`,`runtimeRevisionId`)",
         "CREATE INDEX `ExecutionBinding_tenant_environment_revision_idx` ON `ExecutionBinding` (`tenantId`,`environmentDefinitionRevisionId`)",
-        "CREATE INDEX `ExecutionBinding_tenant_workspace_binding_idx` ON `ExecutionBinding` (`tenantId`,`workspaceBindingId`)"
+        "CREATE INDEX `ExecutionBinding_tenant_workspace_binding_idx` ON `ExecutionBinding` (`tenantId`,`workspaceBindingId`)",
+        "CREATE INDEX `ExecutionBinding_tenant_initial_checkpoint_idx` ON `ExecutionBinding` (`tenantId`,`initialContextCheckpointId`)"
       ],
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/executions.ts#executionBindingTable",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
-        "lib/job/job-execution.ts",
         "lib/context/context-handle.ts",
+        "lib/context/initial-checkpoint-source.ts",
         "lib/executions/application/require-current-execution-authority.ts",
         "lib/executions/persistence/execution-binding-queries.ts",
+        "lib/executions/persistence/execution-ownership-store.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/capabilities/turn-controls.ts",
+        "lib/workspace/checkpoint-pause.ts",
         "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
+        "lib/workspace/recovery-anchor.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -2342,7 +2373,10 @@
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/command-dispatch-gateway.ts",
         "lib/runtime/command-dispatcher.ts",
-        "lib/workspace/checkpoint-producer.ts"
+        "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
+        "lib/workspace/recovery-anchor.ts",
+        "lib/workspace/workspace-write-lock-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -2400,6 +2434,9 @@
         "lib/runtime/command-dispatch-gateway.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
+        "lib/workspace/recovery-anchor.ts",
+        "lib/workspace/workspace-write-lock-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -2886,13 +2923,15 @@
         "lib/executions/persistence/invocation-store.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
-        "lib/workspace/checkpoint-producer.ts"
+        "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts"
       ],
       "productionReaders": [
         "lib/agents/calls/application/agent-call-projection.ts",
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/context/context-handle.ts",
+        "lib/context/initial-checkpoint-source.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/executions/application/require-current-execution-authority.ts",
@@ -2902,9 +2941,11 @@
         "lib/executions/persistence/invocation-store.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/files/agent-attachment-access.ts",
+        "lib/job/job-admission.ts",
         "lib/job/job-command-consumer.ts",
         "lib/job/job-control-queries.ts",
         "lib/job/job-execution.ts",
+        "lib/job/job-step-effects.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
@@ -2912,7 +2953,10 @@
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
         "lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts",
-        "lib/workspace/checkpoint-producer.ts"
+        "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
+        "lib/workspace/recovery-anchor.ts",
+        "lib/workspace/workspace-write-lock-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -2942,10 +2986,11 @@
         "CONSTRAINT `Invocation_subject_allowed` CHECK(`subjectType` IN ('thread', 'job'))",
         "CONSTRAINT `Invocation_kind_allowed` CHECK(`invocationKind` IN ('initial', 'regenerate', 'job'))",
         "CONSTRAINT `Invocation_state_allowed` CHECK(`executionState` IN ('queued', 'running', 'waiting_user', 'completed', 'failed', 'cancelled', 'lost'))",
-        "CONSTRAINT `Invocation_checkpoint_gate_allowed` CHECK(`checkpointGate` IN ('open', 'quiescing', 'frozen'))",
+        "CONSTRAINT `Invocation_checkpoint_gate_allowed` CHECK(`checkpointGate` IN ('open', 'quiescing', 'frozen', 'releasing'))",
         "CONSTRAINT `Invocation_subject_shape` CHECK((`subjectType` = 'thread' AND `threadId` IS NOT NULL AND `turnId` IS NOT NULL AND `triggerItemId` IS NOT NULL AND `jobId` IS NULL) OR (`subjectType` = 'job' AND `jobId` IS NOT NULL AND `threadId` IS NULL AND `turnId` IS NULL AND `triggerItemId` IS NULL AND `invocationKind` = 'job' AND `invocationSequence` = 1))",
         "CONSTRAINT `Invocation_result_terminal_shape` CHECK(((`resultRef` IS NULL AND `resultDigest` IS NULL) OR (`resultRef` IS NOT NULL AND `resultDigest` IS NOT NULL)) AND ((`finishedAt` IS NULL AND `executionState` NOT IN ('completed', 'failed', 'cancelled', 'lost')) OR (`finishedAt` IS NOT NULL AND `executionState` IN ('completed', 'failed', 'cancelled', 'lost'))))",
         "CONSTRAINT `Invocation_checkpoint_owner_shape` CHECK(`checkpointGate` = 'open' OR `checkpointOwnerId` IS NOT NULL)",
+        "CONSTRAINT `Invocation_checkpoint_releasing_shape` CHECK(`checkpointGate` <> 'releasing' OR (`checkpointIntentId` IS NOT NULL AND `checkpointPreparedEvidence` IS NOT NULL))",
         "ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_turnId_Turn_id_fk` FOREIGN KEY (`turnId`) REFERENCES `Turn`(`id`) ON DELETE no action ON UPDATE no action",
@@ -2966,10 +3011,12 @@
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
         "lib/agents/calls/application/agent-call-projection.ts",
         "lib/agents/calls/persistence/apply-agent-call-transition.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/context/context-handle.ts",
+        "lib/context/initial-checkpoint-source.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/executions/application/require-current-execution-authority.ts",
@@ -2979,9 +3026,11 @@
         "lib/executions/persistence/invocation-store.ts",
         "lib/executions/persistence/mysql-execution-binding-store.ts",
         "lib/files/agent-attachment-access.ts",
+        "lib/job/job-admission.ts",
         "lib/job/job-command-consumer.ts",
         "lib/job/job-control-queries.ts",
         "lib/job/job-execution.ts",
+        "lib/job/job-step-effects.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
@@ -2990,6 +3039,9 @@
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
         "lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts",
         "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
+        "lib/workspace/recovery-anchor.ts",
+        "lib/workspace/workspace-write-lock-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -3013,7 +3065,8 @@
         "lib/executions/persistence/execution-ownership-store.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
-        "lib/workspace/checkpoint-producer.ts"
+        "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/workspace-write-lock-queries.ts"
       ],
       "lifecycle": "由生产写入者创建不可变事实，并按领域保留策略归档或清理",
       "authorityKind": "append-only-fact",
@@ -3057,6 +3110,7 @@
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/workspace-write-lock-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -3077,9 +3131,11 @@
       "productionReaders": [
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/executions/persistence/invocation-command-queries.ts",
         "lib/runtime/command-dispatch-gateway.ts",
         "lib/runtime/command-dispatcher.ts",
-        "lib/runtime/retry/dispatch-retry-queries.ts"
+        "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/workspace/checkpoint-producer.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -3120,9 +3176,11 @@
         "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/conversations/child-thread-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/executions/persistence/invocation-command-queries.ts",
         "lib/runtime/command-dispatch-gateway.ts",
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/workspace/checkpoint-producer.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -3145,13 +3203,15 @@
       ],
       "productionReaders": [
         "lib/identity/recovery-consistency-checker.ts",
+        "lib/job/job-admission.ts",
         "lib/job/job-command-consumer.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-control-queries.ts",
         "lib/job/job-event-queries.ts",
         "lib/job/job-execution.ts",
         "lib/job/job-queries.ts",
-        "lib/job/job-result-projection-queries.ts"
+        "lib/job/job-result-projection-queries.ts",
+        "lib/runtime/application/runtime-resume.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -3162,7 +3222,6 @@
       "constraints": [
         "`id` varchar(36) NOT NULL",
         "`tenantId` varchar(36) NOT NULL",
-        "`agentId` varchar(36) NOT NULL",
         "`jobType` varchar(32) NOT NULL",
         "`triggerRef` varchar(512) NOT NULL",
         "`creationKey` varchar(128) NOT NULL",
@@ -3198,6 +3257,7 @@
         "lib/job/job-queries.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/identity/recovery-consistency-checker.ts",
+        "lib/job/job-admission.ts",
         "lib/job/job-command-consumer.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-control-queries.ts",
@@ -3205,6 +3265,7 @@
         "lib/job/job-execution.ts",
         "lib/job/job-queries.ts",
         "lib/job/job-result-projection-queries.ts",
+        "lib/runtime/application/runtime-resume.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -3219,12 +3280,14 @@
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
         "lib/job/job-command-consumer.ts",
+        "lib/job/job-command-lane.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-control-queries.ts",
         "lib/job/job-terminal-bridge.ts"
       ],
       "productionReaders": [
         "lib/job/job-command-consumer.ts",
+        "lib/job/job-command-lane.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-control-queries.ts",
         "lib/job/job-terminal-bridge.ts"
@@ -3266,10 +3329,12 @@
       "evidence": [
         "lib/persistence/schema/job.ts#jobCommandTable",
         "lib/job/job-command-consumer.ts",
+        "lib/job/job-command-lane.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-control-queries.ts",
         "lib/job/job-terminal-bridge.ts",
         "lib/job/job-command-consumer.ts",
+        "lib/job/job-command-lane.ts",
         "lib/job/job-command-queries.ts",
         "lib/job/job-control-queries.ts",
         "lib/job/job-terminal-bridge.ts",
@@ -4894,8 +4959,12 @@
         "lib/runtime/application/ingress-runtime-events.ts"
       ],
       "productionReaders": [
+        "lib/capability/effect-owner.ts",
+        "lib/job/completion-policy.ts",
+        "lib/job/job-step-effects.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
-        "lib/runtime/application/runtime-recovery.ts"
+        "lib/runtime/application/runtime-recovery.ts",
+        "lib/workspace/recovery-anchor.ts"
       ],
       "lifecycle": "由生产写入者创建不可变事实，并按领域保留策略归档或清理",
       "authorityKind": "append-only-fact",
@@ -4935,8 +5004,12 @@
       "evidence": [
         "lib/persistence/schema/executions.ts#runtimeEventIngressTable",
         "lib/runtime/application/ingress-runtime-events.ts",
+        "lib/capability/effect-owner.ts",
+        "lib/job/completion-policy.ts",
+        "lib/job/job-step-effects.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-recovery.ts",
+        "lib/workspace/recovery-anchor.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -5035,20 +5108,15 @@
       "domainOwner": "executions",
       "tenantBoundary": "tenantId 直接隔离；生产查询必须携带 tenantId",
       "productionWriters": [
-        "lib/executions/persistence/execution-ownership-store.ts",
-        "lib/runtime/application/ingress-runtime-events.ts",
-        "lib/runtime/application/runtime-start.ts",
-        "lib/runtime/persistence/runtime-session-store.ts",
-        "lib/runtime/retry/dispatch-retry-queries.ts"
+        "lib/runtime/persistence/runtime-session-store.ts"
       ],
       "productionReaders": [
         "lib/executions/application/create-invocation-command.ts",
         "lib/executions/application/require-current-execution-authority.ts",
-        "lib/executions/persistence/execution-ownership-store.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-recovery.ts",
-        "lib/runtime/application/runtime-start.ts",
         "lib/runtime/persistence/runtime-session-store.ts",
+        "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/workspace/checkpoint-producer.ts"
       ],
@@ -5091,18 +5159,13 @@
       "decision": "keep",
       "evidence": [
         "lib/persistence/schema/executions.ts#runtimeSessionBindingTable",
-        "lib/executions/persistence/execution-ownership-store.ts",
-        "lib/runtime/application/ingress-runtime-events.ts",
-        "lib/runtime/application/runtime-start.ts",
         "lib/runtime/persistence/runtime-session-store.ts",
-        "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/executions/application/create-invocation-command.ts",
         "lib/executions/application/require-current-execution-authority.ts",
-        "lib/executions/persistence/execution-ownership-store.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-recovery.ts",
-        "lib/runtime/application/runtime-start.ts",
         "lib/runtime/persistence/runtime-session-store.ts",
+        "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/workspace/checkpoint-producer.ts",
         "drizzle/0000_initial_schema.sql"
@@ -5400,6 +5463,7 @@
         "lib/conversations/thread-settings-queries.ts",
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/environment/environment-selection.ts",
         "lib/executions/persistence/invocation-store.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/job/job-result-projection-queries.ts",
@@ -5461,6 +5525,7 @@
         "lib/conversations/thread-settings-queries.ts",
         "lib/conversations/turn-queries.ts",
         "lib/conversations/user-action-resolve-queries.ts",
+        "lib/environment/environment-selection.ts",
         "lib/executions/persistence/invocation-store.ts",
         "lib/identity/recovery-consistency-checker.ts",
         "lib/job/job-result-projection-queries.ts",
@@ -5791,6 +5856,7 @@
         "lib/capability/tool-execution-queries.ts"
       ],
       "productionReaders": [
+        "lib/capability/effect-owner.ts",
         "lib/capability/effect-queries.ts",
         "lib/capability/tool-call-queries.ts",
         "lib/capability/tool-execution-queries.ts",
@@ -5834,6 +5900,7 @@
         "lib/capability/effect-queries.ts",
         "lib/capability/tool-call-queries.ts",
         "lib/capability/tool-execution-queries.ts",
+        "lib/capability/effect-owner.ts",
         "lib/capability/effect-queries.ts",
         "lib/capability/tool-call-queries.ts",
         "lib/capability/tool-execution-queries.ts",
@@ -6224,7 +6291,9 @@
         "lib/identity/recovery-consistency-checker.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts",
-        "lib/runtime/continuation/production-invocation-continuation-worker.ts"
+        "lib/runtime/application/ingress-runtime-events.ts",
+        "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+        "lib/workspace/recovery-anchor.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -6268,7 +6337,9 @@
         "lib/identity/recovery-consistency-checker.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/permission/user-action-queries.ts",
+        "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/continuation/production-invocation-continuation-worker.ts",
+        "lib/workspace/recovery-anchor.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -6517,15 +6588,16 @@
         "lib/runtime/application/runtime-redispatch.ts",
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/command-dispatcher.ts",
-        "lib/runtime/dispatcher.ts",
         "lib/runtime/preview-runtime.ts",
         "lib/runtime/resolve-tool-execution-target.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/runtime/scoped-workspace-store.ts",
         "lib/skill/repo.ts",
         "lib/studio/admin-audit.ts",
+        "lib/workspace/checkpoint-pause.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/desktop-workspace-queries.ts",
+        "lib/workspace/workspace-host-server.ts",
         "lib/workspace/workspace-queries.ts",
         "scripts/architecture-gate.ts"
       ],
@@ -6576,15 +6648,16 @@
         "lib/runtime/application/runtime-redispatch.ts",
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/command-dispatcher.ts",
-        "lib/runtime/dispatcher.ts",
         "lib/runtime/preview-runtime.ts",
         "lib/runtime/resolve-tool-execution-target.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/runtime/scoped-workspace-store.ts",
         "lib/skill/repo.ts",
         "lib/studio/admin-audit.ts",
+        "lib/workspace/checkpoint-pause.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/desktop-workspace-queries.ts",
+        "lib/workspace/workspace-host-server.ts",
         "lib/workspace/workspace-queries.ts",
         "scripts/architecture-gate.ts",
         "drizzle/0000_initial_schema.sql"
@@ -6753,10 +6826,10 @@
         "lib/executions/application/require-current-execution-authority.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/build-runtime-start-request.ts",
+        "lib/runtime/application/execution-resources.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-resume.ts",
         "lib/runtime/application/runtime-start.ts",
-        "lib/runtime/dispatcher.ts",
         "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts"
       ],
@@ -6796,10 +6869,10 @@
         "lib/executions/application/require-current-execution-authority.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/build-runtime-start-request.ts",
+        "lib/runtime/application/execution-resources.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-resume.ts",
         "lib/runtime/application/runtime-start.ts",
-        "lib/runtime/dispatcher.ts",
         "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
         "drizzle/0000_initial_schema.sql"
@@ -6832,20 +6905,22 @@
         "`storageScopeDigest` varchar(71) NOT NULL",
         "`writerGeneration` bigint unsigned NOT NULL DEFAULT 0",
         "`lockState` varchar(32) NOT NULL DEFAULT 'released'",
+        "`releaseAttemptCount` int unsigned NOT NULL DEFAULT 0",
         "`versionNo` bigint unsigned NOT NULL DEFAULT 1",
         "`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)",
         "`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)",
         "CONSTRAINT `WorkspaceWriteLock_id` PRIMARY KEY(`id`)",
         "CONSTRAINT `WorkspaceWriteLock_tenant_id_uq` UNIQUE(`tenantId`,`id`)",
         "CONSTRAINT `WorkspaceWriteLock_tenant_scope_uq` UNIQUE(`tenantId`,`storageScopeDigest`)",
-        "CONSTRAINT `WorkspaceWriteLock_state_allowed` CHECK(`lockState` IN ('released', 'reserved', 'active', 'releasing', 'quarantined'))",
+        "CONSTRAINT `WorkspaceWriteLock_state_allowed` CHECK(`lockState` IN ('released', 'reserved', 'active', 'releasing'))",
         "CONSTRAINT `WorkspaceWriteLock_generation_non_negative` CHECK(`writerGeneration` >= 0)",
-        "CONSTRAINT `WorkspaceWriteLock_released_shape` CHECK(`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `leaseExpiresAt` IS NULL))",
+        "CONSTRAINT `WorkspaceWriteLock_released_shape` CHECK(`lockState` <> 'released' OR (`holderInvocationId` IS NULL AND `holderAttemptId` IS NULL AND `holderOwnershipId` IS NULL AND `workspaceBindingId` IS NULL AND `backendGrantRef` IS NULL AND `backendEvidence` IS NULL AND `backendOperationId` IS NULL AND `backendReceipt` IS NULL AND `leaseExpiresAt` IS NULL))",
         "CONSTRAINT `WorkspaceWriteLock_active_evidence_shape` CHECK(`lockState` <> 'active' OR (`holderInvocationId` IS NOT NULL AND `holderAttemptId` IS NOT NULL AND `holderOwnershipId` IS NOT NULL AND `workspaceBindingId` IS NOT NULL AND `backendGrantRef` IS NOT NULL AND `backendEvidence` IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(`backendEvidence`, '$.scopeDigest')) = `storageScopeDigest` AND JSON_EXTRACT(`backendEvidence`, '$.writerGeneration') IS NOT NULL))",
         "ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action",
         "ALTER TABLE `WorkspaceWriteLock` ADD CONSTRAINT `WorkspaceWriteLock_tenant_binding_fk` FOREIGN KEY (`tenantId`,`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action",
         "CREATE INDEX `WorkspaceWriteLock_tenant_holder_idx` ON `WorkspaceWriteLock` (`tenantId`,`holderInvocationId`)",
-        "CREATE INDEX `WorkspaceWriteLock_state_expiry_idx` ON `WorkspaceWriteLock` (`lockState`,`leaseExpiresAt`)"
+        "CREATE INDEX `WorkspaceWriteLock_state_expiry_idx` ON `WorkspaceWriteLock` (`lockState`,`leaseExpiresAt`)",
+        "CREATE INDEX `WorkspaceWriteLock_release_due_idx` ON `WorkspaceWriteLock` (`lockState`,`releaseNextAttemptAt`)"
       ],
       "decision": "keep",
       "evidence": [

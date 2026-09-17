@@ -28,19 +28,33 @@ import {
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
-import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  executionOwnershipTable,
+  invocationTable,
+  runtimeEventIngressTable,
+} from "@/lib/persistence/schema/executions";
 import { filesystemCheckpointTable } from "@/lib/persistence/schema/filesystem-checkpoint";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  type AuthorityIdentity,
+  computeEventPayloadHash,
+  protocolDigest,
+} from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import {
   abandonFilesystemCheckpoint,
   produceFilesystemCheckpoint,
   requestFilesystemCheckpoint,
 } from "@/lib/workspace/checkpoint-producer";
+import {
+  type CheckpointReleaseRecoveryReport,
+  confirmCheckpointRuntimeRelease,
+  recoverPendingCheckpointReleases,
+} from "@/lib/workspace/checkpoint-release";
 import { restoreFilesystemCheckpoint } from "@/lib/workspace/checkpoint-restore";
 import { listFilesystemCheckpoints } from "@/lib/workspace/checkpoint-store";
+import type { RecoveryAnchorDeclarations } from "@/lib/workspace/recovery-anchor";
 import { type SnapshotEntry, digestJson } from "@/lib/workspace/snapshot-manifest";
 import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import { createWorkspaceBackend } from "@/lib/workspace/workspace-backend";
@@ -84,13 +98,32 @@ interface CheckpointFixture {
   environmentRevisionId: string;
   invocationId: string;
   ownershipId: string;
+  /** 该 Invocation 的当前 Runtime Authority（正式身份；种子事实必须带它）。 */
+  authority: AuthorityIdentity;
   writerRoot: string;
   storageRoot: string;
   backend: ReturnType<typeof createWorkspaceBackend>;
-  /** 构造与当前 invocation facts 匹配的合法 RecoveryAnchor。 */
-  anchor: () => Record<string, unknown>;
+  /** 待核验声明；锚点内容由服务端构建。 */
+  declarations: () => RecoveryAnchorDeclarations;
+  /**
+   * 在 RuntimeEventIngress 落下一条**正式接纳**事实（同 tenant / 同 Invocation / 同
+   * Authority tuple），返回 Ingress id 与 payloadHash。用于核验"声明必须对得上事实"。
+   */
+  seedIngressFact: (input: {
+    producerSequence: number;
+    type: "user-action" | "action" | "harness.action.completed" | "progress";
+    payload: Record<string, unknown>;
+    recoveryVersionAfter: number;
+  }) => Promise<{ ingressId: string; payloadHash: string }>;
   /** request + produce 全流程（幂等 intent 由内部生成）。 */
   commit: () => Promise<{ checkpointId: string; anchorDigest: string }>;
+  /** 只做 request + produce（不确认 Runtime 腿）——崩溃窗口夹具。 */
+  commitWithoutRuntimeRelease: () => Promise<{
+    checkpointId: string;
+    checkpointIntentId: string;
+    anchorDigest: string;
+    release: { runtime: "pending" | "confirmed"; backend: "pending" | "confirmed" };
+  }>;
 }
 
 async function setupCheckpointFixture(temporaryRoot: string): Promise<CheckpointFixture> {
@@ -264,23 +297,69 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
       ],
     },
   });
-  const anchor = () => ({
-    invocationId: fixture.invocation.id,
-    bindingDigest: fixture.binding.configHash,
-    recoveryVersion: "0",
-    producerSequence: "1",
-    consumedInputRefs: [],
-    actionFacts: [],
-    childFacts: [],
-    resolvedUserActionRefs: [],
-    unconsumedInputWatermark: "0",
-  });
+  // R09 §1：锚点由服务端构建。夹具只提供"待核验声明"与"正式事实"，不构造锚点内容。
+  const declarations = (): RecoveryAnchorDeclarations => ({});
+  /**
+   * 模拟一次**已正式接纳**的 Runtime 事件落库（真实表、真实复合外键、真实 payloadHash）。
+   * 与 ingress 一致地同步 Invocation 的水位字段，使"事实"与"水位"自洽。
+   */
+  const seedIngressFact: CheckpointFixture["seedIngressFact"] = async (event) => {
+    const payloadHash = computeEventPayloadHash({
+      eventId: `seed-${event.producerSequence}`,
+      producerSequence: String(event.producerSequence),
+      type: event.type,
+      schemaVersion: 1,
+      payload: event.payload,
+    });
+    const ingressId = randomUUID();
+    const now = new Date();
+    await db.insert(runtimeEventIngressTable).values({
+      id: ingressId,
+      tenantId: TENANT_ID,
+      invocationId: fixture.invocation.id,
+      acceptedAttemptId: acquired.authority.attemptId,
+      acceptedOwnershipId: acquired.authority.ownershipId,
+      acceptedSessionId: acquired.authority.sessionBindingId,
+      acceptedEpoch: Number(acquired.authority.leaseEpoch),
+      producerEventId: `seed-${event.producerSequence}`,
+      producerSequence: event.producerSequence,
+      candidateType: event.type,
+      schemaVersion: 1,
+      payloadHash,
+      payloadJson: event.payload,
+      receiptJson: { ingressId },
+      recoveryVersionAfter: event.recoveryVersionAfter,
+      receivedAt: now,
+      acceptedAt: now,
+    });
+    await db
+      .update(invocationTable)
+      .set({
+        lastProducerSequence: event.producerSequence,
+        recoveryVersion: event.recoveryVersionAfter,
+      })
+      .where(eq(invocationTable.id, fixture.invocation.id));
+    return { ingressId, payloadHash };
+  };
   const commit = async () => {
+    const result = await commitWithoutRuntimeRelease();
+    // 真实链路里 Runtime 腿的确认来自 dispatcher 的 releaseSafePoint 成功回调。
+    await confirmCheckpointRuntimeRelease({
+      tenantId: TENANT_ID,
+      invocationId: fixture.invocation.id,
+      checkpointIntentId: result.checkpointIntentId,
+    });
+    return { checkpointId: result.checkpointId, anchorDigest: result.anchorDigest };
+  };
+  /**
+   * 只做到 produce（Backend 腿）：用于模拟"提交成功但 Runtime 解冻丢失"的 Crash 窗口。
+   */
+  const commitWithoutRuntimeRelease = async () => {
     const requested = await requestFilesystemCheckpoint({
       tenantId: TENANT_ID,
       invocationId: fixture.invocation.id,
       ownershipId: acquired.ownership.id,
-      recoveryAnchor: anchor(),
+      declarations: declarations(),
       requestedByType: "service",
       requestedById: "test-service",
     });
@@ -297,18 +376,26 @@ async function setupCheckpointFixture(temporaryRoot: string): Promise<Checkpoint
         writerQuiescenceAchievedAt: new Date(),
       },
     });
-    return { checkpointId: checkpoint.checkpointId, anchorDigest: requested.anchorDigest };
+    return {
+      checkpointId: checkpoint.checkpointId,
+      checkpointIntentId: requested.checkpointIntentId,
+      anchorDigest: requested.anchorDigest,
+      release: checkpoint.release,
+    };
   };
   return {
     workspaceBindingId: workspace.id,
     environmentRevisionId: environmentRevision.id,
     invocationId: fixture.invocation.id,
     ownershipId: acquired.ownership.id,
+    authority: acquired.authority,
     writerRoot: activated.grant.root,
     storageRoot: path.join(temporaryRoot, "snapshot-storage"),
     backend,
-    anchor,
+    declarations,
+    seedIngressFact,
     commit,
+    commitWithoutRuntimeRelease,
   };
 }
 
@@ -329,6 +416,8 @@ async function readGate(invocationId: string): Promise<{
   checkpointGate: string;
   checkpointIntentId: string | null;
   checkpointPreparedEvidence: unknown;
+  /** 库侧行的写入时刻；维护 lane 的扫描窗口以它为界（`updatedAt < now - graceMs`）。 */
+  updatedAt: Date;
 } | null> {
   const [invocation] = await db
     .select()
@@ -339,6 +428,7 @@ async function readGate(invocationId: string): Promise<{
         checkpointGate: invocation.checkpointGate,
         checkpointIntentId: invocation.checkpointIntentId,
         checkpointPreparedEvidence: invocation.checkpointPreparedEvidence,
+        updatedAt: invocation.updatedAt,
       }
     : null;
 }
@@ -356,7 +446,7 @@ describe("FilesystemCheckpoint integration", () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "checkpointed bytes", "utf8");
-      const { checkpointId, anchorDigest } = await ctx.commit();
+      const { checkpointId } = await ctx.commit();
       const destination = path.join(temporaryRoot, "restore");
       await restoreFilesystemCheckpoint({
         tenantId: TENANT_ID,
@@ -368,7 +458,6 @@ describe("FilesystemCheckpoint integration", () => {
           invocationId: ctx.invocationId,
           workspaceBindingId: ctx.workspaceBindingId,
           environmentDefinitionRevisionId: ctx.environmentRevisionId,
-          recoveryAnchorDigest: anchorDigest,
           recoveryVersion: 0,
         },
       });
@@ -392,7 +481,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         invocationId: ctx.invocationId,
         ownershipId: ctx.ownershipId,
-        recoveryAnchor: ctx.anchor(),
+        declarations: {},
         requestedByType: "service",
         requestedById: "test-service",
       });
@@ -439,7 +528,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         invocationId: ctx.invocationId,
         ownershipId: ctx.ownershipId,
-        recoveryAnchor: ctx.anchor(),
+        declarations: {},
         requestedByType: "service",
         requestedById: "test-service",
       });
@@ -459,7 +548,7 @@ describe("FilesystemCheckpoint integration", () => {
       await chmod(path.join(ctx.writerRoot, "sub", "b.bin"), 0o600);
       await symlink("a.txt", path.join(ctx.writerRoot, "link.txt"));
       await utimes(path.join(ctx.writerRoot, "a.txt"), fixedMtime, fixedMtime);
-      const { checkpointId, anchorDigest } = await ctx.commit();
+      const { checkpointId } = await ctx.commit();
       const destination = path.join(temporaryRoot, "restore");
       await restoreFilesystemCheckpoint({
         tenantId: TENANT_ID,
@@ -471,7 +560,6 @@ describe("FilesystemCheckpoint integration", () => {
           invocationId: ctx.invocationId,
           workspaceBindingId: ctx.workspaceBindingId,
           environmentDefinitionRevisionId: ctx.environmentRevisionId,
-          recoveryAnchorDigest: anchorDigest,
           recoveryVersion: 0,
         },
       });
@@ -490,18 +578,19 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it("CHECKPOINT-04: a stale checkpoint cannot be restored against a newer recovery watermark", async () => {
+  it("CHECKPOINT-04: 旧水位 Checkpoint 陈旧，且声明无法伪造锚点成员（R09 §1/§4）", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "v1", "utf8");
       const first = await ctx.commit();
-      // Checkpoint 后新增已消费 Action：producer 水位推进到 2。
-      await db
-        .update(invocationTable)
-        .set({ lastProducerSequence: 2 })
-        .where(eq(invocationTable.id, ctx.invocationId));
-      // 旧 Checkpoint 不能匹配新恢复状态。
-      const newerAnchor = { ...ctx.anchor(), producerSequence: "2" };
+      // Checkpoint 之后新增**已应用 Action 事实**：水位推进到 1（§3 推进表）。
+      const applied = await ctx.seedIngressFact({
+        producerSequence: 2,
+        type: "action",
+        payload: { action: "tool_call", result: "ok" },
+        recoveryVersionAfter: 1,
+      });
+      // 更严格的安全性来自**当前事实**而不是 Checkpoint 自己的记载。
       await expect(
         restoreFilesystemCheckpoint({
           tenantId: TENANT_ID,
@@ -513,32 +602,126 @@ describe("FilesystemCheckpoint integration", () => {
             invocationId: ctx.invocationId,
             workspaceBindingId: ctx.workspaceBindingId,
             environmentDefinitionRevisionId: ctx.environmentRevisionId,
-            recoveryAnchorDigest: protocolDigest(newerAnchor),
-            recoveryVersion: 0,
+            recoveryVersion: 1,
           },
         }),
       ).rejects.toThrow("CheckpointStale");
-      // 请求新 Checkpoint 也不能复用旧水位 anchor。
+      // §1：声明不存在的 actionFact 必须被拒（不能"给了数组就存"）。
       await expect(
         requestFilesystemCheckpoint({
           tenantId: TENANT_ID,
           invocationId: ctx.invocationId,
           ownershipId: ctx.ownershipId,
-          recoveryAnchor: { ...ctx.anchor(), producerSequence: "1", actionFacts: [] },
+          declarations: { actionFacts: [randomUUID()] },
           requestedByType: "service",
           requestedById: "test-service",
         }),
       ).rejects.toThrow("CheckpointStale");
-      // 但用与新水位一致的 anchor 重新提交后，可以继续。
+      // §1：把**未应用**的控制事实声明成 actionFact 必须被拒。
+      const control = await ctx.seedIngressFact({
+        producerSequence: 3,
+        type: "progress",
+        payload: { note: "still working" },
+        recoveryVersionAfter: 1,
+      });
+      await expect(
+        requestFilesystemCheckpoint({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          ownershipId: ctx.ownershipId,
+          declarations: { actionFacts: [control.ingressId] },
+          requestedByType: "service",
+          requestedById: "test-service",
+        }),
+      ).rejects.toThrow("CheckpointStale");
+      // §1：水位是服务端推导的；调用方不能把它声明成更高的值。
+      await expect(
+        requestFilesystemCheckpoint({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          ownershipId: ctx.ownershipId,
+          declarations: { unconsumedInputWatermark: "99" },
+          requestedByType: "service",
+          requestedById: "test-service",
+        }),
+      ).rejects.toThrow("CheckpointStale");
+      // 用与当前事实一致的声明可以继续；锚点成员由服务端从事实填充。
       const requested = await requestFilesystemCheckpoint({
         tenantId: TENANT_ID,
         invocationId: ctx.invocationId,
         ownershipId: ctx.ownershipId,
-        recoveryAnchor: newerAnchor,
+        declarations: { actionFacts: [applied.ingressId], unconsumedInputWatermark: "0" },
         requestedByType: "service",
         requestedById: "test-service",
       });
       expect(requested.checkpointIntentId).toBeTruthy();
+      expect(requested.recoveryAnchor).toMatchObject({
+        recoveryVersion: "1",
+        producerSequence: "3",
+        consumedInputRefs: [],
+        unconsumedInputWatermark: "0",
+      });
+      expect(requested.recoveryAnchor.actionFacts).toEqual([
+        {
+          ref: applied.ingressId,
+          factType: "action",
+          producerSequence: "2",
+          evidenceDigest: applied.payloadHash,
+        },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("CHECKPOINT-04b: 已消费输入由服务端推导，未消费输入不会被伪造成已消费（R09 §1/§3）", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      await writeFile(path.join(ctx.writerRoot, "state.txt"), "payload", "utf8");
+      // 一条**已消费**输入（推进水位）与一条**未消费**输入（不推进水位）。
+      const consumed = await ctx.seedIngressFact({
+        producerSequence: 2,
+        type: "user-action",
+        payload: { text: "hello" },
+        recoveryVersionAfter: 1,
+      });
+      const unconsumed = await ctx.seedIngressFact({
+        producerSequence: 3,
+        type: "user-action",
+        payload: { text: "queued but not looped yet" },
+        recoveryVersionAfter: 1,
+      });
+      // 错报水位（把未消费输入也算进"整段已消费"）必须被拒。
+      await expect(
+        requestFilesystemCheckpoint({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          ownershipId: ctx.ownershipId,
+          declarations: { unconsumedInputWatermark: "3" },
+          requestedByType: "service",
+          requestedById: "test-service",
+        }),
+      ).rejects.toThrow("CheckpointStale");
+      const ok = await requestFilesystemCheckpoint({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        ownershipId: ctx.ownershipId,
+        declarations: { unconsumedInputWatermark: "2" },
+        requestedByType: "service",
+        requestedById: "test-service",
+      });
+      expect(ok.recoveryAnchor.consumedInputRefs).toEqual([
+        {
+          ref: consumed.ingressId,
+          factType: "user-action",
+          producerSequence: "2",
+          evidenceDigest: consumed.payloadHash,
+        },
+      ]);
+      expect(ok.recoveryAnchor.unconsumedInputWatermark).toBe("2");
+      expect(ok.recoveryAnchor.consumedInputRefs).not.toContainEqual(
+        expect.objectContaining({ ref: unconsumed.ingressId }),
+      );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -573,7 +756,7 @@ describe("FilesystemCheckpoint integration", () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "integrity matters", "utf8");
-      const { checkpointId, anchorDigest } = await ctx.commit();
+      const { checkpointId } = await ctx.commit();
       const [row] = await db
         .select()
         .from(filesystemCheckpointTable)
@@ -601,7 +784,6 @@ describe("FilesystemCheckpoint integration", () => {
             invocationId: ctx.invocationId,
             workspaceBindingId: ctx.workspaceBindingId,
             environmentDefinitionRevisionId: ctx.environmentRevisionId,
-            recoveryAnchorDigest: anchorDigest,
             recoveryVersion: 0,
           },
         }),
@@ -675,7 +857,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         invocationId: ctx.invocationId,
         ownershipId: ctx.ownershipId,
-        recoveryAnchor: ctx.anchor(),
+        declarations: {},
         requestedByType: "service",
         requestedById: "test-service",
       });
@@ -727,7 +909,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         invocationId: ctx.invocationId,
         ownershipId: ctx.ownershipId,
-        recoveryAnchor: ctx.anchor(),
+        declarations: {},
         requestedByType: "service",
         requestedById: "test-service",
       });
@@ -790,7 +972,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         invocationId: ctx.invocationId,
         ownershipId: ctx.ownershipId,
-        recoveryAnchor: ctx.anchor(),
+        declarations: {},
         requestedByType: "service",
         requestedById: "test-service",
       });
@@ -813,12 +995,98 @@ describe("FilesystemCheckpoint integration", () => {
             invocationId: ctx.invocationId,
             workspaceBindingId: ctx.workspaceBindingId,
             environmentDefinitionRevisionId: ctx.environmentRevisionId,
-            recoveryAnchorDigest: saved.recoveryAnchorDigest,
-            recoveryVersion: saved.recoveryVersion,
+            // 当前水位：本用例的多个 Checkpoint 都建立在同一水位上，期间无已应用事实推进。
+            recoveryVersion: 0,
           },
         });
         expect(await readFile(path.join(destination, "state.txt"), "utf8")).toBe("shared bytes");
       }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("CHECKPOINT-13: release 丢失后维护 lane 续做 Backend 解冻；Runtime 仍活着时 Gate 保持 fail-closed（R09 §2 步骤 8）", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      await writeFile(path.join(ctx.writerRoot, "state.txt"), "release matters", "utf8");
+      // 模拟"DB 已提交、Runtime 解冻丢失"的崩溃窗口。
+      const produced = await ctx.commitWithoutRuntimeRelease();
+      expect(produced.release).toEqual({ runtime: "pending", backend: "confirmed" });
+      const stalled = await readGate(ctx.invocationId);
+      expect(stalled?.checkpointGate).toBe("releasing");
+      // Checkpoint 本身是已提交事实：即使 release 未完成也必须可被列出。
+      expect(await countCheckpoints(ctx.invocationId)).toBe(1);
+      // 维护 lane 续做：Backend 腿幂等重放，Runtime 腿仍活着 → 不得伪造"已解冻"。
+      // 扫描窗口是 `updatedAt < now - graceMs`，两侧时间都取自毫秒精度的库时钟：`graceMs: 0`
+      // 时若恢复调用与提交落在同一毫秒，这一行会被判"还不够旧"而漏扫。这里显式把 now 推到
+      // 该行之后，使用例只考察**收口判定**本身，不依赖毫秒级墙钟竞争。
+      const report = await recoverPendingCheckpointReleases({
+        now: new Date(stalled!.updatedAt.getTime() + 1),
+        graceMs: 0,
+        resolveBackend: async () => ctx.backend,
+      });
+      expect(report.examined).toBeGreaterThanOrEqual(1);
+      expect(report.awaitingRuntime).toBe(1);
+      expect(report.gateOpened).toBe(0);
+      expect(report.failures).toEqual([]);
+      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
+      // 迟到但合法的 Runtime 确认到达后，Gate 才放行。
+      const legs = await confirmCheckpointRuntimeRelease({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        checkpointIntentId: produced.checkpointIntentId,
+      });
+      expect(legs).toEqual({ runtime: "confirmed", backend: "confirmed" });
+      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("CHECKPOINT-14: Runtime 已消失时维护 lane 据实收口解冻并放开 Gate，不留永久卡死（R09 §2 步骤 8）", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      await writeFile(path.join(ctx.writerRoot, "state.txt"), "release matters", "utf8");
+      const produced = await ctx.commitWithoutRuntimeRelease();
+      // 崩溃后该 Invocation 已进入终态：没有可解冻的 Runtime。
+      await db
+        .update(invocationTable)
+        .set({ executionState: "failed", finishedAt: new Date() })
+        .where(eq(invocationTable.id, ctx.invocationId));
+      const stalled = await readGate(ctx.invocationId);
+      expect(stalled?.checkpointGate).toBe("releasing");
+      const report = await recoverPendingCheckpointReleases({
+        // 同 CHECKPOINT-13：把 now 显式推过该行，避免毫秒同刻被漏扫。
+        now: new Date(stalled!.updatedAt.getTime() + 1),
+        graceMs: 0,
+        resolveBackend: async () => ctx.backend,
+      });
+      // 先断言真的扫到了这一行：否则下面的计数为 0 只是"没扫到"，会掩盖真实的收口缺陷。
+      expect(report.examined).toBeGreaterThanOrEqual(1);
+      expect(report.failures).toEqual([]);
+      expect(report.awaitingRuntime).toBe(0);
+      expect(report.runtimeClosed).toBe(1);
+      expect(report.gateOpened).toBe(1);
+      const gate = await readGate(ctx.invocationId);
+      expect(gate?.checkpointGate).toBe("open");
+      expect(gate?.checkpointIntentId).toBeNull();
+      // 解冻已确认，且 Checkpoint 仍可用于恢复。
+      const destination = path.join(temporaryRoot, "restore-after-release");
+      await restoreFilesystemCheckpoint({
+        tenantId: TENANT_ID,
+        checkpointId: produced.checkpointId,
+        destination,
+        storageRoot: ctx.storageRoot,
+        backend: ctx.backend,
+        expected: {
+          invocationId: ctx.invocationId,
+          workspaceBindingId: ctx.workspaceBindingId,
+          environmentDefinitionRevisionId: ctx.environmentRevisionId,
+          recoveryVersion: 0,
+        },
+      });
+      expect(await readFile(path.join(destination, "state.txt"), "utf8")).toBe("release matters");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -835,7 +1103,7 @@ describe("FilesystemCheckpoint integration", () => {
         payload.write(`block-${offset}`, offset, "utf8");
       }
       await writeFile(path.join(ctx.writerRoot, "big.bin"), payload);
-      const { checkpointId, anchorDigest } = await ctx.commit();
+      const { checkpointId } = await ctx.commit();
       const [row] = await db
         .select()
         .from(filesystemCheckpointTable)
@@ -869,7 +1137,6 @@ describe("FilesystemCheckpoint integration", () => {
           invocationId: ctx.invocationId,
           workspaceBindingId: ctx.workspaceBindingId,
           environmentDefinitionRevisionId: ctx.environmentRevisionId,
-          recoveryAnchorDigest: anchorDigest,
           recoveryVersion: 0,
         },
       });

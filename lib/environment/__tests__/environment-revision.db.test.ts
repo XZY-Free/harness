@@ -35,13 +35,37 @@ import {
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { environmentDefinitionTable } from "@/lib/persistence/schema/environment";
+import { environmentChangeRequestTable } from "@/lib/persistence/schema/environment-change-request";
 import {
   executionBindingTable,
   executionOwnershipTable,
 } from "@/lib/persistence/schema/executions";
+import { tenant } from "@/lib/persistence/schema/identity";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
+
+/**
+ * 断言这次调用因 `EnvironmentChangeRequest_tenant_revision_fk` 这一条约束被拒。
+ *
+ * MySQL 的外键错误可能被 drizzle 包装进 DrizzleQueryError（原文在 cause 上），
+ * 因此沿 cause 链收集消息；断言精确到约束名，既能证明外键存在，也能证明拒绝
+ * 来自预期的复合外键，而不是别的约束顺手挡下。
+ */
+async function revisionForeignKeyRejects(run: () => Promise<unknown>): Promise<boolean> {
+  const error = await run().then(
+    () => null,
+    (reason: unknown) => reason,
+  );
+  if (error === null) return false;
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    messages.push(String((current as Error).message ?? current));
+    current = (current as { cause?: unknown }).cause;
+  }
+  return messages.join(" | ").includes("EnvironmentChangeRequest_tenant_revision_fk");
+}
 
 function revisionInput(
   overrides: Partial<EnvironmentRevisionInput> = {},
@@ -636,6 +660,71 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
     expect(effective?.id).toBe(selection.id);
     expect(effective?.requestState).toBe("applied");
     expect(effective?.requestedRevisionId).toBe(r2.id);
+  });
+
+  it("ENV-16: requestedRevisionId 受同租户复合外键约束（schema-design §5.2.20）", async () => {
+    const definition = await createEnvironmentDefinition({
+      tenantId: DEFAULT_TENANT_ID,
+      environmentKey: "selection-fk-env",
+      displayName: "选择外键环境",
+      revision: revisionInput(),
+    });
+    const fixture = await seedPreparedRuntimeAttempt({
+      environmentDefinitionRevisionId: definition.currentRevisionId!,
+    });
+
+    // 正对照：真实存在的同租户 Revision 可以登记为选择。
+    const accepted = await requestEnvironmentSelection({
+      tenantId: fixture.tenantId,
+      threadId: fixture.threadId,
+      requestedRevisionId: definition.currentRevisionId!,
+      requestedBy: "test-user",
+    });
+    expect(accepted.requestedRevisionId).toBe(definition.currentRevisionId!);
+
+    // 不存在的 Revision id 必须被拒：请求被授权时固定的 Revision 不能是虚构事实。
+    expect(
+      await revisionForeignKeyRejects(() =>
+        requestEnvironmentSelection({
+          tenantId: fixture.tenantId,
+          threadId: fixture.threadId,
+          requestedRevisionId: randomUUID(),
+          requestedBy: "test-user",
+        }),
+      ),
+    ).toBe(true);
+
+    // 跨租户：另一租户的 Revision 同样被拒。这条是复合外键的核心价值——只有
+    // (tenantId, requestedRevisionId) 一起匹配才成立，单看 id 存在并不够。
+    const otherTenantId = randomUUID();
+    await db.insert(tenant).values({
+      id: otherTenantId,
+      key: `other-${otherTenantId.slice(0, 8)}`,
+      name: "Other Tenant",
+    });
+    const otherDefinition = await createEnvironmentDefinition({
+      tenantId: otherTenantId,
+      environmentKey: "selection-fk-other-env",
+      displayName: "他租户环境",
+      revision: revisionInput(),
+    });
+    expect(
+      await revisionForeignKeyRejects(() =>
+        requestEnvironmentSelection({
+          tenantId: fixture.tenantId,
+          threadId: fixture.threadId,
+          requestedRevisionId: otherDefinition.currentRevisionId!,
+          requestedBy: "test-user",
+        }),
+      ),
+    ).toBe(true);
+
+    // 被拒的两次都没有留下任何行（事务整体回滚，不是半写入）。
+    const rows = await db
+      .select({ id: environmentChangeRequestTable.id })
+      .from(environmentChangeRequestTable)
+      .where(eq(environmentChangeRequestTable.tenantId, fixture.tenantId));
+    expect(rows.map((row) => row.id)).toEqual([accepted.id]);
   });
 
   it("ENV-11: NO_PLATFORM_ENVIRONMENT rejects platform-managed environment combinations", async () => {

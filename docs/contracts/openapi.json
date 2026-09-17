@@ -4312,7 +4312,6 @@
         "x-snowharness-error-codes": [
           "ACCESS_DENIED",
           "AUTHENTICATION_REQUIRED",
-          "IDEMPOTENCY_CONFLICT",
           "RATE_LIMITED",
           "REQUEST_SCHEMA_INVALID",
           "RESOURCE_NOT_FOUND"

@@ -9,7 +9,8 @@
  * 2. 扫描到期 InvocationCommand（只取候选 ID）→ 领取 → retryDispatchedCommandToRuntime
  * 3. 维护 lane：Workspace Writer 物理释放与 W 行收口（R04 §3）
  * 4. 维护 lane：租约已到期的 Owner 收口（R01 §3 `Owner expired` / R04 §5）
- * 5. sleep poll interval
+ * 5. 维护 lane：Checkpoint Gate 的 `stuck gate` 与 `releasing 资源` 收口（R05 §5 / R09 §2 步骤 8）
+ * 6. sleep poll interval
  *
  * 关键约束：
  * - 各 lane 共享 Policy / lease 原语；不造第二个 Worker。
@@ -39,6 +40,11 @@ import {
   RUNTIME_DISPATCH_RETRY_POLICY,
   realDispatchClock,
 } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
+import {
+  type CheckpointReleaseRecoveryReport,
+  type StuckCheckpointGateReport,
+  runCheckpointMaintenanceLane,
+} from "@/lib/workspace/checkpoint-release";
 import { runDueWorkspaceWriterReleases } from "@/lib/workspace/workspace-writer-release";
 
 /** Worker 依赖（可注入用于测试）。 */
@@ -62,6 +68,11 @@ export interface RuntimeDispatchRetryWorkerDeps {
   }>;
   /** 维护 lane 覆盖（测试注入）：租约到期的 Owner 收口。 */
   recoverExpiredOwners?: () => Promise<AuthorityRecoverySummary>;
+  /** 维护 lane 覆盖（测试注入）：Checkpoint Gate 的 stuck gate / releasing 资源收口。 */
+  runCheckpointMaintenance?: () => Promise<{
+    stuckGates: StuckCheckpointGateReport;
+    releases: CheckpointReleaseRecoveryReport;
+  }>;
   /** 单轮处理上限覆盖。 */
   batchSize?: number;
 }
@@ -76,6 +87,10 @@ export interface RuntimeDispatchRetryWorker {
     commands: number;
     writerReleases: number;
     ownerRecoveries: number;
+    /** 本轮收口的 stuck Checkpoint Gate 数。 */
+    stuckCheckpointGates: number;
+    /** 本轮收口的 Checkpoint 解冻行数（Backend 腿 + 据实关闭的 Runtime 腿）。 */
+    checkpointReleases: number;
   }>;
 }
 
@@ -122,12 +137,16 @@ export function createRuntimeDispatchRetryWorker(
     (() => runDueWorkspaceWriterReleases({ leaseOwner: workerId, limit: batchSize }));
   const recoverExpiredOwners =
     deps.recoverExpiredOwners ?? (() => runDueExpiredOwnerRecoveries({ limit: batchSize }));
+  const runCheckpointMaintenance =
+    deps.runCheckpointMaintenance ?? (() => runCheckpointMaintenanceLane({ limit: batchSize }));
 
   async function tick(): Promise<{
     attempts: number;
     commands: number;
     writerReleases: number;
     ownerRecoveries: number;
+    stuckCheckpointGates: number;
+    checkpointReleases: number;
   }> {
     const now = clock();
     // 扫描只取候选 ID；每条工作在自己的领取事务里按对象自身根重新验证 due/state/lease。
@@ -203,7 +222,30 @@ export function createRuntimeDispatchRetryWorker(
       });
     }
 
-    return { attempts, commands, writerReleases, ownerRecoveries };
+    // 维护 lane（R05 §5 `stuck gate` + `releasing 资源`；R09 §2 步骤 8）。
+    // 这一步是"解冻不能只在 finally 里做"的生产承载点：安全点请求后 Crash 会留下
+    // 被持有的 Gate，Checkpoint 提交后 Crash 会留下未确认的解冻两条腿，二者都必须
+    // 由持久维护 lane 续做，而不是依赖进程内异常处理。
+    let stuckCheckpointGates = 0;
+    let checkpointReleases = 0;
+    try {
+      const summary = await runCheckpointMaintenance();
+      stuckCheckpointGates = summary.stuckGates.abandoned;
+      checkpointReleases = summary.releases.backendReleased + summary.releases.runtimeClosed;
+    } catch (error) {
+      logger.error("[runtime-dispatch-retry-worker] Checkpoint 维护 lane 失败", {
+        error: String(error),
+      });
+    }
+
+    return {
+      attempts,
+      commands,
+      writerReleases,
+      ownerRecoveries,
+      stuckCheckpointGates,
+      checkpointReleases,
+    };
   }
 
   async function loop(): Promise<void> {

@@ -30,6 +30,7 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import {
   JobAlreadyTerminalError,
   JobCommandAlreadyTerminalError,
@@ -123,7 +124,7 @@ async function createQueuedJob(
     agentId,
     jobType: options?.jobType ?? "evaluation",
     triggerRef: options?.triggerRef ?? "schedule-001",
-    completionPolicyJson: { type: "all_success" },
+    completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId: options?.threadId,
     replacesJobId: options?.replacesJobId,
     inputRef: options?.inputRef ?? "input://batch/001",
@@ -163,7 +164,7 @@ describe("createJob 成功路径", () => {
     expect(result.job.jobType).toBe("evaluation");
     expect(result.job.triggerRef).toBe("schedule-001");
     expect(result.job.jobState).toBe("queued");
-    expect(result.job.completionPolicyJson).toMatchObject({ type: "all_success" });
+    expect(result.job.completionPolicyJson).toMatchObject(ALL_SUCCESS_COMPLETION_POLICY);
     expect(result.job.replacesJobId).toBeNull();
     expect(result.job.threadId).toBeNull();
     expect(result.job.inputRef).toBe("input://batch/001");
@@ -190,7 +191,7 @@ describe("createJob 成功路径", () => {
       trigger_ref: "schedule-001",
       thread_id: null,
       replaces_job_id: null,
-      completion_policy: { type: "all_success" },
+      completion_policy: ALL_SUCCESS_COMPLETION_POLICY,
       input_ref: "input://batch/001",
       input_hash: "sha256:abc",
       created_by: null,
@@ -215,7 +216,7 @@ describe("createJob 成功路径", () => {
       agentId: fx.agentId,
       jobType: "evaluation",
       triggerRef: "schedule-001",
-      completionPolicyJson: { type: "all_success" },
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       threadId: "thread-001",
       replacesJobId: failed.id,
       inputRef: "input://batch/001",
@@ -246,7 +247,7 @@ describe("createJob 参数校验", () => {
         agentId: fx.agentId,
         jobType: "evaluation",
         triggerRef: "schedule-001",
-        completionPolicyJson: { type: "all_success" },
+        completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       }),
     ).rejects.toThrow(/tenantId 不能为空/);
   });
@@ -259,7 +260,7 @@ describe("createJob 参数校验", () => {
         agentId: "",
         jobType: "evaluation",
         triggerRef: "schedule-001",
-        completionPolicyJson: { type: "all_success" },
+        completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       }),
     ).rejects.toThrow(/agentId 只能为 null 或非空字符串/);
   });
@@ -271,7 +272,7 @@ describe("createJob 参数校验", () => {
       agentId: null,
       jobType: "knowledge_build",
       triggerRef: "schedule:knowledge-build",
-      completionPolicyJson: { type: "all_success" },
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       inputJson: { source: "managed" },
       createdBy: "knowledge-service",
     });
@@ -290,7 +291,7 @@ describe("createJob 参数校验", () => {
         agentId: fx.agentId,
         jobType: "evaluation",
         triggerRef: "",
-        completionPolicyJson: { type: "all_success" },
+        completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       }),
     ).rejects.toThrow(/triggerRef 不能为空/);
   });

@@ -24,7 +24,7 @@ import {
   createJobInvocation,
 } from "@/lib/job/job-execution";
 import type { Thread } from "@/lib/persistence/schema/conversation";
-import type { EnvironmentChangeRequest } from "@/lib/persistence/schema/environment";
+import type { EnvironmentChangeRequest } from "@/lib/persistence/schema/environment-change-request";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { type Job, jobTable } from "@/lib/persistence/schema/job";
 import { canonicalRouteResolver } from "@/lib/runtime/application/execution-resources";

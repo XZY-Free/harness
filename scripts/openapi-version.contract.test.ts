@@ -87,3 +87,90 @@ describe("Topic01 OpenAPI API 版本单一来源契约", () => {
     }).not.toThrow();
   });
 });
+
+/**
+ * 只读 POST 的幂等语义一致性契约。
+ *
+ * 背景：`/gateway/attachments/resolve` 是**只读** POST（按短期 bearer capability
+ * 返回原文件字节），但生成器曾给它写上 `IDEMPOTENCY_CONFLICT`，而校验器又把它排除在
+ * `Idempotency-Key` 之外 —— 同一个接口在同一份产物里被两种语义描述。本契约把这条
+ * 判据固定成可回归的断言：声明清单只有一份（`contract_rules.READ_ONLY_POSTS`），
+ * 生成与校验都从它取值，产物不得出现自相矛盾的声明。
+ */
+const RULES_PATH = join(process.cwd(), "docs/contracts/scripts/contract_rules.py");
+const VALIDATOR_PATH = join(process.cwd(), "docs/contracts/scripts/validate_contracts.py");
+
+function readOnlyPosts(): Record<string, string> {
+  const output = execFileSync(
+    "python3",
+    [
+      "-c",
+      "import json,sys;sys.path.insert(0,'docs/contracts/scripts');import contract_rules;print(json.dumps(contract_rules.READ_ONLY_POSTS))",
+    ],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  return JSON.parse(output) as Record<string, string>;
+}
+
+interface OperationShape {
+  parameters?: Array<{ in?: string; name?: string; required?: boolean }>;
+  "x-snowharness-error-codes"?: string[];
+}
+
+describe("只读 POST 幂等语义一致性契约", () => {
+  it("声明清单是唯一事实源：生成器与校验器都从 contract_rules 取值", () => {
+    const generator = readFileSync(GENERATOR_PATH, "utf8");
+    const validator = readFileSync(VALIDATOR_PATH, "utf8");
+    for (const [name, source] of [
+      ["generate_openapi.py", generator],
+      ["validate_contracts.py", validator],
+    ] as const) {
+      expect(source, `${name} 必须从共享清单导入只读 POST 声明`).toContain(
+        "from contract_rules import READ_ONLY_POSTS",
+      );
+      // 不得再出现退役的 v1 路径字面量：它曾让例外静默失效（注释里提到这段历史不算）。
+      expect(source, `${name} 不得残留退役的 v1 路径字面量`).not.toMatch(/["']\/gateway\/v1/);
+    }
+  });
+
+  it("产物里没有只读 POST 声明幂等语义，且每个变更性 POST 都要求 Idempotency-Key", () => {
+    const openapi = JSON.parse(readFileSync(OPENAPI_PATH, "utf8")) as {
+      paths: Record<string, { get?: OperationShape; post?: OperationShape }>;
+    };
+    const readOnly = readOnlyPosts();
+    expect(Object.keys(readOnly).length).toBeGreaterThan(0);
+
+    for (const [path, reason] of Object.entries(readOnly)) {
+      const post = openapi.paths[path]?.post;
+      expect(post, `${path} 必须是真实的 POST 操作（原因：${reason}）`).toBeDefined();
+      const headers = (post!.parameters ?? [])
+        .filter((item) => item.in === "header")
+        .map((item) => item.name?.toLowerCase());
+      expect(headers, `${path} 是只读 POST，不得声明 Idempotency-Key`).not.toContain(
+        "idempotency-key",
+      );
+      expect(
+        post!["x-snowharness-error-codes"],
+        `${path} 是只读 POST，不得声明 IDEMPOTENCY_CONFLICT`,
+      ).not.toContain("IDEMPOTENCY_CONFLICT");
+    }
+
+    for (const [path, item] of Object.entries(openapi.paths)) {
+      if (!item.post || path in readOnly) continue;
+      const headers = (item.post.parameters ?? [])
+        .filter((entry) => entry.in === "header")
+        .map((entry) => entry.name?.toLowerCase());
+      expect(headers, `变更性 POST ${path} 必须要求 Idempotency-Key`).toContain("idempotency-key");
+    }
+  });
+
+  it("attachments/resolve 的只读语义与真实路由实现一致（不做状态变更）", () => {
+    const route = readFileSync(
+      join(process.cwd(), "app/gateway/attachments/resolve/route.ts"),
+      "utf8",
+    );
+    // 只读实现只走"读取原文件"这一条路径；出现写库/写文件调用即说明清单声明不实。
+    expect(route).toContain("readAgentAttachment");
+    expect(route).not.toMatch(/\b(insert|update|delete)\s*\(/);
+  });
+});

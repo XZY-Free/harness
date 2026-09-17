@@ -83,7 +83,7 @@ export interface ProcessCancelCommandResult {
  * 调度器编排 cancel 命令：核对 Invocation/Effect 后才 cancelled。
  *
  * 流程（同事务）：
- * 1. SELECT FOR UPDATE JobCommand + Job
+ * 1. SELECT FOR UPDATE Job（根锁先行）→ SELECT FOR UPDATE JobCommand（复验同 Job 归属）
  * 2. 再次校验 Job 非终态（race condition：可能在 queued 后 Job 已自然终态）
  * → 已终态：rejectCommand(JOB_ALREADY_TERMINAL)
  * 3. 查询所有关联 Invocation（invocationTable.jobId = job.id）
@@ -120,7 +120,23 @@ export async function processCancelCommand(
   const unknownEffectOk = await verifier(cmd.jobId);
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE JobCommand
+    // 1. Job 根锁先行（R06 §4）。
+    //
+    // Job 是本领域所有状态推进的序列化根，全模块只有这一种加锁顺序：
+    // Job → JobCommand → Invocation → Effect facts（见 `consumeTerminalCommand`）。
+    // 若此处先锁 JobCommand 再锁 Job，会与终态消费形成交叉持锁（经典死锁环），
+    // 而 cancel/retry 与终态消费并发正是 R06 §4 要求覆盖的场景。
+    const [job] = await tx
+      .select()
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, cmd.jobId)))
+      .for("update")
+      .limit(1);
+    if (!job) {
+      throw new JobNotFoundError(cmd.jobId);
+    }
+
+    // 2. JobCommand 锁，并复验它确实属于刚锁住的 Job（不按调用方给的 jobId 推断归属）。
     const [current] = await tx
       .select()
       .from(jobCommandTable)
@@ -128,6 +144,7 @@ export async function processCancelCommand(
         and(
           eq(jobCommandTable.tenantId, params.tenantId),
           eq(jobCommandTable.id, params.commandId),
+          eq(jobCommandTable.jobId, job.id),
         ),
       )
       .for("update")
@@ -138,29 +155,12 @@ export async function processCancelCommand(
 
     // 已终态命令直接返回（不应再被调度器处理）
     if (current.commandState === "acknowledged" || current.commandState === "rejected") {
-      // 重新查询 Job 状态以确定 outcome
-      const [job] = await tx
-        .select()
-        .from(jobTable)
-        .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
-        .limit(1);
       return {
-        job: job ?? null,
+        job,
         command: current,
         cancelledEvent: null,
         outcome: "cancelled" as const,
       };
-    }
-
-    // 2. SELECT FOR UPDATE Job
-    const [job] = await tx
-      .select()
-      .from(jobTable)
-      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
-      .for("update")
-      .limit(1);
-    if (!job) {
-      throw new JobNotFoundError(current.jobId);
     }
 
     // race condition：Job 已终态
@@ -375,7 +375,19 @@ export async function processRetryCommand(
   );
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE JobCommand
+    // 1. Job 根锁先行（R06 §4）——顺序与 `consumeTerminalCommand` 及 cancel 完全一致，
+    //    否则 retry 与终态消费并发时会交叉持锁形成死锁。
+    const [job] = await tx
+      .select()
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, cmd.jobId)))
+      .for("update")
+      .limit(1);
+    if (!job) {
+      throw new JobNotFoundError(cmd.jobId);
+    }
+
+    // 2. JobCommand 锁，并复验归属同一 Job。
     const [current] = await tx
       .select()
       .from(jobCommandTable)
@@ -383,6 +395,7 @@ export async function processRetryCommand(
         and(
           eq(jobCommandTable.tenantId, params.tenantId),
           eq(jobCommandTable.id, params.commandId),
+          eq(jobCommandTable.jobId, job.id),
         ),
       )
       .for("update")
@@ -408,28 +421,12 @@ export async function processRetryCommand(
       if (!replacementJob) {
         throw new Error("processRetryCommand: 已 acknowledge 命令但 replacement Job 未找到");
       }
-      const [origJob] = await tx
-        .select()
-        .from(jobTable)
-        .where(eq(jobTable.id, current.jobId))
-        .limit(1);
       return {
-        originalJob: origJob,
+        originalJob: job,
         replacementJob,
         command: current,
         outcome: "retry_created" as const,
       };
-    }
-
-    // 2. SELECT FOR UPDATE Job
-    const [job] = await tx
-      .select()
-      .from(jobTable)
-      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
-      .for("update")
-      .limit(1);
-    if (!job) {
-      throw new JobNotFoundError(current.jobId);
     }
 
     // race condition：Job 非终态

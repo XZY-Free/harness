@@ -25,6 +25,7 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import { JobResultProjectionConflictError } from "@/lib/job/errors";
 import { completeJob } from "@/lib/job/job-control-queries";
 import { createJob, updateJobState } from "@/lib/job/job-queries";
@@ -89,7 +90,7 @@ async function createCompletedJob(tenantId: string, agentId: string, threadId: s
     agentId,
     jobType: "evaluation",
     triggerRef: "schedule-001",
-    completionPolicyJson: { type: "all_success" },
+    completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId,
     inputRef: "input://batch/001",
     inputHash: "sha256:abc",
@@ -305,7 +306,7 @@ describe("projectJobResultToThread 错误路径", () => {
       agentId: fx.agentId,
       jobType: "evaluation",
       triggerRef: "schedule-001",
-      completionPolicyJson: { type: "all_success" },
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       threadId: fx.threadId,
       idempotencyKey: `create-${randomUUID()}`,
     });
@@ -328,7 +329,7 @@ describe("projectJobResultToThread 错误路径", () => {
       agentId: fx.agentId,
       jobType: "evaluation",
       triggerRef: "schedule-001",
-      completionPolicyJson: { type: "all_success" },
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       // threadId 缺失
       inputRef: "input://batch/001",
       inputHash: "sha256:abc",

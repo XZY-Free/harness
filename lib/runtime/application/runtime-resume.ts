@@ -1,5 +1,5 @@
 /** Canonical Runtime resume and Hosted execution boundary. */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cancelActiveAgentCalls } from "@/lib/agents/calls/application/cancel-active-agent-calls";
 import { aiConfig } from "@/lib/config";
 import { getItemById } from "@/lib/conversations/thread-item-queries";
@@ -28,6 +28,7 @@ import {
   type InvocationAttempt,
   invocationAttemptTable,
 } from "@/lib/persistence/schema/executions";
+import { JOB_TERMINAL_STATES, jobTable } from "@/lib/persistence/schema/job";
 import {
   HostedHarnessLoop,
   type HostedHarnessLoopResult,
@@ -240,6 +241,92 @@ async function loadAuthorityFromTuple(tenantId: string, authority: AuthorityIden
   return { owner, session, authority };
 }
 
+/**
+ * R06 §1：装载 Hosted 执行主体（Thread / Job 判别联合）。
+ *
+ * - Thread 主体：执行目标仍是本 Turn 的 trigger item（既有行为不变）。
+ * - Job 主体：执行目标来自 Job 的**正式输入事实**，并在每次实际读取时复验 inputHash；
+ *   不创建 Thread/Turn/triggerItem，也不为 Agent 伪造一个主体。
+ *
+ * 判别不合法（有 subjectType=job 但没有 jobId、Thread 主体缺 threadId/turnId）时
+ * fail-closed，绝不退回"当作 pending"。
+ */
+async function loadHostedExecutionSubject(input: {
+  tenantId: string;
+  invocation: Invocation;
+}): Promise<
+  | { kind: "thread"; threadId: string; turnId: string }
+  | { kind: "job"; jobId: string; objective: string }
+> {
+  const { invocation } = input;
+  if (invocation.subjectType === "job") {
+    const jobId = invocation.jobId;
+    if (!jobId) throw new Error("ExecutionSubjectMismatch");
+    const [job] = await db
+      .select()
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, input.tenantId), eq(jobTable.id, jobId)))
+      .limit(1);
+    if (!job) throw new Error("Job 不存在或跨租户不可见");
+    // Job 的业务态由 JobCommand 消费者推进，因此执行时它可能仍是 queued（不正常之处
+    // 不是"没在 running"，而是**业务终态已经落定还要再跑一次**）。
+    if (JOB_TERMINAL_STATES.includes(job.jobState)) {
+      throw new Error("JobStateMismatch");
+    }
+    // R06 §6：ContextHandle 只是访问契约，不保证输入内容永远不变。每次实际读取都必须
+    // 复验摘要，且必须与 Invocation 冻结的执行目标摘要一致。
+    const digest = jobInputDigest(job);
+    if (job.inputHash !== digest || digest !== invocation.inputDigest) {
+      throw new Error("InputDigestMismatch");
+    }
+    return { kind: "job", jobId, objective: jobObjective(job) };
+  }
+  const threadId = invocation.threadId;
+  const turnId = invocation.turnId;
+  if (!threadId || !turnId) throw new Error("ExecutionSubjectMismatch");
+  return { kind: "thread", threadId, turnId };
+}
+
+/**
+ * 复算 Job 输入的稳定摘要。
+ *
+ * 公式必须与 `createJob` 冻结时完全一致（inline 用 inputJson、reference 用 inputRef），
+ * 否则会把合法输入误判为篡改。
+ */
+function jobInputDigest(job: {
+  inputKind: string;
+  inputJson: unknown;
+  inputRef: string | null;
+}): string {
+  const payload = job.inputKind === "inline" ? job.inputJson : job.inputRef;
+  return `sha256:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
+}
+
+/**
+ * 由 Job 的正式输入事实推导执行目标。
+ *
+ * 输入是业务数据，不是平台 prompt：这里只做"取出可读目标"的稳定投影，
+ * 不发明字段、不注入平台指令。
+ */
+function jobObjective(job: {
+  inputKind: string;
+  inputJson: unknown;
+  inputRef: string | null;
+  id: string;
+}): string {
+  if (job.inputKind !== "inline") {
+    // 受管 inputRef 的内容读取路径尚未落地（无受管输入解析器）：
+    // 不能拿引用字符串冒充"已读取的输入"，显式拒绝而不是伪造执行目标。
+    throw new Error("JobInputReferenceUnsupported");
+  }
+  const json = job.inputJson;
+  if (json && typeof json === "object" && !Array.isArray(json)) {
+    const task = (json as Record<string, unknown>).task;
+    if (typeof task === "string" && task.length > 0) return task;
+  }
+  return typeof json === "string" ? json : JSON.stringify(json ?? null);
+}
+
 async function runHostedInvocation(input: {
   tenantId: string;
   invocation: Invocation;
@@ -297,14 +384,22 @@ async function runHostedInvocation(input: {
     } else if (current.session.bindingState !== "active") {
       throw new Error("RuntimeSessionMismatch");
     }
-    if (!input.invocation.threadId || !input.invocation.turnId) {
-      return { completed: false, pending: true, responseText: "", sentEvents: [] };
-    }
-    const turn = await getTurnById(input.tenantId, input.invocation.turnId);
-    if (!turn) throw new Error("Turn 不存在");
-    const trigger = input.invocation.triggerItemId
-      ? await getItemById(input.tenantId, input.invocation.triggerItemId)
-      : null;
+    // R06 §1：执行主体是判别联合。旧实现用「没有 threadId/turnId ⇒ pending」表达
+    // "这不是 Thread 任务"，其实际效果是**无 Thread 的 Job 永远不执行**（既不完成也不
+    // 失败），并且绕过了 Job 的真实输入校验。这里改为按主体分别装载执行输入。
+    const subject = await loadHostedExecutionSubject({
+      tenantId: input.tenantId,
+      invocation: input.invocation,
+    });
+    // Thread 分支要求 Turn 与 trigger item 真实存在；Job 分支不创建也不读取
+    // Thread/Turn/triggerItem（R06 §1 禁止为通用 Job 执行补一个假 Thread）。
+    const turn =
+      subject.kind === "thread" ? await getTurnById(input.tenantId, subject.turnId) : null;
+    if (subject.kind === "thread" && !turn) throw new Error("Turn 不存在");
+    const trigger =
+      subject.kind === "thread" && input.invocation.triggerItemId
+        ? await getItemById(input.tenantId, input.invocation.triggerItemId)
+        : null;
     const workspaceBinding = await getWorkspaceBindingById(
       input.tenantId,
       input.binding.workspaceBindingId,
@@ -353,9 +448,14 @@ async function runHostedInvocation(input: {
       invocationId: input.invocation.id,
       authority: current.authority,
       tenantId: input.tenantId,
-      threadId: input.invocation.threadId,
-      turnId: input.invocation.turnId,
+      // R06 §1：主体字段按判别联合给出，Job 不再借用空的 threadId/turnId。
+      threadId: subject.kind === "thread" ? subject.threadId : null,
+      turnId: subject.kind === "thread" ? subject.turnId : null,
+      jobId: subject.kind === "job" ? subject.jobId : null,
       inputItems: trigger ? [{ type: "user_message", content: trigger.contentJson }] : [],
+      // Job 的执行目标来自 Job 的正式输入事实（已复验 inputHash），
+      // 不从"空 inputItems"推导，也不伪造一个 user_message。
+      ...(subject.kind === "job" ? { objective: subject.objective } : {}),
       gatewayEndpoints: buildGatewayEndpoints({
         external: false,
         invocationId: input.invocation.id,

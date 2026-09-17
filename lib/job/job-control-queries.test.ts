@@ -23,6 +23,7 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import { createCancelCommand, createRetryCommand } from "@/lib/job/job-command-queries";
 import {
   completeJob,
@@ -75,7 +76,7 @@ async function createQueuedJob(tenantId: string, agentId: string, options?: { th
     agentId,
     jobType: "evaluation",
     triggerRef: "schedule-001",
-    completionPolicyJson: { type: "all_success" },
+    completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId: options?.threadId,
     inputRef: "input://batch/001",
     inputHash: "sha256:abc",

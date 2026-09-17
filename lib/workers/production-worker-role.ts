@@ -98,12 +98,15 @@ export const WORKER_REQUIRED_TABLES: Record<DurableWorkerRole, readonly string[]
   // R04 §5：本 Worker 承载四条 lane —— Session dispatch（RuntimeSessionBinding）、
   // InvocationCommand dispatch、Workspace Writer 物理释放（WorkspaceWriteLock +
   // WorkspaceBinding）、Owner 过期收口（Invocation + ExecutionOwnership + Thread/Turn/ThreadEvent）。
+  // R05 §5 / R09 §2 步骤 8 追加第五条 lane：Checkpoint 维护（stuck gate 收口 +
+  // 解冻两条腿续做），读写 Invocation/ExecutionOwnership/ExecutionBinding/WorkspaceBinding。
   // 启动就绪检查必须覆盖它真实读写的全部对象，否则缺表环境会"启动成功"却在首次 tick 才失败。
   "runtime-dispatch-retry-worker": [
     "Invocation",
     "InvocationAttempt",
     "InvocationCommand",
     "ExecutionOwnership",
+    "ExecutionBinding",
     "RuntimeSessionBinding",
     "Thread",
     "Turn",

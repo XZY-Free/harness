@@ -6,7 +6,11 @@
  * 避免出现"一个修复、两个版本"。
  */
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
-import type { SnapshotStorage, SnapshotStorageReceipt } from "@/lib/workspace/snapshot-storage";
+import type {
+  SnapshotRequirements,
+  SnapshotStorage,
+  SnapshotStorageReceipt,
+} from "@/lib/workspace/snapshot-storage";
 import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import type { WriterStopEvidence } from "@/lib/workspace/workspace-host-server";
 
@@ -92,12 +96,16 @@ export interface WorkspaceHost {
     checkpointIntentId: string;
     anchorDigest: string;
     storage?: SnapshotStorage;
+    /** CHECKPOINT_RESTORABLE 的容量上限与已声明 filesystem profile（fail-closed 必需）。 */
+    requirements: SnapshotRequirements;
   }): Promise<SnapshotStorageReceipt>;
   restore(input: {
     manifestRef: string;
     manifestDigest: string;
     destination: string;
     storage?: SnapshotStorage;
+    operationId?: string;
+    requirements?: SnapshotRequirements;
   }): Promise<void>;
   cleanup(preparation: WorkspacePreparation): Promise<void>;
 }
