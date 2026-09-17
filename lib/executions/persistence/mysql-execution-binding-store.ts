@@ -176,6 +176,9 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         principalFrozenAt: input.principalFrozenAt,
         environmentMode: input.environmentMode,
         configHash: input.configHash,
+        // T33：只落引用列；summaryHash/sourceRangesHash 由 configHash 覆盖并在
+        // 每次 ContextHandle 发放时重新核验，不额外存第二份摘要。
+        initialContextCheckpointId: input.initialContextCompression?.checkpointId ?? null,
         boundAt: input.boundAt,
       });
 
@@ -1196,6 +1199,7 @@ export function toExecutionBinding(
     resolutionInputDigest: row.resolutionInputDigest,
     projectionVersionNo: row.projectionVersionNo,
     configHash: row.configHash,
+    initialContextCheckpointId: row.initialContextCheckpointId,
     boundAt: row.boundAt,
   };
 }

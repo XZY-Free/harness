@@ -1,5 +1,6 @@
 /** Canonical Invocation execution-control schema. */
 import { randomUUID } from "node:crypto";
+import { contextCheckpoint } from "@/lib/persistence/schema/context-checkpoint";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { RuntimeEvidenceKind } from "@/lib/persistence/schema/runtimes";
@@ -191,6 +192,14 @@ export const executionBindingTable = mysqlTable(
       .notNull(),
     environmentDefinitionRevisionId: ascii("environmentDefinitionRevisionId", 36),
     workspaceBindingId: ascii("workspaceBindingId", 36).notNull(),
+    /**
+     * T33：冻结的初始压缩材料引用（同 tenant 的 ContextCheckpoint.id）。
+     *
+     * NULL 只代表「Binding 创建时未选择初始压缩材料」，不是「稍后自动挑选最新」。
+     * 非 null 一旦绑定即不可运行时替换；失效/损坏/撤权必须显式失败，
+     * 需要改变选择只能创建新 Invocation。复合外键保证同 tenant 存在性。
+     */
+    initialContextCheckpointId: ascii("initialContextCheckpointId", 36),
     boundAt: timestamp("boundAt").notNull().default(currentTimestamp()),
   },
   (t) => ({
@@ -214,6 +223,16 @@ export const executionBindingTable = mysqlTable(
     workspaceIdx: index("ExecutionBinding_tenant_workspace_binding_idx").on(
       t.tenantId,
       t.workspaceBindingId,
+    ),
+    // T33：同 tenant 引用 ContextCheckpoint(tenantId, id)；跨 tenant 引用在 DB 层失败。
+    initialContextCheckpointFk: foreignKey({
+      name: "ExecutionBinding_tenant_initial_checkpoint_fk",
+      columns: [t.tenantId, t.initialContextCheckpointId],
+      foreignColumns: [contextCheckpoint.tenantId, contextCheckpoint.id],
+    }),
+    initialContextCheckpointIdx: index("ExecutionBinding_tenant_initial_checkpoint_idx").on(
+      t.tenantId,
+      t.initialContextCheckpointId,
     ),
     evidenceAllowed: check(
       "ExecutionBinding_runtime_evidence_allowed",
@@ -592,6 +611,9 @@ export const RUNTIME_EVENT_INGRESS_TYPES = [
   "harness.action.started",
   "harness.action.completed",
   "harness.action.failed",
+  "job.step.accepted",
+  "job.step.completed",
+  "job.step.failed",
 ] as const;
 export type RuntimeEventIngressType = (typeof RUNTIME_EVENT_INGRESS_TYPES)[number];
 

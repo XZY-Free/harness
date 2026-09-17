@@ -112,6 +112,9 @@ const validContext = {
     tenantId: TENANT_ID,
     invocationId: INVOCATION_ID,
     bindingDigest: DIGEST_A,
+    // T33：初始压缩材料身份是冻结 Start 语义的显式字段，未选择时必须是 null
+    // （不能省略——省略与 null 是同一个语义，但契约要求显式表达，不设旧/新 decoder 双轨）。
+    initialCompression: null,
     principal: { type: "user" as const, id: "user-1", source: "authenticated_user" as const },
     runtimeRevisionId: RUNTIME_REVISION_ID,
     policy: { revisionId: POLICY_REF, digest: DIGEST_A },

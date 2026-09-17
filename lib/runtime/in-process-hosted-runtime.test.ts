@@ -44,6 +44,7 @@ function startRequest(): RuntimeStartRequest {
       tenantId: authority.invocationId,
       invocationId: authority.invocationId,
       bindingDigest: digest,
+      initialCompression: null,
       principal: { type: "service" as const, id: "test", source: "trusted_service" as const },
       runtimeRevisionId: authority.runtimeRevisionId,
       policy: { revisionId: authority.runtimeRevisionId, digest },

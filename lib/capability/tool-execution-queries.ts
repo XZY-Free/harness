@@ -279,7 +279,8 @@ export async function recoverOneExpiredToolAttempt(now = new Date()): Promise<{
         .where(
           and(
             eq(effectRecordTable.tenantId, expired.tenantId),
-            eq(effectRecordTable.toolCallId, expired.toolCallId),
+            eq(effectRecordTable.ownerKind, "tool_call"),
+            eq(effectRecordTable.ownerRef, expired.toolCallId),
             eq(effectRecordTable.effectState, "not_started"),
           ),
         );

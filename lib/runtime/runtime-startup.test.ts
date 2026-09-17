@@ -33,6 +33,7 @@ const request = {
       tenantId: "66666666-6666-4666-8666-666666666666",
       invocationId: "11111111-1111-4111-8111-111111111111",
       bindingDigest: digest,
+      initialCompression: null,
       principal: { type: "service", id: "dispatch", source: "trusted_service" },
       runtimeRevisionId: "22222222-2222-4222-8222-222222222222",
       policy: { revisionId: "77777777-7777-4777-8777-777777777777", digest },

@@ -34,6 +34,7 @@ const binding: ExecutionBinding = {
   resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   projectionVersionNo: 1,
   configHash: `sha256:${"6".repeat(64)}`,
+  initialContextCheckpointId: null,
   boundAt: new Date("2026-08-03T01:02:03.000Z"),
 };
 

@@ -143,6 +143,8 @@ function toNumber(value: string): number {
   return result;
 }
 
+const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
 /**
  * 由正式 Event Schema 决定操作类别（不接受调用方传字符串）。
  *
@@ -157,10 +159,13 @@ function classifyOperationKind(event: RuntimeEvent): ExecutionOperationKind {
     case "action":
     case "harness.action.proposed":
     case "response.completed":
+    case "job.step.accepted":
       return "new_action";
     case "harness.action.started":
     case "harness.action.completed":
     case "harness.action.failed":
+    case "job.step.completed":
+    case "job.step.failed":
       return "accepted_action_completion";
     case "execution.completed":
     case "execution.failed":
@@ -183,7 +188,11 @@ function actionIdOf(event: RuntimeEvent): string | null {
 
 /**
  * 已接纳行动回执不能借 completion 分支创建新 Action：
- * 必须能在本 Invocation 已提交的 Ledger 中找到同一 action_id 的接纳事实。
+ * 必须能在本 Invocation 已提交的 Ledger 中找到同一 action_id（harness.action.*）
+ * 或同一 ownerRef + stepKey（job.step.*）的接纳事实。
+ *
+ * job.step 的 ownerRef 就是 job.step.accepted 那条已提交 Ingress 记录 id：
+ * 重试必须定位同一逻辑步骤，而不是创建一个新 owner 来逃避 Unknown。
  */
 async function assertAcceptedParentAction(
   tx: IngressTx,
@@ -192,6 +201,34 @@ async function assertAcceptedParentAction(
   event: RuntimeEvent,
 ): Promise<void> {
   if (event.type === "harness.action.started") return;
+  if (event.type === "job.step.completed" || event.type === "job.step.failed") {
+    const ownerRef =
+      typeof event.payload.ownerRef === "string" && event.payload.ownerRef
+        ? event.payload.ownerRef
+        : null;
+    const stepKey =
+      typeof event.payload.stepKey === "string" && event.payload.stepKey
+        ? event.payload.stepKey
+        : null;
+    if (!ownerRef || !stepKey) {
+      throw new IngressAuthorityMismatchError(invocationId);
+    }
+    const [accepted] = await tx
+      .select({ id: runtimeEventIngressTable.id })
+      .from(runtimeEventIngressTable)
+      .where(
+        and(
+          eq(runtimeEventIngressTable.tenantId, tenantId),
+          eq(runtimeEventIngressTable.invocationId, invocationId),
+          eq(runtimeEventIngressTable.id, ownerRef),
+          eq(runtimeEventIngressTable.candidateType, "job.step.accepted"),
+          sql`JSON_UNQUOTE(JSON_EXTRACT(${runtimeEventIngressTable.payloadJson}, '$.stepKey')) = ${stepKey}`,
+        ),
+      )
+      .limit(1);
+    if (!accepted) throw new IngressAuthorityMismatchError(invocationId);
+    return;
+  }
   const actionId = actionIdOf(event);
   if (!actionId) {
     throw new IngressAuthorityMismatchError(invocationId);
@@ -210,6 +247,58 @@ async function assertAcceptedParentAction(
     )
     .limit(1);
   if (!accepted) throw new IngressAuthorityMismatchError(invocationId);
+}
+
+/**
+ * `job.step.accepted` 的必需 payload 事实 + 真实平台回读：
+ * jobId / stepKey / stage / inputRefs[{ref,digest}] / processorDigest /
+ * profileDigest / requestDigest 全部非空；Job 主体、真实 service Principal 与
+ * 当前 Authority 由平台侧核对，而不是信任 Runtime 自报。
+ *
+ * stage / stepKey 只是业务标识，绝不作为任意代码执行来源。
+ */
+function assertJobStepAcceptedFacts(
+  invocation: Invocation,
+  event: RuntimeEvent,
+  binding: { principalType: string; principalSource: string },
+): void {
+  if (invocation.subjectType !== "job" || !invocation.jobId) {
+    throw new IngressAuthorityMismatchError(invocation.id);
+  }
+  if (binding.principalType !== "service" || binding.principalSource !== "trusted_service") {
+    throw new IngressAuthorityMismatchError(invocation.id);
+  }
+  const payload = event.payload;
+  const jobId = nonEmptyString(payload.jobId);
+  const stepKey = nonEmptyString(payload.stepKey);
+  const stage = nonEmptyString(payload.stage);
+  const processorDigest = nonEmptyString(payload.processorDigest);
+  const profileDigest = nonEmptyString(payload.profileDigest);
+  const requestDigest = nonEmptyString(payload.requestDigest);
+  if (!jobId || jobId !== invocation.jobId) {
+    throw new IngressAuthorityMismatchError(invocation.id);
+  }
+  if (!stepKey || !stage || !processorDigest || !profileDigest || !requestDigest) {
+    throw new IngressAuthorityMismatchError(invocation.id);
+  }
+  if (!SHA256_DIGEST.test(requestDigest) || !SHA256_DIGEST.test(profileDigest)) {
+    throw new IngressAuthorityMismatchError(invocation.id);
+  }
+  const inputRefs = payload.inputRefs;
+  if (!Array.isArray(inputRefs) || inputRefs.length === 0) {
+    throw new IngressAuthorityMismatchError(invocation.id);
+  }
+  for (const ref of inputRefs) {
+    if (!ref || typeof ref !== "object") throw new IngressAuthorityMismatchError(invocation.id);
+    const entry = ref as Record<string, unknown>;
+    if (!nonEmptyString(entry.ref) || !nonEmptyString(entry.digest)) {
+      throw new IngressAuthorityMismatchError(invocation.id);
+    }
+  }
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 /**
@@ -1146,6 +1235,9 @@ export async function ingressRuntimeEvents(
       );
       if (operationKind === "accepted_action_completion") {
         await assertAcceptedParentAction(tx, input.tenantId, input.invocationId, event);
+      }
+      if (event.type === "job.step.accepted") {
+        assertJobStepAcceptedFacts(lifecycleInvocation, event, authority.binding);
       }
       validateExecutionStarted(event, authority.session);
       const mapped = await mapEvent(tx, lifecycleInvocation, event);

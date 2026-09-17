@@ -186,20 +186,15 @@ async function consumeTerminalCommand(
       return { outcome: "waiting_external" as const, command: waitingCommand, job: waitingJob };
     }
     if (!JOB_TERMINAL_STATES.includes(job.jobState)) {
+      // 直接按 EffectRecord.invocationId 读取两类 owner（tool_call 与 job_step）：
+      // 不再 INNER JOIN ToolCall，否则 job_step Effect 会被静默丢弃。
       const [unknown] = await tx
         .select({ id: effectRecordTable.id })
         .from(effectRecordTable)
-        .innerJoin(
-          toolCallTable,
-          and(
-            eq(toolCallTable.tenantId, input.tenantId),
-            eq(toolCallTable.id, effectRecordTable.toolCallId),
-            eq(toolCallTable.invocationId, invocation.id),
-          ),
-        )
         .where(
           and(
             eq(effectRecordTable.tenantId, input.tenantId),
+            eq(effectRecordTable.invocationId, invocation.id),
             eq(effectRecordTable.effectState, "unknown_effect"),
           ),
         )

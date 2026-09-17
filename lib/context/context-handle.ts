@@ -1,5 +1,9 @@
 /** ContextHandle is the only signed context contract for Thread and Job subjects. */
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  InitialCompressionError,
+  resolveInitialCompression,
+} from "@/lib/context/initial-checkpoint-source";
 import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { db } from "@/lib/db/client";
 import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
@@ -153,11 +157,17 @@ async function loadPersistedContext(
     environmentDefinitionRevisionId: binding.environmentDefinitionRevisionId,
     configHash: binding.configHash,
   });
+  // T33：Binding 冻结了初始压缩材料时，这里真实读一次并核验 Hash/权限/有效期；
+  // 失效、损坏或撤权一律显式失败，不静默改用「最新 Checkpoint」或直接丢弃。
+  const initialCompression = binding.initialContextCheckpointId
+    ? await loadBoundInitialCompression(binding)
+    : null;
   const common = {
     contractVersion: 1 as const,
     tenantId,
     invocationId,
     bindingDigest,
+    initialCompression,
     principal: {
       type: binding.principalType as "user" | "service",
       id: binding.principalId,
@@ -205,6 +215,42 @@ async function loadPersistedContext(
       common: { ...common, issuedAt: 0, expiresAt: 0, jti: randomUUID() },
       subject,
     },
+  };
+}
+
+/**
+ * 读取 Binding 冻结的初始压缩材料并投影为 ContextHandle 受控字段（T33）。
+ *
+ * 失败语义（fail-closed，均有明确错误码）：
+ * - 撤权 / 跨 Principal → binding_mismatch；
+ * - 其余（不存在、非 compression、过期、Hash 不符、不可回读）→ input_unavailable。
+ */
+async function loadBoundInitialCompression(binding: {
+  tenantId: string;
+  initialContextCheckpointId: string | null;
+  principalType: string;
+  principalId: string;
+}): Promise<ContextHandle["common"]["initialCompression"]> {
+  const verified = await resolveInitialCompression({
+    tenantId: binding.tenantId,
+    checkpointId: binding.initialContextCheckpointId as string,
+    requester: {
+      type: binding.principalType as "user" | "service",
+      id: binding.principalId,
+    },
+  }).catch((error: unknown) => {
+    if (error instanceof InitialCompressionError) {
+      throw new ContextHandleError(
+        error.failure === "access_denied" ? "binding_mismatch" : "input_unavailable",
+        `初始压缩材料不可用：${error.message}`,
+      );
+    }
+    throw error;
+  });
+  return {
+    checkpointId: verified.checkpointId,
+    summaryHash: verified.summaryHash,
+    sourceRangesHash: verified.sourceRangesHash,
   };
 }
 

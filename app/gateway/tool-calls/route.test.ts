@@ -24,6 +24,7 @@ import { AiLockManager } from "@/desktop/browser/ai-lock";
 import { openDesktopDatabase } from "@/desktop/storage/database";
 import { registerBuiltinTools } from "@/lib/capability/builtin-tools";
 import {
+  computeEffectRequestDigest,
   createEffectRecord,
   createEffectTargets,
   reconcileEffect,
@@ -260,6 +261,27 @@ async function seedToolchain(
   };
 
   return { toolId, schemaHash };
+}
+
+/**
+ * 建立 tool_call owner 的 EffectRecord（owner 多态后的测试助手）。
+ * operationKey 固定为 ToolCall 唯一外部操作身份，调用方不可自定义。
+ */
+async function seedToolCallEffect(input: {
+  toolCallId: string;
+  invocationId: string;
+  targetSummaryJson?: unknown;
+}): Promise<Awaited<ReturnType<typeof createEffectRecord>>> {
+  return createEffectRecord({
+    tenantId: TENANT,
+    ownerKind: "tool_call",
+    ownerRef: input.toolCallId,
+    invocationId: input.invocationId,
+    requestDigest: computeEffectRequestDigest({ toolCall: input.toolCallId, fixture: "gateway" }),
+    effectType: "update",
+    targetSummaryJson: input.targetSummaryJson ?? { total: 1 },
+    externalIdempotencyKey: `snow-tool:${input.toolCallId}`,
+  });
 }
 
 /** 直接插入 Invocation（turn 或 job 模式）。返回 invocationId。 */
@@ -1171,7 +1193,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const [effect] = await db
         .select()
         .from(effectRecordTable)
-        .where(eq(effectRecordTable.toolCallId, body.tool_call_id));
+        .where(eq(effectRecordTable.ownerRef, body.tool_call_id));
       expect(effect?.effectState).toBe("confirmed_success");
       const continuations = await db
         .select()
@@ -1254,7 +1276,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const [effect] = await db
         .select()
         .from(effectRecordTable)
-        .where(eq(effectRecordTable.toolCallId, body.tool_call_id));
+        .where(eq(effectRecordTable.ownerRef, body.tool_call_id));
       expect(toolCall).toMatchObject({ callState: "failed", errorCode: "PROVIDER_HTTP_422" });
       expect(attempt).toMatchObject({ attemptState: "failed", retryClass: "permanent" });
       expect(effect?.effectState).toBe("confirmed_failure");
@@ -1299,12 +1321,9 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
         leaseMs: 60_000,
       });
       if (!claimed) throw new Error("claim missing");
-      const effect = await createEffectRecord({
-        tenantId: TENANT,
+      const effect = await seedToolCallEffect({
         toolCallId: body.tool_call_id,
-        effectType: "update",
-        targetSummaryJson: { total: 1 },
-        externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+        invocationId,
       });
       await createEffectTargets({
         tenantId: TENANT,
@@ -1360,12 +1379,9 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     const body = await response.json();
     const claimed = await claimNextQueuedToolCall({ workerId: "terminal-crash", leaseMs: 60_000 });
     if (!claimed) throw new Error("claim missing");
-    const effect = await createEffectRecord({
-      tenantId: TENANT,
+    const effect = await seedToolCallEffect({
       toolCallId: body.tool_call_id,
-      effectType: "update",
-      targetSummaryJson: { total: 1 },
-      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+      invocationId,
     });
     const [target] = await createEffectTargets({
       tenantId: TENANT,
@@ -1382,7 +1398,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     });
     await reconcileEffect({
       tenantId: TENANT,
-      toolCallId: body.tool_call_id,
+      effectRecordId: effect.id,
       path: "gateway",
       verificationMethod: "provider_query",
       expectedOperationId: "op-1",
@@ -1510,7 +1526,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       const [effect] = await db
         .select()
         .from(effectRecordTable)
-        .where(eq(effectRecordTable.toolCallId, body.tool_call_id));
+        .where(eq(effectRecordTable.ownerRef, body.tool_call_id));
       expect(effect?.effectState).toBe("unknown_effect");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1577,12 +1593,10 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     );
     const body = await response.json();
     await claimNextQueuedToolCall({ workerId: "partial-test", leaseMs: 60_000 });
-    const effect = await createEffectRecord({
-      tenantId: TENANT,
+    const effect = await seedToolCallEffect({
       toolCallId: body.tool_call_id,
-      effectType: "update",
+      invocationId,
       targetSummaryJson: { total: 2 },
-      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
     });
     const targets = await createEffectTargets({
       tenantId: TENANT,
@@ -1591,7 +1605,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     });
     const reconciled = await reconcileEffect({
       tenantId: TENANT,
-      toolCallId: body.tool_call_id,
+      effectRecordId: effect.id,
       path: "gateway",
       verificationMethod: "provider_query",
       expectedOperationId: "op-1",
@@ -1601,7 +1615,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       ],
     });
     expect(reconciled.effectRecord.effectState).toBe("confirmed_partial");
-    expect(reconciled.toolCall.callState).toBe("unknown_effect");
+    expect(reconciled.toolCall?.callState).toBe("unknown_effect");
   });
 
   it("冲突：同 (toolId, operationId) 不同 args → 409 OPERATION_PAYLOAD_CONFLICT", async () => {

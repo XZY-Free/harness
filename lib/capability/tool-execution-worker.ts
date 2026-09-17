@@ -5,6 +5,7 @@ import {
   getEffectRecordByToolCall,
   listEffectTargets,
   reconcileEffect,
+  recordEffectDispatchIntent,
 } from "@/lib/capability/effect-queries";
 import {
   type ProductionProviderExecutorRegistry,
@@ -27,7 +28,12 @@ import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plan
 import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { type DbOrTx, db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { type EffectType, effectRecordTable } from "@/lib/persistence/schema/effect";
+import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  type EffectType,
+  effectRecordTable,
+  toolCallOperationKey,
+} from "@/lib/persistence/schema/effect";
 import { toolSchemaRevisionTable } from "@/lib/persistence/schema/tool";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { toolExecutionBindingTable } from "@/lib/persistence/schema/tool-execution";
@@ -205,7 +211,11 @@ export function createToolExecutionWorker(
         const effectType = contract.providerOperationMetadata.effectType as EffectType;
         effect = await createEffectRecord({
           tenantId: binding.tenantId,
-          toolCallId: toolCall.id,
+          ownerKind: "tool_call",
+          ownerRef: toolCall.id,
+          invocationId: toolCall.invocationId,
+          operationKey: toolCallOperationKey(toolCall.id),
+          requestDigest: toolCall.argumentsHash,
           effectType,
           targetSummaryJson: { total: 1, description: "provider operation" },
           externalIdempotencyKey,
@@ -223,6 +233,34 @@ export function createToolExecutionWorker(
             tenantId: binding.tenantId,
             effectRecordId: effect.id,
             targets: [{ targetRef: `tool-call:${toolCall.id}` }],
+          });
+        }
+        // 真正发起不可回滚外部写入前，短事务持久记录派发意图；
+        // Crash 在「意图已写但可能尚未发出」时后续接管者保守进入核对，不自动重放。
+        // 首次派发证据是外部副作用的代际事实，只能记录一次：后续 Attempt 的重试
+        // 沿用已冻结的首次证据，不得用新 Attempt 身份改写它（改写会被拒绝，
+        // 也会抹掉「意图已写」的核对依据）。
+        if (!effect.dispatchIntentAt) {
+          const ownership = await getActiveExecutionOwnership({
+            tenantId: binding.tenantId,
+            invocationId: toolCall.invocationId,
+          });
+          await recordEffectDispatchIntent({
+            tenantId: binding.tenantId,
+            effectRecordId: effect.id,
+            authority: {
+              invocationId: toolCall.invocationId,
+              attemptId: attempt.id,
+              ownershipId: ownership?.id ?? null,
+              sessionBindingId: null,
+              leaseEpoch: ownership ? String(ownership.leaseEpoch) : null,
+            },
+            provider: {
+              providerType: binding.providerType,
+              connectionId: binding.connectionId,
+              endpointFingerprint: binding.endpointFingerprint,
+            },
+            requestDigest: effect.requestDigest,
           });
         }
       }
@@ -257,7 +295,7 @@ export function createToolExecutionWorker(
             await reconcileEffect(
               {
                 tenantId: binding.tenantId,
-                toolCallId: toolCall.id,
+                effectRecordId: effect.id,
                 path: "gateway",
                 verificationMethod: "provider_query",
                 expectedOperationId: toolCall.operationId,
@@ -351,7 +389,7 @@ export function createToolExecutionWorker(
             await reconcileEffect(
               {
                 tenantId: binding.tenantId,
-                toolCallId: toolCall.id,
+                effectRecordId: effect.id,
                 path: "gateway",
                 verificationMethod: "provider_query",
                 expectedOperationId: toolCall.operationId,

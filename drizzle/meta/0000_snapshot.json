@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "947ee2cd-fb0f-4bb6-9c0d-60fddb3a3825",
+  "id": "4c3c0202-33e5-40f2-9f77-543d27253231",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -3022,6 +3022,14 @@
         }
       },
       "indexes": {
+        "ContextCheckpoint_tenant_id_uq": {
+          "name": "ContextCheckpoint_tenant_id_uq",
+          "columns": [
+            "tenantId",
+            "id"
+          ],
+          "isUnique": true
+        },
         "ContextCheckpoint_tenant_invocation_type_ranges_uq": {
           "name": "ContextCheckpoint_tenant_invocation_type_ranges_uq",
           "columns": [
@@ -5072,9 +5080,37 @@
           "notNull": true,
           "autoincrement": false
         },
-        "toolCallId": {
-          "name": "toolCallId",
+        "ownerKind": {
+          "name": "ownerKind",
+          "type": "enum('tool_call','job_step')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ownerRef": {
+          "name": "ownerRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocationId": {
+          "name": "invocationId",
           "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "operationKey": {
+          "name": "operationKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestDigest": {
+          "name": "requestDigest",
+          "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -5100,6 +5136,31 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'not_started'"
+        },
+        "dispatchIntentAt": {
+          "name": "dispatchIntentAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchEvidence": {
+          "name": "dispatchEvidence",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "toolOwnerSlot": {
+          "name": "toolOwnerSlot",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "CASE `ownerKind` WHEN 'tool_call' THEN `ownerRef` ELSE NULL END",
+            "type": "stored"
+          }
         },
         "externalIdempotencyKey": {
           "name": "externalIdempotencyKey",
@@ -5160,18 +5221,38 @@
         }
       },
       "indexes": {
-        "EffectRecord_toolCall_uq": {
-          "name": "EffectRecord_toolCall_uq",
+        "EffectRecord_tenant_owner_operation_uq": {
+          "name": "EffectRecord_tenant_owner_operation_uq",
           "columns": [
-            "toolCallId"
+            "tenantId",
+            "ownerKind",
+            "ownerRef",
+            "operationKey"
           ],
           "isUnique": true
         },
-        "EffectRecord_tenant_toolCall_idx": {
-          "name": "EffectRecord_tenant_toolCall_idx",
+        "EffectRecord_tenant_toolOwner_uq": {
+          "name": "EffectRecord_tenant_toolOwner_uq",
           "columns": [
             "tenantId",
-            "toolCallId"
+            "toolOwnerSlot"
+          ],
+          "isUnique": true
+        },
+        "EffectRecord_tenant_invocation_idx": {
+          "name": "EffectRecord_tenant_invocation_idx",
+          "columns": [
+            "tenantId",
+            "invocationId"
+          ],
+          "isUnique": false
+        },
+        "EffectRecord_tenant_owner_idx": {
+          "name": "EffectRecord_tenant_owner_idx",
+          "columns": [
+            "tenantId",
+            "ownerKind",
+            "ownerRef"
           ],
           "isUnique": false
         },
@@ -5208,7 +5289,32 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "EffectRecord_owner_kind_allowed": {
+          "name": "EffectRecord_owner_kind_allowed",
+          "value": "`ownerKind` IN ('tool_call', 'job_step')"
+        },
+        "EffectRecord_owner_ref_non_empty": {
+          "name": "EffectRecord_owner_ref_non_empty",
+          "value": "CHAR_LENGTH(`ownerRef`) > 0"
+        },
+        "EffectRecord_operation_key_non_empty": {
+          "name": "EffectRecord_operation_key_non_empty",
+          "value": "CHAR_LENGTH(`operationKey`) > 0"
+        },
+        "EffectRecord_request_digest_format": {
+          "name": "EffectRecord_request_digest_format",
+          "value": "`requestDigest` REGEXP '^sha256:[0-9a-f]{64}$'"
+        },
+        "EffectRecord_dispatch_intent_shape": {
+          "name": "EffectRecord_dispatch_intent_shape",
+          "value": "(`dispatchIntentAt` IS NULL AND `dispatchEvidence` IS NULL) OR (`dispatchIntentAt` IS NOT NULL AND `dispatchEvidence` IS NOT NULL)"
+        },
+        "EffectRecord_tool_owner_slot_shape": {
+          "name": "EffectRecord_tool_owner_slot_shape",
+          "value": "(`ownerKind` = 'tool_call' AND `toolOwnerSlot` = `ownerRef`) OR (`ownerKind` = 'job_step' AND `toolOwnerSlot` IS NULL)"
+        }
+      }
     },
     "EffectTarget": {
       "name": "EffectTarget",
@@ -13239,6 +13345,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "initialContextCheckpointId": {
+          "name": "initialContextCheckpointId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "boundAt": {
           "name": "boundAt",
           "type": "datetime(6)",
@@ -13280,6 +13393,14 @@
             "workspaceBindingId"
           ],
           "isUnique": false
+        },
+        "ExecutionBinding_tenant_initial_checkpoint_idx": {
+          "name": "ExecutionBinding_tenant_initial_checkpoint_idx",
+          "columns": [
+            "tenantId",
+            "initialContextCheckpointId"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -13290,6 +13411,21 @@
           "columnsFrom": [
             "tenantId",
             "invocationId"
+          ],
+          "columnsTo": [
+            "tenantId",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ExecutionBinding_tenant_initial_checkpoint_fk": {
+          "name": "ExecutionBinding_tenant_initial_checkpoint_fk",
+          "tableFrom": "ExecutionBinding",
+          "tableTo": "ContextCheckpoint",
+          "columnsFrom": [
+            "tenantId",
+            "initialContextCheckpointId"
           ],
           "columnsTo": [
             "tenantId",

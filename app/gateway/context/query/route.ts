@@ -10,6 +10,10 @@ import {
 import { assembleContextView } from "@/lib/context/context-query";
 import type { ContextFragment } from "@/lib/context/fragment";
 import {
+  INITIAL_CHECKPOINT_SOURCE_TYPE,
+  createInitialCompressionResolver,
+} from "@/lib/context/initial-checkpoint-source";
+import {
   KnowledgeResolver,
   MemoryResolver,
   RecentItemsResolver,
@@ -200,14 +204,23 @@ export async function POST(request: Request): Promise<Response> {
       allowedKnowledgeBaseIds: capabilityCatalog.knowledgeSources.map(
         (source) => source.knowledgeBaseId,
       ),
-      allowedSources: BASE_CONTEXT_SOURCES,
+      // T33：初始压缩材料不是模型可选的 `sources`，而是 Binding 冻结的执行输入，
+      // 由 ContextHandle.common.initialCompression 驱动，始终参与装配。
+      allowedSources: [...BASE_CONTEXT_SOURCES, INITIAL_CHECKPOINT_SOURCE_TYPE],
       allowedSkillIds: [],
       query: body.query,
       maxItems: limits.maxItems,
       maxTokens: limits.maxTokens,
       maxSensitivity: limits.maxSensitivity,
     },
-    resolvers: buildResolvers(body.sources, []),
+    resolvers: [
+      ...buildResolvers(body.sources, []),
+      ...initialCompressionResolvers(binding, {
+        tenantId: principal.tenantId,
+        principalType: executionBinding.principalType,
+        principalId: executionBinding.principalId,
+      }),
+    ],
     budget: limits.budget,
   });
 
@@ -222,6 +235,13 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const selectedFragments = view.fragments.slice(0, limits.maxItems);
+  // T33：冻结的初始压缩材料不允许被预算或 max_items 静默丢弃——丢弃等于运行时改变模型输入。
+  if (binding.common.initialCompression && !selectedFragments.some(isInitialCompressionFragment)) {
+    return gatewaySchemaInvalidTable(
+      requestId,
+      "初始压缩材料未进入本次上下文预算（禁止静默丢弃已冻结的初始输入）",
+    );
+  }
   const results = selectedFragments.map(projectContextResult);
   if (results.some((result) => result === null)) {
     return gatewaySchemaInvalidTable(
@@ -257,7 +277,47 @@ export async function POST(request: Request): Promise<Response> {
   );
 }
 
+/**
+ * T33：当 ContextHandle 冻结了初始压缩材料时，注册它的解析器。
+ *
+ * 该解析器与其它源一样经过同一预算与投影路径，不另造专属 Context 流水线；
+ * 它只在 Binding 真正冻结了引用时存在（未选择 → 不注册，无任何隐式默认）。
+ */
+function initialCompressionResolvers(
+  binding: ContextHandle,
+  principal: { tenantId: string; principalType: string; principalId: string },
+): SourceResolver[] {
+  const frozen = binding.common.initialCompression;
+  if (!frozen) return [];
+  return [
+    createInitialCompressionResolver({
+      tenantId: principal.tenantId,
+      requester: {
+        type: principal.principalType as "user" | "service",
+        id: principal.principalId,
+      },
+      initialCompression: frozen,
+      scope: binding.subject.type === "thread" ? "thread" : "project",
+    }),
+  ];
+}
+
+/** 识别初始压缩材料片段（预算保真断言用）。 */
+function isInitialCompressionFragment(fragment: ContextFragment): boolean {
+  return fragment.kind === "summary" && fragment.sourceRef.type === "context_checkpoint";
+}
+
 export function projectContextResult(fragment: ContextFragment): Record<string, string> | null {
+  if (isInitialCompressionFragment(fragment) && fragment.text !== undefined) {
+    return {
+      source_type: "context_summary",
+      source_id: fragment.sourceRef.id,
+      revision_id: fragment.sourceRef.revisionId ?? fragment.sourceRef.id,
+      content_hash: fragment.contentHash,
+      content: fragment.text,
+      citation_ref: `checkpoint://${fragment.sourceRef.id}`,
+    };
+  }
   if (
     fragment.kind === "knowledge" &&
     fragment.sourceRef.type === "knowledge_document" &&

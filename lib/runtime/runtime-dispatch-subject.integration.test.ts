@@ -40,6 +40,7 @@ function request(): RuntimeStartRequest {
         tenantId: invocationId,
         invocationId,
         bindingDigest: digest,
+        initialCompression: null,
         principal: { type: "service", id: "test", source: "trusted_service" },
         runtimeRevisionId: authority.runtimeRevisionId,
         policy: { revisionId: authority.runtimeRevisionId, digest },

@@ -1,5 +1,5 @@
 /**
- * 副作用核对账本 schema：EffectRecord + EffectTarget（阶段 8 S08-C05）。
+ * 副作用核对账本 schema：EffectRecord + EffectTarget。
  *
  * 事实源：
  * - docs/architecture/persistence.md （effect_record 与 effect_target）、
@@ -9,26 +9,32 @@
  * - docs/architecture/api-and-events.md （Gateway 即时核对）、
  * （Admin 长期核对 + 同事务更新 tool_call.call_state + AuditEvent）。
  * - docs/architecture/capabilities-and-security.md 。
+ * - docs/topic02/nexharness-topic02-closure/repairs/10-topic03-interfaces.md §T32、
+ * repairs/11-schema-and-contract-delta.md §3/§4。
  *
  * 关键不变量：
- * - 一条有副作用 ToolCall 恰有一条 EffectRecord（UNIQUE(toolCallId) 一对一）。
+ * - Owner 多态：ownerKind ∈ {tool_call, job_step}；ownerRef 指向真实源对象
+ *   （tool_call → ToolCall.id；job_step → RuntimeEventIngress.id）。
+ *   UNIQUE(tenantId, ownerKind, ownerRef, operationKey) 是 Effect 的逻辑操作身份。
+ * - 一条 ToolCall 恰有一条 EffectRecord：toolOwnerSlot 生成列仅在 tool_call 分支非空，
+ *   由 UNIQUE(tenantId, toolOwnerSlot) 兜底；不保留可写 toolCallId 与 ownerRef 双 Authority。
+ * - 多态 ownerRef 不伪造跨表物理 FK；唯一应用入口在真实事务内回读源对象并校验
+ *   tenant / Invocation 关系（lib/capability/effect-owner.ts）。
  * - effect_target 通过 UNIQUE(effectRecordId, targetHash) 防止同目标重复记录。
  * - 总 effect_state 由目标明细派生：全部 success → confirmed_success；
  * 全部 failure → confirmed_failure；混合 → confirmed_partial；含 unknown → unknown_effect。
- * - 写入后不可变：只能新增 target、更新 target_state/verified_at/evidence_json；
- * effect_type/toolCallId/externalIdempotencyKey 不可修改（补偿语义：另起 ToolCall 通过
- * causation 关联原操作，不修改原事实）。
+ * - 写入后不可变：effect_type / ownerKind / ownerRef / invocationId / operationKey /
+ * requestDigest 不可修改；dispatchEvidence 一旦非 null 语义不可覆写。
  * - 跨租户隔离：所有查询按 tenantId 过滤；tenantId 外键 → Tenant(id) ON DELETE CASCADE。
- * - reconcile 同事务更新：effect_record + effect_target + tool_call.call_state +
- * ThreadEvent/JobEvent + AuditEvent（；本阶段仅实现仓储层原子更新，
- * ThreadEvent/AuditEvent 由调用方在更高层补充）。
  * - unknown_effect 不能自动重放；partial success 只允许重试明确失败且安全的目标。
  */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   datetime,
   index,
   json,
@@ -38,6 +44,9 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
+
+/** ASCII 字符串列（与 executions.ts 同风格）：标识与 digest 均为 ASCII 字面量。 */
+const ascii = (name: string, length: number) => varchar(name, { length }).$type<string>();
 
 // ─── EffectType ──────────────────────────────────────────
 
@@ -55,6 +64,51 @@ import {
  */
 export const EFFECT_TYPES = ["create", "update", "delete", "send", "payment", "deploy"] as const;
 export type EffectType = (typeof EFFECT_TYPES)[number];
+
+// ─── EffectOwnerKind ─────────────────────────────────────
+
+/**
+ * Effect 的多态 owner 类别。
+ * - tool_call：ToolCall 触发的工具副作用；一 ToolCall 一 Effect。
+ * - job_step：Job 内部正式阶段操作触发的副作用（无 ToolCall，不伪造）。
+ */
+export const EFFECT_OWNER_KINDS = ["tool_call", "job_step"] as const;
+export type EffectOwnerKind = (typeof EFFECT_OWNER_KINDS)[number];
+
+/**
+ * Tool owner 的外部操作身份：一条 ToolCall 只有一个外部操作身份，
+ * 该身份就是 ToolCall.id（Provider 侧幂等键亦派生自它）。
+ */
+export function toolCallOperationKey(toolCallId: string): string {
+  return toolCallId;
+}
+
+/**
+ * 首次派发意图证据（不可覆写）。
+ *
+ * 只保存「意图」而不是「已送达」：Crash 在意图已写但可能尚未发出时保守进入核对，
+ * 不自动重复外部写入。不含凭据明文。
+ */
+export interface EffectDispatchEvidence {
+  /** 首次派发的执行身份（十进制字符串保持 BIGINT 精度）。 */
+  authority: {
+    invocationId: string;
+    attemptId: string | null;
+    ownershipId: string | null;
+    sessionBindingId: string | null;
+    leaseEpoch: string | null;
+  };
+  /** 首次派发目标：Provider 类型 / Connection / 端点指纹（非明文端点）。 */
+  provider: {
+    providerType: string | null;
+    connectionId: string | null;
+    endpointFingerprint: string | null;
+  };
+  /** 派发时冻结的请求摘要（与 requestDigest 一致）。 */
+  requestDigest: string;
+  /** 记录时间（UTC ISO 8601）。 */
+  recordedAt: string;
+}
 
 // ─── EffectState ─────────────────────────────────────────
 
@@ -131,16 +185,18 @@ export const ADMIN_VERIFICATION_METHODS: readonly VerificationMethod[] = [
 // ─── EffectRecord 表 ─────────────────────────────────────
 
 /**
- * EffectRecord 表：一条有副作用 ToolCall 的总账（）。
+ * EffectRecord 表：一条有副作用外部操作的核对总账（）。
  *
  * 关键约束：
- * - UNIQUE(toolCallId)：一条 ToolCall 至多一条 EffectRecord（一对一）。
- * - tenantId 冗余字段（与 tool_call.tenantId 一致；由调用方保证）。
- * - toolCallId 逻辑外键 → ToolCall.id（不加 DB 级 FK 避免跨阶段耦合）。
- * - effect_type / toolCallId / externalIdempotencyKey 写入后不可修改（不可变事实）。
+ * - UNIQUE(tenantId, ownerKind, ownerRef, operationKey)：owner 内稳定逻辑操作身份。
+ * - UNIQUE(tenantId, toolOwnerSlot)：tool_call 分支一 ToolCall 一 Effect。
+ * - invocationId：tenant-qualified 引用 Invocation（不带物理 FK：Effect 与 Invocation
+ * 的归属关系由唯一应用入口在事务内回读校验，避免与 owner 回读逻辑产生第二套判定）。
+ * - ownerKind / ownerRef / invocationId / operationKey / requestDigest 写入后不可修改。
+ * - dispatchIntentAt / dispatchEvidence 首次派发意图时成对固定，之后不可覆写。
  * - effect_state / verification_method / verified_at / evidence_json 可通过 reconcile 更新。
  * - external_result_ref 可在 reconcile 中回填（外部系统结果引用）。
- * - 不含 Secret / 未脱敏参数；evidence_json 必须脱敏。
+ * - 不含 Secret / 未脱敏参数；evidence_json 与 dispatchEvidence 必须脱敏。
  */
 export const effectRecordTable = mysqlTable(
   "EffectRecord",
@@ -152,14 +208,40 @@ export const effectRecordTable = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    /** 所属 ToolCall id（逻辑外键 → ToolCall.id；一对一）。 */
-    toolCallId: varchar("toolCallId", { length: 36 }).notNull(),
+    /** 多态 owner 类别：tool_call 或 job_step。无旧模式默认值，创建时显式给出。 */
+    ownerKind: mysqlEnum("ownerKind", EFFECT_OWNER_KINDS).notNull(),
+    /**
+     * 多态 owner 引用：ToolCall.id，或 job.step.accepted 的 RuntimeEventIngress.id。
+     * 不做跨表物理 FK；由唯一应用入口在事务内回读校验。
+     */
+    ownerRef: ascii("ownerRef", 128).notNull(),
+    /** 所属逻辑执行（tenant-qualified 引用 Invocation）。 */
+    invocationId: ascii("invocationId", 36).notNull(),
+    /** owner 内稳定逻辑外部操作键；Retry 不能换 Key。 */
+    operationKey: ascii("operationKey", 128).notNull(),
+    /** 外部目标 / 连接账户语义 / 动作与参数的语义 Hash（sha256: + 64 hex）。 */
+    requestDigest: ascii("requestDigest", 71).notNull(),
     /** 副作用类型。 */
     effectType: mysqlEnum("effectType", EFFECT_TYPES).notNull(),
     /** 目标数量和脱敏摘要（JSON：{ total, description, ... }）。 */
     targetSummaryJson: json("targetSummaryJson").notNull(),
     /** 总状态（not_started / confirmed_* / unknown_effect）。 */
     effectState: mysqlEnum("effectState", EFFECT_STATES).notNull().default("not_started"),
+    /**
+     * 首次派发意图时间（UTC）；未记录派发意图时为 null。
+     * 与 dispatchEvidence 成对出现，非 null 后不覆写。
+     */
+    dispatchIntentAt: datetime("dispatchIntentAt", { mode: "date", fsp: 3 }),
+    /** 首次派发证据（EffectDispatchEvidence）；非 null 后语义不可覆写。 */
+    dispatchEvidence: json("dispatchEvidence").$type<EffectDispatchEvidence>(),
+    /**
+     * tool_call 分支的一 ToolCall 一 Effect 兜底槽位（生成列，不可写）：
+     * ownerKind='tool_call' 时为 ownerRef，否则 NULL。
+     */
+    toolOwnerSlot: ascii("toolOwnerSlot", 128).generatedAlwaysAs(
+      sql`CASE \`ownerKind\` WHEN 'tool_call' THEN \`ownerRef\` ELSE NULL END`,
+      { mode: "stored" },
+    ),
     /** 目标系统幂等键（如外部 API 的 Idempotency-Key）。 */
     externalIdempotencyKey: varchar("externalIdempotencyKey", { length: 128 }),
     /** 外部结果引用（如外部任务 id / 资源 URI）。 */
@@ -180,9 +262,37 @@ export const effectRecordTable = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (t) => ({
-    toolCallUq: uniqueIndex("EffectRecord_toolCall_uq").on(t.toolCallId),
-    tenantToolCallIdx: index("EffectRecord_tenant_toolCall_idx").on(t.tenantId, t.toolCallId),
+    ownerUq: uniqueIndex("EffectRecord_tenant_owner_operation_uq").on(
+      t.tenantId,
+      t.ownerKind,
+      t.ownerRef,
+      t.operationKey,
+    ),
+    toolOwnerUq: uniqueIndex("EffectRecord_tenant_toolOwner_uq").on(t.tenantId, t.toolOwnerSlot),
+    tenantInvocationIdx: index("EffectRecord_tenant_invocation_idx").on(t.tenantId, t.invocationId),
+    tenantOwnerIdx: index("EffectRecord_tenant_owner_idx").on(t.tenantId, t.ownerKind, t.ownerRef),
     tenantStateIdx: index("EffectRecord_tenant_state_idx").on(t.tenantId, t.effectState),
+    ownerKindAllowed: check(
+      "EffectRecord_owner_kind_allowed",
+      sql`\`ownerKind\` IN ('tool_call', 'job_step')`,
+    ),
+    ownerRefNonEmpty: check("EffectRecord_owner_ref_non_empty", sql`CHAR_LENGTH(\`ownerRef\`) > 0`),
+    operationKeyNonEmpty: check(
+      "EffectRecord_operation_key_non_empty",
+      sql`CHAR_LENGTH(\`operationKey\`) > 0`,
+    ),
+    requestDigestFormat: check(
+      "EffectRecord_request_digest_format",
+      sql`\`requestDigest\` REGEXP '^sha256:[0-9a-f]{64}$'`,
+    ),
+    dispatchIntentShape: check(
+      "EffectRecord_dispatch_intent_shape",
+      sql`(\`dispatchIntentAt\` IS NULL AND \`dispatchEvidence\` IS NULL) OR (\`dispatchIntentAt\` IS NOT NULL AND \`dispatchEvidence\` IS NOT NULL)`,
+    ),
+    toolOwnerSlotShape: check(
+      "EffectRecord_tool_owner_slot_shape",
+      sql`(\`ownerKind\` = 'tool_call' AND \`toolOwnerSlot\` = \`ownerRef\`) OR (\`ownerKind\` = 'job_step' AND \`toolOwnerSlot\` IS NULL)`,
+    ),
   }),
 );
 

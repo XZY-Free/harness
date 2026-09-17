@@ -1,5 +1,9 @@
 /** Thread-independent Job execution creation. */
 import { randomUUID } from "node:crypto";
+import {
+  InitialCompressionError,
+  resolveInitialCompression,
+} from "@/lib/context/initial-checkpoint-source";
 import { type DbOrTx, db } from "@/lib/db/client";
 import { environmentDefinitionRevisionTable } from "@/lib/persistence/schema/environment-definition-revision";
 import {
@@ -162,6 +166,28 @@ export async function createJobInvocationInTransaction(
 
 async function validateBindingReferences(tx: Tx, input: CreateJobInvocationInput): Promise<void> {
   const binding = input.binding;
+  // T33：Job Binding 直接写入 ExecutionBinding，因此这里同样必须真实读取并核验
+  // 初始压缩材料（存在性/tenant/用途=compression/Hash/有效期/来源访问权限），
+  // 不能只凭一个 id 落库。
+  if (binding.initialContextCheckpointId) {
+    try {
+      await resolveInitialCompression({
+        tenantId: input.tenantId,
+        checkpointId: binding.initialContextCheckpointId,
+        requester: {
+          type: binding.principalType as "user" | "service",
+          id: binding.principalId,
+        },
+      });
+    } catch (error) {
+      if (error instanceof InitialCompressionError) {
+        throw new JobExecutionConflictError(
+          `Job ExecutionBinding 的初始压缩材料不可用（${error.failure}）：${error.message}`,
+        );
+      }
+      throw error;
+    }
+  }
   const [workspace] = await tx
     .select({ id: workspaceBinding.id, tenantId: workspaceBinding.tenantId })
     .from(workspaceBinding)
@@ -211,6 +237,10 @@ function bindingFingerprint(binding: Partial<ExecutionBinding>): string {
     environmentMode: binding.environmentMode,
     environmentDefinitionRevisionId: binding.environmentDefinitionRevisionId,
     configHash: binding.configHash,
+    // T33：初始压缩材料引用是执行语义的一部分，不能在同一 Job 上被覆盖。
+    // 省略与 null 收敛为同一值（与 computeExecutionBindingConfigHash 一致）：
+    // 「没选初始压缩材料」只有一个语义，不能因为调用方少传一个可选字段就判成冲突。
+    initialContextCheckpointId: binding.initialContextCheckpointId ?? null,
     principalType: binding.principalType,
     principalId: binding.principalId,
     principalSource: binding.principalSource,

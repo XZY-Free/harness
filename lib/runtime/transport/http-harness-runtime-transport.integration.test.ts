@@ -52,6 +52,7 @@ function startRequest(intentType: "start" | "resume" = "start"): RuntimeStartReq
         tenantId: randomUUID(),
         invocationId: current.invocationId,
         bindingDigest: DIGEST,
+        initialCompression: null,
         principal: { type: "service", id: "conformance", source: "trusted_service" },
         runtimeRevisionId: current.runtimeRevisionId,
         policy: { revisionId: randomUUID(), digest: DIGEST },

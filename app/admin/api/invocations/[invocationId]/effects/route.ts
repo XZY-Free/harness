@@ -12,7 +12,8 @@ import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。
  * - 校验 Invocation 存在且属于当前租户（跨租户隐藏为 404）。
- * - 调用 listEffectRecordsByInvocation（innerJoin ToolCall 按 call_sequence 升序）。
+ * - 调用 listEffectRecordsByInvocation：直接按 EffectRecord.invocationId 读取
+ *   tool_call 与 job_step 两类 owner（内连接 ToolCall 会静默丢掉 job_step 记录）。
  * - 投影为 snake_case。
  *
  * 错误映射：
@@ -50,7 +51,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const projected = effects.map((e) => ({
     id: e.id,
     tenant_id: e.tenantId,
-    toolCallId: e.toolCallId,
+    owner_kind: e.ownerKind,
+    owner_ref: e.ownerRef,
+    invocation_id: e.invocationId,
+    operation_key: e.operationKey,
+    request_digest: e.requestDigest,
+    dispatch_intent_at: e.dispatchIntentAt?.toISOString() ?? null,
+    dispatch_evidence: e.dispatchEvidence ?? null,
     effect_type: e.effectType,
     target_summary_json: e.targetSummaryJson,
     effect_state: e.effectState,

@@ -166,6 +166,7 @@ function buildRequest(
       tenantId,
       invocationId: authority.invocationId,
       bindingDigest,
+      initialCompression: null,
       principal: {
         type: "service" as const,
         id: "conformance",

@@ -22,6 +22,23 @@ export interface ExecutionBindingControlPlaneEvidence extends ExecutionBindingRu
   resolutionInputDigest: string;
 }
 
+/**
+ * 冻结的初始压缩材料描述（T33）。
+ *
+ * 三字段都是「已验证事实」，不由调用方自报：
+ * - checkpointId：同 tenant 的 ContextCheckpoint.id（用途必须是 compression）；
+ * - summaryHash：该 Checkpoint 摘要正文的 sha256（已与正文核对一致）；
+ * - sourceRangesHash：该 Checkpoint 来源范围的 sha256（已与 sourceRangesJson 核对一致）。
+ *
+ * 本描述进入 configHash，因而 ContextHandle.bindingDigest 与 Start.executionBinding
+ * 引用的是同一个已验证值。
+ */
+export interface InitialContextCompression {
+  checkpointId: string;
+  summaryHash: string;
+  sourceRangesHash: string;
+}
+
 export interface ExecutionBindingConfigInput {
   runtimeRevisionId: string;
   deploymentRouteId: string;
@@ -54,6 +71,13 @@ export interface ExecutionBindingConfigInput {
   principalId: string;
   principalSource: "authenticated_user" | "trusted_service";
   principalFrozenAt: Date;
+  /**
+   * T33：初始压缩材料（null = 未选择）。可选字段，缺省等价于 null。
+   *
+   * 由 Binding 创建链路在验证 Checkpoint 存在性/tenant/用途/摘要/来源/有效期/访问权限
+   * 之后填入「已验证描述」；调用方不能只给 id 就绑定。
+   */
+  initialContextCompression?: InitialContextCompression | null;
 }
 
 export interface ExecutionBinding
@@ -62,6 +86,13 @@ export interface ExecutionBinding
   invocationId: string;
   tenantId: string;
   configHash: string;
+  /**
+   * T33 回读形态：只携带冻结引用列（null = 未选择）。
+   *
+   * summaryHash/sourceRangesHash 已进入 `configHash`，由 `lib/context/initial-checkpoint-source.ts`
+   * 在每次 ContextHandle 发放与使用时重新核验，因此回读对象不重复携带一份可漂移的摘要。
+   */
+  initialContextCheckpointId: string | null;
   boundAt: Date;
 }
 
@@ -104,9 +135,14 @@ export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigI
   ) {
     throw new ExecutionBindingEvidenceError("可信 principal 冻结字段不完整或不一致");
   }
+  assertInitialContextCompression(input.initialContextCompression ?? null);
   const canonical = JSON.stringify(
     sortKeys({
       ...input,
+      // undefined 与 null 必须收敛为同一个值，否则「未选择」会出现两种不同 digest。
+      initialContextCompression: normalizeInitialContextCompression(
+        input.initialContextCompression ?? null,
+      ),
       controlPlaneEvidence: {
         ...input.controlPlaneEvidence,
         runtimeAttestationIds: [...input.controlPlaneEvidence.runtimeAttestationIds].sort(),
@@ -114,6 +150,37 @@ export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigI
     }),
   );
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+/** 收敛初始压缩材料为 digest 输入形态（未选择恒为 null）。 */
+function normalizeInitialContextCompression(
+  value: InitialContextCompression | null,
+): InitialContextCompression | null {
+  if (!value) return null;
+  return {
+    checkpointId: value.checkpointId,
+    summaryHash: value.summaryHash,
+    sourceRangesHash: value.sourceRangesHash,
+  };
+}
+
+/**
+ * T33：校验初始压缩材料描述本身格式合法。
+ *
+ * 只校验形状；存在性/tenant/用途/内容一致/有效期/访问权限由
+ * `lib/context/initial-checkpoint-source.ts` 在事务外的受控读取中核验。
+ */
+export function assertInitialContextCompression(value: InitialContextCompression | null): void {
+  if (value === null) return;
+  if (!value.checkpointId) {
+    throw new ExecutionBindingEvidenceError("initialContextCompression.checkpointId 不能为空");
+  }
+  if (!SHA256.test(value.summaryHash)) {
+    throw new ExecutionBindingEvidenceError("initialContextCompression.summaryHash 格式非法");
+  }
+  if (!SHA256.test(value.sourceRangesHash)) {
+    throw new ExecutionBindingEvidenceError("initialContextCompression.sourceRangesHash 格式非法");
+  }
 }
 
 /** §9：校验冻结的 Policy/Governance 四字段（有效 Binding 必须非空、digest 带 sha256: 前缀）。 */

@@ -34,6 +34,7 @@ import { createHash } from "node:crypto";
  * - file：Workspace 文件片段。
  * - tool：Tool 结果摘要。
  * - skill：Skill 指令片段。
+ * - summary：历史/前序执行的压缩摘要（低权威数据，T33 初始压缩材料）。
  */
 export const FRAGMENT_KINDS = [
   "system",
@@ -44,6 +45,7 @@ export const FRAGMENT_KINDS = [
   "file",
   "tool",
   "skill",
+  "summary",
 ] as const;
 export type FragmentKind = (typeof FRAGMENT_KINDS)[number];
 
@@ -250,6 +252,9 @@ export function derivePriorityTier(
     case "memory":
     case "skill":
       return FRAGMENT_PRIORITY_TIERS.TIER_RELATED;
+    case "summary":
+      // 历史压缩摘要（T33 初始压缩材料由调用方显式提升到 TIER_RECENT）。
+      return FRAGMENT_PRIORITY_TIERS.TIER_HISTORY;
     default:
       // 历史压缩摘要等未列出的 kind → 最低优先级
       return FRAGMENT_PRIORITY_TIERS.TIER_HISTORY;

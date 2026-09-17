@@ -65,6 +65,13 @@ export async function buildRuntimeStartRequestForInvocation(
     tenantId: input.tenantId,
     invocationId: invocation.id,
   });
+  // T33：Start 冻结的初始材料身份必须与 Binding 落库的引用一致；
+  // 同 Start 网络重试复用已冻结 Binding，不会重新挑选最新 Checkpoint。
+  if (
+    (context.common.initialCompression?.checkpointId ?? null) !== binding.initialContextCheckpointId
+  ) {
+    throw new Error("初始压缩材料与 ExecutionBinding 冻结引用不一致");
+  }
   const inputs =
     invocation.subjectType === "thread"
       ? [

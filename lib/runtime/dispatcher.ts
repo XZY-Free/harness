@@ -129,6 +129,13 @@ export async function dispatchInvocationForTurn(params: {
   runtimeEndpointResolver?: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
   runtimeIdempotencyKey?: string;
   executionSubject: ExecutionSubject;
+  /**
+   * T33：本次 Invocation 显式选择的初始压缩材料（同 tenant 的 compression ContextCheckpoint）。
+   *
+   * 缺省/null = 不选择；不允许「自动取最新 Checkpoint」。同一 Invocation 的
+   * Start 网络重试复用已冻结的 Binding，不会重新挑选。
+   */
+  initialContextCheckpointId?: string | null;
   environmentProvisioner?: EnvironmentProvisioner;
   workspaceBackendResolver?: (
     binding: WorkspaceBinding,
@@ -246,6 +253,8 @@ export async function dispatchInvocationForTurn(params: {
     capabilityCatalogVersion: catalog.version,
     capabilityCatalogSourceRefs: catalog.sourceRefs,
     capabilityCatalogCreatedAt: catalog.createdAt,
+    // T33：显式选择的初始压缩材料；由 create-execution-binding 真实核验后冻结。
+    initialContextCheckpointId: params.initialContextCheckpointId ?? null,
     ...frozenPrincipal,
     projectionVersionNo,
     controlPlaneEvidence: {

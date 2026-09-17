@@ -51,6 +51,7 @@ const bindingRow: BindingRow = {
   environmentDefinitionRevisionId: null,
   environmentMode: "NO_PLATFORM_ENVIRONMENT" as const,
   configHash: `sha256:${"7".repeat(64)}`,
+  initialContextCheckpointId: null,
   boundAt: new Date("2026-08-11T00:00:00.000Z"),
 };
 

@@ -278,10 +278,28 @@ export const ExecutionBindingSchema = z
 export type ExecutionBinding = z.infer<typeof ExecutionBindingSchema>;
 
 /**
+ * T33：ContextHandle 暴露的初始压缩材料受控引用与内容 digest。
+ *
+ * 只暴露稳定身份与内容摘要，不暴露任意可替换对象；summary 正文由平台经
+ * Context 装配下发，不放进句柄。字段缺失代表「Binding 未选择初始材料」。
+ */
+export const ContextInitialCompressionSchema = z
+  .object({
+    checkpointId: uuidSchema,
+    summaryHash: sha256DigestSchema,
+    sourceRangesHash: sha256DigestSchema,
+  })
+  .strict();
+export type ContextInitialCompression = z.infer<typeof ContextInitialCompressionSchema>;
+
+/**
  * ContextHandle wire envelope（§三十二）。
  * Common envelope + subject.type 判别式（thread / job）。
  * Handle 签名文本不入 Start 请求 digest（§7.1 排除域）；
  * 稳定资源身份 threadId / jobId / turnId 仍进入语义域。
+ *
+ * T33：`initialCompression` 是同一契约的显式字段（未选择时为 null），
+ * 不提供旧/新 decoder 双轨。
  */
 export const ContextHandleCommonSchema = z
   .object({
@@ -289,6 +307,7 @@ export const ContextHandleCommonSchema = z
     tenantId: uuidSchema,
     invocationId: uuidSchema,
     bindingDigest: sha256DigestSchema,
+    initialCompression: ContextInitialCompressionSchema.nullable(),
     principal: z
       .object({
         type: z.enum(["user", "service"]),
@@ -576,6 +595,11 @@ export const RuntimeEventTypeSchema = z.enum([
   "harness.action.started",
   "harness.action.completed",
   "harness.action.failed",
+  // Job 内部正式阶段操作事实：ownerRef = 已提交的 job.step.accepted 事件 Ingress id；
+  // 不新建版本目录或兼容 handler，step 事实本身不建立新表。
+  "job.step.accepted",
+  "job.step.completed",
+  "job.step.failed",
 ]);
 export type RuntimeEventType = z.infer<typeof RuntimeEventTypeSchema>;
 

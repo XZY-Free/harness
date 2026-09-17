@@ -107,6 +107,10 @@ export const contextCheckpoint = mysqlTable(
     expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }).notNull(),
   },
   (t) => ({
+    // T33：为 ExecutionBinding.initialContextCheckpointId 的同 tenant 引用提供
+    // 复合外键目标（tenantId, id）。Checkpoint 本身跨 Invocation 复用，
+    // 因此引用必须由 (tenantId, id) 唯一化，不能只靠主键 id。
+    tenantIdUq: uniqueIndex("ContextCheckpoint_tenant_id_uq").on(t.tenantId, t.id),
     // 同一 Invocation 同一 checkpoint_type 下 source_ranges_hash 唯一
     // （同次压缩结果可重放，不同压缩结果不重复落库）。
     tenantInvocationTypeRangesUq: uniqueIndex(

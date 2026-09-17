@@ -8,14 +8,14 @@
   },
   "counts": {
     "unit": 320,
-    "db": 119,
+    "db": 121,
     "integration": 13,
     "contract": 31,
     "e2e-web": 4,
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 491,
+  "total": 493,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -2372,6 +2372,17 @@
       ]
     },
     {
+      "file": "lib/context/__tests__/initial-checkpoint.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/context/budget.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
@@ -3682,6 +3693,17 @@
     },
     {
       "file": "lib/job/__tests__/job-runtime.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/job/__tests__/job-step-effect.integration.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,

@@ -373,6 +373,7 @@ CREATE TABLE `ContextCheckpoint` (
 	`createdAt` datetime(3) NOT NULL,
 	`expiresAt` datetime(3) NOT NULL,
 	CONSTRAINT `ContextCheckpoint_id` PRIMARY KEY(`id`),
+	CONSTRAINT `ContextCheckpoint_tenant_id_uq` UNIQUE(`tenantId`,`id`),
 	CONSTRAINT `ContextCheckpoint_tenant_invocation_type_ranges_uq` UNIQUE(`tenantId`,`invocationId`,`checkpointType`,`sourceRangesHash`)
 );
 --> statement-breakpoint
@@ -627,10 +628,17 @@ CREATE TABLE `Device` (
 CREATE TABLE `EffectRecord` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`toolCallId` varchar(36) NOT NULL,
+	`ownerKind` enum('tool_call','job_step') NOT NULL,
+	`ownerRef` varchar(128) NOT NULL,
+	`invocationId` varchar(36) NOT NULL,
+	`operationKey` varchar(128) NOT NULL,
+	`requestDigest` varchar(71) NOT NULL,
 	`effectType` enum('create','update','delete','send','payment','deploy') NOT NULL,
 	`targetSummaryJson` json NOT NULL,
 	`effectState` enum('not_started','confirmed_success','confirmed_partial','confirmed_failure','unknown_effect') NOT NULL DEFAULT 'not_started',
+	`dispatchIntentAt` datetime(3),
+	`dispatchEvidence` json,
+	`toolOwnerSlot` varchar(128) GENERATED ALWAYS AS (CASE `ownerKind` WHEN 'tool_call' THEN `ownerRef` ELSE NULL END) STORED,
 	`externalIdempotencyKey` varchar(128),
 	`externalResultRef` varchar(512),
 	`verificationMethod` enum('provider_query','callback_evidence','manual_evidence'),
@@ -640,7 +648,14 @@ CREATE TABLE `EffectRecord` (
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `EffectRecord_id` PRIMARY KEY(`id`),
-	CONSTRAINT `EffectRecord_toolCall_uq` UNIQUE(`toolCallId`)
+	CONSTRAINT `EffectRecord_tenant_owner_operation_uq` UNIQUE(`tenantId`,`ownerKind`,`ownerRef`,`operationKey`),
+	CONSTRAINT `EffectRecord_tenant_toolOwner_uq` UNIQUE(`tenantId`,`toolOwnerSlot`),
+	CONSTRAINT `EffectRecord_owner_kind_allowed` CHECK(`ownerKind` IN ('tool_call', 'job_step')),
+	CONSTRAINT `EffectRecord_owner_ref_non_empty` CHECK(CHAR_LENGTH(`ownerRef`) > 0),
+	CONSTRAINT `EffectRecord_operation_key_non_empty` CHECK(CHAR_LENGTH(`operationKey`) > 0),
+	CONSTRAINT `EffectRecord_request_digest_format` CHECK(`requestDigest` REGEXP '^sha256:[0-9a-f]{64}$'),
+	CONSTRAINT `EffectRecord_dispatch_intent_shape` CHECK((`dispatchIntentAt` IS NULL AND `dispatchEvidence` IS NULL) OR (`dispatchIntentAt` IS NOT NULL AND `dispatchEvidence` IS NOT NULL)),
+	CONSTRAINT `EffectRecord_tool_owner_slot_shape` CHECK((`ownerKind` = 'tool_call' AND `toolOwnerSlot` = `ownerRef`) OR (`ownerKind` = 'job_step' AND `toolOwnerSlot` IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `EffectTarget` (
@@ -1617,6 +1632,7 @@ CREATE TABLE `ExecutionBinding` (
 	`environmentMode` varchar(32) NOT NULL,
 	`environmentDefinitionRevisionId` varchar(36),
 	`workspaceBindingId` varchar(36) NOT NULL,
+	`initialContextCheckpointId` varchar(36),
 	`boundAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	CONSTRAINT `ExecutionBinding_invocationId` PRIMARY KEY(`invocationId`),
 	CONSTRAINT `ExecutionBinding_tenant_invocation_uq` UNIQUE(`tenantId`,`invocationId`),
@@ -2936,6 +2952,7 @@ ALTER TABLE `RuntimeRevision` ADD CONSTRAINT `RuntimeRevision_tenantId_Tenant_id
 ALTER TABLE `RuntimeRevision` ADD CONSTRAINT `RuntimeRevision_runtimeId_Runtime_id_fk` FOREIGN KEY (`runtimeId`) REFERENCES `Runtime`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Runtime` ADD CONSTRAINT `Runtime_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_tenant_initial_checkpoint_fk` FOREIGN KEY (`tenantId`,`initialContextCheckpointId`) REFERENCES `ContextCheckpoint`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_tenant_invocation_attempt_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`) REFERENCES `InvocationAttempt`(`tenantId`,`invocationId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -3063,7 +3080,8 @@ CREATE INDEX `DeploymentRoute_runtimeRevision_idx` ON `DeploymentRoute` (`runtim
 CREATE INDEX `DeploymentRoute_activeRouteRevision_idx` ON `DeploymentRoute` (`activeRouteRevisionId`);--> statement-breakpoint
 CREATE INDEX `Device_tenant_user_idx` ON `Device` (`tenantId`,`userId`);--> statement-breakpoint
 CREATE INDEX `Device_tenant_state_idx` ON `Device` (`tenantId`,`deviceState`);--> statement-breakpoint
-CREATE INDEX `EffectRecord_tenant_toolCall_idx` ON `EffectRecord` (`tenantId`,`toolCallId`);--> statement-breakpoint
+CREATE INDEX `EffectRecord_tenant_invocation_idx` ON `EffectRecord` (`tenantId`,`invocationId`);--> statement-breakpoint
+CREATE INDEX `EffectRecord_tenant_owner_idx` ON `EffectRecord` (`tenantId`,`ownerKind`,`ownerRef`);--> statement-breakpoint
 CREATE INDEX `EffectRecord_tenant_state_idx` ON `EffectRecord` (`tenantId`,`effectState`);--> statement-breakpoint
 CREATE INDEX `EffectTarget_tenant_record_idx` ON `EffectTarget` (`tenantId`,`effectRecordId`);--> statement-breakpoint
 CREATE INDEX `EffectTarget_tenant_state_idx` ON `EffectTarget` (`tenantId`,`targetState`);--> statement-breakpoint
@@ -3142,6 +3160,7 @@ CREATE INDEX `Runtime_tenant_lifecycle_updated_idx` ON `Runtime` (`tenantId`,`li
 CREATE INDEX `ExecutionBinding_tenant_runtime_revision_idx` ON `ExecutionBinding` (`tenantId`,`runtimeRevisionId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_tenant_environment_revision_idx` ON `ExecutionBinding` (`tenantId`,`environmentDefinitionRevisionId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_tenant_workspace_binding_idx` ON `ExecutionBinding` (`tenantId`,`workspaceBindingId`);--> statement-breakpoint
+CREATE INDEX `ExecutionBinding_tenant_initial_checkpoint_idx` ON `ExecutionBinding` (`tenantId`,`initialContextCheckpointId`);--> statement-breakpoint
 CREATE INDEX `ExecutionOwnership_state_expiry_idx` ON `ExecutionOwnership` (`ownershipState`,`leaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `ExecutionOwnership_tenant_attempt_epoch_idx` ON `ExecutionOwnership` (`tenantId`,`attemptId`,`leaseEpoch`);--> statement-breakpoint
 CREATE INDEX `InvocationAttempt_preparation_idx` ON `InvocationAttempt` (`preparationState`,`nextPreparationAt`,`preparationLeaseExpiresAt`);--> statement-breakpoint
