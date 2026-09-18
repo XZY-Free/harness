@@ -1,11 +1,43 @@
 import { computeCanonicalDigest, rfc8785Canonicalize } from "@/lib/crypto/rfc-8785-canonicalize";
 import {
+  PUBLICATION_BEHAVIOR_RECEIPT_KEYS,
   PUBLICATION_CONFORMANCE_CASES,
   PUBLICATION_CONFORMANCE_SUITE_REVISION,
+  PUBLICATION_DECLARATION_CASE_IDS,
   type PublicationConformanceCaseId,
+  type PublicationDeclarationCaseId,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  isRuntimeProtocolConformanceCase,
+  validateRuntimeProtocolConformanceEvidence,
+} from "@/lib/runtime/protocol-conformance";
 
 export { PUBLICATION_CONFORMANCE_CASES, PUBLICATION_CONFORMANCE_SUITE_REVISION };
+
+/**
+ * 声明式用例必须携带的真实回执键。
+ *
+ * 「只有 boolean evidence 的材料不接受」：声明式 case 的回执同样必须绑定真实
+ * Adapter 返回的关键字段，而不是把 `passed` 再抄一遍。
+ */
+const DECLARATION_RECEIPT_KEYS: Record<PublicationDeclarationCaseId, string[]> = {
+  "capability-manifest-contract": ["protocolVersion", "features", "limits"],
+  "dispatch-acknowledgement": ["response", "authorityMatches"],
+  "cancel-acknowledgement": ["response"],
+  "steer-capability-consistency": ["declared"],
+  "resume-capability-consistency": ["declared"],
+  "session-recovery-declaration": ["declared"],
+};
+
+/** 逐 case 的全部必需回执键（声明式 + 行为），单一权威。 */
+export const PUBLICATION_CONFORMANCE_RECEIPT_KEYS: Record<
+  PublicationConformanceCaseId,
+  readonly string[]
+> = {
+  ...DECLARATION_RECEIPT_KEYS,
+  ...PUBLICATION_BEHAVIOR_RECEIPT_KEYS,
+};
+
 export type RuntimeConformanceCaseId = PublicationConformanceCaseId;
 export type RuntimeConformanceOverallResult = "passed" | "failed" | "error" | "cancelled";
 
@@ -145,7 +177,33 @@ export function validateRuntimeConformanceReport(report: RuntimeConformanceRepor
         "case evidenceDigest 与 evidence canonical digest 不一致",
       );
     }
+    // R10 §3：只有 boolean evidence、无实际调用回执的材料不接受。
+    // 只对**声明通过**的 case 强制回执：失败 case 由 overallResult 一致性单独拦下。
+    if (!result.passed) continue;
+    const requiredKeys = PUBLICATION_CONFORMANCE_RECEIPT_KEYS[result.caseId];
+    if (!requiredKeys) {
+      throw new RuntimeConformanceTrustError(`case ${result.caseId} 未声明回执要求`);
+    }
+    for (const key of requiredKeys) {
+      const value = evidence[key];
+      if (value === undefined || value === null) {
+        throw new RuntimeConformanceTrustError(
+          `case ${result.caseId} 缺少真实调用回执字段：${key}`,
+        );
+      }
+    }
   }
+
+  // RuntimeProtocol 行为清单（R10 §3）必须同时自洽：行为 case 恰出现一次、全部通过、
+  // 且逐 case 携带真实调用回执。声明式 6 条不能替代它 —— 这正是「旧 case 全集与新协议
+  // required behavior 清单脱节」的闭合点。
+  validateRuntimeProtocolConformanceEvidence(
+    report.caseResults.flatMap((result) =>
+      isRuntimeProtocolConformanceCase(result.caseId)
+        ? [{ caseId: result.caseId, passed: result.passed, receipt: result.evidence }]
+        : [],
+    ),
+  );
 
   // evidenceManifestDigest 必须 canonical 绑定报告内容。
   if (

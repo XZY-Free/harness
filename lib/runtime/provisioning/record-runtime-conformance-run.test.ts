@@ -45,6 +45,7 @@ import {
 import {
   type TestRunnerKey,
   buildDsseConformanceEnvelope,
+  buildTestConformanceCaseEvidence,
   buildTestConformanceReport,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
@@ -135,8 +136,8 @@ function buildDsseEnvelope(
     // 真实结构化证据：可通过 evidenceVariant 注入区分字段（如 probe_ref），
     // 使不同 Run 的 evidence / evidenceDigest / evidenceManifestDigest 真实不同。
     const evidence = evidenceVariant
-      ? { caseId, passed: true, probe_ref: evidenceVariant }
-      : { caseId, passed: true };
+      ? buildTestConformanceCaseEvidence(caseId, { probe_ref: evidenceVariant })
+      : buildTestConformanceCaseEvidence(caseId);
     return {
       caseId,
       passed: true,

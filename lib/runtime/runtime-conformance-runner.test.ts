@@ -1,26 +1,55 @@
 import type { RuntimeAdapter } from "@/lib/runtime/adapters/hosted-adapter";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance";
 import { defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import { runPublicationConformanceSuite } from "@/lib/runtime/runtime-conformance-runner";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { describe, expect, it } from "vitest";
 
+const CAPABILITIES = defaultRuntimeCapabilities();
 const DIGEST = `sha256:${"b".repeat(64)}`;
+
+/**
+ * 合格候选 Runtime 的接纳回执摘要：由**发布事实**（runtimeRevisionId + 冻结
+ * capability manifest）计算，与 runtime-start / in-process Hosted 同源。
+ * 自报 probe 的 `contractDigest` 不是发布事实，不能作为回执摘要。
+ */
+function publishedCapabilitiesDigest(runtimeRevisionId: string): string {
+  return expectedCapabilityManifestDigest({
+    runtimeRevisionId,
+    runtimeCapabilitiesJson: CAPABILITIES,
+  });
+}
 
 function conformingAdapter(): RuntimeAdapter {
   return {
-    probeCapabilities: async () => defaultRuntimeCapabilities(),
-    startInvocation: async (params) => ({
-      response: {
-        protocolVersion: 3,
-        authority: params.authority!,
-        semanticRequestDigest: DIGEST,
-        accepted: true,
-        remoteSessionRef: "session",
-        remoteExecutionRef: "execution",
-        capabilitiesDigest: DIGEST,
-        acceptedAt: Date.now(),
-      },
-    }),
+    probeCapabilities: async () => CAPABILITIES,
+    startInvocation: async (params) => {
+      // 真实声明与真实接受必须一致：未声明的 Workspace profile 必须 fail closed。
+      if (
+        params.workspace?.mode === "BOUND" &&
+        !CAPABILITIES.features.workspaceModes.includes(params.workspace.continuityMode)
+      ) {
+        throw new Error(`RUNTIME_WORKSPACE_MODE_UNSUPPORTED: ${params.workspace.continuityMode}`);
+      }
+      return {
+        response: {
+          protocolVersion: 3,
+          authority: params.authority!,
+          // 语义摘要必须只由语义域字段决定：同一意图重试稳定，内容变更必须不同。
+          semanticRequestDigest: protocolDigest({
+            intentType: "start",
+            invocationId: params.invocationId,
+            inputItems: params.inputItems,
+          }),
+          accepted: true,
+          remoteSessionRef: `session:${params.authority!.sessionBindingId}`,
+          remoteExecutionRef: `execution:${params.invocationId}:${params.authority!.ownershipId}`,
+          capabilitiesDigest: publishedCapabilitiesDigest(params.authority!.runtimeRevisionId),
+          acceptedAt: Date.now(),
+        },
+      };
+    },
     handleCancel: async (params) => ({
       response: { accepted: true, targetAuthority: params.authority!, stopState: "requested" },
     }),
@@ -30,9 +59,9 @@ function conformingAdapter(): RuntimeAdapter {
         authority: params.authority!,
         semanticRequestDigest: DIGEST,
         accepted: true,
-        remoteSessionRef: "session",
-        remoteExecutionRef: "execution",
-        capabilitiesDigest: DIGEST,
+        remoteSessionRef: `session:${params.authority!.sessionBindingId}`,
+        remoteExecutionRef: `execution:${params.invocationId}:${params.authority!.ownershipId}`,
+        capabilitiesDigest: publishedCapabilitiesDigest(params.authority!.runtimeRevisionId),
         acceptedAt: Date.now(),
       },
     }),

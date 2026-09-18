@@ -1,3 +1,4 @@
+import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 /**
  * 从**已冻结的** ExecutionBinding / RuntimeRevision 重建 Runtime Transport。
  *
@@ -8,13 +9,12 @@
  * 不允许各自写一个"看起来一样"的版本。
  */
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
-import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import {
   type ExecutionResourcePurpose,
   resolveExecutionResources,
 } from "@/lib/runtime/application/execution-resources";
+import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { hostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import {
   type RuntimeTransportAuth,
@@ -54,9 +54,7 @@ export async function resolveRuntimeTransportFromBinding(
     revision.protocolType !== "harness_runtime_protocol" ||
     revision.runtimeEvidenceKind !== input.binding.runtimeEvidenceKind
   ) {
-    throw new RuntimeTransportMismatchError(
-      "冻结的 ExecutionBinding 与 RuntimeRevision 不一致",
-    );
+    throw new RuntimeTransportMismatchError("冻结的 ExecutionBinding 与 RuntimeRevision 不一致");
   }
   const hosted = revision.runtimeEvidenceKind === "hosted_artifact";
   const endpoint = hosted ? "in-process://hosted" : revision.endpointRef;
@@ -77,8 +75,7 @@ export async function resolveRuntimeTransportFromBinding(
               runtimeRevisionId: revision.id,
               runtimeCapabilitiesJson: revision.runtimeCapabilitiesJson,
             },
-            applicationService:
-              input.hostedApplicationService ?? hostedRuntimeApplicationService,
+            applicationService: input.hostedApplicationService ?? hostedRuntimeApplicationService,
           }),
         external_endpoint: ({ endpoint: externalEndpoint, auth: externalAuth }) =>
           (input.createExternalTransport ?? createHttpHarnessRuntimeTransport)({

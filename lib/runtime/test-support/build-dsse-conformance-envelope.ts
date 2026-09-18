@@ -17,6 +17,7 @@ import { RUNTIME_CONFORMANCE_PREDICATE_TYPE } from "@/lib/runtime/conformance/ru
 import {
   PUBLICATION_CONFORMANCE_CASES,
   PUBLICATION_CONFORMANCE_SUITE_REVISION,
+  type PublicationConformanceCaseId,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   type RuntimeConformanceReport,
@@ -91,9 +92,81 @@ export function buildDsseConformanceEnvelope(
 }
 
 /**
+ * 构造单条 case 的夹具证据：`caseId` + `passed` + 该 case 声明的全部真实回执字段。
+ *
+ * 所有手工构造 Conformance 报告的夹具（发布链、记录链、Artifact 双轨门禁）都必须走
+ * 本函数，避免各自退化成「只有 boolean evidence」而被正式 validator 拒绝。
+ */
+export function buildTestConformanceCaseEvidence(
+  caseId: PublicationConformanceCaseId,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return { caseId, passed: true, ...fixtureReceipt(caseId), ...extra };
+}
+
+/** 逐 case 的夹具回执：字段集合必须覆盖 `PUBLICATION_CONFORMANCE_RECEIPT_KEYS`。 */
+function fixtureReceipt(caseId: PublicationConformanceCaseId): Record<string, unknown> {
+  const digest = `sha256:${"f".repeat(64)}`;
+  switch (caseId) {
+    case "capability-manifest-contract":
+      return {
+        protocolVersion: 3,
+        contractDigest: digest,
+        runtimeTargetDigest: `sha256:${"a".repeat(64)}`,
+        features: { heartbeat: true, durableStartIdempotency: true },
+        limits: { maxBatchEvents: 100 },
+      };
+    case "dispatch-acknowledgement":
+      return {
+        response: { accepted: true, remoteSessionRef: "s", remoteExecutionRef: "e" },
+        authorityMatches: true,
+      };
+    case "cancel-acknowledgement":
+      return { response: { accepted: true, stopState: "requested" } };
+    case "steer-capability-consistency":
+    case "resume-capability-consistency":
+    case "session-recovery-declaration":
+      return { declared: true };
+    case "heartbeat-semantics":
+      return {
+        call: "startInvocation",
+        acceptedAt: 1_754_000_000_000,
+        capabilitiesDigest: digest,
+        expectedCapabilitiesDigest: digest,
+      };
+    case "durable-start-idempotency":
+      return { call: "startInvocation", retryDigestStable: true, conflictDigestDiffers: true };
+    case "started-event-before-ack":
+      return {
+        call: "startInvocation",
+        transportAcceptanceOnly: true,
+        semanticRequestDigest: digest,
+        retryDigestStable: true,
+      };
+    case "exact-replay":
+      return { call: "startInvocation", semanticRequestDigest: digest, capabilitiesDigest: digest };
+    case "old-epoch-rejection":
+      return { call: "handleSteer", outcome: "authority-rejected", targetAuthorityEcho: true };
+    case "workspace-profile":
+      return {
+        call: "startInvocation",
+        declaredModes: ["HOST_AFFINE"],
+        acceptedModes: ["HOST_AFFINE"],
+        rejectedModes: ["CHECKPOINT_RESTORABLE"],
+      };
+    case "filesystem-checkpoint":
+      return { call: "probeCapabilities", declared: false, declaredModes: ["HOST_AFFINE"] };
+  }
+}
+
+/**
  * 构造一个合法的 RuntimeConformanceReport（全部 case passed）。
  *
  * 供测试快速构造 report 对象，可覆盖任意字段。
+ *
+ * 每条 case 的证据都带齐 `PUBLICATION_CONFORMANCE_RECEIPT_KEYS` 声明的真实调用回执
+ * 字段 —— 「只有 boolean evidence」的报告会被 `validateRuntimeConformanceReport`
+ * 与 DSSE Verifier 一律拒绝，因此夹具必须与正式回执契约一致。
  */
 export function buildTestConformanceReport(
   revisionId: string,
@@ -101,7 +174,7 @@ export function buildTestConformanceReport(
 ): RuntimeConformanceReport {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
   const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
-    const evidence = { caseId, passed: true };
+    const evidence = { caseId, passed: true, ...fixtureReceipt(caseId) };
     return {
       caseId,
       passed: true,

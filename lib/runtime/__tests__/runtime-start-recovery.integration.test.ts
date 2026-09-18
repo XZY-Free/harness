@@ -15,6 +15,7 @@ import {
 import {
   acquireExecutionOwnership,
   getActiveExecutionOwnership,
+  getAuthorityDatabaseTime,
   renewExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { seedPreparedRuntimeAttempt } from "@/lib/executions/test-support/seed-runtime-authority";
@@ -468,9 +469,12 @@ describe("Runtime Start / Resume durable recovery", () => {
     runtime.callbackBeforeResponse = true;
     await runtime.start();
     const first = await startFixture(fixture, runtime.endpoint);
+    // 过期必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：客户端
+    // `Date.now()` 与 DB 时钟存在毫秒级偏差，只留 1ms 余量并不足以表达「已过期」，
+    // 并发下 VM 时钟滞后加剧，会误报 HealthyOwnerExists。
     await db
       .update(executionOwnershipTable)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.authority.ownershipId));
     const replacementAttempt = await createAttempt({
       tenantId: fixture.tenantId,

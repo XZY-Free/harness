@@ -31,7 +31,10 @@ import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/m
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
-import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -318,7 +321,7 @@ async function seedRuntimeAuthority(): Promise<RuntimeAuthorityFixture> {
     runtimeConfigDigest: runtimeConfigDigest,
     protocolVersion: 3,
     protocolContractDigest: "agent-runtime-protocol@1",
-    suiteRevision: "runtime-conformance@1",
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"f".repeat(64)}`,
     runnerIdentity: "resolver-test-runner",
     testEnvironmentRevision: "mysql8-test@1",
@@ -478,7 +481,7 @@ async function addRuntimeRoute(
     runtimeConfigDigest: options.conformanceConfigDigest ?? configDigest,
     protocolVersion: 3,
     protocolContractDigest: "agent-runtime-protocol@1",
-    suiteRevision: "runtime-conformance@1",
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"f".repeat(64)}`,
     runnerIdentity: "resolver-test-runner",
     testEnvironmentRevision: "mysql8-test@1",

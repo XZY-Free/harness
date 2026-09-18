@@ -6,6 +6,18 @@
       "testName": "parallel threads integration (docker) > 2 thread 各自独立容器 + 不同端口 + 文件隔离",
       "reason": "仅在 SNOW_RUN_DOCKER_TESTS=1 且预构建 container runtime 镜像时执行",
       "acceptanceImpact": "不覆盖本轮 Topic01 Runtime transport/worker 路径；对应生产拓扑由独立 worker image 与真实 MySQL 验收覆盖"
+    },
+    {
+      "file": "desktop/storage/workspace-root-store.test.ts",
+      "testName": "WorkspaceRootStore > 本机命令使用 SQLite 绑定目录和真实沙箱，不能读取工作区外文件",
+      "reason": "断言依赖真实 macOS seatbelt（/usr/bin/sandbox-exec）；嵌套沙箱或容器内 sandbox_apply 返回 EPERM 时按能力探测条件跳过，断言零弱化，在 sandbox-exec 可用的环境照常执行",
+      "acceptanceImpact": "该用例跳过期间桌面端本机命令的 seatbelt 隔离未被本轮覆盖；Topic02 服务端执行权、代际与调度路径不依赖本用例，桌面端沙箱由桌面构建与真实 Electron 验收独立覆盖"
+    },
+    {
+      "file": "app/gateway/tool-calls/route.test.ts",
+      "testName": "POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5） > 真实桌面签名桥只执行已授权命令，持久 Attempt 防止并发重复发送",
+      "reason": "断言依赖真实 macOS seatbelt（/usr/bin/sandbox-exec）执行签名桥命令；sandbox_apply EPERM 的环境无法满足“真实执行成功”断言（产品按设计 fail-closed），按能力探测条件跳过，断言零弱化",
+      "acceptanceImpact": "该用例跳过期间桌面签名桥的 seatbelt 真实执行未被本轮覆盖；Topic02 服务端执行权、代际与调度路径不依赖本用例，签名桥授权判定仍由同文件其余用例与桌面端验收覆盖"
     }
   ]
 }

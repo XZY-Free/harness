@@ -96,6 +96,7 @@ import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import {
   PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
   type RuntimeConformanceReport,
   computeCaseEvidenceDigest,
   computeEvidenceManifestDigest,
@@ -124,6 +125,7 @@ import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/re
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
 import {
   buildDsseConformanceEnvelope,
+  buildTestConformanceCaseEvidence,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
@@ -482,7 +484,7 @@ function buildSignedConformanceReport(
 ) {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
   const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
-    const evidence = { caseId, passed: true };
+    const evidence = buildTestConformanceCaseEvidence(caseId);
     return {
       caseId,
       passed: true,
@@ -497,7 +499,7 @@ function buildSignedConformanceReport(
     runtimeTargetDigest,
     runtimeConfigDigest,
     protocolContractDigest,
-    suiteRevision: "runtime-conformance@1",
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: RUNNER_IDENTITY,
     testEnvironmentRevision: "isolated-mysql8@1",
@@ -510,7 +512,7 @@ function buildSignedConformanceReport(
   const evidenceManifestDigest =
     (overrides.evidenceManifestDigest as string | undefined) ??
     computeEvidenceManifestDigest({
-      suiteRevision: "runtime-conformance@1",
+      suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
       testEnvironmentRevision: "isolated-mysql8@1",
       runtimeRevisionId: revisionId,
       runtimeTargetDigest,

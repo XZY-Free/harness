@@ -5,10 +5,19 @@
  */
 
 import { createPrivateKey, sign as cryptoSign } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { computeDssePae } from "@/lib/crypto/dsse";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { PUBLICATION_CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
-import type { RuntimeConformanceReport } from "@/lib/runtime/domain/runtime-conformance-run";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  PUBLICATION_CONFORMANCE_RECEIPT_KEYS,
+  type RuntimeConformanceReport,
+  computeCaseEvidenceDigest,
+} from "@/lib/runtime/domain/runtime-conformance-run";
 import {
   buildDsseConformanceEnvelope,
   buildTestConformanceReport,
@@ -371,8 +380,69 @@ describe("RUNTIME_CONFORMANCE_PREDICATE_TYPE", () => {
 });
 
 describe("PUBLICATION_CONFORMANCE_SUITE_REVISION", () => {
-  it("与测试 report 默认值一致", () => {
-    expect(PUBLICATION_CONFORMANCE_SUITE_REVISION).toBe("runtime-conformance@1");
+  it("与中央机器合同 docs/contracts/runtime-conformance.json 的 required_cases 完全一致", () => {
+    expect(PUBLICATION_CONFORMANCE_SUITE_REVISION).toBe("runtime-conformance@2");
+    const contract = JSON.parse(
+      readFileSync(join(process.cwd(), "docs/contracts/runtime-conformance.json"), "utf8"),
+    ) as {
+      contract_version: string;
+      required_cases: Array<{ id: string; receipt_keys: string[] }>;
+    };
+    // 旧 Publication case 全集与新协议 required behavior 清单不得再脱节：
+    // 中央合同与代码里的唯一 case 全集必须逐项同序。
+    expect(contract.required_cases.map((entry) => entry.id)).toEqual([
+      ...PUBLICATION_CONFORMANCE_CASES,
+    ]);
+    // 回执键也必须逐 case 同序对齐：合同声明的必带回执字段就是校验器实际强制的字段，
+    // 否则「真实调用回执」会在合同与实现之间出现两套口径。
+    expect(
+      Object.fromEntries(contract.required_cases.map((entry) => [entry.id, entry.receipt_keys])),
+    ).toEqual(
+      Object.fromEntries(
+        PUBLICATION_CONFORMANCE_CASES.map((caseId) => [
+          caseId,
+          [...PUBLICATION_CONFORMANCE_RECEIPT_KEYS[caseId]],
+        ]),
+      ),
+    );
+    expect(contract.contract_version).toBe("1.1.0");
+  });
+
+  it("只有 boolean evidence、无真实调用回执的报告不被准入", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    // 把每条 case 的证据退化成 {caseId, passed}：签名仍然有效，但没有任何
+    // 真实调用回执 —— 必须被拒绝，不能被当作「全 true 声明」放行。
+    const booleanOnly: RuntimeConformanceReport = {
+      ...report,
+      caseResults: report.caseResults.map((result) => {
+        const evidence = { caseId: result.caseId, passed: true };
+        return {
+          caseId: result.caseId,
+          passed: true,
+          reason: null,
+          evidence,
+          evidenceDigest: computeCaseEvidenceDigest(evidence),
+        };
+      }),
+    };
+    const envelope = buildDsseConformanceEnvelope(booleanOnly, key);
+    const result = await verifier.verify(createBaseInput(envelope, booleanOnly));
+    expect(result.verified).toBe(false);
+  });
+
+  it("只带旧六类 case 的报告不被准入", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    const legacy: RuntimeConformanceReport = {
+      ...report,
+      caseResults: report.caseResults.slice(0, 6),
+    };
+    const envelope = buildDsseConformanceEnvelope(legacy, key);
+    const result = await verifier.verify(createBaseInput(envelope, legacy));
+    expect(result.verified).toBe(false);
   });
 });
 

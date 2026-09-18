@@ -3,11 +3,11 @@
  *
  * 覆盖统一 Runtime Publication Conformance 验证的完整语义：
  * - null evidence / null run fail-closed
- * - 完整精确 6 Case + 全部 digest/tenant/revision/protocol/suite/format 一致 → valid
+ * - 完整精确全部 Case + 全部 digest/tenant/revision/protocol/suite/format 一致 → valid
  * - overall failed
  * - tenant/revision/artifact/config/protocol/suite/format 每一类漂移
  * - 缺 Case、重复 Case、某 Case failed
- * - 保持数量 6 且全部 passed 但用 unknown case 替换正式 Case → 必须 invalid
+ * - 保持完整数量且全部 passed 但用 unknown case 替换正式 Case → 必须 invalid
  *   （同时能识别缺少正式 Case）
  * - expected digest/protocol 为 null 时 fail-closed
  *
@@ -102,7 +102,7 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
     expect(codes(result)).toContain("conformance_run_not_found");
   });
 
-  it("完整精确 6 Case 且全部 digest/tenant/revision/protocol/suite/format 一致 → valid", () => {
+  it("完整精确全部 Case 且全部 digest/tenant/revision/protocol/suite/format 一致 → valid", () => {
     const result = validateRuntimePublicationConformanceEvidence(makeEvidence());
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
@@ -158,7 +158,7 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
 
   it("suite revision 漂移 → conformance_suite_revision_mismatch", () => {
     const result = validateRuntimePublicationConformanceEvidence(
-      makeEvidence({ run: { suiteRevision: "runtime-conformance@2" } }),
+      makeEvidence({ run: { suiteRevision: `${PUBLICATION_CONFORMANCE_SUITE_REVISION}-drift` } }),
     );
     expect(result.valid).toBe(false);
     expect(codes(result)).toContain("conformance_suite_revision_mismatch");
@@ -197,7 +197,7 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
     expect(codes(result)).toContain("conformance_case_failed");
   });
 
-  it("数量 6 且全部 passed，但用 unknown case 替换正式 Case → 必须 invalid 且识别缺正式 Case", () => {
+  it("数量完整且全部 passed，但用 unknown case 替换正式 Case → 必须 invalid 且识别缺正式 Case", () => {
     const caseResults = makeCaseResults(PUBLICATION_CONFORMANCE_CASES.slice(0, -1));
     caseResults.push({ caseId: "unknown-case", passed: true });
     expect(caseResults).toHaveLength(PUBLICATION_CONFORMANCE_CASES.length);

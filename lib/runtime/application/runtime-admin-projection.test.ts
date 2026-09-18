@@ -6,7 +6,10 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
-import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -148,7 +151,7 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
       runtimeTargetDigest: options.targetDigest ?? revision.runtimeTargetDigest,
       runtimeConfigDigest: revision.configHash,
       protocolContractDigest: revision.protocolContractDigest,
-      suiteRevision: "runtime-conformance@1",
+      suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
       runnerArtifactDigest: `sha256:${"1".repeat(64)}`,
       runnerIdentity: "test-runner",
       testEnvironmentRevision: "test-env@1",

@@ -10,9 +10,9 @@ import {
 } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import type { SessionDispatchClaim } from "@/lib/runtime/retry/dispatch-retry-queries";
 import {
+  requireExecutionBinding,
   resolveBoundExecutionResources,
   resolveRuntimeTransportFromBinding,
-  requireExecutionBinding,
 } from "@/lib/runtime/retry/runtime-transport-from-binding";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";

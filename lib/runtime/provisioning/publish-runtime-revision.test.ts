@@ -14,7 +14,10 @@ import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   computeCaseEvidenceDigest,
   computeEvidenceManifestDigest,
@@ -35,6 +38,7 @@ import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish
 import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import {
   buildDsseConformanceEnvelope,
+  buildTestConformanceCaseEvidence,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { seedVerifiedRuntimeAttestation } from "@/lib/runtime/test-support/seed-verified-runtime-attestation";
@@ -92,7 +96,7 @@ async function seedRuntimePublicationFixture(
     requestHash: "b".repeat(64),
   });
   const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
-    const evidence = { caseId, passed: true };
+    const evidence = buildTestConformanceCaseEvidence(caseId);
     return {
       caseId,
       passed: true,
@@ -101,13 +105,14 @@ async function seedRuntimePublicationFixture(
       evidence,
     };
   });
+  const suiteRevision = PUBLICATION_CONFORMANCE_SUITE_REVISION;
   const report = {
     runId: randomUUID(),
     runtimeRevisionId: revision.id,
     runtimeTargetDigest: revision.runtimeTargetDigest,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
     protocolContractDigest: revision.protocolContractDigest,
-    suiteRevision: "runtime-conformance@1",
+    suiteRevision,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: "ci/runtime-conformance",
     testEnvironmentRevision: "isolated-mysql8@1",
@@ -115,7 +120,7 @@ async function seedRuntimePublicationFixture(
     completedAt: "2026-08-02T01:00:01.000Z",
     overallResult: "passed" as const,
     evidenceManifestDigest: computeEvidenceManifestDigest({
-      suiteRevision: "runtime-conformance@1",
+      suiteRevision,
       testEnvironmentRevision: "isolated-mysql8@1",
       runtimeRevisionId: revision.id,
       runtimeTargetDigest: revision.runtimeTargetDigest,

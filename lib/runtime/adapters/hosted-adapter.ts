@@ -24,6 +24,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import {
   type HarnessActionExecutors,
@@ -674,7 +675,7 @@ export interface CreateHostedAdapterParams {
  * @returns RuntimeAdapter 实例
  */
 export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeAdapter {
-  const refPrefix = "hosted";
+  const adapterCapabilities = hostedAdapterCapabilities();
   const state: AdapterState = {
     lastLoopPromise: null,
   };
@@ -713,17 +714,36 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
     },
 
     async startInvocation(startParams: StartInvocationParams): Promise<StartInvocationResult> {
-      // 1. 生成 runtime_session_ref + runtime_execution_ref
-      const threadSuffix = startParams.threadId ? startParams.threadId.slice(0, 8) : "noturn";
-      const runtimeSessionRef = `${refPrefix}-${threadSuffix}-${randomUUID()}`;
-      const runtimeExecutionRef = `${refPrefix}-exec-${randomUUID()}`;
+      // 0. R10 §3「真实声明的 Workspace profile」：Runtime 必须对自己**未声明**的
+      //    Workspace 连续性模式 fail closed。capability manifest 是发布准入的唯一
+      //    权威声明；接受一个没声明过的 profile 等于用全部布尔 true 强装通过。
+      const capabilities = adapterCapabilities;
+      if (
+        startParams.workspace?.mode === "BOUND" &&
+        !capabilities.features.workspaceModes.includes(startParams.workspace.continuityMode)
+      ) {
+        throw new HarnessLoopError(
+          "RUNTIME_WORKSPACE_MODE_UNSUPPORTED",
+          `Hosted Runtime 未声明 Workspace 模式：${startParams.workspace.continuityMode}`,
+        );
+      }
+
+      // 1. 解析权威身份；refs 由**冻结的启动身份**确定性派生。
+      //
+      //    §7.5 要求「重复相同启动返回原 refs」：RuntimeSessionBinding 在事务内比对
+      //    首次冻结的 remoteSessionRef/remoteExecutionRef，任何一次重投给出不同值都会
+      //    被判 ProtocolViolation。因此 refs 必须只由 Invocation/Session/Ownership 这些
+      //    不可变事实决定 —— 与 in-process-hosted-runtime.ts 使用同一命名约定。
+      const authority = startParams.authority ?? failMissingAuthority();
+      const runtimeSessionRef = `hosted-session:${authority.sessionBindingId}`;
+      const runtimeExecutionRef = `hosted-execution:${startParams.invocationId}:${authority.ownershipId}`;
 
       // 2. 异步执行 Agent Loop（仅会话模式；Job 模式不启动 Loop）
       if (startParams.threadId && startParams.turnId) {
         const ingressClient = createIngressClient(
           startParams.gatewayEndpoints,
           startParams.authToken,
-          startParams.authority ?? failMissingAuthority(),
+          authority,
         );
 
         const loopParams: HostedHarnessLoopParams = {
@@ -767,7 +787,6 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
       }
 
       // 3. 立即返回 accepted + refs + capabilities
-      const authority = startParams.authority ?? failMissingAuthority();
       return {
         response: {
           protocolVersion: 3,
@@ -776,7 +795,14 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           accepted: true,
           remoteSessionRef: runtimeSessionRef,
           remoteExecutionRef: runtimeExecutionRef,
-          capabilitiesDigest: hostedAdapterCapabilities().contractDigest,
+          // R02 §3：接纳回执的能力摘要必须是**发布证据**摘要（runtimeRevisionId +
+          // 冻结 capability manifest），与 runtime-start / ingress-runtime-events /
+          // in-process Hosted 同源。probe 响应里的 `contractDigest` 是候选自报的能力
+          // 声明摘要（不含 runtimeRevisionId），不是发布事实，不能当比对源。
+          capabilitiesDigest: expectedCapabilityManifestDigest({
+            runtimeRevisionId: authority.runtimeRevisionId,
+            runtimeCapabilitiesJson: capabilities,
+          }),
           acceptedAt: Date.now(),
         },
       };
@@ -834,9 +860,13 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
             resumePayload: resumeParams.resumePayload ?? null,
           }),
           accepted: true,
-          remoteSessionRef: `${refPrefix}-session-${authority.sessionBindingId}`,
-          remoteExecutionRef: `${refPrefix}-exec-resume-${randomUUID()}`,
-          capabilitiesDigest: hostedAdapterCapabilities().contractDigest,
+          remoteSessionRef: `hosted-session:${authority.sessionBindingId}`,
+          remoteExecutionRef: `hosted-execution:${resumeParams.invocationId}:${authority.ownershipId}`,
+          // 与 start 同一发布事实口径（R02 §3）：Resume 也换新代际，能力摘要不得变。
+          capabilitiesDigest: expectedCapabilityManifestDigest({
+            runtimeRevisionId: authority.runtimeRevisionId,
+            runtimeCapabilitiesJson: adapterCapabilities,
+          }),
           acceptedAt: Date.now(),
         },
       };

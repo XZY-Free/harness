@@ -128,7 +128,8 @@ export function projectRuntimeConformanceRun(
 
 /**
  * Candidate Conformance 选择：当前 exact RuntimeRevision 下最新一条
- * 「passed 且六个 publication conformance cases 完整全过」且 digest/协议精确绑定的 Run。
+ * 「passed 且全部 publication conformance cases（声明式 + RuntimeProtocol 行为清单）
+ * 完整全过」且 digest/协议精确绑定的 Run。
  * 排序 completedAt DESC、recordedAt DESC；最新一条可能 failed，绝不能只取 latest row。
  */
 async function selectLatestValidConformanceRun(

@@ -185,7 +185,7 @@ def validate_errors() -> int:
     return len(catalog)
 
 
-def _validate_case_list(cases: list, kind: str) -> None:
+def _validate_case_list(cases: list, kind: str, require_evidence_provenance: bool = False) -> None:
     ids = [case.get("id") for case in cases]
     if not ids:
         fail(f"{kind} conformance suite is empty")
@@ -194,12 +194,24 @@ def _validate_case_list(cases: list, kind: str) -> None:
     for case in cases:
         if not case.get("given") or not case.get("when") or len(case.get("expect", [])) < 1:
             fail(f"incomplete {kind} conformance case: {case.get('id')}")
+        if not require_evidence_provenance:
+            continue
+        # 发布/准入必须能追溯到该 case 的实际行为证据：每条 case 都要声明由谁证明，
+        # 以及通过时报告必须携带哪些真实调用回执字段（只写 boolean 不接受）。
+        if case.get("proven_by") not in {"adapter-probe", "platform-integration"}:
+            fail(f"{kind} conformance case {case.get('id')} has invalid proven_by")
+        receipt_keys = case.get("receipt_keys")
+        if not isinstance(receipt_keys, list) or not receipt_keys:
+            fail(f"{kind} conformance case {case.get('id')} must declare receipt_keys")
+        if any(not isinstance(key, str) or not key for key in receipt_keys):
+            fail(f"{kind} conformance case {case.get('id')} has invalid receipt_keys")
 
 
 def validate_conformance() -> int:
     """校验 Runtime Publication Conformance 与 Platform Integration Conformance 两份合同。
 
-    - runtime-conformance.json：RuntimeRevision Publication Gate 的正式套件（6 个协议/Adapter case）。
+    - runtime-conformance.json：RuntimeRevision Publication Gate 的正式套件
+      （6 个声明式 Adapter case + 7 个 RuntimeProtocol required behaviour case）。
     - platform-integration-conformance.json：平台级不变量套件（CI / 集成测试，不阻断 Publication）。
     """
     publication = load_json(CONTRACTS / "runtime-conformance.json")
@@ -208,7 +220,7 @@ def validate_conformance() -> int:
     publication_cases = publication.get("required_cases", [])
     integration_cases = integration.get("required_cases", [])
 
-    _validate_case_list(publication_cases, "runtime publication")
+    _validate_case_list(publication_cases, "runtime publication", require_evidence_provenance=True)
     _validate_case_list(integration_cases, "platform integration")
 
     # Publication 套件不得把平台级不变量（Route/Binding/Event Ingress/Tool/Memory/

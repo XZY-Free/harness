@@ -9,7 +9,10 @@ import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
-import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  acquireExecutionOwnership,
+  getAuthorityDatabaseTime,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -132,9 +135,12 @@ async function createActiveRuntime() {
 }
 
 async function takeOver(runtime: Awaited<ReturnType<typeof createActiveRuntime>>) {
+  // 过期必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：客户端
+  // `Date.now()` 与 DB 时钟存在毫秒级偏差，只留 1ms 余量并不足以表达「已过期」，
+  // 并发下 VM 时钟滞后加剧，会误报 HealthyOwnerExists。
   await db
     .update(executionOwnershipTable)
-    .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+    .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
     .where(eq(executionOwnershipTable.id, runtime.acquired.ownership.id));
   const attempt = await createAttempt({
     tenantId: runtime.fixture.tenantId,

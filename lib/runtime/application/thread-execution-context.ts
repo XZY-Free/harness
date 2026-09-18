@@ -36,11 +36,7 @@ export async function resolveThreadWorkspaceFacts(
   thread: { defaultWorkspaceId: string | null; ownerUserId: string },
 ): Promise<ThreadWorkspaceFacts> {
   const binding = thread.defaultWorkspaceId
-    ? await resolveDeclaredWorkspaceBinding(
-        tenantId,
-        thread.defaultWorkspaceId,
-        thread.ownerUserId,
-      )
+    ? await resolveDeclaredWorkspaceBinding(tenantId, thread.defaultWorkspaceId, thread.ownerUserId)
     : null;
   return {
     workspaceBindingId: binding?.id ?? null,

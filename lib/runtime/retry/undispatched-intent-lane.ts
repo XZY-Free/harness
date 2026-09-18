@@ -1,3 +1,5 @@
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getTurnById } from "@/lib/conversations/turn-queries";
 /**
  * R01 §3：**半程意图**的正式发现入口。
  *
@@ -24,13 +26,11 @@
  * 因此两类对象都使用与 Session/Command 相同的安全窗口 `DISPATCH_STUCK_GRACE_MS`。
  */
 import { db } from "@/lib/db/client";
-import { getThreadById } from "@/lib/conversations/thread-queries";
-import { getTurnById } from "@/lib/conversations/turn-queries";
 import { createAttempt, getAttemptById } from "@/lib/executions/persistence/attempt-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import {
-  type Turn,
   TURN_TERMINAL_STATES,
+  type Turn,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";

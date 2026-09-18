@@ -32,7 +32,10 @@ import {
   createBuildRouteEligibility,
 } from "@/lib/routes/projection/build-route-eligibility";
 import type { RouteEligibilityStore } from "@/lib/routes/projection/route-eligibility-store";
-import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── 窄型 Drizzle query mock ──────────────────────────────
@@ -285,7 +288,7 @@ function runtimeEvidence(
         runtimeTargetDigest: "sha256:target",
         runtimeConfigDigest: "sha256:config",
         protocolContractDigest: "agent-runtime-protocol@1",
-        suiteRevision: "runtime-conformance@1",
+        suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
         conformanceFormat: "standard_dsse",
       },
       caseResults: PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true })),

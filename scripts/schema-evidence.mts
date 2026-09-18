@@ -1,7 +1,8 @@
 #!/usr/bin/env npx tsx
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { db } from "@/lib/db/client";
 import Ajv2020 from "ajv/dist/2020.js";
 import {
@@ -144,16 +145,27 @@ const INVENTORY_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * 从**独立进程**重新派生 Canonical 表名（故意不复用运行期 `db._.schema`）。
+ *
+ * 载荷走临时文件而不是子进程 stdout：`pnpm exec` 会在 stdout 上夹杂自身告警
+ * （例如 engines 不匹配的 WARN），任何 stdout 噪声都会污染表名清单，让「缺少
+ * Canonical 表声明」这类校验以错误理由失败。临时文件放在系统 tmp 目录，不落仓库，
+ * 以免破坏 worktree 洁净门禁。
+ */
 function canonicalNames(): string[] {
-  const expression =
-    'import * as s from "./lib/persistence/schema/index.ts"; import {Table,is,getTableName} from "drizzle-orm"; process.stdout.write(Object.values(s).filter(v=>is(v,Table)).map(v=>getTableName(v)).sort().join("\\n"))';
-  return execFileSync("pnpm", ["exec", "tsx", "-e", expression], {
-    cwd: ROOT,
-    encoding: "utf8",
-  })
-    .trim()
-    .split("\n")
-    .filter(Boolean);
+  const scratch = mkdtempSync(join(tmpdir(), "schema-evidence-"));
+  const outFile = resolve(scratch, "canonical-names.txt");
+  const expression = `import * as s from "./lib/persistence/schema/index.ts"; import {Table,is,getTableName} from "drizzle-orm"; import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(outFile)}, Object.values(s).filter(v=>is(v,Table)).map(v=>getTableName(v)).sort().join("\\n"))`;
+  try {
+    execFileSync("pnpm", ["exec", "tsx", "-e", expression], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    return readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 function runtimeNames(): string[] {

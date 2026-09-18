@@ -55,8 +55,8 @@
       "name": "合同、Schema Authority 与测试收集证据",
       "commands": [
         ["pnpm", "contracts:verify"],
-        ["pnpm", "topic01:schema:verify"],
-        ["pnpm", "topic01:tests:audit"]
+        ["pnpm", "schema:verify"],
+        ["pnpm", "tests:audit"]
       ]
     },
     {

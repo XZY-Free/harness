@@ -6,7 +6,10 @@ import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
-import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  acquireExecutionOwnership,
+  getAuthorityDatabaseTime,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import { TEST_RUNTIME_REVISION_ID } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
@@ -193,9 +196,12 @@ describe("Invocation continuation execution ownership", () => {
     // 新鲜 owner 存活期间，竞争者无法取得执行权。
     await expect(acquire("worker-b")).rejects.toMatchObject({ code: "HealthyOwnerExists" });
     // 租约过期后按新 epoch 接管：旧 owner 置 lost，新 owner epoch+1。
+    // 过期必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：客户端
+    // `Date.now()` 与 DB 时钟存在毫秒级偏差，只留 1ms 余量并不足以表达「已过期」，
+    // 并发下 VM 时钟滞后加剧，会误报 HealthyOwnerExists。
     await db
       .update(executionOwnershipTable)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     const reclaimed = await acquire("worker-b");
 

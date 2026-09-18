@@ -16,6 +16,7 @@ import {
   acquireExecutionOwnership,
   closeExecutionOwnership,
   getActiveExecutionOwnership,
+  getAuthorityDatabaseTime,
   renewExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import {
@@ -112,9 +113,11 @@ describe("ExecutionOwnership database fencing", () => {
       attemptId: fixture.attempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
     });
+    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
+    // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
     await db
       .update(executionOwnershipTable)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     await expect(
       renewExecutionOwnership({
@@ -276,9 +279,11 @@ describe("ExecutionOwnership database fencing", () => {
       }),
     ).rejects.toMatchObject({ code: "HealthyOwnerExists" });
     // 串行序 B：Takeover 先建立 epoch2 → 旧 epoch 的 Renew 被拒绝且不复活。
+    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
+    // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
     await db
       .update(executionOwnershipTable)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     const candidateC = await prepareReplacementAttempt(fixture, "takeover-vs-renew");
     await acquireExecutionOwnership({
@@ -325,9 +330,11 @@ describe("ExecutionOwnership database fencing", () => {
       attemptId: fixture.attempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
     });
+    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
+    // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
     await db
       .update(executionOwnershipTable)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     const candidateB = await prepareReplacementAttempt(fixture, "takeover-vs-release");
     const releasePromise = closeExecutionOwnership({
@@ -464,9 +471,11 @@ describe("ExecutionOwnership database fencing", () => {
     );
     expect(capped.leaseExpiresAt.getTime()).toBeLessThan(Date.now() + 90_000);
     // deadline 已过仍未 Start：续租必须失败，Start 无法无限占用。
+    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
+    // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
     await db
       .update(executionOwnershipTable)
-      .set({ dispatchDeadline: new Date(Date.now() - 1) })
+      .set({ dispatchDeadline: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     await expect(
       renewExecutionOwnership({
@@ -509,9 +518,11 @@ describe("ExecutionOwnership database fencing", () => {
     });
     const claims1 = decodeWorkloadToken(token1);
     expect(claims1.leaseEpoch).toBe(String(first.ownership.leaseEpoch));
+    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
+    // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
     await db
       .update(executionOwnershipTable)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     const candidateB = await prepareReplacementAttempt(fixture, "token-fencing-takeover");
     await acquireExecutionOwnership({
@@ -589,9 +600,11 @@ describe("ExecutionOwnership database fencing", () => {
     expect(newClaims.leaseEpoch).toBe(String(first.ownership.leaseEpoch));
     expect(newClaims.sessionBindingId).toBe(first.session.id);
     // 过期 Owner 不能借 Heartbeat 续发凭据。
+    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
+    // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
     await db
       .update(executionOwnershipTable)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     await expect(
       handleRuntimeHeartbeat({

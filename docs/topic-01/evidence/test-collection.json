@@ -7,15 +7,15 @@
     "duplicateExecution": "完整验收只调用四个 Vitest project 一次，不再追加单文件 Vitest 命令"
   },
   "counts": {
-    "unit": 321,
-    "db": 133,
-    "integration": 13,
+    "unit": 322,
+    "db": 134,
+    "integration": 14,
     "contract": 31,
     "e2e-web": 4,
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 506,
+  "total": 509,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -2108,6 +2108,17 @@
       ]
     },
     {
+      "file": "lib/architecture/execution-closure.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/artifacts/application/artifact-admin-projection.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
@@ -2894,6 +2905,28 @@
       "command": "pnpm vitest run --project db",
       "needsDB": true,
       "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/db/test/container-ownership.integration.test.ts",
+      "group": "integration",
+      "command": "pnpm vitest run --project integration",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/db/test/container-ownership.test.ts",
+      "group": "unit",
+      "command": "pnpm vitest run --project unit",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"

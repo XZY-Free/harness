@@ -215,6 +215,29 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
         );
         return;
       }
+      // §7.4：Runtime 只能接受自己**声明**的 Workspace 连续性 profile。声明之外的模式
+      // 必须 fail closed —— 真实 External Runtime 也不会接一个没声明过的连续性模式。
+      const requestedWorkspace = body?.workspace as
+        | { mode?: string; continuityMode?: string }
+        | undefined;
+      if (
+        requestedWorkspace?.mode === "BOUND" &&
+        requestedWorkspace.continuityMode !== undefined &&
+        !capabilities.features.workspaceModes.includes(
+          requestedWorkspace.continuityMode as (typeof capabilities.features.workspaceModes)[number],
+        )
+      ) {
+        response.statusCode = 409;
+        response.end(
+          JSON.stringify({
+            error: {
+              code: "RUNTIME_WORKSPACE_MODE_UNSUPPORTED",
+              message: `workspace mode not declared: ${requestedWorkspace.continuityMode}`,
+            },
+          }),
+        );
+        return;
+      }
       const idempotencyKey = String(request.headers["idempotency-key"] ?? "");
       acceptedStartKeys.add(idempotencyKey);
       if (disconnectNextAcceptedStart) {

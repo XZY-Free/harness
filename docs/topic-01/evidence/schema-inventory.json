@@ -1725,7 +1725,8 @@
         "lib/identity/device-queries.ts",
         "lib/identity/device-signature.ts",
         "lib/runtime/resolve-tool-execution-target.ts",
-        "lib/workspace/desktop-workspace-queries.ts"
+        "lib/workspace/desktop-workspace-queries.ts",
+        "lib/workspace/workspace-queries.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -1765,6 +1766,7 @@
         "lib/identity/device-signature.ts",
         "lib/runtime/resolve-tool-execution-target.ts",
         "lib/workspace/desktop-workspace-queries.ts",
+        "lib/workspace/workspace-queries.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -2373,6 +2375,7 @@
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/command-dispatch-gateway.ts",
         "lib/runtime/command-dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts",
         "lib/workspace/recovery-anchor.ts",
@@ -2433,6 +2436,7 @@
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/command-dispatch-gateway.ts",
         "lib/runtime/command-dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts",
         "lib/workspace/recovery-anchor.ts",
@@ -2923,6 +2927,7 @@
         "lib/executions/persistence/invocation-store.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts"
       ],
@@ -2953,6 +2958,7 @@
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
         "lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts",
         "lib/workspace/recovery-anchor.ts",
@@ -3010,6 +3016,7 @@
         "lib/executions/persistence/invocation-store.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts",
         "lib/agents/calls/application/agent-call-projection.ts",
@@ -3038,6 +3045,7 @@
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
         "lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts",
         "lib/workspace/recovery-anchor.ts",
@@ -3065,6 +3073,7 @@
         "lib/executions/persistence/execution-ownership-store.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/workspace-write-lock-queries.ts"
       ],
@@ -3109,6 +3118,7 @@
         "lib/executions/persistence/execution-ownership-store.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/workspace-write-lock-queries.ts",
         "drizzle/0000_initial_schema.sql"
@@ -5118,6 +5128,7 @@
         "lib/runtime/persistence/runtime-session-store.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
@@ -5167,6 +5178,7 @@
         "lib/runtime/persistence/runtime-session-store.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "drizzle/0000_initial_schema.sql"
       ],
@@ -5469,7 +5481,8 @@
         "lib/job/job-result-projection-queries.ts",
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/runtime-recovery.ts",
-        "lib/runtime/dispatcher.ts"
+        "lib/runtime/dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -5532,6 +5545,7 @@
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -5636,6 +5650,7 @@
         "lib/job/job-result-projection-queries.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
+        "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-resume.ts",
         "lib/runtime/harness-loop/mysql-recovery-port.ts"
       ],
@@ -5685,6 +5700,7 @@
         "lib/job/job-result-projection-queries.ts",
         "lib/observability/harness-execution-trace.ts",
         "lib/permission/user-action-expiry-queries.ts",
+        "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-resume.ts",
         "lib/runtime/harness-loop/mysql-recovery-port.ts",
         "drizzle/0000_initial_schema.sql"
@@ -6138,7 +6154,8 @@
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/dispatcher.ts",
-        "lib/runtime/employee-turn-dispatcher.ts"
+        "lib/runtime/employee-turn-dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts"
       ],
       "productionReaders": [
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
@@ -6158,7 +6175,8 @@
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/dispatcher.ts",
-        "lib/runtime/employee-turn-dispatcher.ts"
+        "lib/runtime/employee-turn-dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -6197,6 +6215,7 @@
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/employee-turn-dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/agents/calls/persistence/finalize-agent-call-authority.ts",
         "lib/capability/application/apply-tool-call.ts",
         "lib/conversations/fork-queries.ts",
@@ -6215,6 +6234,7 @@
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/employee-turn-dispatcher.ts",
+        "lib/runtime/retry/undispatched-intent-lane.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -6579,7 +6599,6 @@
         "lib/context/context-handle.ts",
         "lib/db/seed.ts",
         "lib/desktop/commands.ts",
-        "lib/executions/application/require-current-execution-authority.ts",
         "lib/identity/action-codes.ts",
         "lib/identity/role-templates.ts",
         "lib/runtime/adapters/hosted-adapter.ts",
@@ -6639,7 +6658,6 @@
         "lib/context/context-handle.ts",
         "lib/db/seed.ts",
         "lib/desktop/commands.ts",
-        "lib/executions/application/require-current-execution-authority.ts",
         "lib/identity/action-codes.ts",
         "lib/identity/role-templates.ts",
         "lib/runtime/adapters/hosted-adapter.ts",
@@ -6831,7 +6849,8 @@
         "lib/runtime/application/runtime-resume.ts",
         "lib/runtime/application/runtime-start.ts",
         "lib/workspace/desktop-workspace-queries.ts",
-        "lib/workspace/workspace-queries.ts"
+        "lib/workspace/workspace-queries.ts",
+        "lib/workspace/workspace-writer-fence.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "binding",
@@ -6875,6 +6894,7 @@
         "lib/runtime/application/runtime-start.ts",
         "lib/workspace/desktop-workspace-queries.ts",
         "lib/workspace/workspace-queries.ts",
+        "lib/workspace/workspace-writer-fence.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"

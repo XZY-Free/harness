@@ -28,7 +28,6 @@ import {
 } from "@/lib/runtime/application/authority-recovery-lane";
 import { retryDispatchedCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchPersistedQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-persisted-queued-invocation-attempt";
-import { runDueUndispatchedIntentRecoveries } from "@/lib/runtime/retry/undispatched-intent-lane";
 import {
   type SessionDispatchClaim,
   claimInvocationCommandDispatch,
@@ -41,6 +40,7 @@ import {
   RUNTIME_DISPATCH_RETRY_POLICY,
   realDispatchClock,
 } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
+import { runDueUndispatchedIntentRecoveries } from "@/lib/runtime/retry/undispatched-intent-lane";
 import {
   type CheckpointReleaseRecoveryReport,
   type StuckCheckpointGateReport,
