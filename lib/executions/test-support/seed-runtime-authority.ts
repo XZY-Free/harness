@@ -168,49 +168,60 @@ export async function seedPreparedRuntimeAttempt(
     environmentDefinitionRevisionId?: string;
     policyRevisionId?: string;
     governanceConfigRevisionId?: string;
+    /**
+     * 复用一条**已经由产品路径建立**的 Thread/Turn（`createThread` +
+     * `acceptUserMessageTurn`），而不是由本夹具直接 INSERT 三张表。
+     *
+     * 产品路径会同时写入 `thread.created` / `turn.accepted` / `item.created` 三个
+     * ThreadEvent，读模型投影据此才能建立 Turn 时间线行；需要验证"刷新产品页后从 DB
+     * 重建的时间线与正式输出一致"的场景必须走这条路径，不能伪造事件行。
+     */
+    thread?: { threadId: string; turnId: string; triggerItemId: string };
   } = {},
 ) {
   const tenantId = input.tenantId ?? DEFAULT_TENANT_ID;
-  const threadId = randomUUID();
-  const turnId = randomUUID();
-  const triggerItemId = randomUUID();
-  await db.insert(threadTable).values({
-    id: threadId,
-    tenantId,
-    ownerUserId: "test-user",
-    lifecycleState: "active",
-    lastActivityAt: new Date(),
-    lastTurnSequence: 1,
-    lastItemSequence: 1,
-    lastEventSequence: 0,
-    pendingQueueVersionNo: 1,
-    versionNo: 1,
-  });
-  await db.insert(threadItemTable).values({
-    id: triggerItemId,
-    threadId,
-    turnId,
-    itemSequence: 1,
-    itemType: "user_message",
-    itemState: "completed",
-    authorType: "user",
-    authorId: "test-user",
-    contentJson: { text: "test runtime invocation" },
-    contentHash: "sha256:test-runtime-invocation",
-    contextPolicy: "include",
-  });
-  await db.insert(turnTable).values({
-    id: turnId,
-    threadId,
-    turnSequence: 1,
-    triggerType: "user_message",
-    triggerItemId,
-    turnState: "accepted",
-    activeInvocationId: null,
-    latestInvocationId: null,
-    regenerationNo: 0,
-    versionNo: 1,
-  });
+  const threadId = input.thread?.threadId ?? randomUUID();
+  const turnId = input.thread?.turnId ?? randomUUID();
+  const triggerItemId = input.thread?.triggerItemId ?? randomUUID();
+  if (!input.thread) {
+    await db.insert(threadTable).values({
+      id: threadId,
+      tenantId,
+      ownerUserId: "test-user",
+      lifecycleState: "active",
+      lastActivityAt: new Date(),
+      lastTurnSequence: 1,
+      lastItemSequence: 1,
+      lastEventSequence: 0,
+      pendingQueueVersionNo: 1,
+      versionNo: 1,
+    });
+    await db.insert(threadItemTable).values({
+      id: triggerItemId,
+      threadId,
+      turnId,
+      itemSequence: 1,
+      itemType: "user_message",
+      itemState: "completed",
+      authorType: "user",
+      authorId: "test-user",
+      contentJson: { text: "test runtime invocation" },
+      contentHash: "sha256:test-runtime-invocation",
+      contextPolicy: "include",
+    });
+    await db.insert(turnTable).values({
+      id: turnId,
+      threadId,
+      turnSequence: 1,
+      triggerType: "user_message",
+      triggerItemId,
+      turnState: "accepted",
+      activeInvocationId: null,
+      latestInvocationId: null,
+      regenerationNo: 0,
+      versionNo: 1,
+    });
+  }
   const { invocation } = await createInvocation({
     tenantId,
     threadId,

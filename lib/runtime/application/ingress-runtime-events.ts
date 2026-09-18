@@ -13,7 +13,7 @@ import type { ExecutionOperationKind } from "@/lib/executions/application/requir
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { bridgeInvocationTerminalToJob } from "@/lib/job/job-terminal-bridge";
 import { createUserActionRequest } from "@/lib/permission/user-action-queries";
-import { turnTable } from "@/lib/persistence/schema/conversation";
+import { threadItemTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import {
   INVOCATION_TERMINAL_STATES,
@@ -611,6 +611,40 @@ function validateExecutionStarted(
   }
 }
 
+/**
+ * R05：Turn 状态变换必须**同时**写入 canonical ThreadEvent（`turn.*`）。
+ *
+ * 权威 Turn 表与 Thread 事件流是同一事实的两个投影面。Runtime 事件改写 Turn 表却不写
+ * 事件时，`rebuildProjectionsForThread`（刷新产品页/从 DB 重建时间线）重放后 Turn 时间线
+ * 仍停在旧状态，页面与正式输出不一致 —— 而这类不一致只靠 SSE 内存态是看不出来的。
+ */
+async function appendTurnStateEvent(
+  tx: IngressTx,
+  input: {
+    threadId: string;
+    turnId: string;
+    invocationId: string;
+    eventType:
+      | "turn.started"
+      | "turn.waiting"
+      | "turn.completed"
+      | "turn.failed"
+      | "turn.cancelled";
+    itemId?: string | null;
+    errorCode?: string | null;
+  },
+): Promise<void> {
+  const sequence = await allocateEventSequences(tx, input.threadId);
+  await insertThreadEvent(tx, input.threadId, sequence, {
+    eventType: input.eventType,
+    turnId: input.turnId,
+    itemId: input.itemId ?? undefined,
+    invocationId: input.invocationId,
+    actorType: "service",
+    payload: { error_code: input.errorCode ?? null },
+  });
+}
+
 async function mapEvent(
   tx: IngressTx,
   invocation: Invocation,
@@ -620,6 +654,22 @@ async function mapEvent(
   if (invocation.subjectType === "job") return {};
   if (!invocation.threadId || !invocation.turnId)
     throw new IngressInvocationNotFoundError(invocation.id);
+
+  // R05：Thread 事件流只承载 `docs/contracts/event-catalog.json` 登记的事件类型。
+  // `execution.*` / `action` / `terminal` 是 Runtime Protocol 的候选事件名，产品侧的
+  // 对应事实由 canonical `turn.*` 事件（`applyEvent` 同事务写入）与 Item 承载。
+  // 把它们当 ThreadEvent 写入会让投影器判 `schema_unsupported`，而投影器**不前移
+  // checkpoint**，整个 Thread 的读模型从此停滞 —— 刷新产品页后时间线与页面永久不一致。
+  if (
+    event.type === "execution.suspended" ||
+    event.type === "execution.completed" ||
+    event.type === "execution.failed" ||
+    event.type === "execution.cancelled" ||
+    event.type === "action" ||
+    event.type === "terminal"
+  ) {
+    return {};
+  }
 
   if (
     event.type === "progress" ||
@@ -851,7 +901,7 @@ async function applyLifecycle(
           updatedAt: now,
         })
         .where(eq(invocationTable.id, invocation.id));
-      if (invocation.turnId)
+      if (invocation.turnId) {
         await tx
           .update(turnTable)
           .set({
@@ -861,6 +911,14 @@ async function applyLifecycle(
             versionNo: sql`${turnTable.versionNo} + 1`,
           })
           .where(eq(turnTable.id, invocation.turnId));
+        if (invocation.threadId)
+          await appendTurnStateEvent(tx, {
+            threadId: invocation.threadId,
+            turnId: invocation.turnId,
+            invocationId: invocation.id,
+            eventType: "turn.started",
+          });
+      }
     }
     await tx
       .update(executionOwnershipTable)
@@ -905,11 +963,19 @@ async function applyLifecycle(
           updatedAt: now,
         })
         .where(eq(invocationTable.id, invocation.id));
-      if (invocation.turnId)
+      if (invocation.turnId) {
         await tx
           .update(turnTable)
           .set({ turnState: "waiting_user" })
           .where(eq(turnTable.id, invocation.turnId));
+        if (invocation.threadId)
+          await appendTurnStateEvent(tx, {
+            threadId: invocation.threadId,
+            turnId: invocation.turnId,
+            invocationId: invocation.id,
+            eventType: "turn.waiting",
+          });
+      }
     }
     const [updated] = await tx
       .select()
@@ -952,11 +1018,19 @@ async function applyLifecycle(
           updatedAt: now,
         })
         .where(eq(invocationAttemptTable.id, attemptId));
-      if (invocation.turnId)
+      if (invocation.turnId) {
         await tx
           .update(turnTable)
           .set({ turnState: "waiting_user" })
           .where(eq(turnTable.id, invocation.turnId));
+        if (invocation.threadId)
+          await appendTurnStateEvent(tx, {
+            threadId: invocation.threadId,
+            turnId: invocation.turnId,
+            invocationId: invocation.id,
+            eventType: "turn.waiting",
+          });
+      }
       // R04 §3：**不**在已持有 I 根锁时调用 WorkspaceWriteLock 撤销/释放。
       // 本事务只失效 Authority、关闭 Session；Writer 的物理 stop/drain 由持久
       // Workspace Writer 释放 lane 按 W→I 顺序处理（`workspace-writer-release.ts`）。
@@ -1075,15 +1149,55 @@ async function applyLifecycle(
         .update(invocationAttemptTable)
         .set({ attemptState: state, finishedAt: now, updatedAt: now })
         .where(eq(invocationAttemptTable.id, attemptId));
-      if (invocation.turnId)
+      const turnId = invocation.turnId;
+      const threadId = invocation.threadId;
+      if (turnId && threadId) {
+        // R05：产品页（`GET /api/threads/{id}/turns`）读的是**权威 Turn 表**，因此
+        // 终态收口必须同时落地 Turn 的"采用关系"——否则页面刷新后看不到正式输出：
+        // - `adoptedInvocationId` = 产出当前 final_item 的会话执行（本 Invocation）；
+        // - `finalItemId` = 本 Invocation 已提交的 `response.completed` 对应的
+        //   assistant_message Item；没有正式回答（失败/取消）时保持原值不动，
+        //   绝不把失败的半截回答抬成"当前正式回答"。
+        // - `activeInvocationId` 终态必须为空（列语义：只在 queued/running/waiting 有值）。
+        const [produced] =
+          state === "completed"
+            ? await tx
+                .select({ id: threadItemTable.id })
+                .from(threadItemTable)
+                .where(
+                  and(
+                    eq(threadItemTable.threadId, threadId),
+                    eq(threadItemTable.invocationId, invocation.id),
+                    eq(threadItemTable.itemType, "assistant_message"),
+                  ),
+                )
+                .orderBy(desc(threadItemTable.itemSequence))
+                .limit(1)
+            : [];
         await tx
           .update(turnTable)
           .set({
             turnState:
               state === "completed" ? "completed" : state === "cancelled" ? "cancelled" : "failed",
             finishedAt: now,
+            activeInvocationId: null,
+            ...(produced ? { finalItemId: produced.id, adoptedInvocationId: invocation.id } : {}),
           })
-          .where(eq(turnTable.id, invocation.turnId));
+          .where(eq(turnTable.id, turnId));
+        await appendTurnStateEvent(tx, {
+          threadId,
+          turnId,
+          invocationId: invocation.id,
+          eventType:
+            state === "completed"
+              ? "turn.completed"
+              : state === "cancelled"
+                ? "turn.cancelled"
+                : "turn.failed",
+          itemId: produced?.id ?? null,
+          errorCode,
+        });
+      }
       // R04 §3：同上——终态事务不释放 WorkspaceWriteLock，只把 Authority 置为终态；
       // 物理 Writer 由持久释放 lane 按 W→I 顺序撤销并留存真实 stop/drain 回执。
       await tx

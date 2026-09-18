@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { POST as ingestRuntimeEventsPOST } from "@/app/runtime/invocations/[invocationId]/events/route";
+import { rebuildProjectionsForThread } from "@/lib/conversations/projector";
+import {
+  getItemSnapshotWithCursor,
+  getTurnTimelineProjection,
+  listTurnTimelineProjections,
+} from "@/lib/conversations/read-model-queries";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { acceptUserMessageTurn, getTurnsByThread } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -12,14 +20,18 @@ import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
+import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import {
   decodeWorkloadToken,
   issueWorkloadToken,
   signWorkloadTokenPayload,
 } from "@/lib/identity/workload-token";
 import { revokeWorkloadToken } from "@/lib/identity/workload-token-revocation-queries";
-import { threadEventTable, threadItemTable } from "@/lib/persistence/schema/conversation";
+import {
+  threadEventTable,
+  threadItemTable,
+  turnTable,
+} from "@/lib/persistence/schema/conversation";
 import {
   executionOwnershipTable,
   invocationTable,
@@ -41,8 +53,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 /** R02 §3：该夹具 Session 冻结的发布能力证据（Hosted Revision 的能力名列表）。 */
 const RUNTIME_CAPABILITIES_JSON = ["event_stream"];
 
-async function createActiveRuntime() {
-  const fixture = await seedPreparedRuntimeAttempt();
+async function createActiveRuntime(thread?: {
+  threadId: string;
+  turnId: string;
+  triggerItemId: string;
+}) {
+  const fixture = await seedPreparedRuntimeAttempt(thread ? { thread } : {});
   const acquired = await acquireTestRuntimeAuthority({
     tenantId: fixture.tenantId,
     invocationId: fixture.invocation.id,
@@ -652,5 +668,101 @@ describe("RuntimeEventIngress database fencing", () => {
     expect(invocation?.lastProducerSequence).toBe(4);
     // 批次水位只归并一次（+1），终态推进一次（+1）：终态写入之后不再有兜底版本更新。
     expect(invocation?.versionNo).toBe(beforeVersion + 2);
+  });
+
+  // ─── REPLAY-07（R05：刷新产品页并从 DB 重建时间线）────────────────────────
+  // 场景：Thread Runtime 完成后刷新产品页并从 DB 重建时间线。
+  // 必须断言：正式输出、Turn 采用关系与页面一致，**不只曾经 SSE 显示**。
+  // 因此本用例全程不读任何 SSE/内存状态：Thread 与 Turn 由真实产品路径建立，
+  // 终态后先 `rebuildProjectionsForThread` 从权威表重建读模型，再按页面真实
+  // 数据源（`getTurnsByThread` = 权威 Turn 表）与时间线投影逐项核对。
+
+  it("REPLAY-07: Runtime 完成后从 DB 重建的产品页显示正式输出，且 Turn 采用关系一致", async () => {
+    // 1. 真实产品路径建 Thread + Turn（写入 thread.created / turn.accepted / item.created）。
+    const thread = await createThread({
+      tenantId: DEFAULT_TENANT_ID,
+      ownerUserId: "test-user",
+      actorId: "test-user",
+    });
+    const accepted = await acceptUserMessageTurn({
+      tenantId: DEFAULT_TENANT_ID,
+      threadId: thread.thread.id,
+      ownerUserId: "test-user",
+      content: { text: "REPLAY-07 提问：请给出正式输出" },
+      actorId: "test-user",
+    });
+
+    // 2. 真实 Runtime 执行链挂到同一个 Thread/Turn 上。
+    const runtime = await createActiveRuntime({
+      threadId: thread.thread.id,
+      turnId: accepted.turn.id,
+      triggerItemId: accepted.item.id,
+    });
+    const invocationId = runtime.fixture.invocation.id;
+
+    // 3. Runtime 逐个提交正式输出（response.completed 携带 item_type）与终态。
+    const officialText = `官方输出-${randomUUID()}`;
+    await ingressBatch(runtime, [
+      {
+        eventId: randomUUID(),
+        producerSequence: "2",
+        type: "response.completed",
+        schemaVersion: 1,
+        payload: { text: officialText, item_type: "assistant_message", finish_reason: "stop" },
+      },
+      {
+        eventId: randomUUID(),
+        producerSequence: "3",
+        type: "execution.completed",
+        schemaVersion: 1,
+        payload: { finish_reason: "execution.completed" },
+      },
+    ]);
+
+    // 4. 刷新产品页 = 从 DB 重建时间线（清空投影并按权威 ThreadEvent 重放）。
+    await rebuildProjectionsForThread(DEFAULT_TENANT_ID, thread.thread.id);
+
+    // 5. 页面真实数据源（权威 Turn 表）：状态与 Turn 采用关系。
+    const [pageTurn] = await getTurnsByThread(DEFAULT_TENANT_ID, thread.thread.id);
+    expect(pageTurn?.id).toBe(accepted.turn.id);
+    expect(pageTurn?.turnState).toBe("completed");
+    // 终态 Turn 不再持有活跃执行（列语义：activeInvocationId 只在 queued/running/waiting 有值）。
+    expect(pageTurn?.activeInvocationId).toBeNull();
+    // 采用关系：当前正式回答属于产出它的那次会话执行。
+    expect(pageTurn?.adoptedInvocationId).toBe(invocationId);
+    expect(pageTurn?.finalItemId).toBeTruthy();
+    expect(pageTurn?.errorCode).toBeNull();
+
+    // 6. 正式输出 = 该 Invocation 的 assistant_message Item，内容与 Runtime 提交的一致。
+    const snapshot = await getItemSnapshotWithCursor(DEFAULT_TENANT_ID, thread.thread.id);
+    const officialItems = snapshot.items.filter(
+      (item) => item.itemType === "assistant_message" && item.invocationId === invocationId,
+    );
+    expect(officialItems).toHaveLength(1);
+    expect(officialItems[0]?.id).toBe(pageTurn?.finalItemId);
+    expect(officialItems[0]?.contentJson).toMatchObject({ text: officialText });
+    const [invocationRow] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, invocationId));
+    expect(invocationRow?.executionState).toBe("completed");
+
+    // 7. 重建后的 Turn 时间线投影必须与页面事实一致（同一条正式输出）。
+    const timelineRows = await listTurnTimelineProjections(DEFAULT_TENANT_ID, thread.thread.id);
+    const [timeline] = timelineRows;
+    expect(timelineRows).toHaveLength(1);
+    expect(timeline?.turnId).toBe(accepted.turn.id);
+    expect(timeline?.turnState).toBe("completed");
+    expect(timeline?.finalItemId).toBe(pageTurn?.finalItemId);
+    expect(timeline?.finalItemType).toBe("assistant_message");
+    expect(timeline?.triggerItemId).toBe(accepted.item.id);
+    const projection = await getTurnTimelineProjection(DEFAULT_TENANT_ID, accepted.turn.id);
+    expect(projection?.finalItemId).toBe(pageTurn?.finalItemId);
+
+    // 8. 负向：页面不得出现重复回答（SSE 期间显示过不等于只得一份），
+    //    也不得把触发消息本身当成正式输出。
+    expect(snapshot.items.filter((item) => item.itemType === "assistant_message")).toHaveLength(1);
+    expect(timeline?.finalItemId).not.toBe(accepted.item.id);
+    expect(pageTurn?.finalItemId).not.toBe(accepted.item.id);
   });
 });
