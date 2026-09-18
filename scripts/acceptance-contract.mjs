@@ -167,6 +167,41 @@ export function validateAcceptanceResult(result, { requireClosed = false } = {})
       assertString(skipped[field], `skippedTests[${index}].${field}`);
     }
   }
+  // 阶段证据必须完整记录：实际命令、**退出码**、起止时刻与记录校验和缺一不可。
+  // `stages` 一直是 `acceptance-result.schema.json` 的必填项，此前只是校验器没读它。
+  // 规则对运行中的中间态同样成立：`acceptance.mjs` 先把阶段落成 running + 空命令集，
+  // 只有命令全部以 0 退出才置 passed —— 所以「声称 passed」等价于「确实全绿」。
+  assert(Array.isArray(result.stages), "stages 缺失");
+  for (const [stageIndex, stage] of result.stages.entries()) {
+    const label = `stages[${stageIndex}]`;
+    assertString(stage.id, `${label}.id`);
+    assert(["running", "passed", "failed"].includes(stage.status), `${label}.status 非法`);
+    assert(Array.isArray(stage.commands), `${label}.commands 缺失`);
+    for (const [commandIndex, entry] of stage.commands.entries()) {
+      const commandLabel = `${label}.commands[${commandIndex}]`;
+      assertStringArray(entry.command, `${commandLabel}.command`);
+      assert(
+        entry.exitCode === null || Number.isInteger(entry.exitCode),
+        `${commandLabel}.exitCode 必须是整数或 null`,
+      );
+      assertString(entry.startedAt, `${commandLabel}.startedAt`);
+      assertString(entry.finishedAt, `${commandLabel}.finishedAt`);
+      assertString(entry.recordChecksum, `${commandLabel}.recordChecksum`);
+    }
+    if (stage.status === "passed") {
+      assert(stage.commands.length > 0, `${label} 声称 passed 却没有任何命令记录`);
+      for (const entry of stage.commands) {
+        assert(
+          entry.exitCode === 0,
+          `${label} 声称 passed，但 ${entry.command.join(" ")} 的退出码是 ${entry.exitCode}`,
+        );
+      }
+    }
+  }
+  // 「未运行不得 PASS」：声称完整本地验收通过，就必须留下真实阶段记录。
+  if (result.fullLocalAcceptance === "passed") {
+    assert(result.stages.length > 0, "fullLocalAcceptance 为 passed 但没有任何阶段记录");
+  }
   if (requireClosed || result.status === "closed") {
     assert(result.githubCi === "passed", "CLOSED 要求 GitHub CI passed");
     assert(

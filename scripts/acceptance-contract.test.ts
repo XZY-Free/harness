@@ -37,6 +37,24 @@ function isTracked(path: string): boolean {
   return git(["ls-files", "--error-unmatch", path]).ok;
 }
 
+/**
+ * 最小合规阶段记录：合同要求「声称 passed 的阶段必须有非空命令记录且退出码为 0」，
+ * 因此构造「完整本地验收通过」的结果时必须带上真实阶段证据，不能用空数组代替。
+ */
+const passingStage = {
+  id: "vitest",
+  status: "passed",
+  commands: [
+    {
+      command: ["pnpm", "test"],
+      startedAt: "2026-09-18T00:00:00.000Z",
+      finishedAt: "2026-09-18T00:00:01.000Z",
+      exitCode: 0,
+      recordChecksum: "e".repeat(64),
+    },
+  ],
+};
+
 describe("Topic01 canonical acceptance contracts", () => {
   it("canonical plan 可按 profile 和单 stage 选择且不引用旧工程包", () => {
     const plan = validateVerificationPlan(json(PLAN_PATH));
@@ -100,6 +118,7 @@ describe("Topic01 canonical acceptance contracts", () => {
       fullLocalAcceptance: "passed",
       status: "closed",
       skippedTests: [],
+      stages: [passingStage],
     };
     expect(validateAcceptanceResult(base, { requireClosed: true })).toBe(base);
     expect(() =>
@@ -127,7 +146,7 @@ describe("Topic01 canonical acceptance contracts", () => {
       artifactDigests: {},
       skippedTests: [],
       acceptanceIdResults: [],
-      stages: [],
+      stages: [passingStage],
     };
     expect(validateAcceptanceResult(base).runId).toBe(base.runId);
     expect(() => validateAcceptanceResult({ ...base, runId: undefined })).toThrow("runId");

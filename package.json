@@ -54,7 +54,8 @@
     "rebuild:desktop-native": "node scripts/rebuild-desktop-native.mjs",
     "package:desktop": "pnpm build:desktop && pnpm rebuild:desktop-native && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config desktop/electron-builder.yml --mac --arm64",
     "package:desktop:signed": "pnpm build:desktop && pnpm rebuild:desktop-native && electron-builder --config desktop/electron-builder.yml --mac --arm64",
-    "architecture:gate": "npx tsx scripts/architecture-gate.ts"
+    "architecture:gate": "npx tsx scripts/architecture-gate.ts",
+    "production:wiring": "npx tsx scripts/production-wiring.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.50",

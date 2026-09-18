@@ -75,8 +75,8 @@
     },
     {
       "id": "production-wiring",
-      "name": "生产入口与 Authority 映射",
-      "commands": [["node", "scripts/acceptance-contract.mjs", "--production-wiring"]]
+      "name": "生产入口与 Authority 接线（真实源码事实）",
+      "commands": [["pnpm", "production:wiring"]]
     },
     {
       "id": "fresh-db",

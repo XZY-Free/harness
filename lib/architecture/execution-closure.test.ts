@@ -780,7 +780,7 @@ describe("GATE-04 旧 Route / 别名 / 默认 db 写事务 / NO 降级 / 生产�
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("GATE-05 全量验收证据完整性（未运行不得 PASS）", () => {
-  it("验收结果合同接受完整记录，且拒绝缺 SHA / 缺运行标识 / 缺跳过记录 / 未收口冒充收口", async () => {
+  it("验收结果合同接受完整记录，且拒绝缺 SHA / 缺运行标识 / 缺跳过记录 / 缺退出码 / 未运行冒充运行", async () => {
     const plan = await loadPlan();
     const complete = {
       schemaVersion: 2,
@@ -842,6 +842,44 @@ describe("GATE-05 全量验收证据完整性（未运行不得 PASS）", () => 
     // 缺 skippedTests（跳过情况未记录）→ 拒绝。
     const { skippedTests: _skipped, ...withoutSkips } = complete;
     expect(() => validateAcceptanceResult(withoutSkips)).toThrow();
+
+    // 缺 stages（实际命令与退出码未记录）→ 拒绝：schema 一直把它列为必填，
+    // 缺少阶段记录的「通过」就是未运行冒充运行。
+    const { stages: _stages, ...withoutStages } = complete;
+    expect(() => validateAcceptanceResult(withoutStages)).toThrow("stages");
+
+    // 声称 passed 却没有任何命令记录 → 拒绝。
+    expect(() =>
+      validateAcceptanceResult({
+        ...complete,
+        stages: complete.stages.map((stage) => ({ ...stage, commands: [] })),
+      }),
+    ).toThrow(/没有任何命令记录/);
+
+    // 声称 passed 但命令退出码非 0 → 拒绝（退出码是「确实跑过且全绿」的唯一凭据）。
+    expect(() =>
+      validateAcceptanceResult({
+        ...complete,
+        stages: complete.stages.map((stage) => ({
+          ...stage,
+          commands: stage.commands.map((entry) => ({ ...entry, exitCode: 1 })),
+        })),
+      }),
+    ).toThrow(/退出码是 1/);
+
+    // 命令缺 exitCode（无法证明是否真的运行）→ 拒绝。
+    expect(() =>
+      validateAcceptanceResult({
+        ...complete,
+        stages: complete.stages.map((stage) => ({
+          ...stage,
+          commands: stage.commands.map(({ exitCode: _exitCode, ...rest }) => rest),
+        })),
+      }),
+    ).toThrow(/exitCode/);
+
+    // 宣称完整本地验收通过却一条阶段都没有 → 拒绝（未运行不得 PASS）。
+    expect(() => validateAcceptanceResult({ ...complete, stages: [] })).toThrow(/没有任何阶段记录/);
 
     // 宣称 closed 但远端 SHA 与本地实际 SHA 不等 → 拒绝（不得用局部结果冒充全量收口）。
     expect(() =>
