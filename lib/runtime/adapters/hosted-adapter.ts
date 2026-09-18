@@ -574,6 +574,23 @@ export class HostedHarnessLoop {
         : undefined,
     });
     const result = await loop.run();
+    // R02 §7：用户等待的**正式暂停**由 Runtime 自报 `execution.suspended`，平台在 Ingress
+    // 处验证安全边界后才落 paused（Attempt=suspended / Owner 释放 / Session 关闭）。
+    //
+    // 判别条件必须是「本轮真的产生了 user-action 请求」：子调用 pending（AgentCall/ToolCall
+    // 仍在跑）**不等于**人工暂停，那种情况由 Supervisor 继续持有任务租约等待子结果。
+    if (result.waitingForUser && this.sentEvents.some((event) => event.type === "user-action")) {
+      const authority = this.params.authority ?? failMissingAuthority();
+      await this.sendEvent(ingressClient, "execution.suspended", {
+        reason: "waiting_user",
+        resumeAnchorDigest: protocolDigest({
+          kind: "runtime-suspension",
+          invocationId: this.params.invocationId,
+          attemptId: authority.attemptId,
+          ownershipId: authority.ownershipId,
+        }),
+      });
+    }
     return {
       completed: result.completed,
       cancelled: result.cancelled,

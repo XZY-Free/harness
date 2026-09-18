@@ -626,25 +626,6 @@ export const runtimeSessionBindingTable = mysqlTable(
 export type RuntimeSessionBinding = InferSelectModel<typeof runtimeSessionBindingTable>;
 export type NewRuntimeSessionBinding = InferInsertModel<typeof runtimeSessionBindingTable>;
 
-export const RUNTIME_EVENT_INGRESS_TYPES = [
-  "execution.started",
-  "execution.suspended",
-  "progress.snapshot",
-  "response.completed",
-  "user_action.requested",
-  "execution.completed",
-  "execution.failed",
-  "execution.cancelled",
-  "harness.action.proposed",
-  "harness.action.started",
-  "harness.action.completed",
-  "harness.action.failed",
-  "job.step.accepted",
-  "job.step.completed",
-  "job.step.failed",
-] as const;
-export type RuntimeEventIngressType = (typeof RUNTIME_EVENT_INGRESS_TYPES)[number];
-
 export const runtimeEventIngressTable = mysqlTable(
   "RuntimeEventIngress",
   {

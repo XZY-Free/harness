@@ -446,7 +446,10 @@ export class HarnessLoop {
       };
     }
     if (execution.waitingForUser) {
-      await this.params.eventWriter.write("user_action.requested", {
+      // R02 §7：只使用 RuntimeProtocol 正式 Event 类型（`user-action`）。旧实现写
+      // `user_action.requested` 是 **ThreadEvent** 的名字，不是协议事件类型——经生产
+      // Ingress 时会被 `RuntimeEventSchema` 直接拒绝（request_user_input 路径整体不可用）。
+      await this.params.eventWriter.write("user-action", {
         request_type: execution.waitingForUser.requestType,
         purpose: execution.waitingForUser.purpose,
         prompt: execution.waitingForUser.prompt,

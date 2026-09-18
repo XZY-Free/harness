@@ -584,7 +584,7 @@ describe("HarnessLoop", () => {
       "progress",
       "harness.action.proposed",
       "harness.action.started",
-      "user_action.requested",
+      "user-action",
       "harness.action.completed",
     ]);
   });

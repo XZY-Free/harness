@@ -602,7 +602,7 @@ export const RuntimeEventTypeSchema = z.enum([
   "user-action",
   "action",
   "terminal",
-  // Harness 行动事实（RUNTIME_EVENT_INGRESS_TYPES 同款）；由平台 Gateway/Hosted Loop 产生，
+  // Harness 行动事实；由平台 Gateway/Hosted Loop 产生，
   // mysql-recovery-port 依赖该 candidateType 前缀重建 durable action 历史。
   "harness.action.proposed",
   "harness.action.started",
