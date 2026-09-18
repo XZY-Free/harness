@@ -504,15 +504,26 @@ describe("ExecutionOwnership database fencing", () => {
       authorityNow.getTime() + OWNERSHIP_LEASE_MS,
     );
     // 封顶的续租依然是合法续租：心跳推进、代际版本单调。
-    expect(capped.lastHeartbeatAt.getTime()).toBeGreaterThanOrEqual(authorityNow.getTime());
+    // 心跳推进只能与**本行续租前的值**比较。生产续租写的是事务内 `CURRENT_TIMESTAMP(6)`，
+    // 那是另一次 `CLOCK_REALTIME` 读取；容器/VM 在长时间高负载下会出现毫秒级回拨（本轮完整
+    // 验收中实测回拨 81ms），把两次独立取时当作单调序列比较会偶发失败，且与本用例要证明的
+    // 「无法越过 dispatchDeadline 延长」安全语义无关。与 1s 前的旧心跳比较既直接又稳定。
+    expect(capped.lastHeartbeatAt.getTime()).toBeGreaterThan(simulatedLastHeartbeatAt.getTime());
     expect(capped.versionNo).toBe(first.ownership.versionNo + 1);
 
     // deadline 已过仍未 Start：续租必须失败，Start 无法无限占用。
-    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
-    // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
+    // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`），不能用客户端
+    // `Date.now()`。同时要留出远超 `CLOCK_REALTIME` 回拨幅度的余量：若把 deadline 设成"刚刚
+    // 读到的 DB 时刻"，生产在数毫秒后取到的 `now` 一旦遇到回拨就可能小于它，用例会偶发失败。
+    // 这里用权威时钟 **-1s** 表达"已过期"——状态语义未变（仍然是「deadline 已过且未 Start」），
+    // 且继续走 deadline 分支（lease 仍在有效期内），"被 deadline 精确封顶"的边界已由上面的
+    // `leaseExpiresAt === dispatchDeadline` 钉住。
+    const expiredDispatchDeadline = new Date(
+      (await getAuthorityDatabaseTime(db)).getTime() - 1_000,
+    );
     await db
       .update(executionOwnershipTable)
-      .set({ dispatchDeadline: await getAuthorityDatabaseTime(db) })
+      .set({ dispatchDeadline: expiredDispatchDeadline })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
     const beforeRejected = await getActiveExecutionOwnership({
       tenantId: fixture.tenantId,
