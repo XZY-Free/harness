@@ -5638,6 +5638,7 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/permission/user-action-expiry-queries.ts",
+        "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-resume.ts"
       ],
       "productionReaders": [
@@ -5690,6 +5691,7 @@
         "lib/conversations/user-action-resolve-queries.ts",
         "lib/job/job-result-projection-queries.ts",
         "lib/permission/user-action-expiry-queries.ts",
+        "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-resume.ts",
         "app/api/threads/[threadId]/turns/[turnId]/activity/route.ts",
         "lib/conversations/child-thread-queries.ts",
