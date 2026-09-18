@@ -19,6 +19,22 @@ P1-05 已修复。Topic01 验收只依赖当前仓库中的 canonical 文件，�
 
 长期机器文件使用稳定名称，不再以批次编号作为 API。
 
+## 运行产物与受控基线的分离
+
+上表全部文件**受版本管理**（`docs/` 虽被 `.gitignore` 排除，这些文件已跟踪，改动需显式 `git add`；
+新增同类基线文件需 `git add -f`）。验收脚本同样在 `scripts/` 下受版本管理。
+
+流程自身重写的运行产物**不进版本管理**，统一落在 `docs/topic-01/evidence/artifacts/`：
+
+- `artifacts/acceptance-result.json` —— 每次运行由 `scripts/acceptance.mjs` 重建，
+  记录 `localAcceptanceSha`、`runId`（`<sha12>-<epochMs>-<pid>`）、真实逐阶段退出码、跳过明细。
+- `artifacts/vitest-skipped-tests.json` —— 由 `scripts/vitest-stage.mjs` 按
+  `skipped-test-registry.json` 允许清单生成的实际跳过记录。
+
+分离原因：产物在运行中被流程自己重写，若纳入跟踪则 `worktree-cleanliness` 必然判脏，
+门禁只能靠放宽来通过。路径常量唯一来源是 `scripts/acceptance-contract.mjs`
+（`RESULT_PATH` / `SKIPPED_TESTS_PATH`），`.gitignore` 中另有指向该目录的显式条目。
+
 ## Schema evidence
 
 生成器每次从当前 Canonical Schema、runtime-loaded schema、clean migration 和当前生产源码重新构建 122 张表的证据，不读取或合并旧 inventory。

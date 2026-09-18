@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { SKIPPED_TESTS_PATH } from "./acceptance-contract.mjs";
 import { collectSkippedTests } from "./vitest-result.mjs";
 
 const allowed = new Set(["unit", "db", "integration", "contract"]);
@@ -10,7 +12,8 @@ if (groups.length === 0 || groups.some((group) => !allowed.has(group))) {
 }
 
 const rawResults = groups.map((group) => `.vitest-result.${group}.json`);
-const output = "docs/topic-01/evidence/vitest-skipped-tests.json";
+/** 运行产物（不进版本管理）；受控允许清单仍是 `skipped-test-registry.json`。 */
+const output = SKIPPED_TESTS_PATH;
 const reports = [];
 let exitCode = 0;
 
@@ -41,6 +44,7 @@ try {
       readFileSync("docs/topic-01/evidence/skipped-test-registry.json", "utf8"),
     );
     const skippedTests = reports.flatMap((report) => collectSkippedTests(report, registry));
+    mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, `${JSON.stringify(skippedTests, null, 2)}\n`);
     console.log(`Skipped tests recorded: ${skippedTests.length}`);
   }

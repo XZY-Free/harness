@@ -2,10 +2,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+/** 受版本管理的受控基线（plan / matrix / schema / 允许清单）所在目录。 */
 export const EVIDENCE_BASE = "docs/topic-01/evidence";
+/**
+ * 运行产物目录：由验收与测试流程在本机生成，**不进版本管理**
+ * （见 .gitignore 的 `docs/topic-01/evidence/artifacts/`）。
+ *
+ * 分离理由：产物在每次运行中被流程自身重写，若纳入跟踪则 `worktree-cleanliness`
+ * 必然判脏，门禁只能靠放宽来通过——那是掩盖问题，不是修复。
+ */
+export const ARTIFACTS_BASE = `${EVIDENCE_BASE}/artifacts`;
 export const PLAN_PATH = `${EVIDENCE_BASE}/verification-plan.json`;
 export const MATRIX_PATH = `${EVIDENCE_BASE}/acceptance-matrix.json`;
-export const RESULT_PATH = `${EVIDENCE_BASE}/acceptance-result.json`;
+export const RESULT_PATH = `${ARTIFACTS_BASE}/acceptance-result.json`;
+/** `vitest-stage.mjs` 写、`acceptance.mjs` 读的跳过用例记录（运行产物）。 */
+export const SKIPPED_TESTS_PATH = `${ARTIFACTS_BASE}/vitest-skipped-tests.json`;
 export const REQUIRED_ACCEPTANCE_IDS = [
   "KNOWLEDGE-SUBJECT-ACL",
   "AGENT-SCENARIO-AUTHORITY",
@@ -140,6 +151,11 @@ export function validateAcceptanceResult(result, { requireClosed = false } = {})
   assert(result?.schemaVersion === 2, "acceptance result schemaVersion 必须为 2");
   assertString(result.baselineSha, "baselineSha");
   assertString(result.localAcceptanceSha, "localAcceptanceSha");
+  assertString(result.runId, "runId");
+  assert(
+    /^[0-9a-f]{12}-\d+-\d+$/.test(result.runId),
+    "runId 必须是 <sha12>-<epochMs>-<pid>，一次运行一个标识",
+  );
   assert(["pending", "passed", "failed"].includes(result.githubCi), "githubCi 非法");
   assert(
     result.remoteHeadSha === null || typeof result.remoteHeadSha === "string",

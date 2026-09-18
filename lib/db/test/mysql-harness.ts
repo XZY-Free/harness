@@ -16,10 +16,15 @@ import * as schema from "@/lib/persistence/schema";
  * TRUNCATE 不再触发 binlog 刷盘和 .ibd 文件删除/创建（macOS Docker osxfs 主要开销）。
  * - reset 专用连接池启用 multipleStatements=true，把 60+ 条 TRUNCATE + FOREIGN_KEY_CHECKS
  * 开关拼成一条 SQL 一次往返执行；与 lib/db/client.ts 的生产池完全隔离，不影响生产安全。
+ *
+ * 容器生命周期：Ryuk 被有意禁用（见下），释放靠 `stop()`；被打断的运行会留下孤儿容器。
+ * 故启动时按归属（项目 + 工作区 + 运行实例）回收**本项目**的孤儿容器，
+ * 详见 lib/db/test/container-ownership.ts；正常结束时显式释放运行标记。
  */
 import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
 import mysql from "mysql2/promise";
+import { beginOwnedTestMysqlRun, ownershipLabels, releaseRun } from "./container-ownership";
 
 /** 用全局 container 的连接串建一个 drizzle 实例（供 setup/migrate/重置用）。 */
 export function buildDrizzle(connectionString: string) {
@@ -35,9 +40,16 @@ export async function startTestMysql(): Promise<{
   // 禁用 ryuk 资源回收容器（网络受限拉不动；teardown 显式 stop 容器即可）。
   process.env.TESTCONTAINERS_RYUK_DISABLED = "true";
   const { MySqlContainer } = await import("@testcontainers/mysql");
+  // 归属登记 + 孤儿回收（同范围互斥）；容器带归属标签，便于下次启动判定。
+  const { ownership, report } = beginOwnedTestMysqlRun();
+  const reclaimNote = report.skippedReason ? ` reclaim-skipped=${report.skippedReason}` : "";
+  console.log(
+    `[test-mysql] run=${ownership.runId} reclaimed=${report.removed.length} retained=${report.retained.length}${reclaimNote}`,
+  );
   // 关闭 binlog 同步 + 降低 innodb flush 频率：测试场景不需要持久化保证，
   // DDL（TRUNCATE）默认要等 binlog 刷盘，关闭后 TRUNCATE 提速 5-10 倍。
   const container = await new MySqlContainer("mysql:8.0")
+    .withLabels(ownershipLabels(ownership))
     .withDatabase("snow_test")
     .withRootPassword("test")
     .withCommand([
@@ -49,7 +61,12 @@ export async function startTestMysql(): Promise<{
       // 文件系统开销（每表 TRUNCATE ~100ms → ~5ms）。
       "--innodb-file-per-table=0",
     ])
-    .start();
+    .start()
+    .catch((error: unknown) => {
+      // 容器没起来就不该留下活跃运行标记，否则下次启动会把它当活跃运行而漏回收。
+      releaseRun(ownership);
+      throw error;
+    });
   const connectionString = container.getConnectionUri();
   const { db, pool } = buildDrizzle(connectionString);
   try {
@@ -60,7 +77,11 @@ export async function startTestMysql(): Promise<{
   return {
     connectionString,
     stop: async () => {
-      await container.stop();
+      try {
+        await container.stop();
+      } finally {
+        releaseRun(ownership);
+      }
     },
   };
 }

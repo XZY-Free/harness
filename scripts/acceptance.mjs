@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import {
   MATRIX_PATH,
   PLAN_PATH,
   RESULT_PATH,
+  SKIPPED_TESTS_PATH,
   loadCanonicalContracts,
   selectVerificationStages,
   validateAcceptanceResult,
@@ -20,7 +21,7 @@ const stageIndex = args.indexOf("--stage");
 const requestedStage = stageIndex >= 0 ? args[stageIndex + 1] : null;
 const { plan, matrix } = loadCanonicalContracts(ROOT);
 const stages = selectVerificationStages(plan, profile, requestedStage);
-const skippedTestsPath = resolve(ROOT, "docs/topic-01/evidence/vitest-skipped-tests.json");
+const skippedTestsPath = resolve(ROOT, SKIPPED_TESTS_PATH);
 
 if (args.includes("--plan")) {
   process.stdout.write(
@@ -44,8 +45,7 @@ function readJson(repositoryPath) {
 }
 
 function readSkippedTests() {
-  const path = "docs/topic-01/evidence/vitest-skipped-tests.json";
-  return existsSync(resolve(ROOT, path)) ? readJson(path) : [];
+  return existsSync(resolve(ROOT, SKIPPED_TESTS_PATH)) ? readJson(SKIPPED_TESTS_PATH) : [];
 }
 
 const worktreeStatus = commandOutput("git", ["status", "--short"]);
@@ -57,13 +57,18 @@ const remoteHeadSha = process.env.ACCEPTANCE_REMOTE_HEAD_SHA ?? process.env.GITH
 const testCollection = readJson("docs/topic-01/evidence/test-collection.json");
 const schemaManifest = readJson("docs/topic-01/evidence/schema-manifest.json");
 const startedAt = new Date().toISOString();
+/** 运行标识：把一次运行绑定到「被测提交 + 时刻 + 进程」，避免不同运行的结果互相冒充。 */
+const runId = `${localAcceptanceSha.slice(0, 12)}-${Date.now()}-${process.pid}`;
 const resultPath = resolve(ROOT, RESULT_PATH);
+// 产物目录是运行产物（不进版本管理），首次运行时按需创建。
+mkdirSync(dirname(resultPath), { recursive: true });
 if (stages.some((stage) => stage.id === "vitest")) rmSync(skippedTestsPath, { force: true });
 const result = {
   schemaVersion: 2,
   baselineSha: plan.baselineSha,
   diffRange: `${plan.baselineSha}..${localAcceptanceSha}`,
   localAcceptanceSha,
+  runId,
   remoteHeadSha,
   githubCi,
   profile,

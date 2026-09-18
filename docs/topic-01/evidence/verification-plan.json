@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "authority": "docs/topic-01/evidence/verification-plan.json",
-  "resultPath": "docs/topic-01/evidence/acceptance-result.json",
+  "resultPath": "docs/topic-01/evidence/artifacts/acceptance-result.json",
   "baselineSha": "24a8d97b26270100d908b8f6d6c81d019324525e",
   "profiles": {
     "acceptance": [
