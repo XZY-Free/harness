@@ -9,7 +9,7 @@ import { recordAuditEvent } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/audit";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { markInvocationLost, readObservedOwner } from "@/lib/runtime/application/runtime-recovery";
-import { resumeHarnessInvocation } from "@/lib/runtime/application/runtime-resume";
+import { resumeHarnessContinuation } from "@/lib/runtime/application/runtime-resume";
 import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import {
   type ExecutionSubject,
@@ -29,7 +29,7 @@ import {
 const handler = createInvocationContinuationHandler({
   getAgentCall: (params) => mysqlAgentCallStore.getById(params),
   coordinateWaitingUser: coordinateAgentInputRequired,
-  resumeParent: resumeHarnessInvocation,
+  resumeParent: (params) => resumeHarnessContinuation(params),
   async resumeAgentFromUserAction(params) {
     const [request] = await db
       .select()
@@ -96,12 +96,12 @@ const handler = createInvocationContinuationHandler({
     });
     // 用户回答已由同一 AgentCall/Session 接受；终态事件会另发 resume_parent。
     if (!call || call.state === "running") return;
-    await resumeHarnessInvocation(params);
+    await resumeHarnessContinuation(params);
   },
   getToolCall: (params) =>
     getToolCallById({ tenantId: params.tenantId, toolCallId: params.toolCallId }),
   resumeToolParent: (params) =>
-    resumeHarnessInvocation({
+    resumeHarnessContinuation({
       tenantId: params.tenantId,
       invocationId: params.invocationId,
       sourceType: "tool_call",

@@ -9,7 +9,7 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { workspaceBinding } from "@/lib/persistence/schema/workspace";
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
-import { getActiveLocksByInvocation } from "@/lib/workspace/workspace-write-lock-queries";
+import { isWorkspaceWriterFenced } from "@/lib/workspace/workspace-writer-fence";
 import { and, eq } from "drizzle-orm";
 
 /**
@@ -148,20 +148,23 @@ export async function requireCurrentExecutionAuthority(input: {
     .for("update")
     .limit(1);
   if (!workspace) throw new Error("WorkspaceNotReady");
-  if (workspace.continuityMode !== "NO_PLATFORM_WORKSPACE") {
-    if (owner.workspaceWriterGeneration === null || !workspace.storageScopeDigest) {
-      throw new Error("WorkspaceWriterNotFenced");
-    }
-    const locks = await getActiveLocksByInvocation(input.tenantId, invocation.id, executor);
-    const writer = locks.find(
-      (lock) =>
-        lock.storageScopeDigest === workspace.storageScopeDigest &&
-        lock.workspaceBindingId === workspace.id &&
-        lock.holderAttemptId === owner.attemptId &&
-        lock.holderOwnershipId === owner.id &&
-        lock.writerGeneration === owner.workspaceWriterGeneration,
-    );
-    if (!writer) throw new Error("WorkspaceWriterNotFenced");
-  }
+  // Workspace Writer 围栏只适用于「服务端持有 Writer」的连续性模式（R08 §1/§4）：
+  // `SHARED_DURABLE` / `CHECKPOINT_RESTORABLE` 的写入必须被当前代际的 W 行真正围栏住。
+  // `HOST_AFFINE`（桌面个人目录）的写由绑定设备本机执行，服务端**不是**该目录的 Writer，
+  // 因此 `workspaceWriterGeneration` 正确地恒为 null —— 对它要求服务端 W 行会把每一个
+  // Runtime 事件都判成 `WorkspaceWriterNotFenced`，使"真实 Workspace 的默认入口"整体不可用
+  // （R01 失败链）。判定与 Ingress 共用同一份实现。
+  const fenced = await isWorkspaceWriterFenced({
+    tenantId: input.tenantId,
+    invocationId: invocation.id,
+    workspaceBinding: workspace,
+    holder: {
+      attemptId: owner.attemptId,
+      ownershipId: owner.id,
+      writerGeneration: owner.workspaceWriterGeneration,
+    },
+    executor,
+  });
+  if (!fenced) throw new Error("WorkspaceWriterNotFenced");
   return owner;
 }

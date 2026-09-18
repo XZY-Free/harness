@@ -13,32 +13,59 @@ import {
 import { getEffectiveEnvironmentSelection } from "@/lib/environment/environment-selection";
 import type { EnvironmentChangeRequest } from "@/lib/persistence/schema/environment-change-request";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
-import { resolveWorkspaceBindingId } from "@/lib/workspace/desktop-workspace-queries";
+import { WorkspaceNotReadyError } from "@/lib/workspace/managed-workspace-host";
+import { resolveDeclaredWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 
 export interface ThreadWorkspaceFacts {
   /** Thread 冻结的真实 WorkspaceBinding（null = 没有可用绑定）。 */
   workspaceBindingId: string | null;
-  /** Thread 声明了 Workspace 但当前解析不到 → 只降级 Workspace 能力，不阻断调度。 */
+  /** Thread 声明了 Workspace 但当前解析不到 → MANAGED 执行必须 fail closed。 */
   workspaceUnavailable: boolean;
 }
 
 /**
  * Thread 固定的 Workspace 事实。
  *
- * 桌面绑定冻结：Thread 固定的 Workspace 事实不回滚。设备撤销/绑定失效只降级 Workspace
- * 能力（catalog 记 unavailableFacts），不阻断基础聊天调度。
+ * 声明的 Workspace 通过与 profile 无关的正式合同解析读取（R01 §1）：云端/远端/Sandbox
+ * 合同必须在入口就能解析成正式合同，否则同一份声明在不同调用路径下会得到不同的
+ * Workspace 语义。设备撤销/绑定失效只让「解析不出」这一事实成立，如何处理由
+ * `assertDeclaredWorkspaceReady` 按是否携带平台环境决定。
  */
 export async function resolveThreadWorkspaceFacts(
   tenantId: string,
   thread: { defaultWorkspaceId: string | null; ownerUserId: string },
 ): Promise<ThreadWorkspaceFacts> {
-  const workspaceBindingId = thread.defaultWorkspaceId
-    ? await resolveWorkspaceBindingId(tenantId, thread.defaultWorkspaceId, thread.ownerUserId)
+  const binding = thread.defaultWorkspaceId
+    ? await resolveDeclaredWorkspaceBinding(
+        tenantId,
+        thread.defaultWorkspaceId,
+        thread.ownerUserId,
+      )
     : null;
   return {
-    workspaceBindingId,
-    workspaceUnavailable: Boolean(thread.defaultWorkspaceId) && !workspaceBindingId,
+    workspaceBindingId: binding?.id ?? null,
+    workspaceUnavailable: Boolean(thread.defaultWorkspaceId) && !binding,
   };
+}
+
+/**
+ * R01 §1 / R07 §4：携带平台环境（MANAGED）的执行必须携带 Thread/Job 声明的真实
+ * Workspace 合同。
+ *
+ * 声明了 Workspace 却解析不出正式合同时必须 fail closed —— 以 `WorkspaceNotReady`
+ * 保留可恢复失败事实，**绝不**静默降级成 NO_PLATFORM_WORKSPACE 合同（那会让一次
+ * MANAGED 执行在没有声明者同意的情况下丢掉它声明的 Workspace）。NONE 只用于
+ * 「没有平台环境、也不携带 Workspace」的执行。
+ */
+export function assertDeclaredWorkspaceReady(input: {
+  environmentRevisionId: string | null;
+  workspaceUnavailable: boolean;
+}): void {
+  if (input.environmentRevisionId && input.workspaceUnavailable) {
+    throw new WorkspaceNotReadyError(
+      "声明的 Workspace 无法解析为正式合同：MANAGED 执行不得降级为 NO_PLATFORM_WORKSPACE",
+    );
+  }
 }
 
 export interface ResolvedInvocationEnvironment {

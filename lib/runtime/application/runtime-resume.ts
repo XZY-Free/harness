@@ -9,7 +9,10 @@ import { getEnvironmentRevisionById } from "@/lib/environment/environment-defini
 import { getEnvironmentLeaseByAttempt } from "@/lib/environment/environment-lease-store";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { transitionInvocation } from "@/lib/executions/application/transition-invocation";
-import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
+import {
+  ExecutionAuthorityError,
+  authorityIdentity,
+} from "@/lib/executions/domain/execution-authority";
 import { getAttemptById, getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
@@ -405,17 +408,15 @@ async function runHostedInvocation(input: {
       input.binding.workspaceBindingId,
     );
     if (!workspaceBinding) throw new Error("WorkspaceBinding 不存在");
-    // R01 §5：Hosted 的默认 Action Executors 必须由 Binding 冻结的能力目录装配，
-    // 不能默认 `{}`（那会把已有 Tool/Agent/Knowledge 工作回归成纯文本回答）。
-    const actionExecutors =
-      input.overrides?.actionExecutors ??
-      (
-        await resolveExecutionResources({
-          tenantId: input.tenantId,
-          binding: input.binding,
-          purpose: "resume",
-        })
-      ).actionExecutors;
+    // R01 §5：Hosted 的默认 Action Executors **与模型可见的能力目录**必须由同一份
+    // Binding 冻结目录装配。只装配执行器而不传目录会让模型视图 `capabilityCatalog: null`
+    // ——执行器具备能力但模型看不到任何工具，要求 Tool/Agent 的任务会退化成纯文本直答。
+    const resources = await resolveExecutionResources({
+      tenantId: input.tenantId,
+      binding: input.binding,
+      purpose: "resume",
+    });
+    const actionExecutors = input.overrides?.actionExecutors ?? resources.actionExecutors;
     const workspace =
       workspaceBinding.continuityMode === "NO_PLATFORM_WORKSPACE"
         ? { mode: "NONE" as const }
@@ -478,6 +479,8 @@ async function runHostedInvocation(input: {
         input.overrides?.finalResponsePort ??
         configuredFinalResponsePort(input.binding.modelId ?? aiConfig.chatModel),
       actionExecutors,
+      // R01 §5：能力目录是 Binding 冻结事实，运行期只投影给模型视图（不得由调用方另拼）。
+      capabilityCatalog: resources.capabilityCatalog,
       recoveryPort: createMySqlHarnessLoopRecoveryPort(input.tenantId),
       ingressClient: {
         postEventBatch: async (invocationId, authority, events) => {
@@ -609,6 +612,84 @@ export async function resumeHarnessInvocation(input: {
     pending: result.pending,
     waitingForUser: result.waitingForUser,
   };
+}
+
+/**
+ * R02 §2 + R03 §5：为**持久化的事实续接**重建当前执行代际的准确 Authority。
+ *
+ * 与 `loadAuthorityFromTuple` 的分工：Start/Resume **命令**携带调用方认定的 tuple，只做
+ * 逐项复核；continuation 事件（ToolCall/AgentCall 终态）只表达"继续这个 Invocation"，
+ * 不携带任何 tuple，因此必须从正式事实重建 —— 当前 active Owner + 该 Ownership 的唯一
+ * Session，二者仍逐项自洽。
+ *
+ * 没有 active Owner（已释权 / 已被换代 / 已被收口）时 fail closed：continuation **绝不**
+ * 复活一个不再持有执行权的旧代际。
+ */
+async function resolveCurrentExecutionAuthority(input: {
+  tenantId: string;
+  invocationId: string;
+  runtimeRevisionId: string;
+}): Promise<AuthorityIdentity> {
+  const owner = await getActiveExecutionOwnership({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+  });
+  if (!owner) {
+    throw new ExecutionAuthorityError(
+      "NotCurrentExecutor",
+      `Invocation ${input.invocationId} 没有 active Owner，continuation 不得复活旧代际`,
+    );
+  }
+  const session = await getRuntimeSessionBindingByOwnership(input.tenantId, owner.id);
+  if (
+    !session ||
+    session.invocationId !== input.invocationId ||
+    session.attemptId !== owner.attemptId ||
+    session.leaseEpoch !== owner.leaseEpoch
+  ) {
+    throw new ExecutionAuthorityError(
+      "RuntimeSessionMismatch",
+      `Ownership ${owner.id} 没有自洽的唯一 Session，continuation 拒绝恢复`,
+    );
+  }
+  return authorityIdentity({
+    invocationId: input.invocationId,
+    runtimeRevisionId: input.runtimeRevisionId,
+    attemptId: owner.attemptId,
+    ownershipId: owner.id,
+    leaseEpoch: owner.leaseEpoch,
+    sessionBindingId: session.id,
+  });
+}
+
+/**
+ * R02 §2：**持久化续接**恢复父 Invocation 的唯一正式入口。
+ *
+ * 与 `resumeHarnessInvocation` 的唯一差别是 authority 的来源：continuation 事件不携带
+ * tuple，这里按当前代际重建（见 `resolveCurrentExecutionAuthority`）。已终态或不存在的
+ * Invocation 不做任何代际推断，直接交给正式入口保持既有 `handled_noop` 语义。
+ */
+export async function resumeHarnessContinuation(input: {
+  tenantId: string;
+  invocationId: string;
+  sourceType?: HarnessResumeSourceType;
+  agentCallId: string;
+  sourceVersion: number;
+}): Promise<HostedRuntimeResumeResult> {
+  const invocation = await getInvocationById(input.tenantId, input.invocationId);
+  if (!invocation || INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
+    return resumeHarnessInvocation(input);
+  }
+  const binding = await getExecutionBindingByInvocation(input.tenantId, invocation.id);
+  if (!binding) throw new Error("ExecutionBinding 不存在");
+  return resumeHarnessInvocation({
+    ...input,
+    authority: await resolveCurrentExecutionAuthority({
+      tenantId: input.tenantId,
+      invocationId: invocation.id,
+      runtimeRevisionId: binding.runtimeRevisionId,
+    }),
+  });
 }
 
 export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = {

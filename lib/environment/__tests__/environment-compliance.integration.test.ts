@@ -472,7 +472,9 @@ describe("R07 真实 Environment 实例化与合规", () => {
   it("ENV-03: 同 Attempt 网络重试复用同一 Lease 与同一真实资源；正式新 Attempt 才新建 Lease 但实现同一 Revision", async () => {
     const fixture = await makeFixture();
     const { revision } = await fixture.createManagedRevision();
-    const candidate = await fixture.seedCandidate();
+    // MANAGED 执行要求 Binding 冻结 EnvironmentDefinitionRevision（Acquire 会逐项复验），
+    // 因此夹具的候选 Attempt 也必须来自一份声明了该 Revision 的真实 Binding。
+    const candidate = await fixture.seedCandidate(revision.id);
 
     const first = await fixture.provisionFor({ revision, candidate });
     const firstName = preparedEvidenceOf(first).instance.workerRef;
@@ -484,6 +486,41 @@ describe("R07 真实 Environment 实例化与合规", () => {
     expect(retried.id).toBe(first.id);
     expect(preparedEvidenceOf(retried).instance.workerRef).toBe(firstName);
     expect(operationIdOf(retried)).toBe(operationIdOf(first));
+    expect((await inspectContainer(firstName))?.Id).toBe(firstContainer?.Id);
+    expect(await listEnvironmentLeasesByInvocation(TENANT_ID, candidate.invocationId)).toHaveLength(
+      1,
+    );
+
+    // 同 Attempt 的重试也可能发生在 **activation 之后**：入口进程在 Runtime Transport 调用处
+    // 死亡（Owner 已激活、Lease 已 ready、Session 已冻结启动意图），后台 lane 按持久事实重投。
+    // 此时"复用同一 Lease / 同一资源"必须同样成立：把 `ready` 排除在复用之外会走进
+    // create → prepare 分支，先真实创建出第二份实例，再被 Lease 状态机（只接受
+    // unresolved/preparing）判成终态失败 —— 一次合法的重投变成不可恢复的失败。
+    const ownership = await acquireExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: candidate.invocationId,
+      attemptId: candidate.attemptId,
+      runtimeRevisionId: TEST_RUNTIME_REVISION_ID,
+      environmentLeaseId: first.id,
+      acquiredByType: "service",
+      acquiredById: "test-runtime",
+    });
+    const activated = await activateEnvironmentLease({
+      tenantId: TENANT_ID,
+      leaseId: first.id,
+      ownershipId: ownership.ownership.id,
+      attemptId: candidate.attemptId,
+      invocationId: candidate.invocationId,
+      environmentDefinitionRevisionId: revision.id,
+    });
+    expect(activated.readinessState).toBe("ready");
+
+    const retriedAfterActivation = await fixture.provisionFor({ revision, candidate });
+    expect(retriedAfterActivation.id).toBe(first.id);
+    expect(retriedAfterActivation.readinessState).toBe("ready");
+    expect(preparedEvidenceOf(retriedAfterActivation).instance.workerRef).toBe(firstName);
+    // 没有重新实例化，也没有重写 Prepared 证据（Prepared 事实保持同一份）。
+    expect(retriedAfterActivation.preparedDigest).toBe(first.preparedDigest);
     expect((await inspectContainer(firstName))?.Id).toBe(firstContainer?.Id);
     expect(await listEnvironmentLeasesByInvocation(TENANT_ID, candidate.invocationId)).toHaveLength(
       1,

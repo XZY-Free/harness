@@ -28,6 +28,7 @@ import {
 } from "@/lib/runtime/application/authority-recovery-lane";
 import { retryDispatchedCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchPersistedQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-persisted-queued-invocation-attempt";
+import { runDueUndispatchedIntentRecoveries } from "@/lib/runtime/retry/undispatched-intent-lane";
 import {
   type SessionDispatchClaim,
   claimInvocationCommandDispatch,
@@ -73,6 +74,8 @@ export interface RuntimeDispatchRetryWorkerDeps {
     stuckGates: StuckCheckpointGateReport;
     releases: CheckpointReleaseRecoveryReport;
   }>;
+  /** 维护 lane 覆盖（测试注入）：半程意图（accepted Turn / 无 Session 的 Invocation）恢复。 */
+  recoverUndispatchedIntents?: typeof runDueUndispatchedIntentRecoveries;
   /** 单轮处理上限覆盖。 */
   batchSize?: number;
 }
@@ -139,6 +142,9 @@ export function createRuntimeDispatchRetryWorker(
     deps.recoverExpiredOwners ?? (() => runDueExpiredOwnerRecoveries({ limit: batchSize }));
   const runCheckpointMaintenance =
     deps.runCheckpointMaintenance ?? (() => runCheckpointMaintenanceLane({ limit: batchSize }));
+  const recoverUndispatchedIntents =
+    deps.recoverUndispatchedIntents ??
+    ((input: { now: Date; batchSize: number }) => runDueUndispatchedIntentRecoveries(input));
 
   async function tick(): Promise<{
     attempts: number;
@@ -147,6 +153,8 @@ export function createRuntimeDispatchRetryWorker(
     ownerRecoveries: number;
     stuckCheckpointGates: number;
     checkpointReleases: number;
+    undispatchedTurns: number;
+    undispatchedInvocations: number;
   }> {
     const now = clock();
     // 扫描只取候选 ID；每条工作在自己的领取事务里按对象自身根重新验证 due/state/lease。
@@ -238,6 +246,21 @@ export function createRuntimeDispatchRetryWorker(
       });
     }
 
+    // 维护 lane（R01 §3 半程意图）：Turn 已 accepted 而无 Invocation，以及 Invocation
+    // 已 queued 但没有任何 Session/Owner（进程死在 Session 写入之前）—— 这两类状态
+    // 在本次修复前没有任何发现者，会永久停在半程（客户端永远看不到终态）。
+    let undispatchedTurns = 0;
+    let undispatchedInvocations = 0;
+    try {
+      const summary = await recoverUndispatchedIntents({ now: clock(), batchSize });
+      undispatchedTurns = summary.turns.recovered;
+      undispatchedInvocations = summary.invocations.recovered;
+    } catch (error) {
+      logger.error("[runtime-dispatch-retry-worker] 半程意图恢复 lane 失败", {
+        error: String(error),
+      });
+    }
+
     return {
       attempts,
       commands,
@@ -245,6 +268,8 @@ export function createRuntimeDispatchRetryWorker(
       ownerRecoveries,
       stuckCheckpointGates,
       checkpointReleases,
+      undispatchedTurns,
+      undispatchedInvocations,
     };
   }
 

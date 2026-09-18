@@ -19,6 +19,7 @@
  */
 import { createHash } from "node:crypto";
 import { type DbOrTx, db } from "@/lib/db/client";
+import { device } from "@/lib/persistence/schema/device";
 import {
   WORKSPACE_BINDING_TYPES,
   type Workspace,
@@ -408,6 +409,61 @@ export async function createWorkspaceBinding(
     .limit(1);
   if (!row) throw new WorkspaceNotFoundError("WorkspaceBinding 创建后回查失败");
   return row;
+}
+
+/**
+ * 解析 Workspace **声明的正式当前合同**（`Workspace.defaultBindingId`）。
+ *
+ * 与桌面专用解析（`desktop-workspace-queries.resolveWorkspaceBindingId`）的区别：这里
+ * 不预设 Workspace 的 profile。声明了 Workspace 的执行必须携带它真实声明的合同
+ * （R01 §1「能力目录 / ExecutionBinding / 真正运行资源引用同一 Workspace 契约」），
+ * 因此 Desktop 与云端/远端/Sandbox 一律按 `defaultBindingId` 解析 —— 只有
+ * Desktop 解析器的入口会让云端合同**永远解析不出**，从而被静默降级成
+ * NO_PLATFORM_WORKSPACE 合同（那正是 R01 §1 要删除的降级）。
+ *
+ * `HOST_AFFINE`（桌面个人目录）额外要求绑定设备仍可用：R07 §4 只允许同持久 Host，
+ * 设备撤销即该合同当前不可执行 —— 判定为「解析不出」，由调用方 fail closed
+ * （MANAGED 执行）或降级 Workspace 能力（无平台环境的执行），而不是把不可写目录
+ * 当成本机可写目录。
+ */
+export async function resolveDeclaredWorkspaceBinding(
+  tenantId: string,
+  workspaceId: string,
+  ownerUserId: string,
+): Promise<WorkspaceBinding | null> {
+  const [row] = await db
+    .select({ binding: workspaceBinding, deviceState: device.deviceState })
+    .from(workspace)
+    .innerJoin(
+      workspaceBinding,
+      and(
+        eq(workspaceBinding.id, workspace.defaultBindingId),
+        eq(workspaceBinding.workspaceId, workspace.id),
+        eq(workspaceBinding.tenantId, workspace.tenantId),
+      ),
+    )
+    .leftJoin(
+      device,
+      and(eq(device.id, workspaceBinding.deviceId), eq(device.tenantId, workspaceBinding.tenantId)),
+    )
+    .where(
+      and(
+        eq(workspace.tenantId, tenantId),
+        eq(workspace.id, workspaceId),
+        eq(workspace.ownerUserId, ownerUserId),
+        eq(workspace.lifecycleState, "active"),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  const binding = row.binding;
+  if (binding.continuityMode === "HOST_AFFINE") {
+    if (!binding.deviceId || row.deviceState !== "active") return null;
+    return binding;
+  }
+  // 云端/远端/Sandbox 合同不允许携带设备（创建时即被拒绝），携带即为不可信事实。
+  if (binding.deviceId) return null;
+  return binding;
 }
 
 export async function getWorkspaceBindingById(

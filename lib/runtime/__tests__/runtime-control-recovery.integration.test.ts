@@ -21,6 +21,7 @@
 import { randomUUID } from "node:crypto";
 import { POST as resolveUserActionPOST } from "@/app/api/threads/[threadId]/user-actions/[requestId]/resolve/route";
 import { POST as cancelRoutePOST } from "@/app/runtime/invocations/[invocationId]/cancel/route";
+import { registerBuiltinTools } from "@/lib/capability/builtin-tools";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
@@ -847,6 +848,12 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
 
   it("CONTROL-04: Tool/Agent 耗时超过一轮 Heartbeat 周期且 Loop 仍 pending 时，合法 Supervisor 持续续租等待，只唤醒一次且不重复 launch", async () => {
     const ctx = await seedDispatchableTurn();
+    // R01 §5：Binding 冻结的能力目录是模型可见能力的唯一来源，也是执行时的**准入**事实。
+    // 本用例要发起真实 Tool 子调用，因此租户必须先通过正式资产发布接口登记工具
+    // （Connection/Provider/… 全部走生产链）——冻结一个空目录却请求工具，等于让用例
+    // 依赖"目录根本没被交给 Loop"这个缺陷（`lib/runtime/application/runtime-resume.ts`
+    // 的 `capabilityCatalog` 缺失）。这里显式登记基础工具，并从冻结目录里取用真实身份。
+    await registerBuiltinTools({ tenantId: ctx.tenantId, ownerUserId: ctx.ownerId });
     const dispatch = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
@@ -860,6 +867,17 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     }
     const tenantId = ctx.tenantId;
     const invocationId = invocation.id;
+
+    // 冻结目录必须真的声明了本用例将要请求的工具操作（否则 Loop 的目录准入会正确拒绝）。
+    const frozenCatalog = binding.capabilityCatalogJson as {
+      tools: Array<{ toolId: string; operationId: string; inputSchema: Record<string, unknown> }>;
+    };
+    const frozenTool = frozenCatalog.tools.find((tool) => tool.operationId === "web-search");
+    if (!frozenTool) {
+      throw new Error(
+        `冻结能力目录未声明 web-search：${JSON.stringify(frozenCatalog.tools.map((t) => t.operationId))}`,
+      );
+    }
 
     // 子调用真实耗时超过一轮心跳周期：执行器阻塞到测试显式交付子结果。
     let releaseSubcall: () => void = () => {};
@@ -877,13 +895,21 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
             observations: view.observations,
           });
           if (view.actionHistory.length === 0) {
+            // 只请求冻结目录里**真实存在**的 Tool Operation（身份与参数都取自同一份冻结事实）。
+            expect(view.capabilities.catalog?.tools.map((tool) => tool.operationId)).toContain(
+              frozenTool.operationId,
+            );
             return {
               actionId: "slow-child-tool",
               stepNo: 1,
               actionType: "tool.call",
               purposeCode: "slow_tool_call",
               shortPurpose: "调用耗时工具",
-              payload: { toolId: "slow-tool", operationId: "run", arguments: { q: "control-04" } },
+              payload: {
+                toolId: frozenTool.toolId,
+                operationId: frozenTool.operationId,
+                arguments: { query: "control-04" },
+              },
             };
           }
           return {

@@ -1,22 +1,21 @@
 /** Rebuilds transport from persisted RuntimeRevision and dispatches one Attempt. */
 import { db } from "@/lib/db/client";
 import { getAttemptById, updateAttemptState } from "@/lib/executions/persistence/attempt-store";
-import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
-import { hostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
-import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
-import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
-import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
   dispatchQueuedInvocationAttempt,
   failAttemptAndInvokeRecoveryAuthority,
 } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import type { SessionDispatchClaim } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  resolveBoundExecutionResources,
+  resolveRuntimeTransportFromBinding,
+  requireExecutionBinding,
+} from "@/lib/runtime/retry/runtime-transport-from-binding";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
-import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
-import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
+import type { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { and, eq } from "drizzle-orm";
 
 export interface PersistedAttemptDispatcherDependencies {
@@ -27,10 +26,6 @@ export interface PersistedAttemptDispatcherDependencies {
 export function createPersistedQueuedInvocationAttemptDispatcher(
   dependencies: PersistedAttemptDispatcherDependencies = {},
 ) {
-  const hostedService = dependencies.hostedApplicationService ?? hostedRuntimeApplicationService;
-  const createExternalTransport =
-    dependencies.createExternalTransport ?? createHttpHarnessRuntimeTransport;
-
   return async function dispatchPersistedQueuedInvocationAttempt(claim: SessionDispatchClaim) {
     const attempt = await getAttemptById(claim.attemptId);
     if (!attempt || attempt.attemptState !== "queued") return;
@@ -62,56 +57,37 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
       );
       return;
     }
-    const binding = await getExecutionBindingByInvocation(invocation.tenantId, invocation.id);
-    const revision = binding ? await getRuntimeRevisionById(binding.runtimeRevisionId) : null;
-    if (
-      !binding ||
-      !revision ||
-      revision.protocolType !== "harness_runtime_protocol" ||
-      revision.runtimeEvidenceKind !== binding.runtimeEvidenceKind
-    ) {
+    let transport: Awaited<ReturnType<typeof resolveRuntimeTransportFromBinding>>;
+    let resources: Awaited<ReturnType<typeof resolveBoundExecutionResources>>;
+    try {
+      const binding = await requireExecutionBinding(invocation.tenantId, invocation.id);
+      transport = await resolveRuntimeTransportFromBinding({
+        tenantId: invocation.tenantId,
+        binding,
+        ...dependencies,
+      });
+      // R01 §5：Transport 只是执行资源的一项。受管 Environment Provisioner 与 Workspace
+      // 执行资源同样只能来自**同一份冻结 Binding**；不解析它们，MANAGED 的重投就会在
+      // 「没有 Provisioner」上直接终态失败 —— 那等于同一份持久意图在请求内联路径可执行、
+      // 在后台恢复路径不可恢复。
+      resources = await resolveBoundExecutionResources({
+        tenantId: invocation.tenantId,
+        binding,
+        purpose: "recovery",
+      });
+    } catch (error) {
       await failAttemptAndInvokeRecoveryAuthority({
         tenantId: invocation.tenantId,
         attempt,
         invocation,
-        errorCode: "EnvironmentRevisionMismatch",
-        errorSummary: "冻结的 ExecutionBinding 与 RuntimeRevision 不一致",
+        errorCode: error instanceof Error ? error.name : "RuntimeTransportMismatch",
+        errorSummary: error instanceof Error ? error.message : String(error),
         now: new Date(),
         claim,
       });
       return;
     }
-    const hosted = revision.runtimeEvidenceKind === "hosted_artifact";
-    const endpoint = hosted ? "in-process://hosted" : revision.endpointRef;
-    const auth = hosted
-      ? { mode: "workload_token" as const, token: "in-process-runtime" }
-      : await resolveOutboundRuntimeAuth({
-          tenantId: invocation.tenantId,
-          identityMode: revision.identityMode,
-          credentialRefId: revision.credentialRefId,
-        });
-    const runtimeClient: RuntimeHttpClient = await createRuntimeTransportResolver({
-      factories: {
-        harness_runtime_protocol: {
-          hosted_artifact: () =>
-            createInProcessHostedRuntimeClient({
-              tenantId: invocation.tenantId,
-              publishedCapabilityEvidence: {
-                runtimeRevisionId: revision.id,
-                runtimeCapabilitiesJson: revision.runtimeCapabilitiesJson,
-              },
-              applicationService: hostedService,
-            }),
-          external_endpoint: ({ endpoint: externalEndpoint, auth: externalAuth }) =>
-            createExternalTransport({ endpoint: externalEndpoint, auth: externalAuth }),
-        },
-      },
-    })({
-      protocolType: revision.protocolType,
-      runtimeEvidenceKind: revision.runtimeEvidenceKind,
-      endpoint,
-      auth,
-    });
+    const runtimeClient: RuntimeHttpClient = transport.runtimeClient;
     try {
       return await dispatchQueuedInvocationAttempt({
         tenantId: invocation.tenantId,
@@ -119,12 +95,13 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
         claim,
         runtimeClient,
         runtimeEndpointResolver: async (frozenBinding) => ({
-          runtimeEndpoint: endpoint,
-          auth,
+          runtimeEndpoint: transport.runtimeEndpoint,
+          auth: transport.auth,
           callbackEndpoints: buildGatewayEndpoints({
-            external: !hosted,
+            external: !transport.hosted,
             invocationId: frozenBinding.invocationId,
           }),
+          ...resources,
         }),
       });
     } catch (error) {

@@ -29,6 +29,7 @@ import { invocationTable } from "@/lib/persistence/schema/executions";
 import { type Job, jobTable } from "@/lib/persistence/schema/job";
 import { canonicalRouteResolver } from "@/lib/runtime/application/execution-resources";
 import {
+  assertDeclaredWorkspaceReady,
   resolveEnvironmentRevisionForInvocation,
   resolveThreadWorkspaceFacts,
 } from "@/lib/runtime/application/thread-execution-context";
@@ -231,6 +232,10 @@ export async function resolveJobBindingCommand(input: {
         thread.defaultEnvironmentDefinitionId,
       )
     : { revision: null, selection: null };
+  assertDeclaredWorkspaceReady({
+    environmentRevisionId: environment.revision?.id ?? null,
+    workspaceUnavailable: workspaceFacts.workspaceUnavailable,
+  });
   const workspaceBindingId =
     environment.revision && workspaceFacts.workspaceBindingId
       ? workspaceFacts.workspaceBindingId

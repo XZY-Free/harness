@@ -36,6 +36,7 @@ import {
 } from "@/lib/runtime/application/execution-resources";
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import {
+  assertDeclaredWorkspaceReady,
   resolveEnvironmentRevisionForInvocation,
   resolveThreadWorkspaceFacts,
 } from "@/lib/runtime/application/thread-execution-context";
@@ -173,6 +174,12 @@ export async function dispatchInvocationForTurn(params: {
   // - MANAGED 且 Thread 有真实 Workspace 绑定 ⇒ 引用该真实合同；Workspace 执行资源由
   //   唯一组合层解析，解析不出即 `WorkspaceNotReady`（保留可恢复失败事实），绝不静默
   //   退化成一个"引用真实 Workspace 却没有 Writer"的 Binding。
+  // 声明的 Workspace 解析不出正式合同时 MANAGED 执行必须 fail closed（R01 §1 / R07 §4），
+  // 不允许在下面被静默替换成 NO_PLATFORM_WORKSPACE 合同。
+  assertDeclaredWorkspaceReady({
+    environmentRevisionId: environmentRevision?.id ?? null,
+    workspaceUnavailable,
+  });
   const workspaceBindingId =
     environmentRevision && resolvedWorkspaceBindingId
       ? resolvedWorkspaceBindingId
@@ -374,7 +381,14 @@ async function loadSession(
   return (await getRuntimeSessionBindingById(tenantId, id)) ?? undefined;
 }
 
-async function transitionTurnToQueued(params: {
+/**
+ * Turn → `queued` 的唯一步骤实现（`turn.queued` 事件 + activeInvocationId + 版本 CAS）。
+ *
+ * 除请求内联调度外，R01 §3 的 preparation lane 在补齐"进程死在 Session 写入之前"的
+ * 半程意图时也必须走这里 —— 同一 Turn 的历史事件与 activeInvocationId 在任何恢复路径下
+ * 都必须一致，因此它是导出的唯一实现，而不是各路径各写一份。
+ */
+export async function transitionTurnToQueued(params: {
   threadId: string;
   turn: Turn;
   invocationId: string;

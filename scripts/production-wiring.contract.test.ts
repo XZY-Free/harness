@@ -104,10 +104,14 @@ describe("Topic 01 production wiring", () => {
     expect(bootstrap).toContain('runProductionWorkerProcess("control-plane-outbox-worker")');
     expect(roleFactory).toContain("createProductionInvocationContinuationWorker");
     expect(roleFactory).toContain("continuationWorker.pollOnce()");
-    expect(worker).toContain("resumeHarnessInvocation");
+    // R02 §2：continuation 事件不携带 authority tuple，因此 worker 必须经
+    // `resumeHarnessContinuation`（从当前 active Owner + 唯一 Session 重建 authority），
+    // 不能直接调 `resumeHarnessInvocation` 而让 authority 缺省。
+    expect(worker).toContain("resumeHarnessContinuation");
     expect(worker).toContain("recoverTrustedExecutionSubject");
     // 唯一生产 Resume 能力：runtime-resume.ts 进程内驱动 HostedHarnessLoop。
     expect(resume).toContain("async function resumeHarnessInvocation");
+    expect(resume).toContain("export async function resumeHarnessContinuation");
     expect(resume).toContain("new HostedHarnessLoop");
     expect(adapter).toContain("new HostedHarnessLoop");
     expect(adapter).not.toContain("Resume 不需要额外事件");

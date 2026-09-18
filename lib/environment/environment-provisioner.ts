@@ -35,6 +35,7 @@ import {
   createEnvironmentLease,
   findReusableEnvironmentLease,
   getEnvironmentLeaseById,
+  isPreparedReadinessState,
   listEnvironmentLeasesDueForCleanup,
   prepareEnvironmentLease,
   recordEnvironmentLeaseCleanupFailure,
@@ -263,8 +264,11 @@ async function provisionWithBackend(input: {
         resources: [],
       },
     }));
-  if (existing && existing.readinessState === "prepared") {
-    // 已 prepared：Transport Retry 只需确认实例仍在（真实回读），不重复建资源。
+  if (existing && isPreparedReadinessState(existing.readinessState)) {
+    // 已备妥（`ready` = 同一份 Prepared 事实 + Writer 已激活）：Transport Retry 只需确认
+    // 实例仍在（真实回读），既不重复建资源，也不重复写 Prepared 证据 ——
+    // `prepareEnvironmentLease` 只接受 `unresolved` / `preparing`，重复写入会把一次
+    // 合法的同 Attempt 重投变成终态失败，而且在失败之前已经真实创建出第二份实例。
     const facts = await input.backend.inspect(requestFor(input, lease, operationId, input.spec));
     assertPreparedInstanceMatches(lease, facts);
     return (await getEnvironmentLeaseById(input.tenantId, lease.id)) ?? lease;
@@ -459,7 +463,7 @@ export function createEnvironmentProvisioner(dependencies: {
       if (input.lease.environmentDefinitionRevisionId !== input.revision.id) {
         throw new EnvironmentComplianceError("EnvironmentLease 与冻结 Revision 不匹配");
       }
-      if (!["prepared", "ready"].includes(input.lease.readinessState)) {
+      if (!isPreparedReadinessState(input.lease.readinessState)) {
         throw new EnvironmentComplianceError("EnvironmentLease 不是可恢复的受管实例");
       }
       if (!["allocated", "active"].includes(input.lease.leaseState)) {

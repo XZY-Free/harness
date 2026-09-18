@@ -41,7 +41,7 @@ import {
   RuntimeEventBatchSchema,
   computeEventPayloadHash,
 } from "@/lib/runtime/runtime-protocol";
-import { getActiveLocksByInvocation } from "@/lib/workspace/workspace-write-lock-queries";
+import { isWorkspaceWriterFenced } from "@/lib/workspace/workspace-writer-fence";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 export type IngressTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -453,25 +453,21 @@ async function requireIngressAuthority(
       )
       .limit(1);
     if (!workspace) throw new IngressAuthorityMismatchError(authority.invocationId);
-    if (workspace.continuityMode !== "NO_PLATFORM_WORKSPACE") {
-      if (
-        owner.workspaceWriterGeneration === null ||
-        owner.workspaceWriterGeneration === undefined ||
-        !workspace.storageScopeDigest
-      ) {
-        throw new IngressAuthorityMismatchError(authority.invocationId);
-      }
-      const locks = await getActiveLocksByInvocation(tenantId, authority.invocationId, tx);
-      const writer = locks.find(
-        (lock) =>
-          lock.storageScopeDigest === workspace.storageScopeDigest &&
-          lock.workspaceBindingId === workspace.id &&
-          lock.holderAttemptId === authority.attemptId &&
-          lock.holderOwnershipId === authority.ownershipId &&
-          lock.writerGeneration === owner.workspaceWriterGeneration,
-      );
-      if (!writer) throw new IngressAuthorityMismatchError(authority.invocationId);
-    }
+    // R08 §1/§4：Writer 围栏只约束「服务端持有 Writer」的连续性模式；`HOST_AFFINE` 的写由
+    // 绑定设备本机执行，服务端不是该目录的 Writer（`workspaceWriterGeneration` 恒为 null）。
+    // 判定与 Current Authority 守卫共用同一份实现，避免两处各留一个版本。
+    const fenced = await isWorkspaceWriterFenced({
+      tenantId,
+      invocationId: authority.invocationId,
+      workspaceBinding: workspace,
+      holder: {
+        attemptId: authority.attemptId,
+        ownershipId: authority.ownershipId,
+        writerGeneration: owner.workspaceWriterGeneration,
+      },
+      executor: tx,
+    });
+    if (!fenced) throw new IngressAuthorityMismatchError(authority.invocationId);
   }
   return { owner, attempt, session, binding };
 }

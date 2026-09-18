@@ -48,6 +48,23 @@ function isTerminalLeaseState(state: string): boolean {
   return ENVIRONMENT_LEASE_TERMINAL_STATES.includes(state as EnvironmentLeaseState);
 }
 
+/** 只有这两种 readiness 才持有「本 Attempt 的实例已建好并通过核验」的 Prepared 证据。 */
+const PREPARED_READINESS_STATES = ["prepared", "ready"] as const;
+
+/**
+ * Lease 是否已具备可复用的 Prepared 事实。
+ *
+ * `ready` 不是"另一种状态"，而是**同一份 Prepared 事实 + Workspace Writer 已激活**
+ * （schema CHECK 要求 `ready` 必带 preparedEvidence/preparedDigest）。因此
+ * "同 Attempt Transport Retry 复用既有实例"与"Resume 前复验既有实例"都必须接受两者：
+ * - `prepareEnvironmentLease` 只接受 `unresolved` / `preparing`，对已备妥的 Lease 再次
+ *   写入会 fail closed，一次合法的同 Attempt 重投会被判成终态失败；
+ * - 复制一份 `prepared` 专用判断就会与 `revalidate` 的两状态判断分叉成两个版本。
+ */
+export function isPreparedReadinessState(state: string): boolean {
+  return PREPARED_READINESS_STATES.includes(state as (typeof PREPARED_READINESS_STATES)[number]);
+}
+
 export interface CreateEnvironmentLeaseInput {
   tenantId: string;
   invocationId: string;
