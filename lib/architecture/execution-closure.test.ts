@@ -8,9 +8,11 @@
  * Worker 角色、真实 MySQL schema、真实静态规则函数、真实验收合同），不得用「文件存在」
  * 或「标题里写了 case id」冒充通过。
  *
- * 分层说明：本文件按文件名含 `architecture` 落入 contract project —— 该 project 有
- * 真实 MySQL（globalSetup 起容器并跑最终 Migration），但没有 per-file 重置。因此这里
- * 只读 schema 事实、只做幂等的角色就绪检查，不写业务事实、不依赖干净数据。
+ * 分层说明：本文件按机器清单（docs/topic-01/evidence/test-collection.json）落入
+ * **db** project（needsDB=true、serial=true）——该 project 由 globalSetup 起真实 MySQL
+ * 容器并跑最终 Migration，singleFork 串行执行；file-setup 只在文件结束时释放连接池，
+ * 不做统一重置（重置由各测试文件自行 beforeEach 调用 resetDatabase）。本文件因此只读
+ * schema 事实（information_schema）、只做幂等的角色就绪检查，不写业务事实、不依赖干净数据。
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
@@ -778,13 +780,14 @@ describe("GATE-04 旧 Route / 别名 / 默认 db 写事务 / NO 降级 / 生产�
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("GATE-05 全量验收证据完整性（未运行不得 PASS）", () => {
-  it("验收结果合同接受完整记录，且拒绝缺 SHA / 缺跳过记录 / 未收口冒充收口", async () => {
+  it("验收结果合同接受完整记录，且拒绝缺 SHA / 缺运行标识 / 缺跳过记录 / 未收口冒充收口", async () => {
     const plan = await loadPlan();
     const complete = {
       schemaVersion: 2,
       baselineSha: plan.baselineSha,
       diffRange: `${plan.baselineSha}..HEAD`,
       localAcceptanceSha: "0".repeat(40),
+      runId: `${"0".repeat(12)}-1789719655480-99006`,
       remoteHeadSha: null,
       githubCi: "pending",
       profile: "acceptance",
@@ -831,6 +834,10 @@ describe("GATE-05 全量验收证据完整性（未运行不得 PASS）", () => 
     // 缺 localAcceptanceSha（实际 SHA 未记录）→ 拒绝。
     const { localAcceptanceSha: _sha, ...withoutSha } = complete;
     expect(() => validateAcceptanceResult(withoutSha)).toThrow();
+
+    // 缺 runId（无法区分是哪一次运行的记录，两次运行会互相冒充）→ 拒绝。
+    const { runId: _runId, ...withoutRunId } = complete;
+    expect(() => validateAcceptanceResult(withoutRunId)).toThrow();
 
     // 缺 skippedTests（跳过情况未记录）→ 拒绝。
     const { skippedTests: _skipped, ...withoutSkips } = complete;
