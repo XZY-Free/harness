@@ -71,13 +71,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const projected = events.map((e) => ({
     id: e.id,
-    threadId: e.threadId,
+    thread_id: e.threadId,
     event_sequence: e.eventSequence,
     event_type: e.eventType,
     schema_version: e.schemaVersion,
-    turnId: e.turnId,
-    itemId: e.itemId,
-    invocationId: e.invocationId,
+    turn_id: e.turnId,
+    item_id: e.itemId,
+    invocation_id: e.invocationId,
     actor_type: e.actorType,
     actor_id: e.actorId,
     payload_json: e.payloadJson,

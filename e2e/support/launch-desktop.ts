@@ -21,8 +21,25 @@ import {
   _electron as electron,
   expect,
 } from "@playwright/test";
+import { DEFAULT_BRAND } from "../../lib/branding/brand-contract";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "../../lib/test-support/e2e-credentials";
 import { E2E_ORIGIN } from "../../playwright.config";
+
+/**
+ * 登录页展示的品牌名——**不写字面量**。
+ *
+ * 权威来源是 `BrandContract`（`lib/branding/brand-contract.ts`）：产品名是可配置的
+ * 品牌字段（代码默认 = `DEFAULT_BRAND.name`，部署期可由 `branding.json` / `SNOW_BRAND_NAME`
+ * pin 更高优先级）。`AuthScreenLayout` 直接把 `brand.name` 用于可见 wordmark（`<BrandName />`）
+ * 与容器 `aria-label`（`${brand.name} ${title}`），所以"页面显示的产品名"与"自动化定位用的
+ * accessible name"本来就是同一个值。
+ *
+ * 因此这里锚定权威常量而不是快照某个字面量：写死字符串会让每次品牌变更都把 e2e 变成
+ * **假失败**（只能靠改测试消除），且测不出"页面确实渲染了品牌名"这件事本身。
+ * 与仓库既有口径一致：`desktop/renderer/src/desktop-renderer-app.test.tsx` 同样 import
+ * `DEFAULT_BRAND` 而非硬编码。
+ */
+export const E2E_BRAND_NAME = DEFAULT_BRAND.name;
 
 const PACKAGE_APP_DIR = join(process.cwd(), "desktop/package-app");
 const MAIN_BUNDLE = join(PACKAGE_APP_DIR, "bundle/main/index.js");
@@ -36,7 +53,7 @@ export interface LaunchedDesktop {
 
 /** Desktop 使用独立 Electron Session，因此必须通过与 Web 相同的正式登录接口。 */
 export async function authenticateDesktopWindow(window: Page): Promise<void> {
-  await expect(window.getByLabel("SnowHarness 登录")).toBeVisible({
+  await expect(window.getByLabel(`${E2E_BRAND_NAME} 登录`)).toBeVisible({
     timeout: 90_000,
   });
   await window.getByLabel("账号").fill(E2E_ADMIN_EMAIL);

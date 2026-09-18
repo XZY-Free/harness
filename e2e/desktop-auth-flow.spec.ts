@@ -6,7 +6,7 @@ import {
   E2E_ADMIN_NAME,
   E2E_ADMIN_PASSWORD,
 } from "../lib/test-support/e2e-credentials";
-import { type LaunchedDesktop, launchDesktopApp } from "./support/launch-desktop";
+import { E2E_BRAND_NAME, type LaunchedDesktop, launchDesktopApp } from "./support/launch-desktop";
 
 const captureUi = process.env.SNOW_CAPTURE_UI === "1";
 const captureDir = resolve(process.cwd(), "output/login-design-qa");
@@ -33,7 +33,7 @@ test.describe("Desktop 登录闭环", () => {
   test("未登录 → 失败反馈 → 登录 → 退出 → 回到登录页", async () => {
     await expect(window.getByRole("button", { name: "登录" })).toBeVisible({ timeout: 90_000 });
     await expect(window.getByRole("heading", { name: "登录" })).toHaveCount(0);
-    await expect(window.getByText("SnowHarness", { exact: true })).toHaveCount(1);
+    await expect(window.getByText(E2E_BRAND_NAME, { exact: true })).toHaveCount(1);
     await expect(window.getByText(/管理员/)).toHaveCount(0);
     await capture(window, "01-desktop-login.png");
 

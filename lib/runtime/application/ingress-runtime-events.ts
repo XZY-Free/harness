@@ -5,6 +5,10 @@ import { createThreadItem } from "@/lib/conversations/thread-item-queries";
 import {
   allocateEventSequences,
   allocateItemSequence,
+  // Item 内容哈希（`thread-queries.computeEventPayloadHash`，递归键排序 sha256）。
+  // 与 `@/lib/runtime/runtime-protocol` 的同名函数不是一回事：后者只吃 `RuntimeEvent`。
+  // 这里以别名导入，避免两者混淆（`createThreadItem` 也用这一个算 contentHash）。
+  computeEventPayloadHash as computeItemContentHash,
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
@@ -645,6 +649,50 @@ async function appendTurnStateEvent(
   });
 }
 
+/**
+ * R05：Invocation 终态必须**同时**写入 canonical ThreadEvent（`invocation.*`）。
+ *
+ * 权威依据：
+ * - `docs/architecture/api-and-events.md` §「Runtime Candidate Event 映射」：
+ *   `execution.completed` 的公开 Event 是 **`invocation.completed` + `turn.completed`**
+ *   （`execution.failed` → `invocation.failed + turn.failed`、
+ *   `execution.cancelled` → `invocation.cancelled + turn.*`）；
+ * - `docs/architecture/persistence.md` §「完成 Agent 回答/Regenerate」：
+ *   同一事务写 `item.completed、item.superseded、invocation.completed、turn.completed`；
+ * - `docs/contracts/event-catalog.json` 把 `invocation.completed` 登记为 thread 流的
+ *   canonical 事件（`required_refs: thread_id、invocation_id`，且不可跳过投影）。
+ *
+ * 只写 `turn.completed` 会让事件流的 invocation 家族只有创建期的
+ * `invocation.queued` 而没有终态：员工端/排障按 invocation 过滤时永远等不到收口信号，
+ * 也无法从事件流判断某次 Invocation 是完成、失败还是被取消。
+ * 注意与 `appendTurnStateEvent` 的分工：两者是同一终态的两个投影面，缺一不可。
+ */
+async function appendInvocationStateEvent(
+  tx: IngressTx,
+  input: {
+    threadId: string;
+    turnId: string;
+    invocationId: string;
+    eventType: "invocation.completed" | "invocation.failed" | "invocation.cancelled";
+    finishReason?: string | null;
+    itemId?: string | null;
+    errorCode?: string | null;
+  },
+): Promise<void> {
+  const sequence = await allocateEventSequences(tx, input.threadId);
+  await insertThreadEvent(tx, input.threadId, sequence, {
+    eventType: input.eventType,
+    turnId: input.turnId,
+    itemId: input.itemId ?? undefined,
+    invocationId: input.invocationId,
+    actorType: "service",
+    payload: {
+      finish_reason: input.finishReason ?? null,
+      error_code: input.errorCode ?? null,
+    },
+  });
+}
+
 async function mapEvent(
   tx: IngressTx,
   invocation: Invocation,
@@ -771,22 +819,80 @@ async function mapEvent(
         }
       }
     }
-    const sequence = await allocateEventSequences(tx, invocation.threadId);
-    const threadEvent = await insertThreadEvent(tx, invocation.threadId, sequence, {
-      eventType: event.type === "user-action" ? "user_action.requested" : "item.created",
+    // user-action 建 Item 必须**同时**写两条 ThreadEvent：摘要 `item.created`（在前）
+    // 与业务事件 `user_action.requested`（在后）。权威依据：
+    // - 本模块 v3 重构前的映射规则原文（`event-ingress-queries.ts` mapUserActionRequested）：
+    //   「user_action.requested：创建 user_action Item（pending）+
+    //   **item.created + user_action.requested ThreadEvent** + Invocation → waiting_user
+    //   + Turn → waiting_user」——v3 重构成三元式时丢掉了 `item.created`；
+    // - 同一语义的另一个生产者 `lib/capability/application/apply-tool-call.ts`：Tool 权限确认
+    //   同样写 `item.created` + `user_action.requested` 两条，并由
+    //   `app/gateway/tool-calls/route.test.ts` 显式断言该事件对。
+    //
+    // 丢 `item.created` 的后果是"新建 Item 对已连线会话不可见"：客户端不凭摘要构造消息，
+    // 只认 `item.created/item.updated`、且其 payload 不含完整 item 时重读权威快照
+    // （`lib/client/thread-client.ts` 的 `requiresSnapshotRefresh` 与 reducer 注释）。
+    // 确认卡片因此只在刷新后才出现，而跨端验收要求"Web/Desktop 不刷新收敛"。
+    const isUserAction = event.type === "user-action";
+    const sequence = await allocateEventSequences(tx, invocation.threadId, isUserAction ? 2 : 1);
+    const sharedRefs = {
       turnId: invocation.turnId,
       itemId: item.id,
       invocationId: invocation.id,
-      actorType: "service",
-      payload: {
-        source: event.type,
-        itemId: item.id,
-        contentHash: item.contentHash,
-        ...event.payload,
-        ...(userActionRequestId ? { request_id: userActionRequestId } : {}),
+      actorType: "service" as const,
+    };
+    // Authority 引用回填：`UserActionRequest` 是 Authority，Item 只是它的唯一投影，
+    // 因此 `request_id` 必须落进 **Item content** 并重算 `contentHash`（不是只写事件 payload）。
+    // 权威依据：
+    // - 本模块 v3 重构前的实现（`event-ingress-queries.ts` mapUserActionRequested 第 2.5 步）：
+    //   「创建 UAR 得到 id 后，在同一事务把 request_id 写入 Item 的最终 contentJson 并重算
+    //   contentHash。Item 仍是唯一 Projection；item.created 必须携带最终行/hash」；
+    // - 员工端组件对 `content.request_id` fail-closed：缺失即禁用确认按钮，且明确
+    //   **不**回退到 `item.id`（`components/thread/items/user-action-item.tsx`）。
+    // v3 重构把这件事丢了，于是外部 Agent 的确认卡片渲染得出来、按钮却永远不可点。
+    let itemContent = (item.contentJson ?? {}) as Record<string, unknown>;
+    let itemContentHash = item.contentHash;
+    if (userActionRequestId) {
+      itemContent = {
+        ...(item.contentJson as Record<string, unknown>),
+        request_id: userActionRequestId,
+      };
+      itemContentHash = computeItemContentHash(itemContent);
+      await tx
+        .update(threadItemTable)
+        .set({ contentJson: itemContent, contentHash: itemContentHash, updatedAt: new Date() })
+        .where(eq(threadItemTable.id, item.id));
+    }
+    if (isUserAction) {
+      // 摘要 payload 刻意不含完整 item：这正是"重读权威快照"的信号。
+      await insertThreadEvent(tx, invocation.threadId, sequence, {
+        ...sharedRefs,
+        eventType: "item.created",
+        payload: {
+          item_type: "user_action",
+          content_hash: itemContentHash,
+          source: "user_action.requested",
+        },
+        idempotencyKey: `runtime-event:${event.eventId}:item.created`,
+      });
+    }
+    const threadEvent = await insertThreadEvent(
+      tx,
+      invocation.threadId,
+      isUserAction ? sequence + 1 : sequence,
+      {
+        ...sharedRefs,
+        eventType: isUserAction ? "user_action.requested" : "item.created",
+        payload: {
+          source: event.type,
+          itemId: item.id,
+          contentHash: itemContentHash,
+          ...event.payload,
+          ...(userActionRequestId ? { request_id: userActionRequestId } : {}),
+        },
+        idempotencyKey: `runtime-event:${event.eventId}`,
       },
-      idempotencyKey: `runtime-event:${event.eventId}`,
-    });
+    );
     return { itemId: item.id, threadEventId: threadEvent.id };
   }
 
@@ -1143,6 +1249,11 @@ async function applyLifecycle(
       }
       const errorCode =
         typeof event.payload.errorCode === "string" ? event.payload.errorCode : null;
+      // 终态事件的 finish_reason 原样透传 Runtime 自报值，不臆造也不归一化：
+      // harness-loop 以 `finish_reason: "execution.completed"` 提交 execution.completed，
+      // 员工端与验收按该字段判定收口原因（执行中止 vs 正常完成）。
+      const finishReason =
+        typeof event.payload.finish_reason === "string" ? event.payload.finish_reason : null;
       // 先收口从属事实（Attempt/Turn/Ownership/Session 与物理 Writer），
       // 最后才写 Invocation 终态并桥接 Job——terminalVersion 必须等于最终提交版本。
       await tx
@@ -1194,6 +1305,21 @@ async function applyLifecycle(
               : state === "cancelled"
                 ? "turn.cancelled"
                 : "turn.failed",
+          itemId: produced?.id ?? null,
+          errorCode,
+        });
+        // 同一终态的另一个投影面：Invocation 家族必须有终态事件，见 appendInvocationStateEvent。
+        await appendInvocationStateEvent(tx, {
+          threadId,
+          turnId,
+          invocationId: invocation.id,
+          eventType:
+            state === "completed"
+              ? "invocation.completed"
+              : state === "cancelled"
+                ? "invocation.cancelled"
+                : "invocation.failed",
+          finishReason,
           itemId: produced?.id ?? null,
           errorCode,
         });

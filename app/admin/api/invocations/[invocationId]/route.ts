@@ -45,9 +45,9 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const body = {
     id: invocation.id,
     tenant_id: invocation.tenantId,
-    threadId: invocation.threadId,
-    turnId: invocation.turnId,
-    jobId: invocation.jobId,
+    thread_id: invocation.threadId,
+    turn_id: invocation.turnId,
+    job_id: invocation.jobId,
     invocation_sequence: invocation.invocationSequence,
     invocation_kind: invocation.invocationKind,
     execution_state: invocation.executionState,

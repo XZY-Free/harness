@@ -70,9 +70,9 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const projected = invocations.map((i) => ({
     id: i.id,
     tenant_id: i.tenantId,
-    threadId: i.threadId,
-    turnId: i.turnId,
-    jobId: i.jobId,
+    thread_id: i.threadId,
+    turn_id: i.turnId,
+    job_id: i.jobId,
     invocation_sequence: i.invocationSequence,
     invocation_kind: i.invocationKind,
     execution_state: i.executionState,

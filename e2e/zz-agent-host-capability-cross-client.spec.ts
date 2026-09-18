@@ -40,7 +40,11 @@ async function loadE2eHarness() {
     { E2E_ADMIN_EMAIL },
     { ensureDefaultTenant },
     { getUserIdentityBySubject },
-    { EXECUTION_FIXTURE_CONTRACT, seedAgentCallExecutionScenario },
+    {
+      EXECUTION_FIXTURE_CONTRACT,
+      seedAgentCallExecutionScenario,
+      acquireExecutionAuthorityForInvocation,
+    },
     { createAgentActionExecutor },
     { createResolveRoute },
     { mysqlRouteEligibilityResolutionStore },
@@ -73,6 +77,7 @@ async function loadE2eHarness() {
     getUserIdentityBySubject,
     EXECUTION_FIXTURE_CONTRACT,
     seedAgentCallExecutionScenario,
+    acquireExecutionAuthorityForInvocation,
     createAgentActionExecutor,
     createResolveRoute,
     mysqlRouteEligibilityResolutionStore,
@@ -137,6 +142,14 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
       }),
       transportChannel: "hosted",
     });
+    // canonical 执行器要求 `agent.call` 携带 **Current Execution Authority**，缺失即
+    // fail-closed（`AgentActionExecutionError: NotCurrentExecutor`）。这里不伪造元组，
+    // 而是走与生产同一套持久事实：ExecutionBinding → prepared Attempt → active
+    // ExecutionOwnership(executing) → active RuntimeSessionBinding，再把该元组交给执行器。
+    const authority = await harness.acquireExecutionAuthorityForInvocation({
+      tenantId: tenant.id,
+      invocationId: scenario.parentInvocationId,
+    });
     const started = await execute(
       {
         actionId,
@@ -152,6 +165,7 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
         threadId: scenario.threadId,
         turnId: scenario.turnId,
         actionDigest: `sha256:${"f".repeat(64)}`,
+        authority,
       },
     );
     const callId = started.pending?.callId;

@@ -9,6 +9,10 @@ import { ENVIRONMENT_PREPARED_TTL_MS } from "@/lib/environment/environment-prepa
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
 import {
+  OWNERSHIP_DISPATCH_DEADLINE_MS,
+  OWNERSHIP_LEASE_MS,
+} from "@/lib/executions/domain/execution-authority";
+import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
@@ -458,7 +462,33 @@ describe("ExecutionOwnership database fencing", () => {
       attemptId: fixture.attempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
     });
-    // 未 Start：续租被 deadline 封顶，无法延长到 now + 90s。
+    // 前置事实：Owner 处于未 Start 的派发窗口（`dispatching`），因此受固定 dispatchDeadline 封顶。
+    expect(first.ownership.executionPhase).toBe("dispatching");
+    // 夹具必须把"平台已续租了约 100 秒"这一**可达状态**摆出来，否则封顶分支不可达。
+    // 关键：`dispatchDeadline = acquiredAt + 120s` 而续租窗口是 `now + 90s`；只有当
+    // `now > acquiredAt + 30s` 时 deadline 才落进 TTL 区间内、封顶分支才会真正执行。
+    // 直接 acquire 出来的行满足 `now = acquiredAt`，desired(`now+90s`) 永远早于
+    // deadline(`now+120s`)，断言会退化成"比较两个时钟"的抛硬币。
+    // 这里按**权威时钟**回拨 acquiredAt 并模拟"最近一次续租发生在 1s 前"：
+    // lease 仍然有效（不触发 OwnershipExpired），而 deadline 已逼近。
+    const authorityNow = await getAuthorityDatabaseTime(db);
+    const simulatedAcquiredAt = new Date(authorityNow.getTime() - 100_000);
+    const simulatedLastHeartbeatAt = new Date(authorityNow.getTime() - 1_000);
+    const dispatchDeadline = new Date(
+      simulatedAcquiredAt.getTime() + OWNERSHIP_DISPATCH_DEADLINE_MS,
+    );
+    await db
+      .update(executionOwnershipTable)
+      .set({
+        acquiredAt: simulatedAcquiredAt,
+        lastHeartbeatAt: simulatedLastHeartbeatAt,
+        leaseExpiresAt: new Date(simulatedLastHeartbeatAt.getTime() + OWNERSHIP_LEASE_MS),
+        dispatchDeadline,
+      })
+      .where(eq(executionOwnershipTable.id, first.ownership.id));
+    // 契约自检：deadline 必须落在 TTL 窗口内，否则本用例又变成无效断言。
+    expect(dispatchDeadline.getTime()).toBeLessThan(authorityNow.getTime() + OWNERSHIP_LEASE_MS);
+
     const capped = await renewExecutionOwnership({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
@@ -466,10 +496,17 @@ describe("ExecutionOwnership database fencing", () => {
       attemptId: fixture.attempt.id,
       leaseEpoch: first.ownership.leaseEpoch,
     });
-    expect(capped.leaseExpiresAt.getTime()).toBeLessThanOrEqual(
-      first.ownership.dispatchDeadline.getTime() + 5,
+    // 未 Start：续租被 deadline **精确**封顶，无法延长到 now + 90s。
+    expect(capped.leaseExpiresAt.getTime()).toBe(dispatchDeadline.getTime());
+    // 用权威时钟（而非 `Date.now()`）表达"未被延长到完整 TTL"：deadline 与 TTL 上界
+    // 相差 70s，留出远超时钟偏差的余量，避免毫秒级抖动决定成败。
+    expect(capped.leaseExpiresAt.getTime()).toBeLessThan(
+      authorityNow.getTime() + OWNERSHIP_LEASE_MS,
     );
-    expect(capped.leaseExpiresAt.getTime()).toBeLessThan(Date.now() + 90_000);
+    // 封顶的续租依然是合法续租：心跳推进、代际版本单调。
+    expect(capped.lastHeartbeatAt.getTime()).toBeGreaterThanOrEqual(authorityNow.getTime());
+    expect(capped.versionNo).toBe(first.ownership.versionNo + 1);
+
     // deadline 已过仍未 Start：续租必须失败，Start 无法无限占用。
     // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
     // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
@@ -477,6 +514,10 @@ describe("ExecutionOwnership database fencing", () => {
       .update(executionOwnershipTable)
       .set({ dispatchDeadline: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
+    const beforeRejected = await getActiveExecutionOwnership({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+    });
     await expect(
       renewExecutionOwnership({
         tenantId: fixture.tenantId,
@@ -486,13 +527,15 @@ describe("ExecutionOwnership database fencing", () => {
         leaseEpoch: first.ownership.leaseEpoch,
       }),
     ).rejects.toMatchObject({ code: "OwnershipExpired" });
-    const active = await getActiveExecutionOwnership({
+    // "Start 无法无限占用"不能只由一个 throw 表达：被拒的续租**不得**留下任何续租痕迹
+    // （lease 未被延长、版本号未推进），否则"拒绝"就只是表象。
+    const afterRejected = await getActiveExecutionOwnership({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
     });
-    expect(active?.leaseExpiresAt.getTime()).toBeLessThanOrEqual(
-      first.ownership.dispatchDeadline.getTime() + 5,
-    );
+    expect(afterRejected?.leaseExpiresAt.getTime()).toBe(beforeRejected?.leaseExpiresAt.getTime());
+    expect(afterRejected?.versionNo).toBe(beforeRejected?.versionNo);
+    expect(afterRejected?.executionPhase).toBe("dispatching");
   });
 
   it("FENCE-13/FENCE-15: a valid unrevoked old-generation token authenticates but its writes are fenced", async () => {
