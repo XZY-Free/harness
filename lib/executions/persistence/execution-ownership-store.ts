@@ -367,7 +367,18 @@ export async function renewExecutionOwnershipInTransaction(
   },
 ): Promise<ExecutionOwnership> {
   // 锁序不变量：任何 Owner 操作先锁 Invocation 根。
-  await lockInvocation(tx, input.tenantId, input.invocationId);
+  const invocation = await lockInvocation(tx, input.tenantId, input.invocationId);
+  // R02 §4「Renew：完整 tuple 匹配、**Invocation 非 terminal**、Owner active 且未过期」。
+  // 这一条不是装饰性的：Cancel 路径先 `closeExecutionOwnership`（Owner 立刻失去 active）
+  // 再 `transitionInvocation`（写终态），两步之间另一个实例可以合法 Acquire 成为新的
+  // Current Owner。若 Renew 只看 Owner 字段不看 Invocation 状态，这个"终态上的活跃
+  // Owner"就能靠平台端点可达无限续租，把一个已收口的逻辑执行一直吊着。
+  if (INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
+    throw new ExecutionAuthorityError(
+      "NotCurrentExecutor",
+      `Invocation 已终态（${invocation.executionState}），不可续租执行权`,
+    );
+  }
   const [owner] = await tx
     .select()
     .from(executionOwnershipTable)

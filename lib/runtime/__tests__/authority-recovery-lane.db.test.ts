@@ -150,7 +150,7 @@ describe("Authority recovery lane（R01 §3 Owner expired）", () => {
     return { fixture, authority };
   }
 
-  it("AUTH-01: 常驻 Worker 默认 lane 发现租约到期的 Owner 并完整收口（且重复运行幂等）", async () => {
+  it("AUTH-REG-01: 常驻 Worker 默认 lane 发现租约到期的 Owner 并完整收口（且重复运行幂等）", async () => {
     const { fixture, authority } = await seeded();
     await expireLease(fixture.tenantId, authority.ownership.id);
     // 候选身份来自租约，不是一个测试自报的 threshold。
@@ -201,7 +201,7 @@ describe("Authority recovery lane（R01 §3 Owner expired）", () => {
     expect(reread?.executionState).toBe("lost");
   });
 
-  it("AUTH-02: 健康 Owner（租约未到期）既不是候选也不被收口", async () => {
+  it("AUTH-REG-02: 健康 Owner（租约未到期）既不是候选也不被收口", async () => {
     const { fixture, authority } = await seeded();
     expect(await findStaleInvocations({ tenantId: fixture.tenantId })).toHaveLength(0);
 
@@ -224,7 +224,7 @@ describe("Authority recovery lane（R01 §3 Owner expired）", () => {
     ]);
   });
 
-  it("AUTH-03: 扫描与收口之间续租 → 观察失效，不误杀（R03 §5）", async () => {
+  it("AUTH-REG-03: 扫描与收口之间续租 → 观察失效，不误杀（R03 §5）", async () => {
     const { fixture, authority } = await seeded();
     await expireLease(fixture.tenantId, authority.ownership.id);
     expect((await findStaleInvocations({ tenantId: fixture.tenantId })).length).toBe(1);
@@ -249,7 +249,7 @@ describe("Authority recovery lane（R01 §3 Owner expired）", () => {
     expect((await readTurn(fixture.turnId))?.turnState).toBe("accepted");
   });
 
-  it("AUTH-04: 换代之后旧 Owner 的过期事实不影响新 Owner", async () => {
+  it("AUTH-REG-04: 换代之后旧 Owner 的过期事实不影响新 Owner", async () => {
     const { fixture, authority } = await seeded();
     await expireLease(fixture.tenantId, authority.ownership.id);
 
