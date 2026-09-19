@@ -1389,13 +1389,30 @@ export function checkFinalClosureBoundaryGate(
   // 已按 MERGE_AND_REPLACE 合并为唯一生产 Resume（lib/runtime/application/runtime-resume.ts），
   // 真实 Hosted resume 模式断言落在合并后的目标文件。
   const runtimeResume = stripComments(source("lib/runtime/application/runtime-resume.ts"));
+  // 判据维护说明（A03）：Resume 已从"跑一轮就返回"改为"pending 不结束 Supervisor ——
+  // 等唤醒后重装 Loop 再跑"（`const result = await running; if (!result.pending) return result;`），
+  // 因此字面量 `return await running` 不再成立。本门禁要守的是**不可退化**这一不变量，
+  // 而不是某一种写法，故改为按语义断言：真的构造 Loop、真的运行它、并且把它**自己的**
+  // 结果返回出去（而不是合成一个只有 ACK 的回执）。任一环节缺失仍在这里报同一行错误。
+  const awaitsLoopOutcome = /const\s+\w+\s*=\s*await\s+running\b/.test(runtimeResume);
+  const returnsLoopOutcome = /return\s+result\b/.test(runtimeResume);
+  // 源码形态可以被改写，行为不能被改写：Resume 的端到端不变量还必须由已登记的真实回归守住
+  // （hosted-adapter-resume = 不依赖旧实例 Map 的 durable 入口；managed-resume-lifecycle =
+  // 暂停→确认→默认命令网关→Resume→同 Attempt 再执行）。两份都在收集清单里才算不退化。
+  const registeredTestFiles = new Set(testCollection.map((test) => test.file));
+  const resumeBehaviorRegressions = [
+    "lib/runtime/adapters/hosted-adapter-resume.integration.test.ts",
+    "lib/runtime/__tests__/managed-resume-lifecycle.db.test.ts",
+  ];
   if (
     !resumeBlock.includes("applicationService.resume(") ||
     !runtimeResume.includes("new HostedHarnessLoop(") ||
-    !runtimeResume.includes("const running = loop.run()") ||
-    !runtimeResume.includes("return await running") ||
+    !runtimeResume.includes("loop.run()") ||
+    !awaitsLoopOutcome ||
+    !returnsLoopOutcome ||
     !runtimeResume.includes("getActiveExecutionOwnership(") ||
-    !runtimeResume.includes("cancelActiveAgentCalls(")
+    !runtimeResume.includes("cancelActiveAgentCalls(") ||
+    !resumeBehaviorRegressions.every((file) => registeredTestFiles.has(file))
   ) {
     failures.push("Hosted Resume 退化为只 ACK");
   }
