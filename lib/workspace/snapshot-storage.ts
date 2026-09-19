@@ -90,14 +90,10 @@ export interface SnapshotStorage {
  * - `broker_default`：由 Broker 使用**它自己持有的**默认存储。控制面不知道也不需要知道
  *   其物理路径 —— 远端进程的默认存储根在控制面本来就不可见，这是唯一诚实的表达。
  */
-export type SnapshotStorageRef =
-  | { kind: "file"; root: string }
-  | { kind: "broker_default" };
+export type SnapshotStorageRef = { kind: "file"; root: string } | { kind: "broker_default" };
 
 /** 由部署配置派生存储引用：没有物理根时**不臆造路径**，交给 Broker 自己的存储。 */
-export function snapshotStorageRefFromRoot(
-  root: string | null | undefined,
-): SnapshotStorageRef {
+export function snapshotStorageRefFromRoot(root: string | null | undefined): SnapshotStorageRef {
   return root ? { kind: "file", root } : { kind: "broker_default" };
 }
 
@@ -112,9 +108,7 @@ export function resolveSnapshotStorage(
   }
   if (ref.kind === "broker_default") {
     if (!fallback) {
-      throw new SnapshotStorageUnavailableError(
-        "broker_default 只能由持有默认存储的 Broker 解析",
-      );
+      throw new SnapshotStorageUnavailableError("broker_default 只能由持有默认存储的 Broker 解析");
     }
     return fallback;
   }

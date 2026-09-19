@@ -191,7 +191,11 @@ export async function queueSteer(params: {
       turn.threadId !== located.threadId ||
       turn.activeInvocationId !== located.activeInvocationId
     ) {
-      throw new TurnStateConflictError(params.turnId, turn?.turnState ?? located.turnState, "steer");
+      throw new TurnStateConflictError(
+        params.turnId,
+        turn?.turnState ?? located.turnState,
+        "steer",
+      );
     }
 
     const [thread] = await tx

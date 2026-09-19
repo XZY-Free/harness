@@ -172,7 +172,9 @@ describe("执行根锁序契约（R04 §2 固定锁图）", () => {
     const rootCallLine = body
       .split("\n")
       .findIndex((line) => /lockInvocation(RootIfExists)?\(/.test(line));
-    const ownershipLock = lockSequence(body).find((site) => site.table === "executionOwnershipTable");
+    const ownershipLock = lockSequence(body).find(
+      (site) => site.table === "executionOwnershipTable",
+    );
     expect(rootCallLine, "守卫必须先取 Invocation 根锁").toBeGreaterThanOrEqual(0);
     expect(ownershipLock, "守卫必须锁 Ownership 行").toBeDefined();
     expect(rootCallLine + 1).toBeLessThan((ownershipLock as LockSite).line);

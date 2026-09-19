@@ -23,12 +23,12 @@
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
 import { randomUUID } from "node:crypto";
-import { computeJobInputDigest } from "@/lib/job/job-input-digest";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
 import { parseCompletionPolicy } from "@/lib/job/completion-policy";
 import { JobNotFoundError, JobStateConflictError, JobVersionConflictError } from "@/lib/job/errors";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
+import { computeJobInputDigest } from "@/lib/job/job-input-digest";
 import {
   type Job,
   type JobEvent,

@@ -278,7 +278,11 @@ describe("A02：Hosted Cancel 的终态收口与代际一致", () => {
       // 用**同一仓储方法**补 Prepared（CHECK 约束要求 evidence/digest 成对，手写 UPDATE 会被拒）。
       await markAttemptPreparedInTransaction(tx, {
         attemptId: attempt2Id,
-        evidence: { kind: "hosted-cancel-takeover", invocationId: invocation.id, attemptId: attempt2Id },
+        evidence: {
+          kind: "hosted-cancel-takeover",
+          invocationId: invocation.id,
+          attemptId: attempt2Id,
+        },
         digest: protocolDigest({ kind: "hosted-cancel-takeover", attemptId: attempt2Id }),
       });
 

@@ -121,8 +121,18 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
       authority: gen.authority,
       transientSequenceStart: 1,
       events: [
-        { transient_id: "t-1", type: "response.delta", transient_sequence: 1, payload: { delta: "你" } },
-        { transient_id: "t-2", type: "response.delta", transient_sequence: 2, payload: { delta: "好" } },
+        {
+          transient_id: "t-1",
+          type: "response.delta",
+          transient_sequence: 1,
+          payload: { delta: "你" },
+        },
+        {
+          transient_id: "t-2",
+          type: "response.delta",
+          transient_sequence: 2,
+          payload: { delta: "好" },
+        },
       ],
     });
     unsubscribe();
@@ -214,7 +224,11 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
 
     // 同一 Ownership 行，但租约代已被推进（旧 epoch 的迟到重放）。
     await expect(
-      send({ ...gen.authority, leaseEpoch: String(Number(gen.authority.leaseEpoch) + 1) }, 1, "旧 epoch"),
+      send(
+        { ...gen.authority, leaseEpoch: String(Number(gen.authority.leaseEpoch) + 1) },
+        1,
+        "旧 epoch",
+      ),
     ).rejects.toBeInstanceOf(IngressAuthorityMismatchError);
 
     // Session 不属于该 Ownership。

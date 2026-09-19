@@ -3,10 +3,7 @@ import path from "node:path";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { getFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
 import { assertRestoreBoundary, parseRecoveryAnchor } from "@/lib/workspace/recovery-anchor";
-import {
-  type SnapshotStorageRef,
-  resolveSnapshotStorage,
-} from "@/lib/workspace/snapshot-storage";
+import { type SnapshotStorageRef, resolveSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import type { WorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { validateWorkspaceContract } from "@/lib/workspace/workspace-contract";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";

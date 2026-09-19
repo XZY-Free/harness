@@ -8,8 +8,8 @@
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import type {
   SnapshotRequirements,
-  SnapshotStorageRef,
   SnapshotStorageReceipt,
+  SnapshotStorageRef,
 } from "@/lib/workspace/snapshot-storage";
 import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import type { WriterStopEvidence } from "@/lib/workspace/workspace-host-server";
