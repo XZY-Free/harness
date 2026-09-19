@@ -3,7 +3,10 @@ import path from "node:path";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { getFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
 import { assertRestoreBoundary, parseRecoveryAnchor } from "@/lib/workspace/recovery-anchor";
-import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
+import {
+  type SnapshotStorageRef,
+  resolveSnapshotStorage,
+} from "@/lib/workspace/snapshot-storage";
 import type { WorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { validateWorkspaceContract } from "@/lib/workspace/workspace-contract";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
@@ -33,7 +36,8 @@ export async function restoreFilesystemCheckpoint(input: {
   tenantId: string;
   checkpointId: string;
   destination: string;
-  storageRoot: string;
+  /** A06：Snapshot 存储的**可序列化引用**；真实 IO 由持有该存储的一端执行。 */
+  storage: SnapshotStorageRef;
   backend?: WorkspaceBackend;
   expected: CheckpointRestoreExpectation;
 }): Promise<{
@@ -82,7 +86,6 @@ export async function restoreFilesystemCheckpoint(input: {
     checkpointPolicy: binding.checkpointPolicy as Record<string, unknown> | null,
   });
   await mkdir(path.dirname(input.destination), { recursive: true });
-  const storage = new FileSnapshotStorage(input.storageRoot);
   const requirements = {
     checkpointPolicy: binding.checkpointPolicy as Record<string, unknown> | null,
     filesystemSemantics: binding.filesystemSemantics as never,
@@ -92,18 +95,22 @@ export async function restoreFilesystemCheckpoint(input: {
       manifestRef: checkpoint.manifestRef,
       manifestDigest: checkpoint.manifestDigest,
       destination: input.destination,
-      storage,
+      storage: input.storage,
       // §7：staging generation 按 operation 唯一；重试用同一 operationId 复核归属。
       operationId: checkpoint.checkpointIntentId,
       requirements,
     });
-  else
+  else {
+    // 没有 Backend 的直连路径必须自带物理根：`broker_default` 只对持有默认存储的
+    // Broker 有意义，这里没有可回退的存储 → fail closed，绝不猜路径。
+    const storage = resolveSnapshotStorage(input.storage, null);
     await storage.restoreSnapshot(
       await storage.readManifest(checkpoint.manifestRef, checkpoint.manifestDigest, requirements),
       input.destination,
       checkpoint.checkpointIntentId,
       requirements,
     );
+  }
   return {
     checkpointId: checkpoint.id,
     destination: input.destination,

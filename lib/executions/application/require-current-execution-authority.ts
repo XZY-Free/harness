@@ -27,12 +27,30 @@ export type ExecutionOperationKind =
 /** 只有新决策/新行动来源要求 Checkpoint Gate 处于 open。 */
 const GATE_OPEN_REQUIRED: readonly ExecutionOperationKind[] = ["new_action"];
 
+/** Owner 执行阶段。 */
+export type ExecutionPhase = "activating" | "dispatching" | "executing" | "suspending";
+
+/**
+ * 归一化 `requiredPhase`。
+ *
+ * R04 §6 要求区分「**同一当前代际的已接纳请求重放**」与「新的操作」：前者在
+ * `execution.started` 先于 HTTP 回执/重试到达时 Owner 已进入 `executing`，若仍强制
+ * `dispatching` 会把一次合法重放判成 `NotCurrentExecutor`。因此这里允许传入多个可接受阶段，
+ * 由入口按「是否命中已接纳重放」选择——但**不放松**任何代际/Ownership/Session 校验。
+ */
+function normalizeRequiredPhase(
+  requiredPhase: ExecutionPhase | readonly ExecutionPhase[] | undefined,
+): readonly ExecutionPhase[] | null {
+  if (!requiredPhase) return null;
+  return typeof requiredPhase === "string" ? [requiredPhase] : requiredPhase;
+}
+
 /** Parent Invocation guard used by both Runtime ingress and Runtime-originated Actions. */
 export async function requireCurrentExecutionAuthority(input: {
   tenantId: string;
   authority: AuthorityIdentity;
   executor?: DbOrTx;
-  requiredPhase?: "activating" | "dispatching" | "executing" | "suspending";
+  requiredPhase?: ExecutionPhase | readonly ExecutionPhase[];
   /** 操作类别；由服务端入口按事件 Schema 决定，不接受调用方任意字符串提权。 */
   operationKind: ExecutionOperationKind;
 }) {
@@ -40,6 +58,7 @@ export async function requireCurrentExecutionAuthority(input: {
   if (!executor) {
     throw new Error("Current Execution Authority Guard 必须在同一事务中执行");
   }
+  const allowedPhases = normalizeRequiredPhase(input.requiredPhase);
   const owner = await requireCurrentExecutionOwnership({
     tenantId: input.tenantId,
     authority: {
@@ -49,7 +68,7 @@ export async function requireCurrentExecutionAuthority(input: {
       leaseEpoch: Number(input.authority.leaseEpoch),
     },
     executor,
-    requiredPhase: input.requiredPhase,
+    requiredPhase: allowedPhases ?? undefined,
   });
   const [invocation] = await executor
     .select()
@@ -96,7 +115,7 @@ export async function requireCurrentExecutionAuthority(input: {
     session.runtimeRevisionId !== input.authority.runtimeRevisionId ||
     binding.runtimeRevisionId !== input.authority.runtimeRevisionId ||
     ["closed", "lost"].includes(session.bindingState) ||
-    (input.requiredPhase === "executing" && session.bindingState !== "active")
+    (allowedPhases?.includes("executing") === true && session.bindingState !== "active")
   ) {
     throw new Error("NotCurrentExecutor");
   }

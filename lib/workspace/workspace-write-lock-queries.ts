@@ -25,7 +25,7 @@ import {
   type WorkspaceWriteLockState,
   workspaceWriteLock,
 } from "@/lib/persistence/schema/workspace-lock";
-import { and, asc, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 export class WorkspaceWriterConflictError extends Error {
   constructor(message: string) {
@@ -421,27 +421,45 @@ export async function scanWorkspaceWriteLocksNeedingRelease(input: {
     isNull(workspaceWriteLock.releaseLeaseExpiresAt),
     lte(workspaceWriteLock.releaseLeaseExpiresAt, input.now),
   );
-  return db
-    .select({
-      tenantId: workspaceWriteLock.tenantId,
-      lockId: workspaceWriteLock.id,
-      lockState: workspaceWriteLock.lockState,
-    })
-    .from(workspaceWriteLock)
-    .where(
-      and(
-        ...(input.tenantId ? [eq(workspaceWriteLock.tenantId, input.tenantId)] : []),
-        inArray(workspaceWriteLock.lockState, [
-          "reserved",
-          "active",
-          "releasing",
-        ] as WorkspaceWriteLockState[]),
-        dueNow,
-        leaseFree,
-      ),
-    )
-    .orderBy(asc(workspaceWriteLock.releaseNextAttemptAt), asc(workspaceWriteLock.updatedAt))
-    .limit(input.limit);
+  return (
+    db
+      .select({
+        tenantId: workspaceWriteLock.tenantId,
+        lockId: workspaceWriteLock.id,
+        lockState: workspaceWriteLock.lockState,
+      })
+      .from(workspaceWriteLock)
+      .where(
+        and(
+          ...(input.tenantId ? [eq(workspaceWriteLock.tenantId, input.tenantId)] : []),
+          inArray(workspaceWriteLock.lockState, [
+            "reserved",
+            "active",
+            "releasing",
+          ] as WorkspaceWriteLockState[]),
+          dueNow,
+          leaseFree,
+        ),
+      )
+      // A08 8.3：**释放工作优先于"健康 Owner 复检"**，否则批次会被健康槽位长期占满。
+      //
+      // 候选集里有两类行，性质完全不同：
+      // - `releasing`：已由某个出口确定必须物理释放，是**义务**；
+      // - `reserved` / `active`：只是"可能有失权残留"的嫌疑行，需要逐行复验父 Owner 健康度，
+      //   是**可选的搭车复检**（这一轮没做，下一轮仍会做）。
+      //
+      // 但它们的 `releaseNextAttemptAt` 分布恰好相反：`releasing` 总有到期时间，而健康 active
+      // 行通常是 NULL —— MySQL 的 ASC 排序把 NULL 排在最前，于是只要健康 active 行数超过批次
+      // 上限，后排**已到期**的 releasing 行就永远排在批次之外（领取时又只是跳过健康行，
+      // 不产生任何分页进度）。把 `releasing` 显式排在前面，义务就不会被嫌疑行的复检挤掉；
+      // 嫌疑行自身靠 `releaseWorkspaceWriterClaim` 写的复检时间轮转，不会互相饿死。
+      .orderBy(
+        desc(sql`${workspaceWriteLock.lockState} = 'releasing'`),
+        asc(workspaceWriteLock.releaseNextAttemptAt),
+        asc(workspaceWriteLock.updatedAt),
+      )
+      .limit(input.limit)
+  );
 }
 
 /**

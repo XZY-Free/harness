@@ -497,6 +497,12 @@ describe("GET /api/threads/{thread_id}/events — 新事件推送", () => {
         transientId: "delta-route-1",
         threadId,
         turnId: "turn-transient-1",
+        // A11：transient 必须带执行代际标记，SSE 透传给消费侧做跨代隔离。
+        generation: {
+          attemptId: "attempt-route-1",
+          ownershipId: "ownership-route-1",
+          leaseEpoch: "7",
+        },
         type: "response.delta",
         occurredAt: "2026-07-21T00:00:00.000Z",
         payload: { delta: "增量正文" },
@@ -509,6 +515,11 @@ describe("GET /api/threads/{thread_id}/events — 新事件推送", () => {
         transient_id: "delta-route-1",
         thread_id: threadId,
         turn_id: "turn-transient-1",
+        generation: {
+          attempt_id: "attempt-route-1",
+          ownership_id: "ownership-route-1",
+          lease_epoch: "7",
+        },
         occurred_at: "2026-07-21T00:00:00.000Z",
         payload: { delta: "增量正文" },
       });

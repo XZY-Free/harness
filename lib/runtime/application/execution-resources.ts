@@ -153,9 +153,7 @@ export async function resolveWorkspaceExecutionResources(
     binding: workspaceBinding,
     backend: createWorkspaceBackend(resources.host),
     root: resources.root,
-    ...(resources.snapshotStorageRoot
-      ? { snapshotStorageRoot: resources.snapshotStorageRoot }
-      : {}),
+    snapshotStorage: resources.snapshotStorage,
   };
 }
 

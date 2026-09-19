@@ -204,12 +204,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       });
     });
 
-    const agentCallCancellations = currentInvocationId
-      ? await cancelActiveAgentCalls({
-          tenantId: principal.tenantId,
-          parentInvocationId: currentInvocationId,
-        })
-      : [];
+    // A02 关联约束：取消子 AgentCall 必须绑定**命令实际指向的代际**，不能用请求前置阶段
+    // 读到的 Turn 快照（`currentInvocationId`）——那个快照可能已被接管改写。`targetCutoffAt`
+    // 是入队时在执行根锁内采样到的时间，保证**后来新代际创建的子调用不被旧目标的取消误伤**。
+    const agentCallCancellations = await cancelActiveAgentCalls({
+      tenantId: principal.tenantId,
+      parentInvocationId: result.targetInvocationId,
+      createdBefore: result.targetCutoffAt,
+    });
 
     // R03 §6：冻结目标失效时命令被收口为终态（`CommandTargetSuperseded`）。响应里的
     // `command_state` 取持久事实，不报派发前的内存快照（否则会报 `queued` 而库里已 `failed`）。

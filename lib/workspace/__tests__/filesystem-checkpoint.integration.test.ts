@@ -413,7 +413,7 @@ async function setupCheckpointFixture(
       invocationId: fixture.invocation.id,
       ownershipId: acquired.ownership.id,
       backend,
-      storageRoot: path.join(base, "snapshot-storage"),
+      storage: { kind: "file", root: path.join(base, "snapshot-storage") },
       checkpointIntentId: requested.checkpointIntentId,
       safePointEvidence: {
         checkpointIntentId: requested.checkpointIntentId,
@@ -508,7 +508,7 @@ function produceFor(
     invocationId: actor.invocationId,
     ownershipId: actor.ownershipId,
     backend: actor.backend,
-    storageRoot: actor.storageRoot,
+    storage: { kind: "file", root: actor.storageRoot },
     checkpointIntentId,
     safePointEvidence: {
       checkpointIntentId,
@@ -700,7 +700,7 @@ describe("FilesystemCheckpoint integration", () => {
           tenantId: TENANT_ID,
           checkpointId: first.checkpointId,
           destination: path.join(temporaryRoot, "restore-stale"),
-          storageRoot: ctx.storageRoot,
+          storage: { kind: "file", root: ctx.storageRoot },
           backend: ctx.backend,
           expected: {
             invocationId: ctx.invocationId,
@@ -818,7 +818,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId: produced.checkpointId,
         destination,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: ctx.backend,
         expected: {
           invocationId: ctx.invocationId,
@@ -918,7 +918,7 @@ describe("FilesystemCheckpoint integration", () => {
           tenantId: TENANT_ID,
           checkpointId,
           destination,
-          storageRoot: ctx.storageRoot,
+          storage: { kind: "file", root: ctx.storageRoot },
           backend: ctx.backend,
           expected: {
             invocationId: ctx.invocationId,
@@ -954,7 +954,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId,
         destination,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: ctx.backend,
         expected: {
           invocationId: ctx.invocationId,
@@ -1108,7 +1108,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId,
         destination: otherRun,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: otherBackend,
         expected: {
           invocationId: ctx.invocationId,
@@ -1172,7 +1172,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId,
         destination: newRoot,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: ctx.backend,
         expected: {
           invocationId: ctx.invocationId,
@@ -1226,7 +1226,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId,
         destination,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: ctx.backend,
         expected: {
           invocationId: ctx.invocationId,
@@ -1328,7 +1328,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId,
         destination,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: ctx.backend,
         expected: {
           invocationId: ctx.invocationId,
@@ -1370,7 +1370,7 @@ describe("FilesystemCheckpoint integration", () => {
           tenantId: TENANT_ID,
           checkpointId: first.checkpointId,
           destination: path.join(temporaryRoot, "restore-stale"),
-          storageRoot: ctx.storageRoot,
+          storage: { kind: "file", root: ctx.storageRoot },
           backend: ctx.backend,
           expected: {
             invocationId: ctx.invocationId,
@@ -1552,7 +1552,7 @@ describe("FilesystemCheckpoint integration", () => {
           tenantId: TENANT_ID,
           checkpointId,
           destination: path.join(temporaryRoot, "restore-corrupt"),
-          storageRoot: ctx.storageRoot,
+          storage: { kind: "file", root: ctx.storageRoot },
           backend: ctx.backend,
           expected: {
             invocationId: ctx.invocationId,
@@ -1650,7 +1650,7 @@ describe("FilesystemCheckpoint integration", () => {
           invocationId: ctx.invocationId,
           ownershipId: ctx.ownershipId,
           backend: ctx.backend,
-          storageRoot: ctx.storageRoot,
+          storage: { kind: "file", root: ctx.storageRoot },
           checkpointIntentId: requested.checkpointIntentId,
           safePointEvidence: {
             checkpointIntentId: requested.checkpointIntentId,
@@ -1700,7 +1700,7 @@ describe("FilesystemCheckpoint integration", () => {
           invocationId: ctx.invocationId,
           ownershipId: ctx.ownershipId,
           backend: ctx.backend,
-          storageRoot: ctx.storageRoot,
+          storage: { kind: "file", root: ctx.storageRoot },
           checkpointIntentId: requested.checkpointIntentId,
           safePointEvidence: {
             checkpointIntentId: requested.checkpointIntentId,
@@ -1763,7 +1763,7 @@ describe("FilesystemCheckpoint integration", () => {
           tenantId: TENANT_ID,
           checkpointId: saved.id,
           destination,
-          storageRoot: ctx.storageRoot,
+          storage: { kind: "file", root: ctx.storageRoot },
           backend: ctx.backend,
           expected: {
             invocationId: ctx.invocationId,
@@ -1851,7 +1851,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId: produced.checkpointId,
         destination,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: ctx.backend,
         expected: {
           invocationId: ctx.invocationId,
@@ -1905,7 +1905,7 @@ describe("FilesystemCheckpoint integration", () => {
         tenantId: TENANT_ID,
         checkpointId,
         destination,
-        storageRoot: ctx.storageRoot,
+        storage: { kind: "file", root: ctx.storageRoot },
         backend: ctx.backend,
         expected: {
           invocationId: ctx.invocationId,

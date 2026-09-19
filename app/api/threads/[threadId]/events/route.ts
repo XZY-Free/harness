@@ -216,6 +216,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
         transient_id: event.transientId,
         thread_id: event.threadId,
         turn_id: event.turnId,
+        // A11：transient 不持久化，但必须带代际标记，消费侧才能隔离"旧执行者混入新执行"。
+        generation: {
+          attempt_id: event.generation.attemptId,
+          ownership_id: event.generation.ownershipId,
+          lease_epoch: event.generation.leaseEpoch,
+        },
         occurred_at: event.occurredAt,
         payload: event.payload,
       });

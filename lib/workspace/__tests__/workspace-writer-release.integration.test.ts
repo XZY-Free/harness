@@ -615,6 +615,80 @@ describe("Workspace writer release lane integration", () => {
     expect(lock.lockState).toBe("active");
     expect(processAlive(run.spawned.pid)).toBe(true);
   });
+  it("WFENCE-08: 健康槽位占满批次时，后排到期的释放工作仍被处理（A08 8.3 公平扫描）", async () => {
+    const root = await makeRoot();
+    const broker = createWorkspaceHostBroker({ root });
+    const probe = await broker.probeIdentity();
+    const run = await activateWithRealWriter({ root, broker, probe });
+
+    /**
+     * 一个 storage scope 一行（`WorkspaceWriteLock_tenant_scope_uq`），因此"健康槽位多于批次上限"
+     * 与生产同构：多个 Workspace 各自的 scope 各占一行。
+     */
+    const HEALTHY_SLOTS = 4;
+    const syntheticScope = (index: number) => `sha256:${index.toString(16).padStart(64, "0")}`;
+
+    const healthyLockIds: string[] = [];
+    const healthyUpdatedAt: number[] = [];
+    for (let index = 1; index <= HEALTHY_SLOTS; index += 1) {
+      const reserved = await reserveWorkspaceWriter({
+        tenantId: TENANT_ID,
+        storageScopeDigest: syntheticScope(index),
+        invocationId: run.fixture.invocation.id,
+        attemptId: run.fixture.attempt.id,
+        ownershipId: run.authority.ownership.id,
+        workspaceBindingId: run.binding.id,
+        leaseExpiresAt: run.authority.ownership.leaseExpiresAt,
+      });
+      healthyLockIds.push(reserved.lock.id);
+      healthyUpdatedAt.push(reserved.lock.updatedAt.getTime());
+    }
+
+    // 释放请求发生在健康槽位**之后**（保证 updatedAt 严格更晚），且 `lockState=releasing`。
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const reservedForRelease = await reserveWorkspaceWriter({
+      tenantId: TENANT_ID,
+      storageScopeDigest: syntheticScope(99),
+      invocationId: run.fixture.invocation.id,
+      attemptId: run.fixture.attempt.id,
+      ownershipId: run.authority.ownership.id,
+      workspaceBindingId: run.binding.id,
+      leaseExpiresAt: run.authority.ownership.leaseExpiresAt,
+    });
+    const requested = await requestWorkspaceWriterRelease({
+      tenantId: TENANT_ID,
+      lockId: reservedForRelease.lock.id,
+      reasonCode: "writer_owner_no_longer_current",
+    });
+    expect(requested?.lockState).toBe("releasing");
+
+    // 排序前提必须显式成立（不成立就是夹具问题，而不是扫描问题）：
+    // 全部候选的 `releaseNextAttemptAt` 都是 NULL，旧实现只按 updatedAt 升序取批次，
+    // 于是健康槽位在前、这条到期的 releasing 行在后。
+    const releasingRow = await readLock(reservedForRelease.lock.id);
+    expect(releasingRow.releaseNextAttemptAt).toBeNull();
+    expect(Math.max(...healthyUpdatedAt)).toBeLessThan(releasingRow.updatedAt.getTime());
+
+    // 批次上限 = 健康槽位数 < 候选总数：到期的释放工作本应被前排健康槽位挤掉。
+    const summary = await runDueWorkspaceWriterReleases({
+      leaseOwner: "test-worker:fairness",
+      limit: HEALTHY_SLOTS,
+    });
+    expect(summary.released).toBe(1);
+    expect((await readLock(reservedForRelease.lock.id)).lockState).toBe("released");
+    // 健康槽位一行都没被触碰（只被跳过并推迟复检）。
+    for (const lockId of healthyLockIds) {
+      const lock = await readLock(lockId);
+      expect(lock.lockState).toBe("reserved");
+      expect(lock.holderOwnershipId).toBe(run.authority.ownership.id);
+    }
+    // 本用例自己起的真实 Writer 收干净，避免影响同文件后续用例。
+    try {
+      process.kill(-run.spawned.pid, "SIGKILL");
+    } catch {
+      // 进程已退出
+    }
+  });
 });
 
 /** 断言文件在等待窗口内**继续**增长（证明真实 Writer 仍存活，未被误杀）。 */

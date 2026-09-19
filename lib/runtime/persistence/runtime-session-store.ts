@@ -432,7 +432,13 @@ export async function closeRuntimeSessionBindingInTransaction(
   const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
   if (current.bindingState === "closed" || current.bindingState === "lost") return current;
   if (input.expectedVersionNo !== undefined) assertVersion(current, input.expectedVersionNo);
-  return applySessionWrite(tx, current, { bindingState: "closed", closedAt: new Date() });
+  // A03：收口即撤销工作身份。否则维护/回收视角会把一条已 closed 的 Session 看成"仍有人执行"。
+  return applySessionWrite(tx, current, {
+    bindingState: "closed",
+    closedAt: new Date(),
+    supervisorLeaseOwner: null,
+    supervisorLeaseExpiresAt: null,
+  });
 }
 
 /**
@@ -451,6 +457,8 @@ export async function markRuntimeSessionLostInTransaction(
     closedAt: new Date(),
     dispatchLeaseOwner: null,
     dispatchLeaseExpiresAt: null,
+    supervisorLeaseOwner: null,
+    supervisorLeaseExpiresAt: null,
   });
 }
 
@@ -478,6 +486,8 @@ export async function markRuntimeSessionLostByOwnershipInTransaction(
     closedAt: new Date(),
     dispatchLeaseOwner: null,
     dispatchLeaseExpiresAt: null,
+    supervisorLeaseOwner: null,
+    supervisorLeaseExpiresAt: null,
   });
 }
 
@@ -538,4 +548,140 @@ export async function rescheduleRuntimeSessionDispatchInTransaction(
     dispatchLeaseOwner: null,
     dispatchLeaseExpiresAt: null,
   });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// A03 · Session 级工作身份：同代际只能有一个实际推进者
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface SupervisorLeaseClaim {
+  /** 是否由本次调用取得工作身份。false 表示该代际正由别的执行者推进。 */
+  claimed: boolean;
+  session: RuntimeSessionBinding;
+}
+
+/**
+ * 领取「本代际 Supervisor 工作身份」（A03 / R02 §2）。
+ *
+ * 契约把 Session 定义为**代际唯一的工作身份**，但 `bindingState = active` 本身不是排他
+ * 领取——它反而明确允许"继续进入执行"，所以两个进程各自读到同一 active Owner/Session 后
+ * 都能起一个决策循环（进程内 `liveRunners` 在对方进程里是空的）。
+ *
+ * 这里补上真正的排他依据：行锁内的 CAS。仅当当前无持有者、持有者就是自己、或租约已过期
+ * 时才成功。它与 `dispatchLease*` **分列**是必需的：派发 lane 在 `prepared`/`dispatching`
+ * 持有派发票据，而 Supervisor 恰好也在 `dispatching` 入场（它要先写 `execution.started`），
+ * 共用一列会让两者互相误判成"已被接管"。
+ *
+ * 本写入**不推进 `versionNo`**：工作身份不是生命周期状态。若续租推进版本号，
+ * 会让并发的网络 ACK（`expectedVersionNo` CAS）因续租而失败——那是把两件不同的事
+ * 绑在同一个乐观锁上。这里的 CAS 条件是工作身份列自身。
+ */
+export async function claimRuntimeSessionSupervisorInTransaction(
+  tx: SessionTx,
+  input: {
+    tenantId: string;
+    id: string;
+    leaseOwner: string;
+    leaseExpiresAt: Date;
+    now: Date;
+  },
+): Promise<SupervisorLeaseClaim> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  if (TERMINAL_SESSION_STATES.has(current.bindingState)) {
+    throw new Error(
+      `RuntimeSessionMismatch: ${current.bindingState} 已收口，不接受 Supervisor 领取`,
+    );
+  }
+  // 持有者不明（owner 非空但无到期时间）按「仍持有」处理：不能抢一个来源不清的身份。
+  const heldByOther =
+    current.supervisorLeaseOwner !== null &&
+    current.supervisorLeaseOwner !== input.leaseOwner &&
+    (current.supervisorLeaseExpiresAt === null || current.supervisorLeaseExpiresAt > input.now);
+  if (heldByOther) return { claimed: false, session: current };
+  const [updated] = await tx
+    .update(runtimeSessionBindingTable)
+    .set({
+      supervisorLeaseOwner: input.leaseOwner,
+      supervisorLeaseExpiresAt: input.leaseExpiresAt,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, current.tenantId),
+        eq(runtimeSessionBindingTable.id, current.id),
+      ),
+    );
+  if (!updated) throw new RuntimeSessionBindingNotFoundError(current.id);
+  return { claimed: true, session: await readSessionRow(tx, current.tenantId, current.id) };
+}
+
+/**
+ * 续期 Supervisor 工作身份。仅当**本执行者**仍是持有者时成功。
+ *
+ * 返回 false 表示身份已被接管或已被收口释放——调用方必须停止推进该代际
+ * （这正是「旧 Owner 复活」在 Supervisor 侧的阻断点）。
+ */
+export async function renewRuntimeSessionSupervisorInTransaction(
+  tx: SessionTx,
+  input: { tenantId: string; id: string; leaseOwner: string; leaseExpiresAt: Date; now: Date },
+): Promise<boolean> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  if (current.supervisorLeaseOwner !== input.leaseOwner) return false;
+  if (TERMINAL_SESSION_STATES.has(current.bindingState)) return false;
+  const [updated] = await tx
+    .update(runtimeSessionBindingTable)
+    .set({ supervisorLeaseExpiresAt: input.leaseExpiresAt, updatedAt: input.now })
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, current.tenantId),
+        eq(runtimeSessionBindingTable.id, current.id),
+      ),
+    );
+  if (!updated) throw new RuntimeSessionBindingNotFoundError(current.id);
+  return true;
+}
+
+/**
+ * 释放 Supervisor 工作身份（Supervisor 正常退出时）。
+ *
+ * 只清自己的身份：代际已被接管（持有者已变）时原样返回 false，
+ * 绝不误删新执行者的身份。
+ */
+export async function releaseRuntimeSessionSupervisorInTransaction(
+  tx: SessionTx,
+  input: { tenantId: string; id: string; leaseOwner: string; now: Date },
+): Promise<boolean> {
+  const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
+  if (current.supervisorLeaseOwner !== input.leaseOwner) return false;
+  const [updated] = await tx
+    .update(runtimeSessionBindingTable)
+    .set({
+      supervisorLeaseOwner: null,
+      supervisorLeaseExpiresAt: null,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, current.tenantId),
+        eq(runtimeSessionBindingTable.id, current.id),
+      ),
+    );
+  if (!updated) throw new RuntimeSessionBindingNotFoundError(current.id);
+  return true;
+}
+
+async function readSessionRow(
+  tx: SessionTx,
+  tenantId: string,
+  id: string,
+): Promise<RuntimeSessionBinding> {
+  const [row] = await tx
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(eq(runtimeSessionBindingTable.tenantId, tenantId), eq(runtimeSessionBindingTable.id, id)),
+    )
+    .limit(1);
+  if (!row) throw new RuntimeSessionBindingNotFoundError(id);
+  return row;
 }

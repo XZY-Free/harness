@@ -78,7 +78,13 @@ export async function activatePreparedWorkspaceWriter(input: {
   const scopeDigest = contract.storageScopeDigest as string;
   const storageIdentity = contract.storageIdentity as string;
   const leaseExpiresAt = input.ownership.leaseExpiresAt;
-  const operationId = `writer-activate:${input.candidate.binding.id}:${scopeDigest}:${input.attemptId}`;
+  const operationId = workspaceWriterActivationOperationId({
+    workspaceBindingId: input.candidate.binding.id,
+    storageScopeDigest: scopeDigest,
+    attemptId: input.attemptId,
+    ownershipId: input.ownership.id,
+    leaseEpoch: input.ownership.leaseEpoch,
+  });
 
   const existing = (await getActiveLocksByInvocation(input.tenantId, input.invocationId)).find(
     (lock) =>
@@ -183,6 +189,33 @@ export async function prepareWorkspaceWriter(input: {
     authority: input.authority,
     candidate,
   });
+}
+
+/**
+ * Writer 激活的 Backend 幂等键（A07 7.2）。
+ *
+ * 它是"同一次逻辑激活"的唯一身份，因此必须覆盖**真实操作代际**：
+ * Binding + 物理 scope + Attempt 只描述"哪个工作目录"，不描述"哪一代执行权"。
+ * 同 Attempt 的第二次正式 Resume 会有新 Owner 与新 leaseEpoch —— 若键里没有它们，
+ * 第二次激活会命中第一次的回执，拿到属于旧 Owner 的物理授权。
+ *
+ * 抽成导出函数是为了让这条约束本身可被断言，而不是只能靠端到端间接覆盖。
+ */
+export function workspaceWriterActivationOperationId(input: {
+  workspaceBindingId: string;
+  storageScopeDigest: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: number | string;
+}): string {
+  return [
+    "writer-activate",
+    input.workspaceBindingId,
+    input.storageScopeDigest,
+    input.attemptId,
+    input.ownershipId,
+    `epoch:${input.leaseEpoch}`,
+  ].join(":");
 }
 
 export function bindingContract(binding: WorkspaceBinding): WorkspaceContinuityContract {

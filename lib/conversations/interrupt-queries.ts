@@ -26,6 +26,7 @@ import { computeInvocationCommandPayloadHash } from "@/lib/conversations/regener
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { lockExecutionRootForProductWrite } from "@/lib/executions/persistence/execution-ownership-store";
 import type { ThreadEventActorType, TurnState } from "@/lib/persistence/schema/conversation";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationCommandTable } from "@/lib/persistence/schema/executions";
@@ -54,6 +55,19 @@ export interface RequestInterruptResult {
   alreadyCompletedEffectsPreserved: true;
   /** turn.interrupt_requested 事件 id。 */
   eventId: string;
+  /**
+   * 本命令**实际指向**的 Invocation（锁内读到的 `Turn.activeInvocationId`）。
+   *
+   * 调用方不得用请求前置阶段读到的 Turn 快照去关联子对象：那个快照可能已被接管改写。
+   */
+  targetInvocationId: string;
+  /**
+   * 代际边界：入队本命令时（执行根加锁之后）的服务器时间。
+   *
+   * 调用方据此取消子 AgentCall 时只能覆盖**这一刻之前**创建的子调用——同一个
+   * `parentInvocationId` 会被后续代际继续使用，按父 id 全量取消会误伤新代际的子调用。
+   */
+  targetCutoffAt: Date;
 }
 
 /** 允许 Interrupt 的 Turn 状态集合（终态 → TurnStateConflictError）。 */
@@ -67,10 +81,10 @@ const INTERRUPTIBLE_STATES: readonly TurnState[] = [
 /**
  * 事务内入队 Interrupt 命令。
  *
- * 流程：
- * 1. SELECT FOR UPDATE Turn + Thread（校验租户 + owner）
- * 2. 校验 Turn 状态为 accepted/queued/running/waiting_user（终态 → TurnStateConflictError）
- * 3. 创建 InvocationCommand（command_type=interrupt, state=queued）
+ * 流程（**按 R04 §2 固定锁图排序**：执行根在前、产品根在后）：
+ * 1. 不加锁定位 Turn + Thread（校验租户 + owner；终态 → TurnStateConflictError）
+ * 2. 锁 Invocation 根 → 创建 InvocationCommand（command_type=interrupt, state=queued，锁 Ownership）
+ * 3. 锁 Turn → Thread 并复验（定位读与加锁读之间可能被改写）
  * 4. 写 turn.interrupt_requested Event（不立即改变 Turn 状态，Runtime ack 后才进入终态）
  *
  * 隐藏式 404：Turn 跨租户/不存在/非 owner → TurnNotFoundError。
@@ -90,19 +104,97 @@ export async function requestInterrupt(params: {
   const preservePendingInputs = params.preservePendingInputs ?? true;
 
   const meta = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE Turn
+    // R04 §2「固定锁图」：`Invocation → Attempt → Ownership → Session → EnvironmentLease →
+    // 必需子执行事实 → Thread/Turn/Item 映射`。**产品根（Thread/Turn）在最后**。
+    //
+    // 这里先做一次**不加锁**的定位读取得执行根，再按统一顺序加锁：
+    // 旧实现是「锁 Turn → 锁 Thread → 建命令（锁 Ownership）」，而 `ingressRuntimeEvents`
+    // 的终态分支是「锁 I/O → 写 Turn/Thread」，两条真实路径互等即构成死锁环
+    // （Interrupt 持 Turn 等 O；Ingress 持 O 等 Turn）。锁序不能只靠注释声明。
+    const [located] = await tx
+      .select({
+        id: turnTable.id,
+        threadId: turnTable.threadId,
+        turnState: turnTable.turnState,
+        activeInvocationId: turnTable.activeInvocationId,
+      })
+      .from(turnTable)
+      .where(eq(turnTable.id, params.turnId))
+      .limit(1);
+    if (!located) {
+      throw new TurnNotFoundError(params.turnId);
+    }
+    if (!INTERRUPTIBLE_STATES.includes(located.turnState)) {
+      throw new TurnStateConflictError(params.turnId, located.turnState, "interrupt");
+    }
+    if (!located.activeInvocationId) {
+      throw new TurnStateConflictError(params.turnId, located.turnState, "interrupt");
+    }
+    // 定位阶段做一次不加锁的归属检查：跨租户/非 owner 直接 NotFound，不产生任何副作用。
+    const [locatedThread] = await tx
+      .select({
+        id: threadTable.id,
+        tenantId: threadTable.tenantId,
+        ownerUserId: threadTable.ownerUserId,
+      })
+      .from(threadTable)
+      .where(eq(threadTable.id, located.threadId))
+      .limit(1);
+    if (
+      !locatedThread ||
+      locatedThread.tenantId !== params.tenantId ||
+      locatedThread.ownerUserId !== params.ownerUserId
+    ) {
+      throw new TurnNotFoundError(params.turnId);
+    }
+
+    // 1) 执行根：先锁 Invocation → 活跃 Ownership（`createInvocationCommand` 随后对同一行
+    //    取锁不会等待）。通过 I 根锁，本事务与 Acquire/Renew/Close/守卫互相串行，
+    //    Ownership 快照在锁内稳定，也不会再与 Runtime 路径形成反向持锁。
+    await lockExecutionRootForProductWrite(tx, params.tenantId, located.activeInvocationId);
+    // 代际边界在执行根加锁之后采样：此刻之后创建的子 AgentCall 属于后续代际，
+    // 不属于本命令的取消范围（见 `RequestInterruptResult.targetCutoffAt`）。
+    const targetCutoffAt = new Date();
+
+    // 2) InvocationCommand（command_type=cancel, state=queued）。
+    // 活动 Turn 必须绑定同一个 Invocation，Hosted local transport 才能执行真实取消。
+    const commandPayload: Record<string, unknown> = {
+      reason_code: params.reasonCode,
+      preserve_pending_inputs: preservePendingInputs,
+    };
+    const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
+
+    await createInvocationCommandInTransaction(tx, {
+      tenantId: params.tenantId,
+      invocationId: located.activeInvocationId,
+      commandType: "cancel",
+      idempotencyKey: params.idempotencyKey,
+      payloadJson: commandPayload,
+      requestedByType: "user",
+      requestedById: params.ownerUserId,
+      commandId,
+    });
+
+    // 3) 产品根：Turn → Thread。定位读与加锁读之间可能被改写，必须逐项复验后再写事件。
     const [turn] = await tx
       .select()
       .from(turnTable)
       .where(eq(turnTable.id, params.turnId))
       .for("update")
       .limit(1);
-
-    if (!turn) {
-      throw new TurnNotFoundError(params.turnId);
+    if (
+      !turn ||
+      turn.threadId !== located.threadId ||
+      turn.activeInvocationId !== located.activeInvocationId ||
+      !INTERRUPTIBLE_STATES.includes(turn.turnState)
+    ) {
+      throw new TurnStateConflictError(
+        params.turnId,
+        turn?.turnState ?? located.turnState,
+        "interrupt",
+      );
     }
 
-    // SELECT FOR UPDATE Thread（隐藏式 404：跨租户/非 owner → NotFound）
     const [thread] = await tx
       .select()
       .from(threadTable)
@@ -118,34 +210,7 @@ export async function requestInterrupt(params: {
       throw new TurnNotFoundError(params.turnId);
     }
 
-    // 2. 校验 Turn 状态为 accepted/queued/running/waiting_user（终态 → TurnStateConflictError）
-    if (!INTERRUPTIBLE_STATES.includes(turn.turnState)) {
-      throw new TurnStateConflictError(params.turnId, turn.turnState, "interrupt");
-    }
-    if (!turn.activeInvocationId) {
-      throw new TurnStateConflictError(params.turnId, turn.turnState, "interrupt");
-    }
-
-    // 3. 创建 InvocationCommand（command_type=interrupt, state=queued）。
-    // 活动 Turn 必须绑定同一个 Invocation，Hosted local transport 才能执行真实取消。
-    const commandPayload: Record<string, unknown> = {
-      reason_code: params.reasonCode,
-      preserve_pending_inputs: preservePendingInputs,
-    };
-    const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
-
-    await createInvocationCommandInTransaction(tx, {
-      tenantId: params.tenantId,
-      invocationId: turn.activeInvocationId,
-      commandType: "cancel",
-      idempotencyKey: params.idempotencyKey,
-      payloadJson: commandPayload,
-      requestedByType: "user",
-      requestedById: params.ownerUserId,
-      commandId,
-    });
-
-    // 4. 写 turn.interrupt_requested Event（不立即改变 Turn 状态）
+    // 4) 写 turn.interrupt_requested Event（不立即改变 Turn 状态）
     // Runtime ack 后才会写 turn.interrupted/failed 终态事件
     const eventSeq = await allocateEventSequences(tx, thread.id, 1);
     const event = await insertThreadEvent(tx, thread.id, eventSeq, {
@@ -166,6 +231,8 @@ export async function requestInterrupt(params: {
     return {
       turnState: turn.turnState,
       eventId: event.id,
+      targetInvocationId: located.activeInvocationId,
+      targetCutoffAt,
     };
   });
 
@@ -179,6 +246,8 @@ export async function requestInterrupt(params: {
     },
     alreadyCompletedEffectsPreserved: true,
     eventId: meta.eventId,
+    targetInvocationId: meta.targetInvocationId,
+    targetCutoffAt: meta.targetCutoffAt,
   };
 }
 

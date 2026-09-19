@@ -85,6 +85,20 @@ export class ResumeInvocationNotWaitingError extends Error {}
  * 语义是**返回 target superseded，不把同一命令重定向新 Owner**：控制面若要取消"当时的
  * Current Authority"，必须生成针对新目标的**新命令**，而不是让旧 Transport 请求追随 current。
  */
+/**
+ * R04 §5：命令尾部的领取权已被接管（A09）。
+ *
+ * 与 `SessionDispatchClaimSuperseded` 同一语义，只是作用对象是 InvocationCommand：
+ * 过期 Worker 的迟到结论必须被**拒绝**，而不是"能写就写"。
+ */
+export class CommandDispatchClaimSupersededError extends Error {
+  readonly stableCode = "CommandDispatchClaimSuperseded";
+  constructor(message: string) {
+    super(message);
+    this.name = "CommandDispatchClaimSuperseded";
+  }
+}
+
 export class CommandTargetSupersededError extends Error {
   readonly code = "CommandTargetSuperseded";
   constructor(reason: string) {
@@ -154,7 +168,39 @@ async function loadCommand(
   return { command, invocation, binding, owner: resolvedOwner ?? null };
 }
 
-async function markDispatched(tenantId: string, commandId: string): Promise<InvocationCommand> {
+/**
+ * R04 §5：命令尾部提交的**当前领取权**校验（A09）。
+ *
+ * 在此之前只有"瞬态重试排定"和"superseded 专用收口"校验了 claim，而
+ * `markDispatched` / `acknowledgeResumeCommand` / `acknowledge` / `reject` 只看
+ * `commandState=dispatched`。这不足以区分「仍是这个状态」和「已经换了领取者」：
+ *
+ * > 旧 Worker 发出请求后阻塞 → 领取租约到期 → 新 Worker 接管 → 旧 Worker 回来，
+ * > 仍可把新领取者的命令写成 acknowledged/failed，让新执行结果被忽略、取消后续重试。
+ *
+ * 因此全部尾部提交共用这一条语义：`claimToken` 非空时必须等于该行当前的
+ * `dispatchLeaseOwner`；**请求内联调度**从未领取租约（`null`），只按状态机复核。
+ * 这不是"把 token 做成可选参数绕过去"——内联路径本来就不是一次 claim，
+ * 它没有可被接管的领取身份。
+ */
+function assertCommandClaimHeld(
+  current: InvocationCommand,
+  claimToken: string | null,
+  commandId: string,
+): void {
+  if (claimToken !== null && current.dispatchLeaseOwner !== claimToken) {
+    throw new CommandDispatchClaimSupersededError(
+      `Command ${commandId} 的领取权已被接管（holder=${current.dispatchLeaseOwner ?? "none"}）`,
+    );
+  }
+}
+
+async function markDispatched(
+  tenantId: string,
+  commandId: string,
+  claimToken?: string,
+): Promise<InvocationCommand> {
+  const token = claimToken ?? null;
   return db.transaction(async (tx) => {
     const [command] = await tx
       .select()
@@ -170,6 +216,7 @@ async function markDispatched(tenantId: string, commandId: string): Promise<Invo
     if (!command) throw new CommandNotFoundError(commandId);
     if (!["queued", "dispatched"].includes(command.commandState))
       throw new CommandAlreadyDispatchedError(`${commandId}:${command.commandState}`);
+    assertCommandClaimHeld(command, token, commandId);
     await tx
       .update(invocationCommandTable)
       .set({
@@ -200,7 +247,10 @@ async function acknowledgeResumeCommand(params: {
   tenantId: string;
   commandId: string;
   response: unknown;
+  /** R04 §5：本次领取令牌；内联调度为 `null`。 */
+  claimToken?: string | null;
 }): Promise<void> {
+  const token = params.claimToken ?? null;
   await db.transaction(async (tx) => {
     const [command] = await tx
       .select()
@@ -215,55 +265,95 @@ async function acknowledgeResumeCommand(params: {
       .limit(1);
     if (!command) throw new CommandNotFoundError(params.commandId);
     if (command.commandState !== "dispatched") return;
+    assertCommandClaimHeld(command, token, params.commandId);
     await tx
       .update(invocationCommandTable)
       .set({
         commandState: "acknowledged",
         receiptJson: params.response,
         completedAt: new Date(),
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
         updatedAt: new Date(),
       })
       .where(eq(invocationCommandTable.id, params.commandId));
   });
 }
 
-async function acknowledge(tenantId: string, commandId: string, response: unknown): Promise<void> {
-  await db
-    .update(invocationCommandTable)
-    .set({
-      commandState: "acknowledged",
-      receiptJson: response,
-      completedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(invocationCommandTable.tenantId, tenantId),
-        eq(invocationCommandTable.id, commandId),
-        eq(invocationCommandTable.commandState, "dispatched"),
-      ),
-    );
+async function acknowledge(
+  tenantId: string,
+  commandId: string,
+  response: unknown,
+  claimToken?: string | null,
+): Promise<void> {
+  const token = claimToken ?? null;
+  await db.transaction(async (tx) => {
+    const [command] = await tx
+      .select()
+      .from(invocationCommandTable)
+      .where(
+        and(
+          eq(invocationCommandTable.tenantId, tenantId),
+          eq(invocationCommandTable.id, commandId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!command) throw new CommandNotFoundError(commandId);
+    if (command.commandState !== "dispatched") return;
+    assertCommandClaimHeld(command, token, commandId);
+    await tx
+      .update(invocationCommandTable)
+      .set({
+        commandState: "acknowledged",
+        receiptJson: response,
+        completedAt: new Date(),
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(invocationCommandTable.id, commandId));
+  });
 }
 
-async function reject(tenantId: string, commandId: string, error: unknown): Promise<void> {
+async function reject(
+  tenantId: string,
+  commandId: string,
+  error: unknown,
+  claimToken?: string | null,
+): Promise<void> {
+  const token = claimToken ?? null;
   const code =
     error instanceof RuntimeHttpClientError ? error.stableCode : "RUNTIME_COMMAND_FAILED";
-  await db
-    .update(invocationCommandTable)
-    .set({
-      commandState: "failed",
-      lastErrorCode: code,
-      receiptJson: { code },
-      completedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(invocationCommandTable.tenantId, tenantId),
-        eq(invocationCommandTable.id, commandId),
-        eq(invocationCommandTable.commandState, "dispatched"),
-      ),
-    );
+  await db.transaction(async (tx) => {
+    const [command] = await tx
+      .select()
+      .from(invocationCommandTable)
+      .where(
+        and(
+          eq(invocationCommandTable.tenantId, tenantId),
+          eq(invocationCommandTable.id, commandId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!command) throw new CommandNotFoundError(commandId);
+    if (command.commandState !== "dispatched") return;
+    assertCommandClaimHeld(command, token, commandId);
+    await tx
+      .update(invocationCommandTable)
+      .set({
+        commandState: "failed",
+        lastErrorCode: code,
+        receiptJson: { code },
+        completedAt: new Date(),
+        nextDispatchAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(invocationCommandTable.id, commandId));
+  });
 }
 
 async function dispatchCommand(params: {
@@ -283,7 +373,7 @@ async function dispatchCommand(params: {
   );
   if (context.command.commandType !== params.expectedType)
     throw new CommandNotFoundError(params.commandId);
-  const command = await markDispatched(params.tenantId, params.commandId);
+  const command = await markDispatched(params.tenantId, params.commandId, params.claimToken);
   const endpoint = await params.runtimeEndpointResolver(context.binding);
   let resumeAcknowledged = false;
   try {
@@ -404,10 +494,12 @@ async function dispatchCommand(params: {
         tenantId: params.tenantId,
         commandId: params.commandId,
         response,
+        claimToken: params.claimToken ?? null,
       });
       resumeAcknowledged = true;
     }
-    if (!resumeAcknowledged) await acknowledge(params.tenantId, params.commandId, response);
+    if (!resumeAcknowledged)
+      await acknowledge(params.tenantId, params.commandId, response, params.claimToken ?? null);
     return { commandId: params.commandId, commandState: "acknowledged", response, events: [] };
   } catch (error) {
     if (error instanceof RuntimeHttpClientError && error.retryable) {
@@ -466,7 +558,7 @@ async function dispatchCommand(params: {
         claimToken: params.claimToken ?? null,
       });
     } else {
-      await reject(params.tenantId, params.commandId, error);
+      await reject(params.tenantId, params.commandId, error, params.claimToken ?? null);
     }
     return {
       commandId: params.commandId,
@@ -579,12 +671,11 @@ async function dispatchFilesystemCheckpoint(input: {
     throw new CommandTargetSupersededError(`Checkpoint 目标 Session 不匹配：ownership=${owner.id}`);
   }
   const workspace = input.endpoint.workspace;
-  if (
-    !workspace ||
-    workspace.binding.id !== input.context.binding.workspaceBindingId ||
-    !workspace.snapshotStorageRoot
-  )
+  // A06：存储能力是**引用**（`file` / `broker_default`），恒存在；不再把"没配物理根"
+  // 当成"没有存储能力"而在装配层就恒 WorkspaceNotReady。
+  if (!workspace || workspace.binding.id !== input.context.binding.workspaceBindingId) {
     throw new Error("WorkspaceNotReady");
+  }
   const authority = {
     invocationId: input.context.invocation.id,
     runtimeRevisionId: input.context.binding.runtimeRevisionId,
@@ -617,7 +708,7 @@ async function dispatchFilesystemCheckpoint(input: {
     invocationId: input.context.invocation.id,
     ownershipId: owner.id,
     backend: workspace.backend,
-    storageRoot: workspace.snapshotStorageRoot,
+    storage: workspace.snapshotStorage,
     checkpointIntentId: payload.checkpointIntentId,
     safePointEvidence: {
       checkpointIntentId: safePoint.checkpointIntentId,

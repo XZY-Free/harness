@@ -22,7 +22,8 @@
  * - completion_policy_json 决定整个 Job 终态；单 Invocation 终态只写 job.invocation_*。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { computeJobInputDigest } from "@/lib/job/job-input-digest";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
 import { parseCompletionPolicy } from "@/lib/job/completion-policy";
@@ -81,6 +82,10 @@ export interface CreateJobParams {
   inputRef?: string;
   inputJson?: unknown;
   inputKind?: JobInputKind;
+  /**
+   * **仅 reference 输入可用**：创建方冻结的内容摘要（定位符不含内容，摘要无法从 inputRef 推导）。
+   * inline 输入必须由 `inputJson` 经规范摘要推导，传入本字段会被拒绝。
+   */
   inputHash?: string;
   createdBy?: string;
   /** Event actor（默认 system，因领域服务触发）。 */
@@ -148,11 +153,21 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
     throw new Error("createJob: inline input 不得提供 inputRef");
   }
   const inputJson = inputKind === "inline" ? (params.inputJson ?? {}) : null;
+  // A10：Job 输入的摘要必须是**JSON 语义稳定**的。`Job.inputJson` 是 MySQL JSON 列，
+  // 回读时对象键会被服务端规范化重排；若创建时用 `JSON.stringify`（依赖属性插入顺序），
+  // 同一个合法对象 round-trip 后字节序改变就会被判成 `InputDigestMismatch`。
+  // 因此创建、重复接纳（creationKey 比对）与运行时复验共用同一条 RFC 8785 规范化摘要。
+  //
+  // `inputHash` 只对 **reference** 输入开放：定位符本身不含内容，冻结的内容摘要是独立事实
+  // （JOB-07 义务依赖它）。**inline 输入一律拒绝自报摘要**——其 payload 就在行内，
+  // 推导出来的摘要才是可信的，自报 hash 是纯粹的旁路。
+  if (params.inputHash !== undefined && inputKind !== "reference") {
+    throw new Error(
+      "createJob: 只有 reference 输入可声明内容摘要；inline 输入的 inputHash 必须由 inputJson 推导",
+    );
+  }
   const inputHash =
-    params.inputHash ??
-    `sha256:${createHash("sha256")
-      .update(JSON.stringify(inputKind === "inline" ? inputJson : params.inputRef))
-      .digest("hex")}`;
+    params.inputHash ?? computeJobInputDigest(inputKind === "inline" ? inputJson : params.inputRef);
 
   const result = await db.transaction(async (tx) => {
     // creationKey 来自领域服务的正式业务触发身份（09 §8.2）；未提供时用 Job 自身 id

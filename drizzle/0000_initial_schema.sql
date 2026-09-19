@@ -1853,6 +1853,8 @@ CREATE TABLE `RuntimeSessionBinding` (
 	`lastDispatchAt` datetime(6),
 	`lastErrorCode` varchar(64),
 	`closedAt` datetime(6),
+	`supervisorLeaseOwner` varchar(128),
+	`supervisorLeaseExpiresAt` datetime(6),
 	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
 	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -3178,6 +3180,7 @@ CREATE INDEX `Invocation_tenant_state_updated_idx` ON `Invocation` (`tenantId`,`
 CREATE INDEX `Invocation_checkpoint_gate_deadline_idx` ON `Invocation` (`tenantId`,`checkpointGate`,`checkpointDeadline`);--> statement-breakpoint
 CREATE INDEX `RuntimeEventIngress_tenant_owner_sequence_idx` ON `RuntimeEventIngress` (`tenantId`,`acceptedOwnershipId`,`producerSequence`);--> statement-breakpoint
 CREATE INDEX `RuntimeSessionBinding_state_dispatch_idx` ON `RuntimeSessionBinding` (`bindingState`,`nextDispatchAt`,`dispatchLeaseExpiresAt`);--> statement-breakpoint
+CREATE INDEX `RuntimeSessionBinding_state_supervisor_idx` ON `RuntimeSessionBinding` (`bindingState`,`supervisorLeaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `RuntimeSessionBinding_tenant_revision_execution_idx` ON `RuntimeSessionBinding` (`tenantId`,`runtimeRevisionId`,`remoteExecutionRef`);--> statement-breakpoint
 CREATE INDEX `IncidentContainment_tenant_incident_idx` ON `IncidentContainment` (`tenantId`,`incidentId`);--> statement-breakpoint
 CREATE INDEX `IncidentContainment_incident_state_idx` ON `IncidentContainment` (`incidentId`,`actionState`);--> statement-breakpoint

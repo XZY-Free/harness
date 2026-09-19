@@ -194,7 +194,7 @@ export async function startRuntimeInvocation(
   ) {
     if (
       !input.recovery.checkpointId ||
-      !input.workspace?.snapshotStorageRoot ||
+      !input.workspace ||
       !input.binding.environmentDefinitionRevisionId ||
       !workspaceCandidate ||
       input.invocation.checkpointRecoveryVersion === null
@@ -210,7 +210,7 @@ export async function startRuntimeInvocation(
         tenantId: input.tenantId,
         checkpointId: input.recovery.checkpointId,
         destination: workspaceCandidate.preparation.candidateRoot,
-        storageRoot: input.workspace.snapshotStorageRoot,
+        storage: input.workspace.snapshotStorage,
         backend: input.workspace.backend,
         expected: {
           invocationId: input.invocation.id,
@@ -257,6 +257,11 @@ export async function startRuntimeInvocation(
       now,
     });
   });
+  // A05：本次取得执行权所依据的恢复水位。必须在 **Acquire 之前**确定：`prepareChecks`
+  // 会用它与 Lease 上的 Prepared 证据比对，写死 `null` 会让正式 Resume 被判成
+  // "恢复 Anchor 已变化"（同一份事实两套判据）。
+  const recoveryAnchorDigest =
+    input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
   const result = await db.transaction(async (tx) => {
     const nowAtAuthority = await getAuthorityDatabaseTime(tx);
     const [existingOwnership] = await tx
@@ -308,6 +313,7 @@ export async function startRuntimeInvocation(
           environmentLeaseId: input.environmentLeaseId ?? null,
           acquiredByType: "service",
           acquiredById: "runtime-start",
+          recoveryAnchorDigest,
           activationEvidence: {
             workspace: "not-yet-required",
             runtimeRevisionId: input.binding.runtimeRevisionId,
@@ -335,6 +341,7 @@ export async function startRuntimeInvocation(
         environmentLeaseId: input.environmentLeaseId ?? null,
         acquiredByType: "service",
         acquiredById: "runtime-start",
+        recoveryAnchorDigest,
         activationEvidence: {
           workspace: "not-yet-required",
           runtimeRevisionId: input.binding.runtimeRevisionId,
@@ -396,8 +403,6 @@ export async function startRuntimeInvocation(
             : workspaceCandidate,
         });
       }
-      const recoveryAnchorDigest =
-        input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
       ownership = await db.transaction(async (tx) => {
         const [invocation] = await tx
           .select({ id: invocationTable.id })

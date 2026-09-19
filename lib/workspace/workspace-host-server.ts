@@ -14,7 +14,7 @@
  * 复用 Node 现有能力（node:fs/promises、node:child_process、process.kill 进程组）
  * 与既有受管容器链（lib/runtime/container/*），不引入新的执行内核。
  */
-import { execFile, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
@@ -25,8 +25,9 @@ import type {
   SnapshotRequirements,
   SnapshotStorage,
   SnapshotStorageReceipt,
+  SnapshotStorageRef,
 } from "@/lib/workspace/snapshot-storage";
-import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
+import { FileSnapshotStorage, resolveSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import type {
   SafePointReceipt,
   WorkspaceHost,
@@ -43,9 +44,27 @@ const SCOPE_CLAIM_FILE = "workspace-scope.json";
 const OPERATIONS_DIR = "operations";
 const WRITERS_DIR = "writers";
 const CANDIDATES_DIR = "candidates";
+/**
+ * A06：候选**运行目录**（Writer root 的候选）必须落在受管写根内、控制面目录之外。
+ *
+ * 之前它建在 `controlRoot/candidates/...`，而 `activateWriter` 明确拒绝"控制面目录作为
+ * Writer root" —— 于是"恢复成功但随后无法激活"是必然结果。控制面目录只保留
+ * `candidates/<sha>.json` 这份**归属登记**，真正的目录在工作区侧。
+ */
+const RUNS_DIR = ".snow-runs";
 const GRANTS_DIR = "grants";
 const SAFE_POINTS_DIR = "safe-points";
 const SNAPSHOT_DIR = "snapshot-storage";
+/** 每代际的"授权已物理撤销"墓碑目录（A07 7.4）。 */
+const REVOKED_DIR = "revoked";
+/** scope 锁被回收时留下的证据目录（A07 7.5）。 */
+const LOCK_RECOVERIES_DIR = "lock-recoveries";
+/** scope 物理写屏障文件（A07 7.1）。 */
+const FREEZE_FILE = "freeze.json";
+/** scope 锁的持有者归属证据文件名。 */
+const SCOPE_LOCK_OWNER_FILE = "owner.json";
+/** scope 锁目录名。 */
+const SCOPE_LOCK_DIR_NAME = ".scope.lock";
 
 /** 停止进程组的单次等待上限（先 SIGTERM，再 SIGKILL）。 */
 const STOP_WAIT_MS = 3_000;
@@ -54,6 +73,18 @@ const DRAIN_SAMPLE_MS = 60;
 /** 物理 scope 临界区等待上限与重试间隔。 */
 const SCOPE_LOCK_TIMEOUT_MS = 10_000;
 const SCOPE_LOCK_RETRY_MS = 15;
+/**
+ * scope 锁的**持有者租约**：过了这个时刻，即使进程看起来仍存活，也允许凭
+ * "租约已过期"这一持久证据回收。它不是本地超时，而是写在锁目录里的归属声明。
+ */
+const SCOPE_LOCK_LEASE_MS = 60_000;
+/**
+ * 锁目录已建、但归属记录尚未落盘时的宽限。
+ *
+ * `mkdir` 与写 `owner.json` 之间被强杀会留下"无归属记录"的锁目录。宽限结束后
+ * 允许按证据回收；宽限之内只视为"持有者正在写记录"，继续等待。
+ */
+const SCOPE_LOCK_OWNER_GRACE_MS = 2_000;
 
 // ─── 错误 ──────────────────────────────────────────────────
 
@@ -96,6 +127,21 @@ export class WorkspaceCleanupRejectedError extends Error {
   }
 }
 
+/**
+ * A06：控制端口参数契约被违反 —— 在**发出网络请求之前**由客户端本地拒绝。
+ *
+ * 不用 `WorkspaceWriterNotFenced` 表达这件事：那不是"Writer 未被 fence"，
+ * 而是"跨进程端口不能承载这个值"。两类错误必须可区分，否则调用方（和测试）
+ * 只能看到"同一个稳定串"，无法判断失败发生在哪一侧。
+ */
+export class WorkspaceRpcContractError extends Error {
+  readonly stableCode = "WorkspaceRpcContractViolation";
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkspaceRpcContractViolation";
+  }
+}
+
 // ─── 持久记录形状 ──────────────────────────────────────────
 
 interface WorkspaceIdentityRecord {
@@ -118,14 +164,65 @@ interface HostIdentityRecord {
   createdAt: string;
 }
 
+/**
+ * 受管 Writer 进程的持久归属记录（A07 7.3）。
+ *
+ * `phase` 让"已经启动、但还没登记 PID"不再是**无记录**状态：
+ * `spawning` 表示确定启动过、却无法给出进程组，因此调用方必须按
+ * "可能仍有写者存活"处理，不能声明已停止。
+ */
 interface WriterProcessRecord {
   scopeDigest: string;
   writerGeneration: number;
-  pid: number;
-  processGroupId: number;
+  phase: "spawning" | "running";
+  pid: number | null;
+  processGroupId: number | null;
   command: string;
   activityPath: string | null;
   registeredAt: string;
+}
+
+/** 某代际的 Writer 授权已被**物理撤销**（不是"进程停了"就算撤销）。 */
+interface WriterRevocationRecord {
+  scopeDigest: string;
+  writerGeneration: number;
+  reason: string;
+  revokedAt: string;
+  evidence: WriterStopEvidence;
+}
+
+/**
+ * scope 物理写屏障（A07 7.1）。
+ *
+ * 存在即可代表"该 scope 现在不接受写入授权，也不接受启动受管 Writer"。
+ * 它必须与"已登记 Writer 进程组确认停止"一起成立，才算真正冻结。
+ */
+interface WorkspaceFreezeRecord {
+  scopeDigest: string;
+  checkpointIntentId: string;
+  writerGeneration: number;
+  anchorDigest: string;
+  frozenAt: string;
+  stopEvidence: WriterStopEvidence;
+}
+
+/** scope 锁的持有者归属证据：崩溃回收只能靠它判断"持有者是否失活"。 */
+interface ScopeLockOwnerRecord {
+  holderId: string;
+  hostIdentity: string;
+  pid: number;
+  acquiredAt: string;
+  leaseExpiresAt: string;
+}
+
+/** 一次凭证据的锁回收记录（A07 7.5）。 */
+interface ScopeLockRecoveryRecord {
+  scopeDigest: string;
+  recoveredAt: string;
+  /** 被回收的持有者归属证据；缺失说明持有者在写证据前就被强杀。 */
+  previousOwner: ScopeLockOwnerRecord | null;
+  /** 判定"可回收"的依据（稳定串，便于断言与审计）。 */
+  reason: string;
 }
 
 interface CandidateClaimRecord {
@@ -393,8 +490,38 @@ export class WorkspaceHostBroker implements WorkspaceHost {
   private async operationPath(operationId: string): Promise<string> {
     return path.join(await this.controlRoot(), OPERATIONS_DIR, `${sha256Hex(operationId)}.json`);
   }
+  /** 撤销墓碑：grant 是否还能被承认，靠这份持久事实而不是进程是否还在。 */
+  private async revokedWriterPath(scopeDigest: string, generation: number): Promise<string> {
+    return path.join(await this.grantsRootFor(scopeDigest), REVOKED_DIR, `${generation}.json`);
+  }
+  private async readWriterRevocation(
+    scopeDigest: string,
+    generation: number,
+  ): Promise<WriterRevocationRecord | null> {
+    return readJson<WriterRevocationRecord>(await this.revokedWriterPath(scopeDigest, generation));
+  }
+  private async freezePath(scopeDigest: string): Promise<string> {
+    return path.join(await this.grantsRootFor(scopeDigest), FREEZE_FILE);
+  }
+  private async readFreeze(scopeDigest: string): Promise<WorkspaceFreezeRecord | null> {
+    return readJson<WorkspaceFreezeRecord>(await this.freezePath(scopeDigest));
+  }
   private async candidateClaimPath(operationId: string): Promise<string> {
     return path.join(await this.controlRoot(), CANDIDATES_DIR, `${sha256Hex(operationId)}.json`);
+  }
+  /**
+   * 候选运行目录（A06）：受管写根内、控制面目录外。
+   *
+   * 它是**真实 Workspace 内容根**，因此必须满足 `activateWriter` 的两条约束：
+   * 在受管物理根内、不在控制面目录内。归属登记仍在控制面（`candidateClaimPath`），
+   * 清理/幂等/越权判定都靠那份登记，不靠目录位置。
+   */
+  private async candidateWorkRoot(
+    candidateAttemptId: string,
+    operationId: string,
+  ): Promise<string> {
+    const probe = await this.observeIdentity();
+    return path.join(probe.canonicalRoot, RUNS_DIR, candidateAttemptId, operationId);
   }
 
   // ── 准备 ───────────────────────────────────────────────
@@ -405,12 +532,7 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     workspaceBindingId: string;
     operationId: string;
   }): Promise<WorkspacePreparation> {
-    const candidateRoot = path.join(
-      await this.controlRoot(),
-      CANDIDATES_DIR,
-      input.candidateAttemptId,
-      input.operationId,
-    );
+    const candidateRoot = await this.candidateWorkRoot(input.candidateAttemptId, input.operationId);
     const claimFile = await this.candidateClaimPath(input.operationId);
     const existing = await readJson<CandidateClaimRecord>(claimFile);
     if (existing) {
@@ -486,13 +608,31 @@ export class WorkspaceHostBroker implements WorkspaceHost {
 
     // 跨进程串行化：读 current → 停旧 Writer → 写 grant/current → 落回执 必须在同一临界区内，
     // 否则晚到的低代际会覆盖高代际，出现"两个 JSON 写者各算成功"。
-    return this.withScopeLock(probe.scopeDigest, async () => {
+    return this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
       // 回执幂等：同一 operation 重放（响应丢失后的重试）返回同一 receipt，不回退 generation。
       const receiptKey = `activate:${input.operationId}`;
       const recorded = await readJson<BackendOperationReceipt>(
         await this.operationPath(receiptKey),
       );
-      if (recorded) return recorded.receipt as unknown as WorkspaceWriterGrant;
+      if (recorded) {
+        const recordedGrant = recorded.receipt as WorkspaceWriterGrant;
+        // A07 7.2：幂等命中**不能**无条件复用回执。operationId 里可能缺少 Ownership/Epoch，
+        // 于是"同一 Attempt 的下一个正式代际"会撞上旧回执，拿到一个属于旧 Owner 的物理授权。
+        // 重放合法的前提是"这是同一请求"，因此必须逐项核对本次提交的完整身份。
+        const mismatch = activationRequestMismatch(recordedGrant, {
+          scopeDigest: input.scopeDigest,
+          writerGeneration: input.writerGeneration,
+          invocationId: input.authority.invocationId,
+          attemptId: input.authority.attemptId,
+          ownershipId: input.authority.ownershipId,
+          leaseEpoch: input.authority.leaseEpoch,
+          writerRoot,
+        });
+        if (mismatch) {
+          throw new WorkspaceWriterNotFencedError(`同一 operation 的重放身份不一致：${mismatch}`);
+        }
+        return recordedGrant;
+      }
 
       const current = await this.readCurrentWriter(probe.scopeDigest);
       if (current && current.writerGeneration > input.writerGeneration) {
@@ -557,28 +697,146 @@ export class WorkspaceHostBroker implements WorkspaceHost {
    *
    * 用 `mkdir` 的原子性做互斥量：同 root 的不同 Broker 进程/实例都能看到同一把锁，
    * 因此"读代际 → 停旧 Writer → 写新代际"不会交错，generation 严格单调。
+   *
+   * A07 7.5：锁目录里必须留下**持有者归属证据**（pid + hostIdentity + 租约），
+   * 因为持锁进程被强杀时 `finally` 不会执行。回收只能凭证据：
+   * 持有者租约已过期、且无法证明其存活时，先把锁目录原子 `rename` 走（只有一个
+   * 竞争者能成功），再写下回收记录。**不做无条件删除** —— 那会让两个持有者同时
+   * 进入临界区，比"卡住"更危险。
    */
-  private async withScopeLock<T>(scopeDigest: string, run: () => Promise<T>): Promise<T> {
-    const lockDir = path.join(await this.grantsRootFor(scopeDigest), ".scope.lock");
-    await mkdir(path.dirname(lockDir), { recursive: true });
-    const deadline = Date.now() + SCOPE_LOCK_TIMEOUT_MS;
-    for (;;) {
-      try {
-        await mkdir(lockDir);
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        if (Date.now() > deadline) {
-          throw new WorkspaceWriterNotFencedError("scope 锁等待超时");
-        }
-        await delay(SCOPE_LOCK_RETRY_MS);
-      }
-    }
+  private async withScopeLock<T>(
+    scopeDigest: string,
+    hostIdentity: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const grantsRoot = await this.grantsRootFor(scopeDigest);
+    const lockDir = path.join(grantsRoot, SCOPE_LOCK_DIR_NAME);
+    await mkdir(grantsRoot, { recursive: true });
+    const owner = await this.acquireScopeLock(scopeDigest, hostIdentity, lockDir);
     try {
       return await run();
     } finally {
-      await rm(lockDir, { recursive: true, force: true }).catch(() => undefined);
+      // 只释放自己持有的锁：若持有者记录已被别人按"失活"回收，此处不得删掉新持有者的锁。
+      const held = await readJson<ScopeLockOwnerRecord>(path.join(lockDir, SCOPE_LOCK_OWNER_FILE));
+      if (held?.holderId === owner.holderId) {
+        await rm(lockDir, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
+  }
+
+  /** 取得 scope 锁；只在取得**归属证据**之后才返回，失败按证据回收或超时报错。 */
+  private async acquireScopeLock(
+    scopeDigest: string,
+    hostIdentity: string,
+    lockDir: string,
+  ): Promise<ScopeLockOwnerRecord> {
+    const deadline = Date.now() + SCOPE_LOCK_TIMEOUT_MS;
+    for (;;) {
+      const owner = await this.tryCreateScopeLock(hostIdentity, lockDir);
+      if (owner) return owner;
+      const holder = await readJson<ScopeLockOwnerRecord>(
+        path.join(lockDir, SCOPE_LOCK_OWNER_FILE),
+      );
+      const verdict = await this.assessScopeLockHolder(hostIdentity, lockDir, holder);
+      if (verdict.recoverable) {
+        await this.recoverScopeLock(scopeDigest, lockDir, holder, verdict.reason);
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new WorkspaceWriterNotFencedError(
+          `scope 锁等待超时（持有者 ${holder?.holderId ?? "无归属记录"} pid=${
+            holder?.pid ?? "unknown"
+          } 依据=${verdict.reason}）`,
+        );
+      }
+      await delay(SCOPE_LOCK_RETRY_MS);
+    }
+  }
+
+  private async tryCreateScopeLock(
+    hostIdentity: string,
+    lockDir: string,
+  ): Promise<ScopeLockOwnerRecord | null> {
+    try {
+      await mkdir(lockDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return null;
+    }
+    const owner: ScopeLockOwnerRecord = {
+      holderId: `lock:${randomUUID()}`,
+      hostIdentity,
+      pid: process.pid,
+      acquiredAt: new Date().toISOString(),
+      leaseExpiresAt: new Date(Date.now() + SCOPE_LOCK_LEASE_MS).toISOString(),
+    };
+    await writeJsonStable(path.join(lockDir, SCOPE_LOCK_OWNER_FILE), owner);
+    return owner;
+  }
+
+  /**
+   * 判定现有锁的持有者是否已失活到可以回收。
+   *
+   * 优先级就是证据强度：**同 Host 上"持有者进程已不存在"比租约更强**，因此先判死亡。
+   * 若把租约放在前面，持锁进程被强杀后仍要枯等到租约到期才能恢复 —— 那正是
+   * "只能持续等到超时报错"的老问题换了个形式。
+   */
+  private async assessScopeLockHolder(
+    hostIdentity: string,
+    lockDir: string,
+    holder: ScopeLockOwnerRecord | null,
+  ): Promise<{ recoverable: boolean; reason: string }> {
+    if (!holder) {
+      const stats = await stat(lockDir).catch(() => null);
+      if (!stats) return { recoverable: false, reason: "lock_vanished" };
+      const ageMs = Date.now() - stats.mtimeMs;
+      // 宽限之内认为持有者正在写归属证据，继续等待而不是抢锁。
+      if (ageMs < SCOPE_LOCK_OWNER_GRACE_MS) {
+        return { recoverable: false, reason: "owner_record_pending" };
+      }
+      return { recoverable: true, reason: "owner_record_missing" };
+    }
+    const leaseActive = Date.parse(holder.leaseExpiresAt) > Date.now();
+    if (holder.hostIdentity === hostIdentity) {
+      if (processAlive(holder.pid)) {
+        // 活着就是活着：租约过期也只报"存活"，绝不因为超时去抢别人的锁。
+        return { recoverable: false, reason: leaseActive ? "lease_active" : "holder_alive" };
+      }
+      return { recoverable: true, reason: "holder_dead" };
+    }
+    // 不同 Host 无法探测 pid，只能凭租约这一持久证据判断。
+    if (leaseActive) return { recoverable: false, reason: "lease_active" };
+    return { recoverable: true, reason: "cross_host_lease_expired" };
+  }
+
+  /** 原子接管失效锁并留下回收证据。`rename` 失败说明已被其他竞争者回收。 */
+  private async recoverScopeLock(
+    scopeDigest: string,
+    lockDir: string,
+    previousOwner: ScopeLockOwnerRecord | null,
+    reason: string,
+  ): Promise<void> {
+    const graveyard = `${lockDir}.reclaimed.${randomUUID()}`;
+    try {
+      await rename(lockDir, graveyard);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    await writeJsonStable(
+      path.join(
+        await this.grantsRootFor(scopeDigest),
+        LOCK_RECOVERIES_DIR,
+        `${Date.now()}-${randomUUID()}.json`,
+      ),
+      {
+        scopeDigest,
+        recoveredAt: new Date().toISOString(),
+        previousOwner,
+        reason,
+      } satisfies ScopeLockRecoveryRecord,
+    );
+    await rm(graveyard, { recursive: true, force: true }).catch(() => undefined);
   }
 
   private buildGrant(input: {
@@ -678,12 +936,17 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     scopeDigest: string,
     writerGeneration: number,
   ): Promise<WorkspaceWriterGrant | null> {
+    // A07 7.4：撤销之后不得再交出这份 grant —— "进程已停"不等于"授权已撤销"。
+    if (await this.readWriterRevocation(scopeDigest, writerGeneration)) return null;
     const current = await this.readCurrentWriter(scopeDigest);
     if (!current || current.writerGeneration !== writerGeneration) return null;
     return current;
   }
 
   async assertWriter(grant: WorkspaceWriterGrant): Promise<void> {
+    if (await this.readWriterRevocation(grant.scopeDigest, grant.writerGeneration)) {
+      throw new WorkspaceWriterNotFencedError("该 writer 代际已被撤销");
+    }
     const persisted = await this.readCurrentWriter(grant.scopeDigest);
     if (
       !persisted ||
@@ -712,6 +975,18 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     const probe = await this.observeIdentity();
     if (probe.scopeDigest !== input.scopeDigest) {
       throw new WorkspaceWriterNotFencedError("实际存储 scope 与冻结 scope 不一致");
+    }
+    // A07 7.1：冻结期间不得再签发任何可写根。只靠"冻结时把 Writer 停了"不够 ——
+    // 授权出口必须自己读屏障，否则冻结之后仍会有人拿到写路径。
+    const freeze = await this.readFreeze(input.scopeDigest);
+    if (freeze) {
+      throw new WorkspaceWriterNotFencedError(
+        `安全点冻结期间不接受写入授权（intent ${freeze.checkpointIntentId}）`,
+      );
+    }
+    // A07 7.4：已撤销的代际即使还躺在 current.json 里也不得授权。
+    if (await this.readWriterRevocation(input.scopeDigest, input.writerGeneration)) {
+      throw new WorkspaceWriterNotFencedError("该 writer 代际已被撤销");
     }
     const current = await this.readCurrentWriter(input.scopeDigest);
     if (
@@ -751,47 +1026,111 @@ export class WorkspaceHostBroker implements WorkspaceHost {
       throw new WorkspaceWriterNotFencedError("实际存储 scope 与冻结 scope 不一致");
     }
     await this.claimScope(input.tenantId, probe.scopeDigest);
-    const current = await this.readCurrentWriter(probe.scopeDigest);
-    if (!current || current.writerGeneration !== input.writerGeneration) {
-      throw new WorkspaceWriterNotFencedError("没有该 generation 的有效 writer grant");
-    }
-    const recordPath = await this.writerRecordPath(probe.scopeDigest, input.writerGeneration);
-    const existing = await readJson<WriterProcessRecord>(recordPath);
-    if (existing && processAlive(existing.pid)) {
-      throw new WorkspaceWriterNotFencedError("该 generation 已有存活的受管 Writer");
-    }
-    const child = spawn(input.command, input.args, {
-      cwd: input.cwd,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
+    // A07 7.3：「读 grant → 确认没有存活 Writer → spawn → 登记 PID」必须在**同一临界区**。
+    // 之前 `activateWriter` 有锁而这里没有，于是接管可以插在"检查旧 grant"与"spawn/登记"之间，
+    // 平台认为旧 Writer 已清掉之后旧进程才被启动。
+    return this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      const freeze = await this.readFreeze(probe.scopeDigest);
+      if (freeze) {
+        throw new WorkspaceWriterNotFencedError(
+          `安全点冻结期间不接受受管 Writer 启动（intent ${freeze.checkpointIntentId}）`,
+        );
+      }
+      if (await this.readWriterRevocation(probe.scopeDigest, input.writerGeneration)) {
+        throw new WorkspaceWriterNotFencedError("该 writer 代际已被撤销");
+      }
+      const current = await this.readCurrentWriter(probe.scopeDigest);
+      if (!current || current.writerGeneration !== input.writerGeneration) {
+        throw new WorkspaceWriterNotFencedError("没有该 generation 的有效 writer grant");
+      }
+      const recordPath = await this.writerRecordPath(probe.scopeDigest, input.writerGeneration);
+      const existing = await readJson<WriterProcessRecord>(recordPath);
+      if (existing) {
+        // `spawning` 表示"确定启动过、但进程组未知"：绝不能当成"没有 Writer"。
+        const possiblyAlive =
+          existing.phase === "spawning" || (existing.pid !== null && processAlive(existing.pid));
+        if (possiblyAlive) {
+          throw new WorkspaceWriterNotFencedError("该 generation 已有(或可能有)存活的受管 Writer");
+        }
+      }
+      const base = {
+        scopeDigest: probe.scopeDigest,
+        writerGeneration: input.writerGeneration,
+        command: [input.command, ...input.args].join(" "),
+        activityPath: input.activityPath ?? null,
+      };
+      // 先落**启动意图**：spawn 成功到写 PID 之间被强杀，也不会留下"没有持久归属记录"的写者。
+      await writeJsonStable(recordPath, {
+        ...base,
+        phase: "spawning",
+        pid: null,
+        processGroupId: null,
+        registeredAt: new Date().toISOString(),
+      } satisfies WriterProcessRecord);
+      let child: ChildProcess;
+      try {
+        child = spawn(input.command, input.args, {
+          cwd: input.cwd,
+          detached: true,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (error) {
+        // spawn 直接失败：确定没有进程被创建，意图记录必须收回，否则会永久挡住后续启动。
+        await rm(recordPath, { force: true }).catch(() => undefined);
+        throw error;
+      }
+      if (child.pid === undefined) {
+        await rm(recordPath, { force: true }).catch(() => undefined);
+        throw new WorkspaceWriterNotFencedError("受管 Writer 启动失败");
+      }
+      child.stdout?.resume();
+      child.stderr?.resume();
+      child.unref();
+      await writeJsonStable(recordPath, {
+        ...base,
+        phase: "running",
+        pid: child.pid,
+        processGroupId: child.pid,
+        registeredAt: new Date().toISOString(),
+      } satisfies WriterProcessRecord);
+      return {
+        writerRef: `writer:${probe.scopeDigest}:${input.writerGeneration}`,
+        pid: child.pid,
+        processGroupId: child.pid,
+      };
     });
-    if (child.pid === undefined) throw new WorkspaceWriterNotFencedError("受管 Writer 启动失败");
-    child.stdout?.resume();
-    child.stderr?.resume();
-    child.unref();
-    await writeJsonStable(recordPath, {
-      scopeDigest: probe.scopeDigest,
-      writerGeneration: input.writerGeneration,
-      pid: child.pid,
-      processGroupId: child.pid,
-      command: [input.command, ...input.args].join(" "),
-      activityPath: input.activityPath ?? null,
-      registeredAt: new Date().toISOString(),
-    } satisfies WriterProcessRecord);
-    return {
-      writerRef: `writer:${probe.scopeDigest}:${input.writerGeneration}`,
-      pid: child.pid,
-      processGroupId: child.pid,
-    };
   }
 
-  /** 真实停止某代际的受管 Writer 进程组并确认退出；返回可核验证据。 */
+  /**
+   * 真实撤销某代际的受管 Writer：停止进程组，并**让该 grant 立即失效**。
+   *
+   * A07 7.4：只杀进程组的撤销是不完整的 —— `getWriter`/`assertWriter`/`authorizeWrite`
+   * 仍会承认 `current.json` 里那份 grant。撤销必须同时落一份持久墓碑，并把指向该代际的
+   * `current.json` 摘掉；否则"DB 层可能还会拦"就成了唯一防线，而那不是物理撤销的证据。
+   */
   async revokeWriterGeneration(
     scopeDigest: string,
     writerGeneration: number,
   ): Promise<WriterStopEvidence> {
+    const reason = "revoked_by_control_plane";
     const probe = await this.observeIdentity();
-    return await this.stopWriterGeneration(scopeDigest, writerGeneration);
+    return await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      const evidence = await this.stopWriterGeneration(scopeDigest, writerGeneration);
+      await writeJsonStable(await this.revokedWriterPath(scopeDigest, writerGeneration), {
+        scopeDigest,
+        writerGeneration,
+        reason,
+        revokedAt: new Date().toISOString(),
+        evidence,
+      } satisfies WriterRevocationRecord);
+      const current = await this.readCurrentWriter(scopeDigest);
+      if (current?.writerGeneration === writerGeneration) {
+        await rm(path.join(await this.grantsRootFor(scopeDigest), "current.json"), {
+          force: true,
+        }).catch(() => undefined);
+      }
+      return evidence;
+    });
   }
 
   private async stopWriterGeneration(
@@ -807,6 +1146,19 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         stopped: true,
         processGroupEmpty: true,
         drained: true,
+        signals,
+        pids: [],
+      };
+    }
+    // A07 7.3：`spawning` 阶段只有"启动意图"，没有进程组。确定启动过、却无法核验，
+    // 因此必须按"可能仍有写者"报告；声明 stopped=true 就等于把真实写者当成不存在。
+    // 记录**保留**，让后续调用方（与运维）仍能看到这份归属。
+    if (record.phase === "spawning" || record.processGroupId === null || record.pid === null) {
+      return {
+        previousWriterPresent: true,
+        stopped: false,
+        processGroupEmpty: false,
+        drained: false,
         signals,
         pids: [],
       };
@@ -881,6 +1233,14 @@ export class WorkspaceHostBroker implements WorkspaceHost {
 
   // ── 安全点 / 快照 ──────────────────────────────────────
 
+  /**
+   * 建立**物理**安全点：不是只写一份 JSON 回执。
+   *
+   * A07 7.1：回执形状合法不足以证明"扫描期间没有写入"。冻结必须
+   * 1) 在同一临界区内确认该代际的受管 Writer 进程组已停止并排空（否则拒绝冻结）；
+   * 2) 落下持久写屏障，使 `authorizeWrite`/`spawnManagedWriter` 从此刻起一律 fail closed。
+   * 顺序是先停 Writer、后落屏障，且全程持锁 —— 因此屏障生效后不可能再出现新的写者。
+   */
   async freeze(input: {
     grant: WorkspaceWriterGrant;
     checkpointIntentId: string;
@@ -888,42 +1248,69 @@ export class WorkspaceHostBroker implements WorkspaceHost {
   }): Promise<SafePointReceipt> {
     await this.assertWriter(input.grant);
     const probe = await this.observeIdentity();
-    const receipt: SafePointReceipt = {
-      checkpointIntentId: input.checkpointIntentId,
-      scopeDigest: input.grant.scopeDigest,
-      writerGeneration: input.grant.writerGeneration,
-      anchorDigest: input.anchorDigest,
-      frozenAt: new Date().toISOString(),
-    };
-    await writeJsonExclusive(
-      path.join(await this.controlRoot(), SAFE_POINTS_DIR, `${input.checkpointIntentId}.json`),
-      receipt,
-    );
-    return receipt;
+    return this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      const stopEvidence = await this.stopWriterGeneration(
+        probe.scopeDigest,
+        input.grant.writerGeneration,
+      );
+      if (!stopEvidence.stopped || !stopEvidence.processGroupEmpty) {
+        throw new WorkspaceWriterNotFencedError("冻结未能确认已登记的受管 Writer 已停止");
+      }
+      const receipt: SafePointReceipt = {
+        checkpointIntentId: input.checkpointIntentId,
+        scopeDigest: input.grant.scopeDigest,
+        writerGeneration: input.grant.writerGeneration,
+        anchorDigest: input.anchorDigest,
+        frozenAt: new Date().toISOString(),
+      };
+      await writeJsonStable(await this.freezePath(probe.scopeDigest), {
+        scopeDigest: probe.scopeDigest,
+        checkpointIntentId: input.checkpointIntentId,
+        writerGeneration: input.grant.writerGeneration,
+        anchorDigest: input.anchorDigest,
+        frozenAt: receipt.frozenAt,
+        stopEvidence,
+      } satisfies WorkspaceFreezeRecord);
+      await writeJsonExclusive(
+        path.join(await this.controlRoot(), SAFE_POINTS_DIR, `${input.checkpointIntentId}.json`),
+        receipt,
+      );
+      return receipt;
+    });
   }
 
   async releaseFreeze(receipt: SafePointReceipt): Promise<void> {
     const probe = await this.observeIdentity();
-    await writeFile(
-      path.join(
-        await this.controlRoot(),
-        SAFE_POINTS_DIR,
-        `${receipt.checkpointIntentId}.released`,
-      ),
-      JSON.stringify(receipt),
-      { flag: "a" },
+    // A06：解冻登记是**追加式持久事实**，必须可重复执行。不能假设本进程/本代际
+    // 曾在本机写过 `<intentId>.json`：控制面目录可能整体缺失（新进程、目录被清理、
+    // 冻结证据在别处、或先前写入失败后的重试）。缺目录直接 ENOENT 会让"重试"
+    // 变成永久失败，所以这里显式建父目录再以 `a` 追加。
+    const file = path.join(
+      await this.controlRoot(),
+      SAFE_POINTS_DIR,
+      `${receipt.checkpointIntentId}.released`,
     );
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify(receipt), { flag: "a" });
+    // A07 7.1：屏障必须随解冻一起撤销，否则安全点结束后该 scope 永久拒绝写入。
+    // 只撤销**匹配本 intent** 的屏障：迟到的旧 release 不得解掉更新的冻结。
+    await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      const freeze = await this.readFreeze(probe.scopeDigest);
+      if (freeze && freeze.checkpointIntentId === receipt.checkpointIntentId) {
+        await rm(await this.freezePath(probe.scopeDigest), { force: true }).catch(() => undefined);
+      }
+    });
   }
 
   async snapshot(input: {
     grant: WorkspaceWriterGrant;
     checkpointIntentId: string;
     anchorDigest: string;
-    storage?: SnapshotStorage;
+    storage?: SnapshotStorageRef;
     requirements: SnapshotRequirements;
   }): Promise<SnapshotStorageReceipt> {
     await this.assertWriter(input.grant);
-    const storage = input.storage ?? this.storage;
+    const storage = resolveSnapshotStorage(input.storage, this.storage);
     return (
       await storage.writeSnapshot(input.grant.root, input.checkpointIntentId, input.requirements)
     ).receipt;
@@ -933,11 +1320,11 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     manifestRef: string;
     manifestDigest: string;
     destination: string;
-    storage?: SnapshotStorage;
+    storage?: SnapshotStorageRef;
     operationId?: string;
     requirements?: SnapshotRequirements;
   }): Promise<void> {
-    const storage = input.storage ?? this.storage;
+    const storage = resolveSnapshotStorage(input.storage, this.storage);
     const manifest = await storage.readManifest(
       input.manifestRef,
       input.manifestDigest,
@@ -958,12 +1345,7 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     const canonicalRoot = probe.canonicalRoot;
     const controlRoot = await this.controlRoot();
     const expectedRoot = await resolveReal(
-      path.join(
-        controlRoot,
-        CANDIDATES_DIR,
-        preparation.candidateAttemptId,
-        preparation.operationId,
-      ),
+      path.join(canonicalRoot, RUNS_DIR, preparation.candidateAttemptId, preparation.operationId),
     );
     const target = await resolveReal(preparation.candidateRoot);
     // 绝不递归删除共享受管根或控制面目录。
@@ -1044,6 +1426,37 @@ function grantIdentity(grant: WorkspaceWriterGrant): Record<string, unknown> {
   };
 }
 
+/** `activateWriter` 的**请求身份**（A07 7.2）：回执重放必须逐项命中这一组事实。 */
+interface ActivationRequestIdentity {
+  scopeDigest: string;
+  writerGeneration: number;
+  invocationId: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: string;
+  writerRoot: string;
+}
+
+/** 返回第一处不一致的字段名；完全一致返回 `null`（合法重放）。 */
+function activationRequestMismatch(
+  grant: WorkspaceWriterGrant,
+  request: ActivationRequestIdentity,
+): string | null {
+  const pairs: Array<[keyof ActivationRequestIdentity, unknown, unknown]> = [
+    ["scopeDigest", grant.scopeDigest, request.scopeDigest],
+    ["writerGeneration", grant.writerGeneration, request.writerGeneration],
+    ["invocationId", grant.invocationId, request.invocationId],
+    ["attemptId", grant.attemptId, request.attemptId],
+    ["ownershipId", grant.ownershipId, request.ownershipId],
+    ["leaseEpoch", grant.leaseEpoch, request.leaseEpoch],
+    ["writerRoot", grant.root, request.writerRoot],
+  ];
+  for (const [field, actual, expected] of pairs) {
+    if (actual !== expected) return `${field}: 回执 ${String(actual)} ≠ 请求 ${String(expected)}`;
+  }
+  return null;
+}
+
 export function createWorkspaceHostBroker(input: {
   root: string;
   /** 实际受管写根；省略时等于控制面根。 */
@@ -1070,6 +1483,7 @@ const RPC_METHODS = [
   "revokeWriterGeneration",
   "freeze",
   "releaseFreeze",
+  "snapshot",
   "restore",
   "cleanup",
 ] as const;
@@ -1132,6 +1546,12 @@ async function handleRpc(
   }
 }
 
+/**
+ * params → 方法位置参数。
+ *
+ * 契约（A06 统一）：除下列多参方法外，**整个 params 对象就是该方法的唯一参数**。
+ * 客户端不得再包一层（`{ receipt }` / `{ preparation }` 都会让服务端拿到包装对象）。
+ */
 function paramsToArgs(method: RpcMethod, params: Record<string, unknown> | undefined): unknown[] {
   const value = params ?? {};
   if (method === "getWriter") return [value.scopeDigest, value.writerGeneration];
@@ -1140,6 +1560,39 @@ function paramsToArgs(method: RpcMethod, params: Record<string, unknown> | undef
     return [value.scopeDigest, value.writerGeneration];
   }
   return [value];
+}
+
+/**
+ * RPC 参数必须是**可序列化值**：普通对象/数组/原始值。
+ *
+ * 只检查到"原型必须是 Object.prototype 或 null"，因为那正好区分了
+ * `{ kind: "file", root }` 这样的数据与 `new FileSnapshotStorage(...)` 这样的能力对象。
+ */
+function assertRpcSerializable(value: unknown, method: string, path = "$"): void {
+  if (value === null) return;
+  const type = typeof value;
+  if (type === "string" || type === "number" || type === "boolean") return;
+  if (type === "undefined") return;
+  if (type === "function") {
+    throw new WorkspaceRpcContractError(`RPC ${method} 参数含不可序列化值：${path}`);
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertRpcSerializable(item, method, `${path}[${index}]`));
+    return;
+  }
+  if (type !== "object") {
+    throw new WorkspaceRpcContractError(`RPC ${method} 参数含不可序列化值：${path}`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new WorkspaceRpcContractError(
+      `RPC ${method} 参数含带方法/原型的实例：${path}（控制端口只传可序列化值）`,
+    );
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    assertRpcSerializable(record[key], method, `${path}.${key}`);
+  }
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<string> {
@@ -1171,6 +1624,10 @@ export function createRemoteWorkspaceHost(baseUrl: string): WorkspaceHost & {
   }): Promise<{ root: string; writerGeneration: number; grantRef: string }>;
 } {
   const call = async <T>(method: RpcMethod, params: Record<string, unknown>): Promise<T> => {
+    // A06：契约守卫。带方法的实例（SnapshotStorage 之类）一旦进 JSON 就静默退化成普通
+    // 对象，远端会在"调用不存在的方法"上失败 —— 那是在错误的地方、以错误的方式暴露。
+    // 这里在**发网络之前**拒绝，让"控制端口只传可序列化值"成为可验证的契约。
+    assertRpcSerializable(params, method);
     const response = await fetch(`${baseUrl}/rpc`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1209,13 +1666,17 @@ export function createRemoteWorkspaceHost(baseUrl: string): WorkspaceHost & {
       call<WriterStopEvidence>("revokeWriterGeneration", { scopeDigest, writerGeneration }),
     freeze: (input) =>
       call<SafePointReceipt>("freeze", input as unknown as Record<string, unknown>),
-    releaseFreeze: (receipt) => call<void>("releaseFreeze", { receipt }),
+    // A06：参数**不包装**。服务端把一个 params 对象当作"该方法的唯一参数"，
+    // 之前发 `{ receipt }` / `{ preparation }` 会让服务端拿到包装对象：
+    // `receipt.checkpointIntentId` 变 undefined（写出"undefined.released"却返回成功）、
+    // `preparation.candidateRoot` 变 undefined（清理目标错位）。
+    releaseFreeze: (receipt) =>
+      call<void>("releaseFreeze", receipt as unknown as Record<string, unknown>),
+    snapshot: (input) =>
+      call<SnapshotStorageReceipt>("snapshot", input as unknown as Record<string, unknown>),
     restore: (input) => call<void>("restore", input as unknown as Record<string, unknown>),
     cleanup: (preparation) =>
-      call<void>("cleanup", { preparation } as unknown as Record<string, unknown>),
-    snapshot: async () => {
-      throw new WorkspaceWriterNotFencedError("远程 Broker 不承接 in-process SnapshotStorage");
-    },
+      call<void>("cleanup", preparation as unknown as Record<string, unknown>),
   };
 }
 

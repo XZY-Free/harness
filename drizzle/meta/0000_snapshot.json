@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "26b57d9d-df2a-4048-8fc5-c9e545dc5a62",
+  "id": "13e7b2bb-4cbf-4da0-84e9-c018939efd38",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -15150,6 +15150,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "supervisorLeaseOwner": {
+          "name": "supervisorLeaseOwner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supervisorLeaseExpiresAt": {
+          "name": "supervisorLeaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "versionNo": {
           "name": "versionNo",
           "type": "bigint unsigned",
@@ -15206,6 +15220,14 @@
             "bindingState",
             "nextDispatchAt",
             "dispatchLeaseExpiresAt"
+          ],
+          "isUnique": false
+        },
+        "RuntimeSessionBinding_state_supervisor_idx": {
+          "name": "RuntimeSessionBinding_state_supervisor_idx",
+          "columns": [
+            "bindingState",
+            "supervisorLeaseExpiresAt"
           ],
           "isUnique": false
         },

@@ -78,6 +78,58 @@ export interface SnapshotStorage {
   ): Promise<void>;
 }
 
+/**
+ * SnapshotStorage 的**可序列化**引用（A06）。
+ *
+ * 控制端口（含跨进程 RPC）只允许传递这个值：`SnapshotStorage` 是带方法的实例，一旦进入
+ * JSON 请求就会**静默退化成普通对象**，服务端 `storage.readManifest(...)` 立刻是
+ * "not a function"。因此真实 IO 必须留在**拥有该存储能力的那一端**执行：
+ *
+ * - `file`：显式物理根（部署配置了 `SNOWHARNESS_SNAPSHOT_STORAGE_ROOT` 一类事实）；
+ *   同机进程间共享同一路径时合法。
+ * - `broker_default`：由 Broker 使用**它自己持有的**默认存储。控制面不知道也不需要知道
+ *   其物理路径 —— 远端进程的默认存储根在控制面本来就不可见，这是唯一诚实的表达。
+ */
+export type SnapshotStorageRef =
+  | { kind: "file"; root: string }
+  | { kind: "broker_default" };
+
+/** 由部署配置派生存储引用：没有物理根时**不臆造路径**，交给 Broker 自己的存储。 */
+export function snapshotStorageRefFromRoot(
+  root: string | null | undefined,
+): SnapshotStorageRef {
+  return root ? { kind: "file", root } : { kind: "broker_default" };
+}
+
+/** 在拥有存储能力的一端把引用解析成真实实现；无 fallback 时 `broker_default` 无法解析。 */
+export function resolveSnapshotStorage(
+  ref: SnapshotStorageRef | undefined,
+  fallback: SnapshotStorage | null,
+): SnapshotStorage {
+  if (!ref) {
+    if (!fallback) throw new SnapshotStorageUnavailableError("缺少 SnapshotStorage 引用");
+    return fallback;
+  }
+  if (ref.kind === "broker_default") {
+    if (!fallback) {
+      throw new SnapshotStorageUnavailableError(
+        "broker_default 只能由持有默认存储的 Broker 解析",
+      );
+    }
+    return fallback;
+  }
+  return new FileSnapshotStorage(ref.root);
+}
+
+/** 缺存储能力（fail-closed，绝不用空实现兜底）。 */
+export class SnapshotStorageUnavailableError extends Error {
+  readonly stableCode = "SnapshotStorageUnavailable";
+  constructor(message: string) {
+    super(message);
+    this.name = "SnapshotStorageUnavailable";
+  }
+}
+
 interface RestoreState {
   operationId: string;
   manifestDigest: string;

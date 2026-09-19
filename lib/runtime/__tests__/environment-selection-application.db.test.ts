@@ -57,6 +57,11 @@ const boundaryProvisioner: EnvironmentProvisioner = {
   async revalidate() {
     return { id: randomUUID(), tenantId: "unused" } as unknown as EnvironmentLease;
   },
+  // A05：Provisioner 契约新增"暂停后的重新准备"；本套件不发起 Runtime 传输，
+  // 因此替身只需保持契约完整（返回值不被消费）。
+  async reprepare() {
+    return { id: randomUUID(), tenantId: "unused" } as unknown as EnvironmentLease;
+  },
   async cleanup() {
     return { state: "released" as const, cleanupCount: 1 };
   },

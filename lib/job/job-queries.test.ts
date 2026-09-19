@@ -114,7 +114,6 @@ async function createQueuedJob(
     threadId?: string;
     replacesJobId?: string;
     inputRef?: string;
-    inputHash?: string;
     createdBy?: string;
     idempotencyKey?: string;
   },
@@ -128,7 +127,6 @@ async function createQueuedJob(
     threadId: options?.threadId,
     replacesJobId: options?.replacesJobId,
     inputRef: options?.inputRef ?? "input://batch/001",
-    inputHash: options?.inputHash ?? "sha256:abc",
     createdBy: options?.createdBy,
     idempotencyKey: options?.idempotencyKey,
   });
@@ -168,7 +166,8 @@ describe("createJob 成功路径", () => {
     expect(result.job.replacesJobId).toBeNull();
     expect(result.job.threadId).toBeNull();
     expect(result.job.inputRef).toBe("input://batch/001");
-    expect(result.job.inputHash).toBe("sha256:abc");
+    // A10：inputHash 由实际输入经 RFC 8785 规范化摘要推导，不再由调用方自报。
+    expect(result.job.inputHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(result.job.lastEventSequence).toBe(1);
     expect(result.job.resultRef).toBeNull();
     expect(result.job.resultHash).toBeNull();
@@ -193,7 +192,7 @@ describe("createJob 成功路径", () => {
       replaces_job_id: null,
       completion_policy: ALL_SUCCESS_COMPLETION_POLICY,
       input_ref: "input://batch/001",
-      input_hash: "sha256:abc",
+      input_hash: result.job.inputHash,
       created_by: null,
     });
     expect(result.queuedEvent.idempotencyKey).toBe("create-001:job-queued");
@@ -220,7 +219,6 @@ describe("createJob 成功路径", () => {
       threadId: "thread-001",
       replacesJobId: failed.id,
       inputRef: "input://batch/001",
-      inputHash: "sha256:abc",
       createdBy: fx.ownerId,
       idempotencyKey: "replace-001",
     });

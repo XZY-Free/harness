@@ -8,7 +8,7 @@
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import type {
   SnapshotRequirements,
-  SnapshotStorage,
+  SnapshotStorageRef,
   SnapshotStorageReceipt,
 } from "@/lib/workspace/snapshot-storage";
 import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
@@ -95,7 +95,11 @@ export interface WorkspaceHost {
     grant: WorkspaceWriterGrant;
     checkpointIntentId: string;
     anchorDigest: string;
-    storage?: SnapshotStorage;
+    /**
+     * A06：**可序列化**引用，绝不是带方法的实例 —— 该方法可能经控制端口 RPC 跨进程调用。
+     * 省略时由 Broker 使用自己持有的默认存储。
+     */
+    storage?: SnapshotStorageRef;
     /** CHECKPOINT_RESTORABLE 的容量上限与已声明 filesystem profile（fail-closed 必需）。 */
     requirements: SnapshotRequirements;
   }): Promise<SnapshotStorageReceipt>;
@@ -103,7 +107,8 @@ export interface WorkspaceHost {
     manifestRef: string;
     manifestDigest: string;
     destination: string;
-    storage?: SnapshotStorage;
+    /** A06：同 `snapshot`；真实 IO 在执行该方法的进程内完成。 */
+    storage?: SnapshotStorageRef;
     operationId?: string;
     requirements?: SnapshotRequirements;
   }): Promise<void>;

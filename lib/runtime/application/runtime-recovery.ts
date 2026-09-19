@@ -1,5 +1,6 @@
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { scheduleEnvironmentLeaseCleanup } from "@/lib/environment/environment-lease-store";
 import { transitionInvocation } from "@/lib/executions/application/transition-invocation";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
@@ -264,6 +265,24 @@ export async function markInvocationLost(
         invocationId: current.id,
         ownershipId: owner.id,
       });
+      // A08 8.1：Owner 丢失同样是**正式生命周期出口** —— 这里只登记该 Attempt 的真实清理工作。
+      //
+      // 失联收口此前完全没碰 EnvironmentLease：Owner 已 lost、Session 已收口，但真实容器
+      // 既不会消失、也不会进入 `releasing` 扫描（repairs/06-environment.md §5 明确要求
+      // "Owner 丢失、Invocation terminal 均生成持久清理工作"）。
+      // 位置按 R04 §2 固定锁图：`… → Session → EnvironmentLease → …`。
+      if (owner.environmentLeaseId) {
+        await scheduleEnvironmentLeaseCleanup(
+          {
+            tenantId: input.tenantId,
+            leaseId: owner.environmentLeaseId,
+            errorCode: input.reasonCode,
+            now,
+            immediate: true,
+          },
+          tx,
+        );
+      }
     }
 
     const invocation = await transitionInvocation(tx, {

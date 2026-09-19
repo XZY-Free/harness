@@ -8,14 +8,14 @@
   },
   "counts": {
     "unit": 322,
-    "db": 134,
+    "db": 144,
     "integration": 14,
-    "contract": 31,
+    "contract": 34,
     "e2e-web": 4,
     "e2e-desktop": 2,
     "e2e-cross-client": 2
   },
-  "total": 509,
+  "total": 522,
   "tests": [
     {
       "file": "app/admin/api/agent-calls/[callId]/diagnostic/route.test.ts",
@@ -3208,6 +3208,17 @@
       ]
     },
     {
+      "file": "lib/environment/__tests__/environment-lease-cleanup-closure.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/environment/__tests__/environment-revision.db.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -3747,6 +3758,17 @@
       ]
     },
     {
+      "file": "lib/job/__tests__/job-input-digest-roundtrip.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/job/__tests__/job-runtime.integration.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -4176,6 +4198,17 @@
       ]
     },
     {
+      "file": "lib/runtime/__tests__/command-tail-claim.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/__tests__/command-target-authority.db.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -4209,11 +4242,55 @@
       ]
     },
     {
+      "file": "lib/runtime/__tests__/execution-lock-order.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/__tests__/host-execution-runtime.test.ts",
       "group": "unit",
       "command": "pnpm vitest run --project unit",
       "needsDB": false,
       "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/hosted-cancel-closure.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/hosted-supervisor-lifecycle.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/managed-resume-lifecycle.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -4308,7 +4385,29 @@
       ]
     },
     {
+      "file": "lib/runtime/__tests__/runtime-start-route-idempotency.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/runtime/__tests__/session-dispatch-intent.db.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/runtime/__tests__/transient-generation-isolation.db.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
       "needsDB": true,
@@ -5287,6 +5386,17 @@
       ]
     },
     {
+      "file": "lib/workspace/__tests__/checkpoint-default-path.integration.test.ts",
+      "group": "db",
+      "command": "pnpm vitest run --project db",
+      "needsDB": true,
+      "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
       "file": "lib/workspace/__tests__/filesystem-checkpoint.integration.test.ts",
       "group": "db",
       "command": "pnpm vitest run --project db",
@@ -5325,6 +5435,28 @@
       "command": "pnpm vitest run --project db",
       "needsDB": true,
       "serial": true,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/__tests__/workspace-host-rpc-contract.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "lib/workspace/__tests__/workspace-host-writer-generation.contract.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
       "inFullAcceptance": true,
       "batchAcceptanceIds": [
         "topic01-final-acceptance"
@@ -5508,6 +5640,17 @@
     },
     {
       "file": "scripts/evidence-integrity.test.ts",
+      "group": "contract",
+      "command": "pnpm vitest run --project contract",
+      "needsDB": false,
+      "serial": false,
+      "inFullAcceptance": true,
+      "batchAcceptanceIds": [
+        "topic01-final-acceptance"
+      ]
+    },
+    {
+      "file": "scripts/execution-lock-order.contract.test.ts",
       "group": "contract",
       "command": "pnpm vitest run --project contract",
       "needsDB": false,

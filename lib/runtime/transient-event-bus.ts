@@ -20,10 +20,23 @@
 
 import { SSE_BUFFER_SIZE } from "@/lib/conversations/sse-transport";
 
+/**
+ * 发布事件的**执行代际标记**（A11）。
+ *
+ * transient 不持久化，但同一个 Thread/Turn 会被后续代际继续使用；没有这个标记时，
+ * 消费侧无法区分"这条 delta 属于当前展示代际"还是"属于已经被接管的旧执行者"。
+ */
+export interface ThreadTransientGeneration {
+  readonly attemptId: string;
+  readonly ownershipId: string;
+  readonly leaseEpoch: string;
+}
+
 export interface ThreadTransientEvent {
   readonly transientId: string;
   readonly threadId: string;
   readonly turnId: string;
+  readonly generation: ThreadTransientGeneration;
   readonly type: string;
   readonly occurredAt: string;
   readonly payload: Readonly<Record<string, unknown>>;

@@ -14,6 +14,7 @@ import type {
   RuntimeSessionBinding,
 } from "@/lib/persistence/schema/executions";
 import type { RuntimeRevisionRow } from "@/lib/persistence/schema/runtimes";
+import type { ExecutionResourcePurpose } from "@/lib/runtime/application/execution-resources";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { hostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
@@ -35,6 +36,10 @@ import {
   getRuntimeSessionBindingsByInvocation,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import { settleSupersededInvocationCommand } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  type BoundExecutionResources,
+  resolveBoundExecutionResources,
+} from "@/lib/runtime/retry/runtime-transport-from-binding";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import type { RuntimeTransport } from "@/lib/runtime/transport/runtime-transport";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
@@ -135,6 +140,29 @@ async function resolveTransport(
   context: Extract<CommandContextLoad, { ok: true }>,
 ): Promise<{ client: RuntimeTransport; endpoint: CommandRuntimeEndpointResolution }> {
   const external = context.revision.runtimeEvidenceKind === "external_endpoint";
+  // A05：Resume 需要与**请求内联调度**同源的受管执行资源（Workspace 执行资源 +
+  // Environment Provisioner）。它们只能来自同一份冻结 Binding，调用方不得另拼；
+  // 缺了它们，默认命令网关上的 MANAGED Resume 会在"没有 Provisioner"上直接变成
+  // 终态失败 —— 同一份持久意图在请求内联路径可执行、在正式恢复路径不可恢复。
+  //
+  // 只在需要它们的命令上解析：
+  // - `resume`：受管 Environment（Provisioner）+ Workspace 执行资源；
+  // - `checkpoint`：Checkpoint 生产者必须拿到带 `snapshotStorageRoot` 的真实写根，
+  //   否则默认路径恒 `WorkspaceNotReady`（同一类"接线缺参"缺陷）。
+  // - `cancel`/`steer` 不需要写根与实例：不该因为"部署没配受管 WorkspaceHost"而被拒。
+  const managedResourcePurpose: ExecutionResourcePurpose | null =
+    context.command.commandType === "resume"
+      ? "resume"
+      : context.command.commandType === "checkpoint"
+        ? "recovery"
+        : null;
+  const managedResources: BoundExecutionResources = managedResourcePurpose
+    ? await resolveBoundExecutionResources({
+        tenantId,
+        binding: context.binding,
+        purpose: managedResourcePurpose,
+      })
+    : {};
   const endpoint = external ? context.revision.endpointRef : "http://127.0.0.1";
   const authority =
     context.owner && context.session
@@ -194,6 +222,7 @@ async function resolveTransport(
       runtimeEndpoint: endpoint,
       auth,
       callbackEndpoints: buildGatewayEndpoints({ external, invocationId: context.invocation.id }),
+      ...managedResources,
     },
   };
 }

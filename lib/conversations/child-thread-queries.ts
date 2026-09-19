@@ -42,6 +42,7 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { lockExecutionRootForProductWrite } from "@/lib/executions/persistence/execution-ownership-store";
 import type {
   ThreadEvent,
   ThreadEventActorType,
@@ -399,7 +400,49 @@ export async function requestChildThreadCancellation(params: {
   const now = new Date();
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE 父 Thread
+    // R04 §2「固定锁图」：执行根（Invocation → 活跃 Ownership）必须早于产品根（Thread/Relation）。
+    // 本路径在第 6 步会为子 Invocation 创建 cancel 命令（内部锁 Ownership），而旧顺序先锁
+    // 父 Thread + relation，与 Runtime 路径「锁 I/O → 写 Thread 事件流」互为反向持锁。
+    // 这里先用不加锁定位读取出子 Invocation，先锁执行根，再 FOR UPDATE 产品根并复验。
+    const [locatedParent] = await tx
+      .select({ id: threadTable.id })
+      .from(threadTable)
+      .where(
+        and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, params.parentThreadId)),
+      )
+      .limit(1);
+    if (!locatedParent) {
+      throw new ThreadNotFoundError(params.parentThreadId);
+    }
+    const [locatedRelation] = await tx
+      .select({ id: threadRelationTable.id, childThreadId: threadRelationTable.childThreadId })
+      .from(threadRelationTable)
+      .where(eq(threadRelationTable.id, params.relationId))
+      .limit(1);
+    if (!locatedRelation) {
+      throw new ThreadNotFoundError(params.relationId);
+    }
+    const [locatedChildInvocation] = await tx
+      .select({ id: invocationTable.id, executionState: invocationTable.executionState })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, params.tenantId),
+          eq(invocationTable.threadId, locatedRelation.childThreadId),
+        ),
+      )
+      .orderBy(desc(invocationTable.invocationSequence))
+      .limit(1);
+
+    // 1) 执行根：若子 Invocation 仍在执行，先把 Invocation → 活跃 Ownership 锁住。
+    if (
+      locatedChildInvocation &&
+      !INVOCATION_TERMINAL_STATES.includes(locatedChildInvocation.executionState)
+    ) {
+      await lockExecutionRootForProductWrite(tx, params.tenantId, locatedChildInvocation.id);
+    }
+
+    // 2) SELECT FOR UPDATE 父 Thread
     const [parent] = await tx
       .select()
       .from(threadTable)
@@ -412,7 +455,7 @@ export async function requestChildThreadCancellation(params: {
       throw new ThreadNotFoundError(params.parentThreadId);
     }
 
-    // 2. SELECT relation（锁定行）
+    // 3. SELECT relation（锁定行）+ 复验定位读之间未被改写
     const [relation] = await tx
       .select()
       .from(threadRelationTable)
@@ -423,6 +466,9 @@ export async function requestChildThreadCancellation(params: {
       throw new ThreadNotFoundError(params.relationId);
     }
     if (relation.parentThreadId !== params.parentThreadId) {
+      throw new ThreadNotFoundError(params.relationId);
+    }
+    if (relation.childThreadId !== locatedRelation.childThreadId) {
       throw new ThreadNotFoundError(params.relationId);
     }
 

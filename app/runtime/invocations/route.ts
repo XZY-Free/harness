@@ -1,5 +1,6 @@
 import { db } from "@/lib/db/client";
 import { requireCurrentExecutionAuthority } from "@/lib/executions/application/require-current-execution-authority";
+import { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
@@ -74,21 +75,57 @@ export async function POST(request: Request): Promise<Response> {
   const semanticDigest = computeSemanticRequestDigest(start);
   if (semanticDigest !== start.semanticRequestDigest)
     return apiError("REQUEST_SCHEMA_INVALID", "semanticRequestDigest 不匹配", { requestId });
+  // R02 §3：回执的 capabilitiesDigest 必须等于**发布证据**（RuntimeRevision manifest）摘要，
+  // 不存在零摘要占位——调用方（runtime-start）会逐字比对同一来源。事务前取一次，既写进
+  // 持久化的 transport ACK（Ingress 在接纳 `execution.started` 时会与它逐字比对），
+  // 也用于响应体，避免同一事实被算两遍。
+  const runtimeRevision = await getRuntimeRevisionById(claims.runtimeRevisionId);
+  if (!runtimeRevision)
+    return apiError("RESOURCE_NOT_FOUND", "RuntimeRevision 不存在或不可见", { requestId });
+  const capabilitiesDigest = expectedCapabilityManifestDigest({
+    runtimeRevisionId: runtimeRevision.id,
+    runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
+  });
   const now = Date.now();
+  const startIntentKey = idempotencyKey;
   let session: RuntimeSessionBinding;
   try {
     session = await db.transaction(async (tx) => {
+      // R04 §6：先锁 Invocation 根，再按**完整** startIntentKey 定位历史 Session/原回执。
+      //
+      // 「同一当前代际的已接纳启动请求重放」与「一次新的启动操作」不是同一前置状态：
+      // `execution.started` 可能先于 HTTP 回执/重试到达，此时 Owner 已进入 `executing`，
+      // 若仍强制 `dispatching`，一次合法重放会被判成 `NotCurrentExecutor`，后面的
+      // `bindingState === "active"` 稳定回执分支永远不可达。
+      //
+      // 注意这里**不放松**任何代际校验：重放判定只依赖「同一 Invocation+Ownership+leaseEpoch
+      // 且 Session 已 active」，其余仍由下面的守卫逐项复核（含 Current Authority 与 Checkpoint Gate）。
+      const replayed = await getRuntimeSessionBindingByStartIntent(
+        claims.tenantId,
+        startIntentKey,
+        tx,
+      );
+      const isAcceptedReplay =
+        !!replayed &&
+        replayed.invocationId === claims.invocationId &&
+        replayed.ownershipId === claims.ownershipId &&
+        replayed.leaseEpoch === Number(claims.leaseEpoch) &&
+        replayed.bindingState === "active";
+
       await requireCurrentExecutionAuthority({
         tenantId: claims.tenantId,
         authority: claims,
         executor: tx,
-        requiredPhase: "dispatching",
+        // 已接纳重放允许 Owner 已 executing；新启动仍必须处于 dispatching。
+        requiredPhase: isAcceptedReplay ? ["dispatching", "executing"] : "dispatching",
         // Start 是新执行的起点：Checkpoint Gate 未解除时不得接纳。
         operationKind: "new_action",
       });
+      // startIntentKey 在创建时被强制为完整 `start:<ownershipId>`（仓储断言），
+      // 因此这里必须用**同一完整键**查询：曾去掉前缀导致合法启动恒报 RuntimeSessionMismatch。
       const current = await getRuntimeSessionBindingByStartIntent(
         claims.tenantId,
-        idempotencyKey.slice("start:".length),
+        startIntentKey,
         tx,
       );
       if (
@@ -118,13 +155,27 @@ export async function POST(request: Request): Promise<Response> {
           semanticRequestDigest: start.semanticRequestDigest,
           remoteSessionRef,
           remoteExecutionRef,
-          transportAcknowledgement: { protocolVersion: 3, acceptedAt: now, idempotencyKey },
+          transportAcknowledgement: {
+            protocolVersion: 3,
+            acceptedAt: now,
+            idempotencyKey,
+            capabilitiesDigest,
+          },
           acknowledgedAt: new Date(now),
         },
       });
     });
   } catch (error) {
-    const code = error instanceof Error ? error.message : "NotCurrentExecutor";
+    // 客户端必须拿到**协议错误码**，而不是给人看的说明文案：`RuntimeErrorCodeSchema` 明确要求
+    // 外部 Runtime 按码决定能否自愈（例如 `NotCurrentExecutor` / `LeaseExpired` 一律不得自行
+    // 签发新 Token 复活）。`ExecutionAuthorityError` 已经携带协议码（`name` 与 `code` 相同），
+    // 之前直接返回 `message` 会让这些码在 HTTP 层消失。
+    const code =
+      error instanceof ExecutionAuthorityError
+        ? error.code
+        : error instanceof Error
+          ? error.message
+          : "NotCurrentExecutor";
     return apiError(
       code === "StartIntentConflict" ? "IDEMPOTENCY_CONFLICT" : "ACCESS_DENIED",
       code,
@@ -133,15 +184,6 @@ export async function POST(request: Request): Promise<Response> {
   }
   const remoteSessionRef = session.remoteSessionRef ?? `runtime-session:${session.id}`;
   const remoteExecutionRef = session.remoteExecutionRef ?? `runtime-execution:${session.id}`;
-  // R02 §3：回执的 capabilitiesDigest 必须等于**发布证据**（RuntimeRevision manifest）摘要，
-  // 不存在零摘要占位——调用方（runtime-start）会逐字比对同一来源。
-  const runtimeRevision = await getRuntimeRevisionById(claims.runtimeRevisionId);
-  if (!runtimeRevision)
-    return apiError("RESOURCE_NOT_FOUND", "RuntimeRevision 不存在或不可见", { requestId });
-  const capabilitiesDigest = expectedCapabilityManifestDigest({
-    runtimeRevisionId: runtimeRevision.id,
-    runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
-  });
   const response: RuntimeStartResponse = {
     protocolVersion: 3,
     authority: start.authority,

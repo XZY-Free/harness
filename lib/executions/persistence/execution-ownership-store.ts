@@ -1,6 +1,7 @@
 /** Serialized ExecutionOwnership operations. Every operation locks Invocation first. */
 import { randomUUID } from "node:crypto";
 import { type DbOrTx, db } from "@/lib/db/client";
+import { scheduleEnvironmentLeaseCleanup } from "@/lib/environment/environment-lease-store";
 import { assertLeasePreparedEvidence } from "@/lib/environment/environment-prepared-evidence";
 import {
   ExecutionAuthorityError,
@@ -47,6 +48,15 @@ export interface AcquireExecutionOwnershipInput {
   workspaceWriterGeneration?: number | null;
   activationEvidence?: unknown;
   activationDigest?: string | null;
+  /**
+   * A05：**本次取得执行权时**的恢复水位摘要（`start` 为 `null`，`resume` 为当次 Anchor）。
+   *
+   * `prepareChecks` 会用它与 Lease 上冻结的 Prepared 证据逐字比对（R07 §4「恢复水位变化
+   * 必须在这里被拒绝」）。此前它写死 `null`，等价于"只承认 Start 时准备的证据"：
+   * 正式 Resume 携带新 Anchor、证据也按新 Anchor 重写过，却仍会被判成
+   * "恢复 Anchor 已变化" —— 同一份恢复事实在两处用两套判据。
+   */
+  recoveryAnchorDigest?: string | null;
 }
 
 export interface OwnershipResult {
@@ -55,13 +65,66 @@ export interface OwnershipResult {
   takeover: boolean;
 }
 
-async function lockInvocation(executor: OwnershipTx, tenantId: string, invocationId: string) {
+/**
+ * 锁定执行根 `Invocation`；行不存在时返回 `null`，由调用方决定是否 fail closed。
+ *
+ * R04 §2「固定锁图」把 Invocation 定为所有执行事实的根：
+ * `Invocation → Attempt → Ownership → Session → EnvironmentLease → 必需子执行事实 → Thread/Turn/Item 映射`。
+ * 凡是可能触达 Ownership/Session/Lease 的入口都必须先经过这里，否则会与
+ * `acquire`/`renew`/`close`/守卫形成相反的持锁顺序（真实死锁环，不是理论担忧）。
+ */
+export async function lockInvocationRootIfExists(
+  executor: OwnershipTx,
+  tenantId: string,
+  invocationId: string,
+) {
   const [invocation] = await executor
     .select()
     .from(invocationTable)
     .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)))
     .for("update")
     .limit(1);
+  return invocation ?? null;
+}
+
+/**
+ * 在写产品根（Thread/Turn/Item 映射）之前**预先锁定执行根**：`Invocation → 活跃 Ownership`。
+ *
+ * R04 §2 固定锁图的顺序是
+ * `Invocation → Attempt → Ownership → Session → EnvironmentLease → 必需子执行事实 → Thread/Turn/Item`。
+ * 产品侧入口（Steer / Pause-Resume / 子线程取消 / UAR 解析 / Interrupt）在语义上都需要
+ * 「先改执行侧、再改产品侧」，但它们往往先锁 Turn/Thread 才能定位执行根，于是形成了
+ * **产品根 → 执行根** 的反向序：Runtime 路径「锁 I/O → 写 Thread 事件流」与之互等即是死锁环。
+ *
+ * 用法：先用非锁定读定位出 `invocationId`，调用本函数，然后再去 `FOR UPDATE` Turn/Thread。
+ * 之后任何下游 helper（如 `createInvocationCommandInTransaction`）再对同一行取锁都不会等待。
+ *
+ * 行不存在时返回 `null`（调用方沿用自身的错误语义），不做 fail-closed 判定。
+ */
+export async function lockExecutionRootForProductWrite(
+  executor: OwnershipTx,
+  tenantId: string,
+  invocationId: string | null | undefined,
+): Promise<{ invocationId: string | null; ownershipId: string | null }> {
+  if (!invocationId) return { invocationId: null, ownershipId: null };
+  await lockInvocationRootIfExists(executor, tenantId, invocationId);
+  const [owner] = await executor
+    .select({ id: executionOwnershipTable.id })
+    .from(executionOwnershipTable)
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, tenantId),
+        eq(executionOwnershipTable.invocationId, invocationId),
+        eq(executionOwnershipTable.ownershipState, "active"),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  return { invocationId, ownershipId: owner?.id ?? null };
+}
+
+async function lockInvocation(executor: OwnershipTx, tenantId: string, invocationId: string) {
+  const invocation = await lockInvocationRootIfExists(executor, tenantId, invocationId);
   if (!invocation)
     throw new ExecutionAuthorityError("NotCurrentExecutor", "Invocation 不存在或不可见");
   return invocation;
@@ -155,7 +218,8 @@ async function prepareChecks(executor: OwnershipTx, input: AcquireExecutionOwner
       semanticDigest: revision.semanticDigest,
       attemptId: input.attemptId,
       workspaceBindingId: binding.workspaceBindingId,
-      recoveryAnchorDigest: null,
+      // 判据必须与"本次取得执行权所依据的恢复水位"一致，不能写死 null。
+      recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
       // Acquire 在事务内，用 DB Authority 时间判定有效期（不受调用方时钟影响）。
       now: await getAuthorityDatabaseTime(executor),
     });
@@ -241,25 +305,26 @@ export async function acquireExecutionOwnershipInTransaction(
         })
         .where(eq(invocationAttemptTable.id, staleAttempt.id));
     }
-    if (active.environmentLeaseId) {
-      await tx
-        .update(environmentLeaseTable)
-        .set({
-          leaseState: "lost",
-          readinessState: "blocked",
-          activationOwnershipId: null,
-          releasedAt: now,
-          lastErrorCode: "OwnershipExpired",
-          versionNo: sql`${environmentLeaseTable.versionNo} + 1`,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(environmentLeaseTable.tenantId, input.tenantId),
-            eq(environmentLeaseTable.id, active.environmentLeaseId),
-            eq(environmentLeaseTable.activationOwnershipId, active.id),
-          ),
-        );
+    // A08 8.1：旧代际失权 = **Authority** 事实，不是**资源**事实。
+    //
+    // 此前这里直接把 `active.environmentLeaseId` 写成 `lost`（终态），而清理 Worker 只扫
+    // `releasing`：旧 Owner 的真实容器因此永远进不了清理扫描、也永远不会消失。
+    // 现在出口只登记持久清理工作（`releasing` + 立即可重试），`releasedAt` 保持为空，
+    // 真实释放回执由清理 Worker 写；`released` 才是"物理已释放"。
+    //
+    // 只有**另一个** Lease 才登记：接管偶尔在同一 Attempt 上重建执行权（Lease id 相同），
+    // 此时新代际正要继续用它，绝不能把它的真实资源排进释放队列。
+    if (active.environmentLeaseId && active.environmentLeaseId !== input.environmentLeaseId) {
+      await scheduleEnvironmentLeaseCleanup(
+        {
+          tenantId: input.tenantId,
+          leaseId: active.environmentLeaseId,
+          errorCode: "OwnershipExpired",
+          now,
+          immediate: true,
+        },
+        tx,
+      );
     }
     // R04 §3：**不**在已持有 I 根锁时撤销/释放 WorkspaceWriteLock。
     // 旧 Owner 被置为 lost 之后，其 Writer 的物理 stop/drain 与 W 行收口由持久
@@ -429,9 +494,24 @@ export async function requireCurrentExecutionOwnership(input: {
   tenantId: string;
   authority: { invocationId: string; attemptId: string; ownershipId: string; leaseEpoch: number };
   executor?: DbOrTx;
-  requiredPhase?: "activating" | "dispatching" | "executing" | "suspending";
+  /** 可接受一个或多个执行阶段（R04 §6：已接纳重放可同时接受 dispatching/executing）。 */
+  requiredPhase?:
+    | "activating"
+    | "dispatching"
+    | "executing"
+    | "suspending"
+    | readonly ("activating" | "dispatching" | "executing" | "suspending")[];
 }): Promise<ExecutionOwnership> {
   const executor = input.executor ?? db;
+  // R04 §2「固定锁图」：`Invocation → Attempt → Ownership → Session → EnvironmentLease → …`
+  // —— **任何 Owner 操作先锁 Invocation 根**，与 `acquire`/`renew`/`close` 保持同一顺序。
+  //
+  // 这里必须先锁 I 再读 O。此前本函数只对 `ExecutionOwnership` 加 `FOR UPDATE`，于是唯一
+  // 调用方 `requireCurrentExecutionAuthority` 的实际顺序是 **O → I**，而 `renew`/`acquire`/
+  // `close` 是 **I → O**：两条真实路径互等即构成死锁环（Tool 接纳持 O 等 I，Heartbeat
+  // 持 I 等 O），且 `applyToolCall` 的重试只处理 `ToolCallSequenceConflictError`，不会兜住
+  // 数据库死锁。锁序只能靠顺序本身保证，不能靠注释声明。
+  await lockInvocation(executor as OwnershipTx, input.tenantId, input.authority.invocationId);
   const [owner] = await executor
     .select()
     .from(executionOwnershipTable)
@@ -452,11 +532,15 @@ export async function requireCurrentExecutionOwnership(input: {
     owner.ownershipState !== "active"
   )
     throw new ExecutionAuthorityError("NotCurrentExecutor", "不是 Current ExecutionOwnership");
-  if (input.requiredPhase && owner.executionPhase !== input.requiredPhase)
-    throw new ExecutionAuthorityError(
-      "NotCurrentExecutor",
-      "Current ExecutionOwnership 阶段不允许该操作",
-    );
+  if (input.requiredPhase) {
+    const allowed =
+      typeof input.requiredPhase === "string" ? [input.requiredPhase] : input.requiredPhase;
+    if (!allowed.includes(owner.executionPhase))
+      throw new ExecutionAuthorityError(
+        "NotCurrentExecutor",
+        "Current ExecutionOwnership 阶段不允许该操作",
+      );
+  }
   if (owner.leaseExpiresAt <= now)
     throw new ExecutionAuthorityError("OwnershipExpired", "Current ExecutionOwnership 已过期");
   return owner;

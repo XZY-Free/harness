@@ -8,7 +8,11 @@
  * **绝不**降级成 NO_PLATFORM_WORKSPACE。
  */
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
-import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
+import {
+  FileSnapshotStorage,
+  type SnapshotStorageRef,
+  snapshotStorageRefFromRoot,
+} from "@/lib/workspace/snapshot-storage";
 import type { WorkspaceHost } from "@/lib/workspace/workspace-host";
 import {
   createRemoteWorkspaceHost,
@@ -114,8 +118,8 @@ export interface ManagedWorkspaceResources {
   host: WorkspaceHost;
   /** Writer 激活使用的物理根（与 Host 身份同源，不是调用方提交的字符串）。 */
   root: string;
-  /** CHECKPOINT_RESTORABLE 的内容寻址存储根；未配置时为空。 */
-  snapshotStorageRoot?: string;
+  /** CHECKPOINT_RESTORABLE 的内容寻址存储引用；未配置物理根时为 `broker_default`。 */
+  snapshotStorage: SnapshotStorageRef;
 }
 
 /**
@@ -139,11 +143,10 @@ export async function resolveManagedWorkspaceResources(
       `Workspace ${binding.id} 缺少物理根引用（locationRef / 部署配置）`,
     );
   }
-  const snapshotStorageRoot =
-    overrides.snapshotStorageRoot ?? envValue("SNOWHARNESS_SNAPSHOT_STORAGE_ROOT");
-  return {
-    host,
-    root,
-    ...(snapshotStorageRoot ? { snapshotStorageRoot } : {}),
-  };
+  // 配置了物理根 → 显式 `file` 引用；没配 → `broker_default`（由 Broker 用它自己持有
+  // 的存储执行真实 IO）。两条都是**真实能力**，不存在"没有存储"这一种默认状态。
+  const snapshotStorage = snapshotStorageRefFromRoot(
+    overrides.snapshotStorageRoot ?? envValue("SNOWHARNESS_SNAPSHOT_STORAGE_ROOT"),
+  );
+  return { host, root, snapshotStorage };
 }

@@ -40,6 +40,7 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { lockExecutionRootForProductWrite } from "@/lib/executions/persistence/execution-ownership-store";
 import { updateInvocationState } from "@/lib/executions/persistence/invocation-store";
 import { issueGrant } from "@/lib/permission/permission-queries";
 import { expireUserActionRequest } from "@/lib/permission/user-action-expiry-queries";
@@ -263,18 +264,12 @@ export async function resolveGenericUserAction(
         validateInputResponseAgainstSchema(request.inputSchemaJson, params.responseRedactedJson);
       }
 
-      // 2. SELECT FOR UPDATE Thread（锁定事件流 + 乐观锁基线）
-      const [thread] = await tx
-        .select()
-        .from(threadTable)
-        .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, request.threadId)))
-        .for("update")
-        .limit(1);
-      if (!thread) {
-        throw new ThreadNotFoundError(request.threadId);
-      }
-
-      // 3. SELECT FOR UPDATE Invocation（必须 waiting_user）
+      // 2. SELECT FOR UPDATE Invocation（必须 waiting_user）
+      //
+      // R04 §2 固定锁图：**执行根（Invocation/Attempt/Ownership/Session/Lease）先于产品根
+      // （Thread/Turn/Item 映射）**。旧顺序是「Thread → Invocation」，而 Runtime 路径是
+      // 「锁 I/O → 写 Thread 事件流」（`allocateEventSequences` 会对 Thread 行取 X 锁），
+      // 两条真实路径互等即构成死锁环。这里把 Invocation 提前，Thread 顺延到其后再锁。
       const [invocation] = await tx
         .select()
         .from(invocationTable)
@@ -293,6 +288,23 @@ export async function resolveGenericUserAction(
         throw new UserActionStateError(
           `Invocation ${request.invocationId} executionState=${invocation.executionState}，仅 waiting_user 可 resolve`,
         );
+      }
+
+      // 2b. 执行根的 Ownership 段也必须早于产品根：本函数稍后（第 6 步）会创建
+      // InvocationCommand，其内部对**活跃 Ownership** 取 FOR UPDATE。若留到 Thread/Item 之后再取，
+      // 就与「守卫持 O → 写 Thread 事件流」形成反向持锁。这里把 `Invocation → Ownership`
+      // 这段一次性锁满（下游对同一行再取锁不会等待）。
+      await lockExecutionRootForProductWrite(tx, params.tenantId, invocation.id);
+
+      // 3. SELECT FOR UPDATE Thread（锁定事件流 + 乐观锁基线）
+      const [thread] = await tx
+        .select()
+        .from(threadTable)
+        .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, request.threadId)))
+        .for("update")
+        .limit(1);
+      if (!thread) {
+        throw new ThreadNotFoundError(request.threadId);
       }
 
       // 4. 原子 UPDATE UserActionRequest: pending → resolved

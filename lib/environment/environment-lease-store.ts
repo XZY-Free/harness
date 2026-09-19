@@ -19,7 +19,7 @@ import {
   environmentLeaseTable,
 } from "@/lib/persistence/schema/environment";
 import { environmentDefinitionRevisionTable } from "@/lib/persistence/schema/environment-definition-revision";
-import { and, asc, desc, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 export {
   EnvironmentComplianceError,
@@ -388,6 +388,71 @@ export async function activateEnvironmentLease(
   return updated;
 }
 
+/**
+ * A05：把 Lease 交还到"可重新准备"的形状，并把恢复水位推进到**本次 Resume 的锚点**。
+ *
+ * 为什么必须有这一步（而不是"给调用方的 if 多加一个字符串"）：
+ * - 暂停（`execution.suspended`）会把 Lease 打成 `readinessState=preparing` +
+ *   `activationOwnershipId=null`，而 Resume 的 Start 事务内 `activateEnvironmentLease`
+ *   只接受 `prepared`；
+ * - Resume 使用**新的**恢复锚点（`recovery.anchorDigest`），而 `activateEnvironmentLease`
+ *   要求 Prepared 证据的 `candidate.recoveryAnchorDigest` 与它逐字相等 —— 沿用 Start 时
+ *   写入的旧证据必然以"恢复 Anchor 已变化，Prepared 证据失效"被拒。
+ *
+ * 语义边界：本函数只做**状态与水位**的交接（清掉上一代际的 Writer 激活、写入新水位），
+ * 不产生任何符合性证据 —— 证据仍必须由 `reprepare` 真实回读实例后经
+ * `prepareEnvironmentLease` 写入。实例此刻已不存在时，`backend.create` 会按稳定
+ * operationId 幂等重建，而不是把"没有实例"自报成 prepared。
+ */
+export async function beginEnvironmentLeaseReprepare(
+  input: {
+    tenantId: string;
+    leaseId: string;
+    /** 本次 Resume 的恢复水位摘要；`null` 表示本次执行不从 Checkpoint/恢复水位承接。 */
+    recoveryAnchorDigest?: string | null;
+    now?: Date;
+  },
+  executor: DbOrTx = db,
+): Promise<EnvironmentLease> {
+  const now = input.now ?? new Date();
+  const [lease] = await executor
+    .select()
+    .from(environmentLeaseTable)
+    .where(
+      and(
+        eq(environmentLeaseTable.tenantId, input.tenantId),
+        eq(environmentLeaseTable.id, input.leaseId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!lease) throw new EnvironmentLeaseConflictError(input.leaseId);
+  if (!["allocated", "active"].includes(lease.leaseState)) {
+    throw new EnvironmentLeaseStateError(`EnvironmentLease 已非活跃：${lease.leaseState}`);
+  }
+  const manifest = (lease.resourceManifest ?? {}) as Record<string, unknown>;
+  await executor
+    .update(environmentLeaseTable)
+    .set({
+      readinessState: "preparing",
+      activationOwnershipId: null,
+      resourceManifest: {
+        ...manifest,
+        recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
+      },
+      versionNo: lease.versionNo + 1,
+      updatedAt: now,
+    })
+    .where(eq(environmentLeaseTable.id, lease.id));
+  const [updated] = await executor
+    .select()
+    .from(environmentLeaseTable)
+    .where(eq(environmentLeaseTable.id, lease.id))
+    .limit(1);
+  if (!updated) throw new EnvironmentLeaseConflictError(input.leaseId);
+  return updated;
+}
+
 export async function getEnvironmentLeaseById(tenantId: string, id: string, executor: DbOrTx = db) {
   const [row] = await executor
     .select()
@@ -494,7 +559,13 @@ export async function scheduleEnvironmentLeaseCleanup(
   const now = input.now ?? new Date();
   const current = await getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
   if (!current) return null;
-  if (isTerminalLeaseState(current.leaseState)) return current;
+  // A08 8.1：只有 `released` 是"真实资源已释放"的事实。
+  //
+  // `lost` / `expired` 只是**逻辑**收口（失权、超时），它们仍可能指向真实运行中的容器。
+  // 把它们一并当作"已释放"提前返回，正是审查报告指出的"逻辑收口不等于实际资源释放"：
+  // 任一出口只要先写了 `lost`，该 Lease 就再也进不了 `releasing` 扫描，真实资源永久泄漏。
+  // 因此这里只对 `released` 幂等短路，其余状态一律登记（或保持）持久清理工作。
+  if (current.leaseState === "released") return current;
   await executor
     .update(environmentLeaseTable)
     .set({
@@ -518,6 +589,46 @@ export async function scheduleEnvironmentLeaseCleanup(
     })
     .where(eq(environmentLeaseTable.id, current.id));
   return getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
+}
+
+/**
+ * A08 8.1：**正式生命周期出口**登记真实清理工作。
+ *
+ * 出口（Invocation 终态、Owner 失权/接管）只决定"这个 Attempt 的实例不该继续存在"，
+ * 它**不能**同时声明"实例已经不存在"——审查报告的判据是：不把"已失权"写成"物理已释放"。
+ * 因此出口统一走这里：把 Lease 推进到非终态的 `releasing`，把真实释放留给清理 Worker
+ * 经 Backend 回执确认后才写 `released`。
+ *
+ * 用 Attempt 定位 Lease（而不是靠 `activationOwnershipId`）：`prepared` 但尚未激活的
+ * Lease 同样可能已经建好了真实容器，靠激活指针会漏掉它。
+ */
+export async function registerEnvironmentLeaseCleanupForAttempt(
+  input: {
+    tenantId: string;
+    invocationId: string;
+    attemptId: string;
+    errorCode: string;
+    now?: Date;
+  },
+  executor: DbOrTx = db,
+): Promise<EnvironmentLease | null> {
+  const lease = await getEnvironmentLeaseByAttempt(
+    input.tenantId,
+    input.invocationId,
+    input.attemptId,
+    executor,
+  );
+  if (!lease) return null;
+  return scheduleEnvironmentLeaseCleanup(
+    {
+      tenantId: input.tenantId,
+      leaseId: lease.id,
+      errorCode: input.errorCode,
+      immediate: true,
+      ...(input.now ? { now: input.now } : {}),
+    },
+    executor,
+  );
 }
 
 /** 需要清理且已到重试时间的 Lease（Worker 扫描入口）。 */
@@ -546,51 +657,111 @@ export async function listEnvironmentLeasesDueForCleanup(input?: {
     .limit(input?.limit ?? 50);
 }
 
-/** 认领清理工作（条件 UPDATE，保证多 Worker 不重复清理同一 Lease）。 */
+/**
+ * A08 8.2：清理工作的**领取令牌**。
+ *
+ * 审查报告指出：此前是"全局 db 的 `SELECT … FOR UPDATE`"+"另一个全局 `db.update` 仅按 id 更新"，
+ * 两条独立语句各属一个 autocommit 事务，行锁在第一条结束时就释放了 —— 于是两个 Worker
+ * 可以都读到"可领取"并都继续执行，完成/失败回写也不带任何本轮身份，旧执行者能覆盖
+ * 新领取者的结论。这里把领取收敛为**一个事务内的一次条件 UPDATE**，并把该次写入的
+ * `versionNo` 作为令牌本体：后续每一步写入都必须逐字带回 `(owner, versionNo)`，
+ * 迟到的旧执行者拿不到令牌，就无法把自己的结论写到别人的领取上。
+ */
+export interface EnvironmentLeaseCleanupClaim {
+  tenantId: string;
+  leaseId: string;
+  owner: string;
+  /** 领取当次写入的 `versionNo`（令牌本体）。 */
+  claimVersionNo: number;
+  /** 本次领取的到期时刻；超时后允许他人接管。 */
+  leaseExpiresAt: Date;
+}
+
+/** 该 Lease 上的这一轮领取是否仍由该令牌持有。 */
+function isCleanupClaimHeld(lease: EnvironmentLease, claim: EnvironmentLeaseCleanupClaim): boolean {
+  return lease.cleanupLeaseOwner === claim.owner && lease.versionNo === claim.claimVersionNo;
+}
+
+/**
+ * 认领清理工作：单事务内的条件 UPDATE。
+ *
+ * 条件必须在**同一条写入语句的同一事务内**复核（不能靠先前读到的 row，也不能靠
+ * "前一条语句加过锁"）：`releasing` + 已到期 + 上一轮领取已失效。
+ * 返回 `null` = "本轮不该由我处理"（不可领取 / 未到期 / 已被他人领取），
+ * 调用方不得据此写任何结论。
+ */
 export async function claimEnvironmentLeaseCleanup(input: {
   tenantId: string;
   leaseId: string;
   owner: string;
   now?: Date;
   leaseMs?: number;
-}): Promise<EnvironmentLease | null> {
+}): Promise<{ lease: EnvironmentLease; claim: EnvironmentLeaseCleanupClaim } | null> {
   const now = input.now ?? new Date();
   const leaseMs = input.leaseMs ?? ENVIRONMENT_CLEANUP_LEASE_MS;
-  const [lease] = await db
-    .select()
-    .from(environmentLeaseTable)
-    .where(
-      and(
-        eq(environmentLeaseTable.tenantId, input.tenantId),
-        eq(environmentLeaseTable.id, input.leaseId),
-      ),
-    )
-    .for("update")
-    .limit(1);
-  if (!lease || lease.leaseState !== "releasing") return null;
-  if (lease.cleanupLeaseExpiresAt && lease.cleanupLeaseExpiresAt > now) return null;
-  if (lease.nextCleanupAt && lease.nextCleanupAt > now) return null;
-  await db
-    .update(environmentLeaseTable)
-    .set({
-      cleanupLeaseOwner: input.owner,
-      cleanupLeaseExpiresAt: new Date(now.getTime() + leaseMs),
-      updatedAt: now,
-      versionNo: lease.versionNo + 1,
-    })
-    .where(eq(environmentLeaseTable.id, lease.id));
-  return getEnvironmentLeaseById(input.tenantId, input.leaseId);
+  return db.transaction(async (tx) => {
+    const [lease] = await tx
+      .select()
+      .from(environmentLeaseTable)
+      .where(
+        and(
+          eq(environmentLeaseTable.tenantId, input.tenantId),
+          eq(environmentLeaseTable.id, input.leaseId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!lease || lease.leaseState !== "releasing") return null;
+    if (lease.cleanupLeaseExpiresAt && lease.cleanupLeaseExpiresAt > now) return null;
+    if (lease.nextCleanupAt && lease.nextCleanupAt > now) return null;
+    const claimVersionNo = lease.versionNo + 1;
+    const leaseExpiresAt = new Date(now.getTime() + leaseMs);
+    const [result] = await tx
+      .update(environmentLeaseTable)
+      .set({
+        cleanupLeaseOwner: input.owner,
+        cleanupLeaseExpiresAt: leaseExpiresAt,
+        versionNo: claimVersionNo,
+        updatedAt: now,
+      })
+      // CAS：锁内读到的版本必须仍是当前版本，否则说明本轮身份不是由我先写入的。
+      .where(
+        and(
+          eq(environmentLeaseTable.id, lease.id),
+          eq(environmentLeaseTable.versionNo, lease.versionNo),
+        ),
+      );
+    if ((result?.affectedRows ?? 0) !== 1) return null;
+    return {
+      lease: {
+        ...lease,
+        cleanupLeaseOwner: input.owner,
+        cleanupLeaseExpiresAt: leaseExpiresAt,
+        versionNo: claimVersionNo,
+      },
+      claim: {
+        tenantId: input.tenantId,
+        leaseId: lease.id,
+        owner: input.owner,
+        claimVersionNo,
+        leaseExpiresAt,
+      },
+    };
+  });
 }
 
-/** 真实释放成功 → 控制面 `released`（此时才允许写终态）。 */
-export async function completeEnvironmentLeaseCleanup(
-  input: { tenantId: string; leaseId: string; releasedAt?: Date },
-  executor: DbOrTx = db,
-): Promise<EnvironmentLease | null> {
+/**
+ * 真实释放成功 → 控制面 `released`（此时才允许写终态）。
+ *
+ * 必须携带本轮领取令牌：令牌不在（已被他人接管 / 领取早已过期而他人重领）时，
+ * 返回 `not_claimed` 且**不写任何东西** —— 迟到的完成结论不得覆盖新领取者的结论。
+ */
+export async function completeEnvironmentLeaseCleanup(input: {
+  claim: EnvironmentLeaseCleanupClaim;
+  releasedAt?: Date;
+}): Promise<{ outcome: "released" | "not_claimed"; lease: EnvironmentLease | null }> {
   const now = input.releasedAt ?? new Date();
-  const current = await getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
-  if (!current) return null;
-  await executor
+  const [result] = await db
     .update(environmentLeaseTable)
     .set({
       leaseState: "released",
@@ -600,40 +771,80 @@ export async function completeEnvironmentLeaseCleanup(
       cleanupLeaseOwner: null,
       cleanupLeaseExpiresAt: null,
       nextCleanupAt: null,
-      cleanupCount: current.cleanupCount + 1,
+      cleanupCount: sql`${environmentLeaseTable.cleanupCount} + 1`,
       lastErrorCode: null,
       updatedAt: now,
-      versionNo: current.versionNo + 1,
+      versionNo: sql`${environmentLeaseTable.versionNo} + 1`,
     })
-    .where(eq(environmentLeaseTable.id, current.id));
-  return getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
+    .where(
+      and(
+        eq(environmentLeaseTable.tenantId, input.claim.tenantId),
+        eq(environmentLeaseTable.id, input.claim.leaseId),
+        eq(environmentLeaseTable.leaseState, "releasing"),
+        eq(environmentLeaseTable.cleanupLeaseOwner, input.claim.owner),
+        eq(environmentLeaseTable.versionNo, input.claim.claimVersionNo),
+      ),
+    );
+  const lease = await getEnvironmentLeaseById(input.claim.tenantId, input.claim.leaseId);
+  if ((result?.affectedRows ?? 0) !== 1) return { outcome: "not_claimed", lease };
+  return { outcome: "released", lease };
 }
 
-/** 真实释放失败 → 记录错误 + 退避重试（保持 `releasing`，绝不写 released）。 */
-export async function recordEnvironmentLeaseCleanupFailure(
-  input: { tenantId: string; leaseId: string; errorCode: string; now?: Date },
-  executor: DbOrTx = db,
-): Promise<EnvironmentLease | null> {
+/**
+ * 真实释放失败 → 记录错误 + 退避重试（保持 `releasing`，绝不写 released）。
+ *
+ * 同样必须携带本轮领取令牌：令牌不在时返回 `not_claimed` 且不写 ——
+ * 否则一个迟到失败的旧执行者会把新领取者刚设好的重试时机与错误码抹掉。
+ */
+export async function recordEnvironmentLeaseCleanupFailure(input: {
+  claim: EnvironmentLeaseCleanupClaim;
+  errorCode: string;
+  now?: Date;
+}): Promise<{ outcome: "scheduled" | "not_claimed"; lease: EnvironmentLease | null }> {
   const now = input.now ?? new Date();
-  const current = await getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
-  if (!current) return null;
-  if (isTerminalLeaseState(current.leaseState)) return current;
-  const cleanupCount = current.cleanupCount + 1;
-  await executor
-    .update(environmentLeaseTable)
-    .set({
-      leaseState: "releasing",
-      readinessState: "blocked",
-      cleanupLeaseOwner: null,
-      cleanupLeaseExpiresAt: null,
-      cleanupCount,
-      lastErrorCode: input.errorCode.slice(0, 64),
-      nextCleanupAt: new Date(now.getTime() + cleanupBackoffMs(cleanupCount - 1)),
-      updatedAt: now,
-      versionNo: current.versionNo + 1,
-    })
-    .where(eq(environmentLeaseTable.id, current.id));
-  return getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
+  return db.transaction(async (tx) => {
+    const [lease] = await tx
+      .select()
+      .from(environmentLeaseTable)
+      .where(
+        and(
+          eq(environmentLeaseTable.tenantId, input.claim.tenantId),
+          eq(environmentLeaseTable.id, input.claim.leaseId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!lease) return { outcome: "not_claimed" as const, lease: null };
+    if (!isCleanupClaimHeld(lease, input.claim)) {
+      return { outcome: "not_claimed" as const, lease };
+    }
+    if (lease.leaseState !== "releasing") return { outcome: "not_claimed" as const, lease };
+    const cleanupCount = lease.cleanupCount + 1;
+    const [result] = await tx
+      .update(environmentLeaseTable)
+      .set({
+        leaseState: "releasing",
+        readinessState: "blocked",
+        cleanupLeaseOwner: null,
+        cleanupLeaseExpiresAt: null,
+        cleanupCount,
+        lastErrorCode: input.errorCode.slice(0, 64),
+        nextCleanupAt: new Date(now.getTime() + cleanupBackoffMs(cleanupCount - 1)),
+        updatedAt: now,
+        versionNo: lease.versionNo + 1,
+      })
+      .where(
+        and(
+          eq(environmentLeaseTable.id, lease.id),
+          eq(environmentLeaseTable.versionNo, lease.versionNo),
+        ),
+      );
+    if ((result?.affectedRows ?? 0) !== 1) return { outcome: "not_claimed" as const, lease };
+    return {
+      outcome: "scheduled" as const,
+      lease: await getEnvironmentLeaseById(input.claim.tenantId, input.claim.leaseId, tx),
+    };
+  });
 }
 
 /** 按 id 集合统计非终态 Lease 数（诊断）。 */

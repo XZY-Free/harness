@@ -1,3 +1,4 @@
+import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { INVOCATION_TERMINAL_STATES } from "@/lib/persistence/schema/executions";
 /**
@@ -27,6 +28,8 @@ import {
   IngressInvocationNotFoundError,
   IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
+import { getRuntimeSessionBindingByOwnership } from "@/lib/runtime/persistence/runtime-session-store";
+import { type AuthorityIdentity, decimalStringToNumber } from "@/lib/runtime/runtime-protocol";
 import { publishThreadTransientEvent } from "@/lib/runtime/transient-event-bus";
 
 /** Transient 事件输入（不持久化）。 */
@@ -45,6 +48,15 @@ export interface TransientCandidateEvent {
 export interface IngressTransientBatchParams {
   tenantId: string;
   invocationId: string;
+  /**
+   * 本条 transient 通道所属的**执行代际**（R02 §2）。
+   *
+   * A11：transient 不持久化，但"不持久化"不等于"没有身份"。接管之后 Invocation 仍在运行，
+   * 旧 Hosted 执行者在发现租约丢失/abort 生效之前发出的 delta 若只看 `invocationId`，
+   * 就会混进新代际的流式展示。因此这里必须逐项复核 (Attempt, Ownership, leaseEpoch)
+   * 及其唯一 Session——与持久入口同一条代际语义，只是不做加锁重活。
+   */
+  authority: AuthorityIdentity;
   /** 本批次起始 transient_sequence（必须等于 events[0].transient_sequence）。 */
   transientSequenceStart: number;
   /** Transient 事件列表（按 transient_sequence 升序）。 */
@@ -93,6 +105,11 @@ export async function ingressTransientBatch(
     throw new IngressInvocationTerminalError(params.invocationId, invocation.executionState);
   }
 
+  // 2.5 代际校验（A11）：请求携带的 (Attempt, Ownership, leaseEpoch) 必须仍等于**当前**
+  //     活跃代际，且该 Ownership 的唯一 Session 与请求一致。任何一项不符 → 拒绝发布，
+  //     旧执行者的迟到增量不会进入当前页面的流。
+  await requireCurrentTransientGeneration(params);
+
   // 3. 校验批次非空
   if (params.events.length === 0) {
     throw new IngressBatchEmptyError(params.invocationId);
@@ -115,12 +132,20 @@ export async function ingressTransientBatch(
   }
 
   // 6. 不持久化；会话模式下推送给当前 Thread 的 SSE 订阅者。
+  //    发布出去的事件带**代际标记**：消费侧（SSE 客户端）即使收到跨代的乱序到达，
+  //    也能按 (attemptId, ownershipId, leaseEpoch) 判定它是否属于当前展示代际。
   if (invocation.threadId && invocation.turnId) {
+    const generation = {
+      attemptId: params.authority.attemptId,
+      ownershipId: params.authority.ownershipId,
+      leaseEpoch: params.authority.leaseEpoch,
+    };
     for (const event of params.events) {
       publishThreadTransientEvent({
         transientId: event.transient_id,
         threadId: invocation.threadId,
         turnId: invocation.turnId,
+        generation,
         type: event.type,
         occurredAt: new Date().toISOString(),
         payload: event.payload,
@@ -133,6 +158,42 @@ export async function ingressTransientBatch(
     acceptedThroughTransientSequence: params.transientSequenceStart + params.events.length - 1,
     persisted: false,
   };
+}
+
+/**
+ * A11：transient 通道的当前代际复核。
+ *
+ * 与持久入口共用同一份代际定义（当前 active Owner + 该 Ownership 的唯一 Session），
+ * 但**只读**：transient 是展示性高频通道，不能为此在每次 delta 上取行锁——
+ * 代际的权威变更（接管、收口）始终由持久路径在同一事务内完成，这里只需要在读取时
+ * 确认"请求声明的代际仍是当前代际"。任何读不到/不一致都 fail closed（不发布）。
+ */
+async function requireCurrentTransientGeneration(
+  params: IngressTransientBatchParams,
+): Promise<void> {
+  const owner = await getActiveExecutionOwnership({
+    tenantId: params.tenantId,
+    invocationId: params.invocationId,
+  });
+  if (
+    !owner ||
+    owner.id !== params.authority.ownershipId ||
+    owner.attemptId !== params.authority.attemptId ||
+    owner.leaseEpoch !== decimalStringToNumber(params.authority.leaseEpoch)
+  ) {
+    throw new IngressAuthorityMismatchError(params.invocationId);
+  }
+  const session = await getRuntimeSessionBindingByOwnership(params.tenantId, owner.id);
+  if (
+    !session ||
+    session.id !== params.authority.sessionBindingId ||
+    session.invocationId !== params.invocationId ||
+    session.attemptId !== owner.attemptId ||
+    session.leaseEpoch !== owner.leaseEpoch ||
+    session.runtimeRevisionId !== params.authority.runtimeRevisionId
+  ) {
+    throw new IngressAuthorityMismatchError(params.invocationId);
+  }
 }
 
 /** Transient sequence 不连续错误（route 层映射 409 EVENT_SEQUENCE_GAP）。 */

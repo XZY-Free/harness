@@ -2,9 +2,20 @@ import { SSE_BUFFER_SIZE } from "@/lib/conversations/sse-transport";
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_BUFFERED_EVENTS_PER_THREAD,
+  type ThreadTransientGeneration,
   publishThreadTransientEvent,
   subscribeThreadTransientEvents,
 } from "./transient-event-bus";
+
+/**
+ * A11：transient 事件必须携带执行代际标记。本文件只覆盖总线的一次性投递语义，
+ * 代际本身固定为同一代，代际隔离由 transient-events 的入站复核覆盖。
+ */
+const TRANSIENT_GENERATION: ThreadTransientGeneration = {
+  attemptId: "attempt-1",
+  ownershipId: "ownership-1",
+  leaseEpoch: "1",
+};
 
 function makeEvent(
   threadId: string,
@@ -14,6 +25,7 @@ function makeEvent(
   threadId: string;
   transientId: string;
   turnId: string;
+  generation: ThreadTransientGeneration;
   type: string;
   occurredAt: string;
   payload: { delta: string };
@@ -22,6 +34,7 @@ function makeEvent(
     threadId,
     transientId,
     turnId: "turn-1",
+    generation: TRANSIENT_GENERATION,
     type: "response.delta",
     occurredAt: "2026-07-21T00:00:00.000Z",
     payload: { delta },

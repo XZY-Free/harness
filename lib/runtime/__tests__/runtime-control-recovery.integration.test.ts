@@ -484,7 +484,14 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
         reasonCode: "cancel_requested",
       },
     });
-    expect((await readOwner(gen2.ownership.id))?.ownershipState).toBe("revoked");
+    // A02 之后，Hosted Cancel 与 RuntimeEventIngress 走**同一**终态收口
+    // （`closeInvocationTerminalInTransaction`），因此 Ownership 的终态写法与 Ingress
+    // 完全一致：`released` + `reasonCode=execution_terminal`。
+    // 旧期望 `revoked` 来自已删除的 Hosted 旁路（它只关 Owner、不关 Attempt/Turn/Session），
+    // 保留它反而会把「收口边界已统一」这一事实断言成不成立。
+    const owner = await readOwner(gen2.ownership.id);
+    expect(owner?.ownershipState).toBe("released");
+    expect(owner?.reasonCode).toBe("execution_terminal");
     expect((await readInvocation(tenantId, invocationId))?.executionState).toBe("cancelled");
   });
 

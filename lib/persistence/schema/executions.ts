@@ -558,6 +558,11 @@ export const runtimeSessionBindingTable = mysqlTable(
     lastDispatchAt: timestamp("lastDispatchAt"),
     lastErrorCode: ascii("lastErrorCode", 64),
     closedAt: timestamp("closedAt"),
+    // A03：同代际只能有一个实际推进者（Supervisor 工作身份）。
+    // 与 `dispatchLease*` 分列是必需的：派发 lane 在 `prepared`/`dispatching` 持有派发票据，
+    // 而 Supervisor 恰好也在 `dispatching` 入场，共用一列会让两者互相误判为"已被接管"。
+    supervisorLeaseOwner: ascii("supervisorLeaseOwner", 128),
+    supervisorLeaseExpiresAt: timestamp("supervisorLeaseExpiresAt"),
     versionNo: bigintUnsigned("versionNo").notNull().default(1),
     createdAt: timestamp("createdAt").notNull().default(currentTimestamp()),
     updatedAt: timestamp("updatedAt").notNull().default(currentTimestamp()),
@@ -576,6 +581,10 @@ export const runtimeSessionBindingTable = mysqlTable(
       t.bindingState,
       t.nextDispatchAt,
       t.dispatchLeaseExpiresAt,
+    ),
+    supervisorIdx: index("RuntimeSessionBinding_state_supervisor_idx").on(
+      t.bindingState,
+      t.supervisorLeaseExpiresAt,
     ),
     revisionExecutionIdx: index("RuntimeSessionBinding_tenant_revision_execution_idx").on(
       t.tenantId,

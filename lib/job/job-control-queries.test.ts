@@ -79,7 +79,6 @@ async function createQueuedJob(tenantId: string, agentId: string, options?: { th
     completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId: options?.threadId,
     inputRef: "input://batch/001",
-    inputHash: "sha256:abc",
     idempotencyKey: `create-${randomUUID()}`,
   });
 }

@@ -35,6 +35,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const result = await ingressTransientBatch({
       tenantId: claims.tenantId,
       invocationId,
+      // A11：transient 通道也必须带代际身份。Workload Token 已经冻结了本代际的完整
+      // tuple（Start/Resume 时签发），直接用它作为 authority，不另造身份来源。
+      authority: {
+        invocationId,
+        runtimeRevisionId: claims.runtimeRevisionId,
+        attemptId: claims.attemptId,
+        ownershipId: claims.ownershipId,
+        leaseEpoch: String(claims.leaseEpoch),
+        sessionBindingId: claims.sessionBindingId,
+      },
       transientSequenceStart: body.transientSequenceStart,
       events: body.events as never,
       correlationId: requestId,

@@ -30,6 +30,7 @@ import {
   normalizeEnvironmentInstanceSpec,
 } from "@/lib/environment/environment-instance-spec";
 import {
+  beginEnvironmentLeaseReprepare,
   claimEnvironmentLeaseCleanup,
   completeEnvironmentLeaseCleanup,
   createEnvironmentLease,
@@ -75,11 +76,29 @@ export interface EnvironmentRevalidateInput {
   now?: Date;
 }
 
+/**
+ * A05：**重新准备**的输入（暂停/代际交接后的 Resume）。
+ *
+ * 字段与 `EnvironmentRevalidateInput` 相同，差别在语义与前置：
+ * - `revalidate` 只做"物理复验 + 原样返回"，要求 Lease 已处于可恢复形状
+ *   （`prepared`/`ready`、证据未过期）；
+ * - `reprepare` 承接"暂停把 Lease 打回 `preparing`（或残留上一代际 Writer 激活）"的形状：
+ *   先按 `recoveryAnchorDigest` 推进恢复水位、清掉旧激活，再真实回读实例并**重写**
+ *   Prepared 证据（实例已不存在时按稳定 operationId 幂等重建）。
+ *
+ * 不做这一步（只给调用方的 if 多加一个字符串）时，Resume 阶段要么在
+ * "`preparing` 不是可恢复的受管实例"上被拒，要么在 Start 事务内以
+ * "恢复 Anchor 已变化，Prepared 证据失效"被拒 —— 两条都是真实缺陷。
+ */
+export type EnvironmentReprepareInput = EnvironmentRevalidateInput;
+
 export interface EnvironmentProvisioner {
   /** 真实实例化并核验；失败时登记持久清理工作后 fail closed。 */
   provision(input: EnvironmentProvisionInput): Promise<EnvironmentLease>;
   /** 复验既有实例（Resume / takeover 前）。 */
   revalidate(input: EnvironmentRevalidateInput): Promise<EnvironmentLease>;
+  /** 暂停/代际交接后的重新准备：真实回读（必要时幂等重建）+ 以新恢复锚点重写 Prepared 证据。 */
+  reprepare(input: EnvironmentReprepareInput): Promise<EnvironmentLease>;
   /** 真实释放该 Lease 的资源；失败保持 `releasing` 等待 Worker 重试。 */
   cleanup(input: {
     tenantId: string;
@@ -113,7 +132,9 @@ function resourceManifestPatchOf(lease: EnvironmentLease) {
 /**
  * 真实执行一次清理：认领 → Backend 真实释放 → 写终态或记录失败。
  *
- * 幂等：Lease 已终态 / 已被他人认领 / 未到重试时间 → 直接返回当前状态。
+ * A08 8.2：结论（`released` / 退避重试）必须绑定**本轮领取令牌**。领不到就不是本轮的工作；
+ * 结论被拒绝（领取已失效、已被他人接管）时既不写终态也不写重试，只如实报告
+ * `claim_superseded` —— 迟到的执行者不得干扰新领取者的结论。
  */
 export async function runEnvironmentLeaseCleanup(input: {
   tenantId: string;
@@ -121,7 +142,10 @@ export async function runEnvironmentLeaseCleanup(input: {
   backend: EnvironmentInstanceBackend;
   owner: string;
   now?: Date;
-}): Promise<{ state: "released" | "pending_retry" | "not_due"; cleanupCount: number }> {
+}): Promise<{
+  state: "released" | "pending_retry" | "not_due" | "claim_superseded";
+  cleanupCount: number;
+}> {
   const now = input.now ?? new Date();
   const claimed = await claimEnvironmentLeaseCleanup({
     tenantId: input.tenantId,
@@ -137,13 +161,13 @@ export async function runEnvironmentLeaseCleanup(input: {
     }
     return { state: "not_due", cleanupCount: current.cleanupCount };
   }
-  const manifest = (claimed.resourceManifest ?? {}) as Record<string, unknown>;
+  const manifest = (claimed.lease.resourceManifest ?? {}) as Record<string, unknown>;
   const operationId =
     typeof manifest.operationId === "string"
       ? manifest.operationId
       : environmentOperationId({
-          environmentDefinitionRevisionId: claimed.environmentDefinitionRevisionId,
-          attemptId: claimed.attemptId,
+          environmentDefinitionRevisionId: claimed.lease.environmentDefinitionRevisionId,
+          attemptId: claimed.lease.attemptId,
         });
   const resources = Array.isArray(manifest.resources)
     ? (manifest.resources as Array<{ kind: string; ref: string; identity: string }>)
@@ -151,7 +175,7 @@ export async function runEnvironmentLeaseCleanup(input: {
   try {
     const receipt = await input.backend.release({
       tenantId: input.tenantId,
-      leaseId: claimed.id,
+      leaseId: claimed.lease.id,
       operationId,
       ...(resources ? { resources } : {}),
     });
@@ -162,22 +186,29 @@ export async function runEnvironmentLeaseCleanup(input: {
       );
     }
     const released = await completeEnvironmentLeaseCleanup({
-      tenantId: input.tenantId,
-      leaseId: claimed.id,
+      claim: claimed.claim,
       releasedAt: new Date(),
     });
-    return { state: "released", cleanupCount: released?.cleanupCount ?? claimed.cleanupCount + 1 };
+    if (released.outcome === "not_claimed") {
+      return {
+        state: "claim_superseded",
+        cleanupCount: released.lease?.cleanupCount ?? claimed.lease.cleanupCount,
+      };
+    }
+    return { state: "released", cleanupCount: released.lease?.cleanupCount ?? 0 };
   } catch (error) {
     const failed = await recordEnvironmentLeaseCleanupFailure({
-      tenantId: input.tenantId,
-      leaseId: claimed.id,
+      claim: claimed.claim,
       errorCode: error instanceof Error ? error.name : "EnvironmentCleanupFailed",
       now: new Date(),
     });
-    return {
-      state: "pending_retry",
-      cleanupCount: failed?.cleanupCount ?? claimed.cleanupCount + 1,
-    };
+    if (failed.outcome === "not_claimed") {
+      return {
+        state: "claim_superseded",
+        cleanupCount: failed.lease?.cleanupCount ?? claimed.lease.cleanupCount,
+      };
+    }
+    return { state: "pending_retry", cleanupCount: failed.lease?.cleanupCount ?? 0 };
   }
 }
 
@@ -190,11 +221,17 @@ export async function runDueEnvironmentLeaseCleanups(input: {
   owner: string;
   limit?: number;
   now?: Date;
-}): Promise<{ scanned: number; released: number; pendingRetry: number }> {
+}): Promise<{
+  scanned: number;
+  released: number;
+  pendingRetry: number;
+  claimSuperseded: number;
+}> {
   const now = input.now ?? new Date();
   const due = await listEnvironmentLeasesDueForCleanup({ now, limit: input.limit });
   let released = 0;
   let pendingRetry = 0;
+  let claimSuperseded = 0;
   for (const lease of due) {
     const outcome = await runEnvironmentLeaseCleanup({
       tenantId: lease.tenantId,
@@ -205,8 +242,9 @@ export async function runDueEnvironmentLeaseCleanups(input: {
     });
     if (outcome.state === "released") released += 1;
     else if (outcome.state === "pending_retry") pendingRetry += 1;
+    else if (outcome.state === "claim_superseded") claimSuperseded += 1;
   }
-  return { scanned: due.length, released, pendingRetry };
+  return { scanned: due.length, released, pendingRetry, claimSuperseded };
 }
 
 function assertRevisionFrozen(input: {
@@ -499,6 +537,59 @@ export function createEnvironmentProvisioner(dependencies: {
       );
       assertPreparedInstanceMatches(input.lease, facts);
       return (await getEnvironmentLeaseById(input.tenantId, input.lease.id)) ?? input.lease;
+    },
+
+    async reprepare(input) {
+      assertRevisionFrozen(input);
+      const now = input.now ?? new Date();
+      const current = await getEnvironmentLeaseById(input.tenantId, input.lease.id);
+      if (!current) throw new EnvironmentComplianceError("EnvironmentLease 不存在");
+      if (current.tenantId !== input.tenantId) {
+        throw new EnvironmentComplianceError("EnvironmentLease 不属于当前租户");
+      }
+      if (current.environmentDefinitionRevisionId !== input.revision.id) {
+        throw new EnvironmentComplianceError("EnvironmentLease 与冻结 Revision 不匹配");
+      }
+      if (
+        current.invocationId !== input.lease.invocationId ||
+        current.attemptId !== input.lease.attemptId
+      ) {
+        throw new EnvironmentComplianceError("EnvironmentLease 属于其他 Invocation/Attempt");
+      }
+      if (!["allocated", "active"].includes(current.leaseState)) {
+        throw new EnvironmentComplianceError(
+          `EnvironmentLease 已非活跃（${current.leaseState}），不能重新准备`,
+        );
+      }
+      const boundWorkspace = workspaceBindingIdOf(current);
+      if (boundWorkspace && boundWorkspace !== input.workspaceBindingId) {
+        throw new EnvironmentComplianceError("EnvironmentLease 属于其他 WorkspaceBinding");
+      }
+      const spec = normalizeEnvironmentInstanceSpec(input.revision);
+      if (spec.backendKind !== backend.kind) {
+        throw new EnvironmentComplianceError(
+          `Revision 声明的 backendKind=${spec.backendKind} 与受管 Backend=${backend.kind} 不匹配`,
+        );
+      }
+      // ① 状态与恢复水位交接：清掉上一代际的 Writer 激活，并把水位推进到本次 Resume 的锚点。
+      await beginEnvironmentLeaseReprepare({
+        tenantId: input.tenantId,
+        leaseId: current.id,
+        recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
+        now,
+      });
+      // ② 真实回读 + 以新锚点重写 Prepared 证据（实例缺失时按稳定 operationId 幂等重建）。
+      return provisionWithBackend({
+        backend,
+        tenantId: input.tenantId,
+        invocationId: current.invocationId,
+        attemptId: current.attemptId,
+        spec,
+        workspaceBindingId: input.workspaceBindingId,
+        workspaceRoot: input.workspaceRoot ?? null,
+        recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
+        now,
+      });
     },
 
     async cleanup(input) {

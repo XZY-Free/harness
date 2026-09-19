@@ -41,7 +41,7 @@ import {
   buildRecoveryAnchor,
   computeRecoveryAnchorDigest,
 } from "@/lib/workspace/recovery-anchor";
-import { FileSnapshotStorage, type SnapshotStorageReceipt } from "@/lib/workspace/snapshot-storage";
+import type { SnapshotStorageReceipt, SnapshotStorageRef } from "@/lib/workspace/snapshot-storage";
 import type { WorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { validateWorkspaceContract } from "@/lib/workspace/workspace-contract";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
@@ -183,7 +183,11 @@ export async function produceFilesystemCheckpoint(input: {
   invocationId: string;
   ownershipId: string;
   backend: WorkspaceBackend;
-  storageRoot: string;
+  /**
+   * A06：Snapshot 存储的**可序列化引用**。生产者不持有实例、不假设存储就在本进程 ——
+   * 它把引用交给 Backend，由真正拥有该存储能力的一端执行真实 IO。
+   */
+  storage: SnapshotStorageRef;
   checkpointIntentId: string;
   /** Runtime safe-point receipt obtained before this producer freezes the writer. */
   safePointEvidence: CheckpointSafePointEvidence;
@@ -277,7 +281,7 @@ export async function produceFilesystemCheckpoint(input: {
       grant,
       checkpointIntentId,
       anchorDigest: digest,
-      storage: new FileSnapshotStorage(input.storageRoot),
+      storage: input.storage,
       // §5：容量上限与已声明 profile 必须来自**已校验的不可变 Binding**，不是调用方入参。
       requirements: {
         checkpointPolicy: workspace.checkpointPolicy as Record<string, unknown> | null,
