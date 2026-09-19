@@ -100,82 +100,104 @@ afterEach(() => {
   for (const marker of markers.splice(0)) rmSync(marker, { force: true });
 });
 
+/**
+ * 本文件的每个用例都要经 `docker` CLI 真实往返多次（`docker create`、`docker ps -a`、
+ * `docker image inspect`），第一个用例还要建 4 个容器并连一次 MySQL。
+ *
+ * 单独运行时约 1s；但验收的 `integration` 阶段与其他 13 个文件并行，Docker Desktop 的
+ * CLI 往返会显著变慢（实测在整组并行下超过 vitest 的 5s 默认预算）。因此这里显式声明
+ * 现实的预算——与 `db` 项目对真实 IO 用例使用 60s 的约定一致——而不是让用例依赖机器空载。
+ */
+const DOCKER_TEST_TIMEOUT_MS = 60_000;
+
 describe("测试容器归属：真实 Docker 回收边界", () => {
-  it("回收自身孤儿；活跃运行者与其他归属容器全部保留", async () => {
-    // 前置：image 必须存在——globalSetup 已用它起了本次运行的 MySQL。
-    expect(docker(["image", "inspect", IMAGE]).trim()).not.toBe("");
+  it(
+    "回收自身孤儿；活跃运行者与其他归属容器全部保留",
+    async () => {
+      // 前置：image 必须存在——globalSetup 已用它起了本次运行的 MySQL。
+      expect(docker(["image", "inspect", IMAGE]).trim()).not.toBe("");
 
-    const self = currentOwnership(process.cwd());
-    const orphanRun = `orphan-${Date.now()}`;
-    const liveRun = `live-${Date.now()}`;
-    registerForeignLiveRun(self, liveRun);
+      const self = currentOwnership(process.cwd());
+      const orphanRun = `orphan-${Date.now()}`;
+      const liveRun = `live-${Date.now()}`;
+      registerForeignLiveRun(self, liveRun);
 
-    const orphan = createLabelledContainer(scopeLabels(self, orphanRun));
-    const activeRun = createLabelledContainer(scopeLabels(self, liveRun));
-    const foreignProject = createLabelledContainer({
-      ...scopeLabels(self, "foreign-run"),
-      [OWNERSHIP_LABELS.project]: "another-project",
-    });
-    const foreignWorkspace = createLabelledContainer({
-      ...scopeLabels(self, "foreign-run"),
-      [OWNERSHIP_LABELS.workspace]: "0000000000000000",
-    });
+      const orphan = createLabelledContainer(scopeLabels(self, orphanRun));
+      const activeRun = createLabelledContainer(scopeLabels(self, liveRun));
+      const foreignProject = createLabelledContainer({
+        ...scopeLabels(self, "foreign-run"),
+        [OWNERSHIP_LABELS.project]: "another-project",
+      });
+      const foreignWorkspace = createLabelledContainer({
+        ...scopeLabels(self, "foreign-run"),
+        [OWNERSHIP_LABELS.workspace]: "0000000000000000",
+      });
 
-    const began = beginOwnedTestMysqlRun(process.cwd());
-    ownerships.push(began.ownership);
+      const began = beginOwnedTestMysqlRun(process.cwd());
+      ownerships.push(began.ownership);
 
-    // 自身孤儿被回收。
-    expect(began.report.removed).toContain(orphan);
-    expect(containerExists(orphan)).toBe(false);
-    // 活跃运行者的容器既在候选里、又被保留——证明「有活跃运行者」这一条真的生效。
-    expect(began.report.retained).toContain(activeRun);
-    expect(began.report.removed).not.toContain(activeRun);
-    expect(containerExists(activeRun)).toBe(true);
-    // 其他项目 / 其他工作区的容器不在候选范围，必须原样存在。
-    expect(began.report.removed).not.toContain(foreignProject);
-    expect(began.report.removed).not.toContain(foreignWorkspace);
-    expect(containerExists(foreignProject)).toBe(true);
-    expect(containerExists(foreignWorkspace)).toBe(true);
+      // 自身孤儿被回收。
+      expect(began.report.removed).toContain(orphan);
+      expect(containerExists(orphan)).toBe(false);
+      // 活跃运行者的容器既在候选里、又被保留——证明「有活跃运行者」这一条真的生效。
+      expect(began.report.retained).toContain(activeRun);
+      expect(began.report.removed).not.toContain(activeRun);
+      expect(containerExists(activeRun)).toBe(true);
+      // 其他项目 / 其他工作区的容器不在候选范围，必须原样存在。
+      expect(began.report.removed).not.toContain(foreignProject);
+      expect(began.report.removed).not.toContain(foreignWorkspace);
+      expect(containerExists(foreignProject)).toBe(true);
+      expect(containerExists(foreignWorkspace)).toBe(true);
 
-    // 本次运行依赖的活跃 MySQL（globalSetup 起的）在回收后仍然可连接。
-    const url = process.env.DATABASE_URL;
-    expect(url, "integration 组依赖 globalSetup 注入的 DATABASE_URL").toBeTruthy();
-    const connection = await mysql.createConnection(url as string);
-    try {
-      const [rows] = await connection.query("SELECT 1 AS ok");
-      expect(rows).toEqual([{ ok: 1 }]);
-    } finally {
-      await connection.end();
-    }
-  });
+      // 本次运行依赖的活跃 MySQL（globalSetup 起的）在回收后仍然可连接。
+      const url = process.env.DATABASE_URL;
+      expect(url, "integration 组依赖 globalSetup 注入的 DATABASE_URL").toBeTruthy();
+      const connection = await mysql.createConnection(url as string);
+      try {
+        const [rows] = await connection.query("SELECT 1 AS ok");
+        expect(rows).toEqual([{ ok: 1 }]);
+      } finally {
+        await connection.end();
+      }
+    },
+    DOCKER_TEST_TIMEOUT_MS,
+  );
 
-  it("先后启动的两个流程互不误删：先登记的运行仍算活跃", () => {
-    const first = beginOwnedTestMysqlRun(process.cwd());
-    ownerships.push(first.ownership);
-    const firstContainer = createLabelledContainer(
-      scopeLabels(first.ownership, first.ownership.runId),
-    );
+  it(
+    "先后启动的两个流程互不误删：先登记的运行仍算活跃",
+    () => {
+      const first = beginOwnedTestMysqlRun(process.cwd());
+      ownerships.push(first.ownership);
+      const firstContainer = createLabelledContainer(
+        scopeLabels(first.ownership, first.ownership.runId),
+      );
 
-    const second = beginOwnedTestMysqlRun(process.cwd());
-    ownerships.push(second.ownership);
+      const second = beginOwnedTestMysqlRun(process.cwd());
+      ownerships.push(second.ownership);
 
-    expect(second.report.removed).not.toContain(firstContainer);
-    expect(second.report.retained).toContain(firstContainer);
-    expect(containerExists(firstContainer)).toBe(true);
-    expect(second.ownership.runId).not.toBe(first.ownership.runId);
-  });
+      expect(second.report.removed).not.toContain(firstContainer);
+      expect(second.report.retained).toContain(firstContainer);
+      expect(containerExists(firstContainer)).toBe(true);
+      expect(second.ownership.runId).not.toBe(first.ownership.runId);
+    },
+    DOCKER_TEST_TIMEOUT_MS,
+  );
 
-  it("pid 已死的运行标记对应的容器视为孤儿", () => {
-    const self = currentOwnership(process.cwd());
-    const deadRun = `dead-${Date.now()}`;
-    // 只写标记、不登记活进程：pid 越界即「已死」。
-    registerDeadRun(self, deadRun);
-    const orphan = createLabelledContainer(scopeLabels(self, deadRun));
+  it(
+    "pid 已死的运行标记对应的容器视为孤儿",
+    () => {
+      const self = currentOwnership(process.cwd());
+      const deadRun = `dead-${Date.now()}`;
+      // 只写标记、不登记活进程：pid 越界即「已死」。
+      registerDeadRun(self, deadRun);
+      const orphan = createLabelledContainer(scopeLabels(self, deadRun));
 
-    const began = beginOwnedTestMysqlRun(process.cwd());
-    ownerships.push(began.ownership);
+      const began = beginOwnedTestMysqlRun(process.cwd());
+      ownerships.push(began.ownership);
 
-    expect(began.report.removed).toContain(orphan);
-    expect(containerExists(orphan)).toBe(false);
-  });
+      expect(began.report.removed).toContain(orphan);
+      expect(containerExists(orphan)).toBe(false);
+    },
+    DOCKER_TEST_TIMEOUT_MS,
+  );
 });

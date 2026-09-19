@@ -20,24 +20,58 @@ import type {
 } from "@/lib/persistence/schema/executions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  getInvocationById: vi.fn<() => Promise<Invocation>>(),
-  getExecutionBindingByInvocation: vi.fn<() => Promise<ExecutionBinding>>(),
-  getActiveExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
-  getRuntimeSessionBindingByOwnership: vi.fn<() => Promise<RuntimeSessionBinding>>(),
-  getRuntimeSessionBindingById: vi.fn<() => Promise<RuntimeSessionBinding>>(),
-  getRuntimeRevisionById: vi.fn(),
-  renewExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
-  hostedLoopOptions: [] as Array<Record<string, unknown>>,
-  hostedLoopResult: {
-    completed: true,
-    responseText: "完成",
-    sentEvents: [],
-    pending: false,
-    waitingForUser: false,
-  },
-  hostedLoopResolveOnAbort: false,
-}));
+const mocks = vi.hoisted(() => {
+  /**
+   * A03：Hosted Supervisor 的「工作身份」是 RuntimeSessionBinding 行上的**行锁 CAS**，
+   * 不是进程内 Map。夹具必须同样记账——否则「重复交付不再起第二个 Loop」会因为模块被
+   * 替换成「领取永远成功」而失去判别力（进程内 `liveRunners` 去重与跨进程领取是两件事，
+   * 后者必须由行锁证明）。
+   */
+  const supervisorLeases = new Map<string, string>();
+  const claimRuntimeSessionSupervisor = vi.fn(
+    async (_tx: unknown, input: { id: string; leaseOwner: string }) => {
+      const holder = supervisorLeases.get(input.id);
+      if (holder !== undefined && holder !== input.leaseOwner) {
+        return { claimed: false, session: null };
+      }
+      supervisorLeases.set(input.id, input.leaseOwner);
+      return { claimed: true, session: null };
+    },
+  );
+  const renewRuntimeSessionSupervisor = vi.fn(
+    async (_tx: unknown, input: { id: string; leaseOwner: string }) =>
+      supervisorLeases.get(input.id) === input.leaseOwner,
+  );
+  const releaseRuntimeSessionSupervisor = vi.fn(
+    async (_tx: unknown, input: { id: string; leaseOwner: string }) => {
+      if (supervisorLeases.get(input.id) !== input.leaseOwner) return false;
+      supervisorLeases.delete(input.id);
+      return true;
+    },
+  );
+  return {
+    getInvocationById: vi.fn<() => Promise<Invocation>>(),
+    getExecutionBindingByInvocation: vi.fn<() => Promise<ExecutionBinding>>(),
+    getActiveExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
+    getRuntimeSessionBindingByOwnership: vi.fn<() => Promise<RuntimeSessionBinding>>(),
+    getRuntimeSessionBindingById: vi.fn<() => Promise<RuntimeSessionBinding>>(),
+    getRuntimeRevisionById: vi.fn(),
+    renewExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
+    hostedLoopOptions: [] as Array<Record<string, unknown>>,
+    hostedLoopResult: {
+      completed: true,
+      responseText: "完成",
+      sentEvents: [],
+      pending: false,
+      waitingForUser: false,
+    },
+    hostedLoopResolveOnAbort: false,
+    supervisorLeases,
+    claimRuntimeSessionSupervisor,
+    renewRuntimeSessionSupervisor,
+    releaseRuntimeSessionSupervisor,
+  };
+});
 
 vi.mock("@/lib/executions/persistence/invocation-store", () => ({
   getInvocationById: mocks.getInvocationById,
@@ -54,6 +88,12 @@ vi.mock("@/lib/executions/persistence/execution-ownership-store", () => ({
 vi.mock("@/lib/runtime/persistence/runtime-session-store", () => ({
   getRuntimeSessionBindingByOwnership: mocks.getRuntimeSessionBindingByOwnership,
   getRuntimeSessionBindingById: mocks.getRuntimeSessionBindingById,
+  // A03：Hosted 分支的领取 / 续期 / 释放全部落在这三个函数上。模块被整体替换时
+  // 必须一并给出——否则真实实现会以 "No ... export" 直接炸掉，测试退化成模块错误，
+  // 而不是对执行权行为的判别。
+  claimRuntimeSessionSupervisorInTransaction: mocks.claimRuntimeSessionSupervisor,
+  renewRuntimeSessionSupervisorInTransaction: mocks.renewRuntimeSessionSupervisor,
+  releaseRuntimeSessionSupervisorInTransaction: mocks.releaseRuntimeSessionSupervisor,
 }));
 vi.mock("@/lib/runtime/persistence/runtime-revision-queries", () => ({
   getRuntimeRevisionById: mocks.getRuntimeRevisionById,
@@ -70,16 +110,21 @@ vi.mock("@/lib/runtime/adapters/hosted-adapter", () => ({
         return new Promise<{ completed: boolean; responseText: string; sentEvents: [] }>(
           (resolve) => {
             const signal = (this.options as { abortSignal: AbortSignal }).abortSignal;
-            signal.addEventListener(
-              "abort",
-              () =>
-                resolve({
-                  completed: false,
-                  responseText: "",
-                  sentEvents: [],
-                }),
-              { once: true },
-            );
+            const finish = () =>
+              resolve({
+                completed: false,
+                responseText: "",
+                sentEvents: [],
+              });
+            // AbortSignal 是**电平**语义：已中止的信号不会再补发事件。A03 之后心跳
+            // 先于排他领取启动，续约失败可能发生在 Loop 被构造之前——此时生产 Loop
+            // 必须先查 `aborted` 再决定是否等待。夹具同样必须如此，否则「先中止、
+            // 后建 Loop」会被误判成永久挂起。
+            if (signal.aborted) {
+              finish();
+              return;
+            }
+            signal.addEventListener("abort", finish, { once: true });
           },
         );
       }
@@ -188,6 +233,10 @@ function authorityOf(f: ReturnType<typeof fixture>) {
 }
 
 beforeEach(() => {
+  mocks.supervisorLeases.clear();
+  mocks.claimRuntimeSessionSupervisor.mockClear();
+  mocks.renewRuntimeSessionSupervisor.mockClear();
+  mocks.releaseRuntimeSessionSupervisor.mockClear();
   mocks.hostedLoopOptions.length = 0;
   mocks.hostedLoopResolveOnAbort = false;
   mocks.hostedLoopResult = {
@@ -217,6 +266,13 @@ describe("Resume Harness Invocation", () => {
     });
     expect(first).toMatchObject({ status: "resumed", completed: true });
     expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // A03：执行权来自 Session 上的**排他领取**，不是进程内 Map 的副作用。
+    expect(mocks.claimRuntimeSessionSupervisor).toHaveBeenCalledTimes(1);
+    expect(mocks.claimRuntimeSessionSupervisor.mock.calls[0]?.[1]).toMatchObject({
+      tenantId: "tenant-1",
+      id: "session-1",
+      leaseOwner: expect.stringContaining("ownership-1"),
+    });
 
     // Owner 已释放（无活跃 ExecutionOwnership）→ 同一 Invocation 不能再次取得执行权。
     mocks.getActiveExecutionOwnership.mockResolvedValue(null as unknown as ExecutionOwnership);
@@ -231,6 +287,8 @@ describe("Resume Harness Invocation", () => {
       }),
     ).rejects.toThrow("NotCurrentExecutor");
     expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // 被拒的第二次交付在进入领取之前就失败了，不得留下第二个工作身份。
+    expect(mocks.claimRuntimeSessionSupervisor).toHaveBeenCalledTimes(1);
   });
 
   it("父 Invocation 已终态时 handled-no-op，不重新获取执行权", async () => {
@@ -299,6 +357,8 @@ describe("Resume Harness Invocation", () => {
       }),
     ).resolves.toMatchObject({ status: "resumed", completed: false, pending: true });
     expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // 同一代际的重复交付必须由「已在运行」直接消化：不得再产生第二次领取。
+    expect(mocks.claimRuntimeSessionSupervisor).toHaveBeenCalledTimes(1);
 
     // 收尾：中止存活 Loop，让第一个 promise 结束后再退出用例。
     const options = mocks.hostedLoopOptions[0] as { abortSignal: AbortSignal };
@@ -312,21 +372,6 @@ describe("Resume Harness Invocation", () => {
     mocks.hostedLoopResolveOnAbort = true;
     mocks.renewExecutionOwnership.mockRejectedValue(new Error("lease renew failed"));
 
-    // 捕获传入 Loop 的 abortSignal，观察 fail-closed 中止原因。
-    let observedReason: unknown;
-    const originalPush = mocks.hostedLoopOptions.push.bind(mocks.hostedLoopOptions);
-    mocks.hostedLoopOptions.push = (...items) => {
-      const options = items[0] as { abortSignal: AbortSignal } | undefined;
-      options?.abortSignal.addEventListener(
-        "abort",
-        () => {
-          observedReason = options.abortSignal.reason;
-        },
-        { once: true },
-      );
-      return originalPush(...items);
-    };
-
     vi.useFakeTimers();
     const promise = resumeHarnessInvocation({
       tenantId: "tenant-1",
@@ -338,8 +383,11 @@ describe("Resume Harness Invocation", () => {
     // 心跳续约间隔 20s：推进时钟触发续约失败 → abort。
     await vi.advanceTimersByTimeAsync(20_000);
     await expect(promise).resolves.toMatchObject({ status: "resumed", completed: false });
-    expect(observedReason).toBeInstanceOf(Error);
-    expect((observedReason as Error).message).toBe("OwnershipExpired");
+    // 中止信号是**电平**事实：直接读 `aborted` / `reason`，不依赖"监听器恰好在
+    // 事件之后注册"。续约失败意味着该代际已失去执行权，Loop 不得再推进。
+    const options = mocks.hostedLoopOptions[0] as { abortSignal: AbortSignal } | undefined;
+    expect(options?.abortSignal.aborted).toBe(true);
+    expect((options?.abortSignal.reason as Error | undefined)?.message).toBe("OwnershipExpired");
   });
 
   it("Agent failed/cancelled 以结构化 Observation 交回 Harness，不直接完成父级", () => {

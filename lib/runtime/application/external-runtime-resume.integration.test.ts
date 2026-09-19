@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getAttemptById: vi.fn(),
   getLatestAttempt: vi.fn(),
   getRuntimeRevisionById: vi.fn(),
+  getWorkspaceBindingById: vi.fn(),
   startRuntimeInvocation: vi.fn(),
   resolveOutboundRuntimeAuth: vi.fn(),
   createHttpHarnessRuntimeTransport: vi.fn(),
@@ -48,6 +49,13 @@ vi.mock("@/lib/runtime/persistence/runtime-session-store", () => ({
 vi.mock("@/lib/runtime/persistence/runtime-revision-queries", () => ({
   getRuntimeRevisionById: mocks.getRuntimeRevisionById,
 }));
+// A05：External continuation 与请求内联调度必须携带**同一份**受管执行资源，
+// 而资源的唯一来源是 R01 §1 的组合层（`resolveExecutionResources`）。该层按
+// `Binding.workspaceBindingId` 解析 WorkspaceBinding，因此夹具必须提供这一行；
+// 合同本身由下面 `getWorkspaceBindingById` 的调用断言来守。
+vi.mock("@/lib/workspace/workspace-queries", () => ({
+  getWorkspaceBindingById: mocks.getWorkspaceBindingById,
+}));
 vi.mock("@/lib/runtime/credentials/resolve-outbound-runtime-auth", () => ({
   resolveOutboundRuntimeAuth: mocks.resolveOutboundRuntimeAuth,
 }));
@@ -64,6 +72,7 @@ vi.mock("@/lib/runtime/adapters/hosted-adapter", () => ({
   },
 }));
 
+import { frozenCapabilityCatalogForInvocation } from "@/lib/test-support/frozen-capability-catalog";
 import { resumeHarnessInvocation, type resumeRuntimeInvocation } from "./runtime-resume";
 
 const invocation = {
@@ -86,6 +95,13 @@ const binding = {
   workspaceBindingId: "workspace-1",
   modelId: "test-model",
   environmentMode: "NO_PLATFORM_ENVIRONMENT",
+  // R01 §1：执行资源只能从 Binding 冻结的事实解析。组合层要复核可信执行主体
+  // 与冻结能力目录，缺任何一项都会在资源解析阶段 fail closed。
+  principalType: "user",
+  principalId: "user-1",
+  principalSource: "authenticated_user",
+  principalFrozenAt: new Date(0),
+  ...frozenCapabilityCatalogForInvocation("invocation-external"),
 } as ExecutionBinding;
 
 const attempt = {
@@ -114,6 +130,13 @@ describe("External Runtime continuation resume", () => {
     });
     mocks.resolveOutboundRuntimeAuth.mockResolvedValue({ mode: "none" });
     mocks.createHttpHarnessRuntimeTransport.mockReturnValue({ kind: "external-http-transport" });
+    // 领域显式冻结的 NO_PLATFORM 合同（不是"解析失败后的降级"）。
+    mocks.getWorkspaceBindingById.mockResolvedValue({
+      id: "workspace-1",
+      tenantId: "tenant-1",
+      continuityMode: "NO_PLATFORM_WORKSPACE",
+      contractDigest: `sha256:${"0".repeat(64)}`,
+    });
     mocks.startRuntimeInvocation.mockResolvedValue({
       authority: { ownershipId: "ownership-1" },
       response: { acceptedAt: new Date().toISOString() },
@@ -156,6 +179,13 @@ describe("External Runtime continuation resume", () => {
       auth: { mode: "none" },
     });
     expect(started.runtimeClient).toEqual({ kind: "external-http-transport" });
+    // A05：External 分支不能"只换 Transport"——受管资源必须经唯一组合层解析，
+    // 否则 MANAGED 的 continuation 会在默认路径上因为缺少 Workspace / Provisioner
+    // 直接终态失败。这里断言组合层确实被咨询过（而不是被跳过）。
+    expect(mocks.getWorkspaceBindingById).toHaveBeenCalledWith("tenant-1", "workspace-1");
+    // NO_PLATFORM 是领域冻结的合同，必须原样到达 Start 服务，不能被改写成"缺失字段"。
+    expect(started.environmentProvisioner).toBeNull();
+    expect(started.workspace).toBeUndefined();
     // External 回调端点按 invocationId 解析，不是 in-process Hosted 通道。
     expect(started.callbackEndpoints).toMatchObject({
       events: expect.stringContaining("/runtime/invocations/invocation-external/events"),
