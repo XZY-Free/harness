@@ -24,6 +24,7 @@ import {
 import { registerDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { type WorkspaceBackend, createWorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { computeWorkspaceContractDigest } from "@/lib/workspace/workspace-contract";
@@ -32,6 +33,7 @@ import {
   type WorkspaceHostIdentityProbe,
   WorkspaceIdentityMismatchError,
   WorkspaceWriterNotFencedError,
+  type WriterStopEvidence,
   continuousWriterArgs,
   createRemoteWorkspaceHost,
   createWorkspaceHostBroker,
@@ -42,6 +44,8 @@ import {
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
 } from "@/lib/workspace/workspace-writer";
+import { runWorkspaceWriterRelease } from "@/lib/workspace/workspace-writer-release";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000000";
@@ -198,6 +202,31 @@ describe("Workspace host recovery integration", () => {
         state: "lost",
         reasonCode: "runtime_process_lost",
       });
+      // A07 决策四：失权只解除"逻辑当前"，`active` 行必须由持久释放 lane 拿真实停止回执
+      // 写成 `released` 之后，下一代才被分配 —— 停机与排空证据从此处产生，而不是在激活里。
+      const stoppedByLane = await runWorkspaceWriterRelease({
+        tenantId: TENANT_ID,
+        lockId: generation1.lockId,
+        leaseOwner: "writer-01-release",
+        deps: { resolveHost: async () => backend.host },
+      });
+      expect(stoppedByLane.outcome).toBe("released");
+      const stoppedRow = await readLock(generation1.lockId);
+      expect(stoppedRow.lockState).toBe("released");
+      const receipt = stoppedRow.releaseReceipt as WriterStopEvidence;
+      // 真实停止证据：旧进程已退出，进程组为空，信号是真实发出的。
+      expect(receipt.previousWriterPresent).toBe(true);
+      expect(receipt.stopped).toBe(true);
+      expect(receipt.processGroupEmpty).toBe(true);
+      expect(receipt.pids).toContain(spawned.pid);
+      expect(receipt.signals).toContain("SIGTERM");
+      expect(processAlive(spawned.pid)).toBe(false);
+
+      // 排空：旧写入停止后当前根不再有新写入（换代前就已确认，而不是靠新激活顺带确认）。
+      const sizeAfterStop = await fileSize(activityFile);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(await fileSize(activityFile)).toBe(sizeAfterStop);
+
       const attempt2 = await createAttempt({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
@@ -235,21 +264,7 @@ describe("Workspace host recovery integration", () => {
         candidate: secondCandidate,
       });
       expect(generation2.writerGeneration).toBeGreaterThan(generation1.writerGeneration);
-
-      // 真实停止证据：旧进程已退出，进程组为空，信号是真实发出的。
-      const evidence = generation2.grant.backendEvidence as Record<string, unknown>;
-      expect(generation2.grant.oldWriterRevoked).toBe(true);
-      expect(evidence.oldWriterRevoked).toBe(true);
-      expect(evidence.processGroupEmpty).toBe(true);
-      expect(evidence.previousWriterPresent).toBe(true);
-      expect(evidence.stoppedPids).toContain(spawned.pid);
-      expect(evidence.stopSignals).toContain("SIGTERM");
       expect(processAlive(spawned.pid)).toBe(false);
-
-      // 排空：旧写入停止后当前根不再有新写入。
-      const sizeAfterStop = await fileSize(activityFile);
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      expect(await fileSize(activityFile)).toBe(sizeAfterStop);
 
       // 新 generation 正常写当前根，旧内容保持可读且不混杂。
       await writeFile(path.join(root, "gen2.txt"), "new generation", "utf8");
@@ -624,6 +639,14 @@ describe("Workspace host recovery integration", () => {
         runtimeRevisionId: first.binding.runtimeRevisionId,
       });
       if (!secondCandidate) throw new Error("second candidate missing");
+      // A07 决策四：`active` 行不得被直接覆盖 —— 先由释放 lane 真实停止旧 Writer 并写 `released`。
+      const supersededRelease = await runWorkspaceWriterRelease({
+        tenantId: TENANT_ID,
+        lockId: generation1.lockId,
+        leaseOwner: "writer-07-release",
+        deps: { resolveHost: async () => backend.host },
+      });
+      expect(supersededRelease.outcome).toBe("released");
       await activatePreparedWorkspaceWriter({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
@@ -722,3 +745,14 @@ describe("Workspace host recovery integration", () => {
     }
   }, 60_000);
 });
+
+/** 读回 WorkspaceWriteLock 行，用来断言"释放义务/回执/定位"的真实持久状态。 */
+async function readLock(lockId: string) {
+  const [row] = await db
+    .select()
+    .from(workspaceWriteLock)
+    .where(and(eq(workspaceWriteLock.tenantId, TENANT_ID), eq(workspaceWriteLock.id, lockId)))
+    .limit(1);
+  if (!row) throw new Error("WorkspaceWriteLock 不存在");
+  return row;
+}

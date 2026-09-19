@@ -31,11 +31,16 @@ import { type WorkspaceHost, createManagedWorkspaceHost } from "@/lib/workspace/
 import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import { requireWorkspaceReadiness } from "@/lib/workspace/workspace-readiness";
-import { reserveWorkspaceWriter } from "@/lib/workspace/workspace-write-lock-queries";
+import {
+  type AcquireWorkspaceWriteLockResult,
+  type ReserveWorkspaceWriterOutcome,
+  reserveWorkspaceWriter,
+} from "@/lib/workspace/workspace-write-lock-queries";
 import {
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
 } from "@/lib/workspace/workspace-writer";
+import { runWorkspaceWriterRelease } from "@/lib/workspace/workspace-writer-release";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -204,6 +209,16 @@ describe("Workspace continuity integration", () => {
         state: "lost",
         reasonCode: "runtime_process_lost",
       });
+      // A07 决策四：父 Owner 失权只解除"逻辑当前"，**不等于**旧 Writer 已经停下。
+      // `active` 行必须由持久释放 lane 拿到真实停止回执、写成 `released` 之后，下一代才可分配
+      // —— 否则旧 Writer 会失去定位。这仍然是 lane 的自主行为，不是 I 侧显式撤销 W 行。
+      const recoveredRelease = await runWorkspaceWriterRelease({
+        tenantId: TENANT_ID,
+        lockId: firstRun.activated.lockId,
+        leaseOwner: "continuity-release",
+        deps: { resolveHost: async () => backend.host },
+      });
+      expect(recoveredRelease.outcome).toBe("released");
       // 同 Invocation 新 Attempt：同 Host 磁盘与 Workspace 身份不变，恢复取得合法下一代 writer。
       const attempt2 = await createAttempt({
         tenantId: TENANT_ID,
@@ -403,8 +418,8 @@ describe("Workspace continuity integration", () => {
         root: temporaryRoot,
       });
       const oldGrant = firstRun.activated.grant;
-      // 换代：旧 Owner 失权即为持久事实，新 Owner（同 Invocation 新 Attempt 的 takeover）
-      // 直接取得下一代，不需要任何 I 侧显式撤销 W 行（R04 §3）。
+      // 换代：旧 Owner 失权即为持久事实；但新 Owner 仍须等旧 Writer 被**真实停止**后才能
+      // 取得下一代（A07 决策四）—— 这一步由持久释放 lane 完成，不需要 I 侧显式撤销 W 行。
       await closeExecutionOwnership({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
@@ -412,6 +427,13 @@ describe("Workspace continuity integration", () => {
         state: "lost",
         reasonCode: "takeover",
       });
+      const takeoverRelease = await runWorkspaceWriterRelease({
+        tenantId: TENANT_ID,
+        lockId: firstRun.activated.lockId,
+        leaseOwner: "continuity-takeover-release",
+        deps: { resolveHost: async () => backend.host },
+      });
+      expect(takeoverRelease.outcome).toBe("released");
       const attempt2 = await createAttempt({
         tenantId: TENANT_ID,
         invocationId: first.invocation.id,
@@ -491,15 +513,17 @@ describe("Workspace continuity integration", () => {
       });
       const fixture = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
       // DB 侧 reserve 得到 gen1，但 Host current 已是 gen2：激活必须 fail closed。
-      const reserved = await reserveWorkspaceWriter({
-        tenantId: TENANT_ID,
-        storageScopeDigest: scopeDigest,
-        invocationId: fixture.invocation.id,
-        attemptId: fixture.attempt.id,
-        ownershipId: fixture.invocation.id,
-        workspaceBindingId: binding.id,
-        leaseExpiresAt: new Date(Date.now() + 60_000),
-      });
+      const reserved = expectReserved(
+        await reserveWorkspaceWriter({
+          tenantId: TENANT_ID,
+          storageScopeDigest: scopeDigest,
+          invocationId: fixture.invocation.id,
+          attemptId: fixture.attempt.id,
+          ownershipId: fixture.invocation.id,
+          workspaceBindingId: binding.id,
+          leaseExpiresAt: new Date(Date.now() + 60_000),
+        }),
+      );
       expect(reserved.writerGeneration).toBe(1);
       await expect(
         backend.host.activateWriter({
@@ -796,3 +820,14 @@ describe("Workspace continuity integration", () => {
     );
   });
 });
+
+/**
+ * A07 决策四：预留的成功出口现在是**显式 outcome**。测试里凡是"预期预留成功"的地方都必须
+ * 穿过这个断言，避免直接读联合体上可能表示 `release_pending` 的字段。
+ */
+function expectReserved(outcome: ReserveWorkspaceWriterOutcome): AcquireWorkspaceWriteLockResult {
+  if (outcome.outcome !== "reserved") {
+    throw new Error(`预期预留成功，实际得到 release_pending（${outcome.reason}）`);
+  }
+  return outcome;
+}

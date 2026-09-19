@@ -14,13 +14,19 @@
  * 复用 Node 现有能力（node:fs/promises、node:child_process、process.kill 进程组）
  * 与既有受管容器链（lib/runtime/container/*），不引入新的执行内核。
  */
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import path from "node:path";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
+import {
+  ScopeLockBusyError,
+  ScopeLockUnavailableError,
+  scopeLockFilePath,
+  withScopeLock as withNativeScopeLock,
+} from "@/lib/workspace/scope-lock";
 import type {
   SnapshotRequirements,
   SnapshotStorage,
@@ -29,11 +35,20 @@ import type {
 } from "@/lib/workspace/snapshot-storage";
 import { FileSnapshotStorage, resolveSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import type {
+  ManagedFileOperation,
+  ManagedFileOperationResult,
   SafePointReceipt,
   WorkspaceHost,
   WorkspacePreparation,
   WorkspaceWriterGrant,
+  WorkspaceWriterIdentity,
 } from "@/lib/workspace/workspace-host";
+import {
+  type ManagedWriterContainment,
+  readManagedWriterContainment,
+  startManagedWriter,
+  writeJsonDurable,
+} from "@/lib/workspace/writer-launcher";
 
 // ─── 稳定字面量 ────────────────────────────────────────────
 
@@ -57,34 +72,20 @@ const SAFE_POINTS_DIR = "safe-points";
 const SNAPSHOT_DIR = "snapshot-storage";
 /** 每代际的"授权已物理撤销"墓碑目录（A07 7.4）。 */
 const REVOKED_DIR = "revoked";
-/** scope 锁被回收时留下的证据目录（A07 7.5）。 */
-const LOCK_RECOVERIES_DIR = "lock-recoveries";
 /** scope 物理写屏障文件（A07 7.1）。 */
 const FREEZE_FILE = "freeze.json";
-/** scope 锁的持有者归属证据文件名。 */
-const SCOPE_LOCK_OWNER_FILE = "owner.json";
-/** scope 锁目录名。 */
-const SCOPE_LOCK_DIR_NAME = ".scope.lock";
+/**
+ * scope 的 Writer 代际账本（A07 决策二）。
+ *
+ * `current.json` 是**当前授权指针**，撤销时会被整体摘除；代际高水位必须另有一份
+ * 单调记录，否则指针为空之后下一代可以回退、甚至复用已被撤销的 generation。
+ */
+const LEDGER_FILE = "ledger.json";
 
 /** 停止进程组的单次等待上限（先 SIGTERM，再 SIGKILL）。 */
 const STOP_WAIT_MS = 3_000;
 /** 排空采样间隔。 */
 const DRAIN_SAMPLE_MS = 60;
-/** 物理 scope 临界区等待上限与重试间隔。 */
-const SCOPE_LOCK_TIMEOUT_MS = 10_000;
-const SCOPE_LOCK_RETRY_MS = 15;
-/**
- * scope 锁的**持有者租约**：过了这个时刻，即使进程看起来仍存活，也允许凭
- * "租约已过期"这一持久证据回收。它不是本地超时，而是写在锁目录里的归属声明。
- */
-const SCOPE_LOCK_LEASE_MS = 60_000;
-/**
- * 锁目录已建、但归属记录尚未落盘时的宽限。
- *
- * `mkdir` 与写 `owner.json` 之间被强杀会留下"无归属记录"的锁目录。宽限结束后
- * 允许按证据回收；宽限之内只视为"持有者正在写记录"，继续等待。
- */
-const SCOPE_LOCK_OWNER_GRACE_MS = 2_000;
 
 // ─── 错误 ──────────────────────────────────────────────────
 
@@ -167,19 +168,59 @@ interface HostIdentityRecord {
 /**
  * 受管 Writer 进程的持久归属记录（A07 7.3）。
  *
- * `phase` 让"已经启动、但还没登记 PID"不再是**无记录**状态：
- * `spawning` 表示确定启动过、却无法给出进程组，因此调用方必须按
- * "可能仍有写者存活"处理，不能声明已停止。
+ * 定位字段来自决策三的启动屏障（`ManagedWriterContainment`）—— 这里只在其上追加
+ * 停止确认事实，避免"两条各自演进的记录形状"。
+ *
+ * A07 决策二：`stop` 是"停止确认事实"。**缺省即未确认停止**，记录必须保留
+ * （`lastFailure` 说明卡在哪里），因为那份位置信息是后续重试与可审计处置的
+ * 唯一依据 —— 把它删掉等于伪造"没有写者"。
  */
-interface WriterProcessRecord {
+interface WriterProcessRecord extends ManagedWriterContainment {
+  stop?: WriterStopAttempt;
+}
+
+/** 一次（或多次累积的）停止尝试结果；只有实测清空且排空才算 `confirmed`。 */
+interface WriterStopAttempt {
+  confirmed: boolean;
+  confirmedAt: string | null;
+  lastAttemptAt: string;
+  attempts: number;
+  /** 未确认时的原因；`confirmed = true` 时为 null。 */
+  lastFailure: string | null;
+  evidence: WriterStopEvidence;
+}
+
+/** scope Writer 代际账本：高水位是单调的，不随 `current.json` 的摘除而回退。 */
+interface ScopeWriterLedgerRecord {
+  schemaVersion: number;
   scopeDigest: string;
+  highestAllocatedGeneration: number;
+  updatedAt: string;
+}
+
+/** 未确认停止的写者：必须阻塞后续激活，且不得被 GC 掉。 */
+export interface UnreconciledWriter {
   writerGeneration: number;
-  phase: "spawning" | "running";
+  phase: WriterProcessRecord["phase"];
   pid: number | null;
   processGroupId: number | null;
-  command: string;
-  activityPath: string | null;
-  registeredAt: string;
+  recordPath: string;
+  reason: string;
+}
+
+/**
+ * 一个 scope 的**物理写者全集视图**（A07 决策二）。
+ *
+ * 权威事实来自目录枚举，而不是任一指针文件：`current.json` 只是当前授权指针，
+ * 撤销会把它摘掉；只看指针就无法发现"仍有更旧写者可能存活"。
+ */
+export interface ScopeWriterState {
+  scopeDigest: string;
+  highestAllocatedGeneration: number;
+  current: WorkspaceWriterGrant | null;
+  revokedGenerations: number[];
+  writerRecords: WriterProcessRecord[];
+  unreconciledWriters: UnreconciledWriter[];
 }
 
 /** 某代际的 Writer 授权已被**物理撤销**（不是"进程停了"就算撤销）。 */
@@ -188,6 +229,13 @@ interface WriterRevocationRecord {
   writerGeneration: number;
   reason: string;
   revokedAt: string;
+  /**
+   * A07 决策五：被撤销的**精确归属**（含 tenant）。
+   *
+   * 墓碑上必须能看出"撤的是谁"，否则事后审计只能看到"第 N 代被撤了"，
+   * 而那正是让失败补偿误杀健康 Writer 的那种说法。
+   */
+  identity: WorkspaceWriterIdentity;
   evidence: WriterStopEvidence;
 }
 
@@ -204,25 +252,6 @@ interface WorkspaceFreezeRecord {
   anchorDigest: string;
   frozenAt: string;
   stopEvidence: WriterStopEvidence;
-}
-
-/** scope 锁的持有者归属证据：崩溃回收只能靠它判断"持有者是否失活"。 */
-interface ScopeLockOwnerRecord {
-  holderId: string;
-  hostIdentity: string;
-  pid: number;
-  acquiredAt: string;
-  leaseExpiresAt: string;
-}
-
-/** 一次凭证据的锁回收记录（A07 7.5）。 */
-interface ScopeLockRecoveryRecord {
-  scopeDigest: string;
-  recoveredAt: string;
-  /** 被回收的持有者归属证据；缺失说明持有者在写证据前就被强杀。 */
-  previousOwner: ScopeLockOwnerRecord | null;
-  /** 判定"可回收"的依据（稳定串，便于断言与审计）。 */
-  reason: string;
 }
 
 interface CandidateClaimRecord {
@@ -323,6 +352,63 @@ function isInside(parent: string, child: string): boolean {
     child === parent ||
     child.startsWith(parent.endsWith(path.sep) ? parent : `${parent}${path.sep}`)
   );
+}
+
+/** 枚举 `<dir>/<n>.json` 形式的代际编号（目录不存在 → 空集，不抛）。 */
+async function listGenerationFiles(dir: string): Promise<number[]> {
+  const names = await readdir(dir).catch(() => [] as string[]);
+  return names
+    .filter((name) => /^\d+\.json$/.test(name))
+    .map((name) => Number.parseInt(name.slice(0, -".json".length), 10))
+    .filter((value) => Number.isFinite(value));
+}
+
+/** 未确认停止的具体原因：用于拒绝消息，也用于运维判断下一步该做什么。 */
+function writerUnreconciledReason(record: WriterProcessRecord): string {
+  if (record.phase === "spawning" || record.processGroupId === null || record.pid === null) {
+    return "只有启动意图、缺少可核验的进程组定位";
+  }
+  return record.stop?.lastFailure ?? "进程组/排空尚未确认";
+}
+
+/** 合并多代停止证据：只有全部代际都确认为真时结论才为真。 */
+function mergeStopEvidence(evidence: WriterStopEvidence[]): WriterStopEvidence {
+  if (evidence.length === 0) {
+    return {
+      previousWriterPresent: false,
+      stopped: true,
+      processGroupEmpty: true,
+      drained: true,
+      signals: [],
+      pids: [],
+    };
+  }
+  return {
+    previousWriterPresent: evidence.some((entry) => entry.previousWriterPresent),
+    stopped: evidence.every((entry) => entry.stopped),
+    processGroupEmpty: evidence.every((entry) => entry.processGroupEmpty),
+    drained: evidence.every((entry) => entry.drained),
+    signals: [...new Set(evidence.flatMap((entry) => entry.signals))],
+    pids: [...new Set(evidence.flatMap((entry) => entry.pids))],
+  };
+}
+
+/**
+ * 请求代际之前**实际存在过**的最高代际。
+ *
+ * 不再只看 `current.json`：指针可能已被撤销摘除，而更旧的写者记录仍在。
+ * 这个值只作为回执里的证据字段，判定仍需用 `highestAllocatedGeneration`。
+ */
+function previousAllocatedGeneration(
+  state: ScopeWriterState,
+  requestedGeneration: number,
+): number | null {
+  const candidates = [
+    ...state.writerRecords.map((record) => record.writerGeneration),
+    ...(state.current ? [state.current.writerGeneration] : []),
+  ].filter((generation) => generation < requestedGeneration);
+  if (candidates.length === 0) return null;
+  return Math.max(...candidates);
 }
 
 // ─── Broker ────────────────────────────────────────────────
@@ -500,6 +586,33 @@ export class WorkspaceHostBroker implements WorkspaceHost {
   ): Promise<WriterRevocationRecord | null> {
     return readJson<WriterRevocationRecord>(await this.revokedWriterPath(scopeDigest, generation));
   }
+
+  /**
+   * 读出某代际的**持久归属快照**（A07 决策五）。
+   *
+   * 事实来源必须是 Broker 自己落盘的东西：`workspace-scope.json`（这个物理 scope 属于哪个
+   * tenant）+ `grants/<generation>.json`（该代际被授予给了哪一段执行权）。
+   *
+   * 刻意**不**用 `current.json` 当基准：它会被撤销摘掉、也会被下一代整体覆盖 —— 拿它比对
+   * 等于"谁最新谁说了算"，迟到的旧补偿照样能停掉新 Writer。`grants/<generation>.json`
+   * 是**每代独立**的，永不被后续代际改写，因此能回答"第 N 代当时是谁的"。
+   *
+   * 返回 null 表示这一代从未被授予过（没有可核对的归属）。
+   */
+  private async readWriterAttribution(
+    scopeDigest: string,
+    generation: number,
+  ): Promise<WorkspaceWriterIdentity | null> {
+    const claim = await readJson<ScopeClaimRecord>(
+      path.join(await this.controlRoot(), SCOPE_CLAIM_FILE),
+    );
+    if (!claim || claim.scopeDigest !== scopeDigest) return null;
+    const grant = await readJson<WorkspaceWriterGrant>(
+      path.join(await this.grantsRootFor(scopeDigest), `${generation}.json`),
+    );
+    if (!grant) return null;
+    return writerIdentityOf(grant, claim.tenantId);
+  }
   private async freezePath(scopeDigest: string): Promise<string> {
     return path.join(await this.grantsRootFor(scopeDigest), FREEZE_FILE);
   }
@@ -631,18 +744,49 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         if (mismatch) {
           throw new WorkspaceWriterNotFencedError(`同一 operation 的重放身份不一致：${mismatch}`);
         }
+        // A07 决策二：回执是**历史成功收据**，不是"授权现在仍然有效"的证明。
+        // 已撤销的代际、或当前授权指针已不再属于该代际的旧回执，都不能因为这份 JSON
+        // 还在盘上就把物理写权发回去 —— 否则"重放"就成了复活旧写者的旁路。
+        if (await this.readWriterRevocation(input.scopeDigest, input.writerGeneration)) {
+          throw new WorkspaceWriterNotFencedError(
+            `generation ${input.writerGeneration} 的激活回执已失效：该代际已被撤销`,
+          );
+        }
+        const liveCurrent = await this.readCurrentWriter(input.scopeDigest);
+        if (
+          !liveCurrent ||
+          liveCurrent.writerGeneration !== input.writerGeneration ||
+          JSON.stringify(grantIdentity(liveCurrent)) !==
+            JSON.stringify(grantIdentity(recordedGrant))
+        ) {
+          throw new WorkspaceWriterNotFencedError(
+            `generation ${input.writerGeneration} 的激活回执已失效：当前授权指针不属于该代际`,
+          );
+        }
         return recordedGrant;
       }
 
-      const current = await this.readCurrentWriter(probe.scopeDigest);
-      if (current && current.writerGeneration > input.writerGeneration) {
-        throw new WorkspaceWriterNotFencedError("Backend 已存在更高 writer generation");
+      // A07 决策二：激活的核对基准是**物理写者全集**，不是 `current.json`。
+      // 撤销会把 current 指针整体摘掉；只看指针，就会让"已被撤销且可能仍有进程"的旧代际
+      // 凭空消失，下一代照样拿到写权 —— 那正是"两个可写者"的来源。
+      const state = await this.readScopeWriterState(probe.scopeDigest);
+      if (state.highestAllocatedGeneration > input.writerGeneration) {
+        throw new WorkspaceWriterNotFencedError(
+          `Backend 已分配更高 writer generation（已分配 ${state.highestAllocatedGeneration} > 请求 ${input.writerGeneration}）`,
+        );
       }
+      // 指针被摘掉之后，最高代际依旧由账本/墓碑/记录维持；被撤销的代际更不能被复用。
+      if (state.revokedGenerations.includes(input.writerGeneration)) {
+        throw new WorkspaceWriterNotFencedError(
+          `writer generation ${input.writerGeneration} 已被撤销，不得复用该代际`,
+        );
+      }
+      const current = state.current;
       const candidateGrant = this.buildGrant({
         probe,
         input,
         writerRoot,
-        previousWriterGeneration: current?.writerGeneration ?? null,
+        previousWriterGeneration: previousAllocatedGeneration(state, input.writerGeneration),
         stop: null,
       });
       if (current && current.writerGeneration === input.writerGeneration) {
@@ -651,6 +795,7 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         ) {
           throw new WorkspaceWriterNotFencedError("同 generation 的 writer 身份冲突");
         }
+        await this.recordAllocatedGeneration(probe.scopeDigest, input.writerGeneration);
         await this.writeCurrentWriter(probe.scopeDigest, current, input.operationId);
         await writeJsonStable(await this.operationPath(receiptKey), {
           operationId: receiptKey,
@@ -660,27 +805,32 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         return current;
       }
 
-      // 真实的旧 Writer 撤销：停止旧执行组并确认退出；没有实际检查不得声明已撤销。
-      const stop: WriterStopEvidence = current
-        ? await this.stopWriterGeneration(probe.scopeDigest, current.writerGeneration)
-        : {
-            previousWriterPresent: false,
-            stopped: true,
-            processGroupEmpty: true,
-            drained: true,
-            signals: [],
-            pids: [],
-          };
-      if (!stop.stopped || !stop.processGroupEmpty) {
-        throw new WorkspaceWriterNotFencedError("旧 Writer 进程组未确认停止");
+      // 真实的旧 Writer 撤销：停止**全部更旧且未确认停止**的执行组并确认退出。
+      // 只停 `current` 是不够的 —— 指针丢失过的更旧代际仍可能有进程在写。
+      // 任一无法确认就拒绝激活：这是可重试 / 告警，不是"继续跑"。
+      const outcomes = await this.stopUnreconciledWriters(
+        probe.scopeDigest,
+        input.writerGeneration,
+      );
+      const blocked = outcomes.filter(
+        (outcome) => !(outcome.evidence.stopped && outcome.evidence.processGroupEmpty),
+      );
+      if (blocked.length > 0) {
+        throw new WorkspaceWriterNotFencedError(
+          `旧 Writer 进程组未确认停止：${blocked
+            .map((outcome) => `generation ${outcome.writerGeneration}（${outcome.reason}）`)
+            .join("、")}；定位记录已保留，必须重试或人工处置后才能激活下一代`,
+        );
       }
+      const stop = mergeStopEvidence(outcomes.map((outcome) => outcome.evidence));
       const grant = this.buildGrant({
         probe,
         input,
         writerRoot,
-        previousWriterGeneration: current?.writerGeneration ?? null,
+        previousWriterGeneration: previousAllocatedGeneration(state, input.writerGeneration),
         stop,
       });
+      await this.recordAllocatedGeneration(probe.scopeDigest, input.writerGeneration);
       await this.writeGrantRecord(probe.scopeDigest, grant);
       await this.writeCurrentWriter(probe.scopeDigest, grant, input.operationId);
       await writeJsonStable(await this.operationPath(receiptKey), {
@@ -693,150 +843,40 @@ export class WorkspaceHostBroker implements WorkspaceHost {
   }
 
   /**
-   * 物理 scope 的跨进程临界区。
+   * 物理 scope 的跨进程临界区（A07 决策一）。
    *
-   * 用 `mkdir` 的原子性做互斥量：同 root 的不同 Broker 进程/实例都能看到同一把锁，
-   * 因此"读代际 → 停旧 Writer → 写新代际"不会交错，generation 严格单调。
+   * 内核排他锁落在**稳定锁文件**上（`lib/workspace/scope-lock.ts` → `native/workspace-lock`）：
    *
-   * A07 7.5：锁目录里必须留下**持有者归属证据**（pid + hostIdentity + 租约），
-   * 因为持锁进程被强杀时 `finally` 不会执行。回收只能凭证据：
-   * 持有者租约已过期、且无法证明其存活时，先把锁目录原子 `rename` 走（只有一个
-   * 竞争者能成功），再写下回收记录。**不做无条件删除** —— 那会让两个持有者同时
-   * 进入临界区，比"卡住"更危险。
+   * - 同 scope 的所有 Broker 进程/实例算出同一个锁文件路径，因此在同一把内核锁上排队；
+   * - 持锁进程被 SIGKILL 由 OS 释放，无需（也不再允许）任何"过期持有者回收"；
+   * - 锁文件**从不** rename/unlink/按 mtime 删除 —— 那正是审查报告点出的路径替换竞争；
+   * - 等待是非阻塞尝试 + 有界异步等待，不会阻塞事件循环（heartbeat 保持可用）；
+   * - 超时抛 `ScopeLockBusyError`（可重试占用），绝不触碰现有持有者的锁。
    */
   private async withScopeLock<T>(
     scopeDigest: string,
     hostIdentity: string,
     run: () => Promise<T>,
   ): Promise<T> {
-    const grantsRoot = await this.grantsRootFor(scopeDigest);
-    const lockDir = path.join(grantsRoot, SCOPE_LOCK_DIR_NAME);
-    await mkdir(grantsRoot, { recursive: true });
-    const owner = await this.acquireScopeLock(scopeDigest, hostIdentity, lockDir);
+    const lockPath = scopeLockFilePath(await this.grantsRootFor(scopeDigest));
     try {
-      return await run();
-    } finally {
-      // 只释放自己持有的锁：若持有者记录已被别人按"失活"回收，此处不得删掉新持有者的锁。
-      const held = await readJson<ScopeLockOwnerRecord>(path.join(lockDir, SCOPE_LOCK_OWNER_FILE));
-      if (held?.holderId === owner.holderId) {
-        await rm(lockDir, { recursive: true, force: true }).catch(() => undefined);
-      }
-    }
-  }
-
-  /** 取得 scope 锁；只在取得**归属证据**之后才返回，失败按证据回收或超时报错。 */
-  private async acquireScopeLock(
-    scopeDigest: string,
-    hostIdentity: string,
-    lockDir: string,
-  ): Promise<ScopeLockOwnerRecord> {
-    const deadline = Date.now() + SCOPE_LOCK_TIMEOUT_MS;
-    for (;;) {
-      const owner = await this.tryCreateScopeLock(hostIdentity, lockDir);
-      if (owner) return owner;
-      const holder = await readJson<ScopeLockOwnerRecord>(
-        path.join(lockDir, SCOPE_LOCK_OWNER_FILE),
-      );
-      const verdict = await this.assessScopeLockHolder(hostIdentity, lockDir, holder);
-      if (verdict.recoverable) {
-        await this.recoverScopeLock(scopeDigest, lockDir, holder, verdict.reason);
-        continue;
-      }
-      if (Date.now() > deadline) {
+      return await withNativeScopeLock({ lockPath, hostIdentity, run });
+    } catch (error) {
+      // 等待超时是**可重试占用**，不是"已确认未 fence"。对外仍收敛到 Broker 既有的
+      // `WorkspaceWriterNotFenced` 分类（调用方按该稳定串判定），具体原因放 detail。
+      if (error instanceof ScopeLockBusyError) {
         throw new WorkspaceWriterNotFencedError(
-          `scope 锁等待超时（持有者 ${holder?.holderId ?? "无归属记录"} pid=${
-            holder?.pid ?? "unknown"
-          } 依据=${verdict.reason}）`,
+          `scope 锁在 ${error.waitedMs}ms 内不可取得（可重试占用，非物理停止证据）path=${lockPath}${
+            error.holderDiagnostic ? `；持有者诊断 ${error.holderDiagnostic}` : ""
+          }`,
         );
       }
-      await delay(SCOPE_LOCK_RETRY_MS);
-    }
-  }
-
-  private async tryCreateScopeLock(
-    hostIdentity: string,
-    lockDir: string,
-  ): Promise<ScopeLockOwnerRecord | null> {
-    try {
-      await mkdir(lockDir);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      return null;
-    }
-    const owner: ScopeLockOwnerRecord = {
-      holderId: `lock:${randomUUID()}`,
-      hostIdentity,
-      pid: process.pid,
-      acquiredAt: new Date().toISOString(),
-      leaseExpiresAt: new Date(Date.now() + SCOPE_LOCK_LEASE_MS).toISOString(),
-    };
-    await writeJsonStable(path.join(lockDir, SCOPE_LOCK_OWNER_FILE), owner);
-    return owner;
-  }
-
-  /**
-   * 判定现有锁的持有者是否已失活到可以回收。
-   *
-   * 优先级就是证据强度：**同 Host 上"持有者进程已不存在"比租约更强**，因此先判死亡。
-   * 若把租约放在前面，持锁进程被强杀后仍要枯等到租约到期才能恢复 —— 那正是
-   * "只能持续等到超时报错"的老问题换了个形式。
-   */
-  private async assessScopeLockHolder(
-    hostIdentity: string,
-    lockDir: string,
-    holder: ScopeLockOwnerRecord | null,
-  ): Promise<{ recoverable: boolean; reason: string }> {
-    if (!holder) {
-      const stats = await stat(lockDir).catch(() => null);
-      if (!stats) return { recoverable: false, reason: "lock_vanished" };
-      const ageMs = Date.now() - stats.mtimeMs;
-      // 宽限之内认为持有者正在写归属证据，继续等待而不是抢锁。
-      if (ageMs < SCOPE_LOCK_OWNER_GRACE_MS) {
-        return { recoverable: false, reason: "owner_record_pending" };
+      // provider 不可用是环境错误：绝不能退化成"没有锁也能写"。
+      if (error instanceof ScopeLockUnavailableError) {
+        throw new WorkspaceWriterNotFencedError(`scope 内核锁不可用：${error.message}`);
       }
-      return { recoverable: true, reason: "owner_record_missing" };
-    }
-    const leaseActive = Date.parse(holder.leaseExpiresAt) > Date.now();
-    if (holder.hostIdentity === hostIdentity) {
-      if (processAlive(holder.pid)) {
-        // 活着就是活着：租约过期也只报"存活"，绝不因为超时去抢别人的锁。
-        return { recoverable: false, reason: leaseActive ? "lease_active" : "holder_alive" };
-      }
-      return { recoverable: true, reason: "holder_dead" };
-    }
-    // 不同 Host 无法探测 pid，只能凭租约这一持久证据判断。
-    if (leaseActive) return { recoverable: false, reason: "lease_active" };
-    return { recoverable: true, reason: "cross_host_lease_expired" };
-  }
-
-  /** 原子接管失效锁并留下回收证据。`rename` 失败说明已被其他竞争者回收。 */
-  private async recoverScopeLock(
-    scopeDigest: string,
-    lockDir: string,
-    previousOwner: ScopeLockOwnerRecord | null,
-    reason: string,
-  ): Promise<void> {
-    const graveyard = `${lockDir}.reclaimed.${randomUUID()}`;
-    try {
-      await rename(lockDir, graveyard);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
-    await writeJsonStable(
-      path.join(
-        await this.grantsRootFor(scopeDigest),
-        LOCK_RECOVERIES_DIR,
-        `${Date.now()}-${randomUUID()}.json`,
-      ),
-      {
-        scopeDigest,
-        recoveredAt: new Date().toISOString(),
-        previousOwner,
-        reason,
-      } satisfies ScopeLockRecoveryRecord,
-    );
-    await rm(graveyard, { recursive: true, force: true }).catch(() => undefined);
   }
 
   private buildGrant(input: {
@@ -932,6 +972,127 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     );
   }
 
+  // ── 物理写者全集（A07 决策二） ───────────────────────────
+
+  private async ledgerPath(scopeDigest: string): Promise<string> {
+    return path.join(await this.grantsRootFor(scopeDigest), LEDGER_FILE);
+  }
+
+  /**
+   * 把某代际登记进高水位账本（单调，只增不减）。
+   *
+   * 撤销会摘掉 `current.json`；如果没有账本，"最高代际"就只剩指针，
+   * `activateWriter` 便可能接受一个比已分配代际更低（甚至已被撤销）的 generation。
+   */
+  private async recordAllocatedGeneration(scopeDigest: string, generation: number): Promise<void> {
+    const ledger = await readJson<ScopeWriterLedgerRecord>(await this.ledgerPath(scopeDigest));
+    const highest = Math.max(ledger?.highestAllocatedGeneration ?? 0, generation);
+    await writeJsonStable(await this.ledgerPath(scopeDigest), {
+      schemaVersion: 1,
+      scopeDigest,
+      highestAllocatedGeneration: highest,
+      updatedAt: new Date().toISOString(),
+    } satisfies ScopeWriterLedgerRecord);
+  }
+
+  /** 本 scope 的全部 Writer 归属记录（目录枚举，不依赖任何指针文件）。 */
+  private async listWriterRecords(scopeDigest: string): Promise<WriterProcessRecord[]> {
+    const component = safeComponent(scopeDigest);
+    const dir = path.join(await this.controlRoot(), WRITERS_DIR);
+    const names = await readdir(dir).catch(() => [] as string[]);
+    const records: WriterProcessRecord[] = [];
+    for (const name of names) {
+      if (!name.startsWith(`${component}.`) || !name.endsWith(".json")) continue;
+      const record = await readManagedWriterContainment<WriterProcessRecord>(path.join(dir, name));
+      if (record) records.push(record);
+    }
+    return records.sort((left, right) => left.writerGeneration - right.writerGeneration);
+  }
+
+  /** 已分配过的代际（grant 记录文件 + 撤销墓碑 + 账本 + current 指针的并集）。 */
+  private async listAllocatedGenerations(scopeDigest: string): Promise<number[]> {
+    const grantsRoot = await this.grantsRootFor(scopeDigest);
+    const revoked = await listGenerationFiles(path.join(grantsRoot, REVOKED_DIR));
+    const grants = await listGenerationFiles(grantsRoot);
+    const ledger = await readJson<ScopeWriterLedgerRecord>(await this.ledgerPath(scopeDigest));
+    const records = await this.listWriterRecords(scopeDigest);
+    const current = await this.readCurrentWriter(scopeDigest);
+    return [
+      ...new Set([
+        ...grants,
+        ...revoked,
+        ...records.map((record) => record.writerGeneration),
+        ...(ledger ? [ledger.highestAllocatedGeneration] : []),
+        ...(current ? [current.writerGeneration] : []),
+      ]),
+    ].sort((left, right) => left - right);
+  }
+
+  /**
+   * 读出这个 scope 的物理写者全集。
+   *
+   * 这是 `activateWriter` 在临界区里的核对基准：代际高水位、当前授权指针、
+   * 每一代的撤销墓碑、以及**全部未确认停止的 Writer 记录**。
+   */
+  async readScopeWriterState(scopeDigest: string): Promise<ScopeWriterState> {
+    const [current, records, allocations, revocations] = await Promise.all([
+      this.readCurrentWriter(scopeDigest),
+      this.listWriterRecords(scopeDigest),
+      this.listAllocatedGenerations(scopeDigest),
+      listGenerationFiles(path.join(await this.grantsRootFor(scopeDigest), REVOKED_DIR)),
+    ]);
+    const unreconciled: UnreconciledWriter[] = [];
+    for (const record of records) {
+      if (record.stop?.confirmed === true) continue;
+      unreconciled.push({
+        writerGeneration: record.writerGeneration,
+        phase: record.phase,
+        pid: record.pid,
+        processGroupId: record.processGroupId,
+        recordPath: await this.writerRecordPath(scopeDigest, record.writerGeneration),
+        reason: writerUnreconciledReason(record),
+      });
+    }
+    return {
+      scopeDigest,
+      highestAllocatedGeneration: allocations.at(-1) ?? 0,
+      current,
+      revokedGenerations: revocations.sort((left, right) => left - right),
+      writerRecords: records,
+      unreconciledWriters: unreconciled,
+    };
+  }
+
+  /**
+   * 真实停止**所有更旧且未确认停止**的写者。
+   *
+   * 返回逐代结果（含失败原因），由调用方决定是拒绝还是在重试后推进：
+   * 本方法不做"猜一个 PID 就 kill"的事，也不删除任何未确认记录。
+   */
+  private async stopUnreconciledWriters(
+    scopeDigest: string,
+    requestedGeneration: number,
+  ): Promise<Array<{ writerGeneration: number; reason: string; evidence: WriterStopEvidence }>> {
+    const state = await this.readScopeWriterState(scopeDigest);
+    const outcomes: Array<{
+      writerGeneration: number;
+      reason: string;
+      evidence: WriterStopEvidence;
+    }> = [];
+    const stale = state.unreconciledWriters
+      .filter((entry) => entry.writerGeneration < requestedGeneration)
+      .sort((left, right) => left.writerGeneration - right.writerGeneration);
+    for (const entry of stale) {
+      const evidence = await this.stopWriterGeneration(scopeDigest, entry.writerGeneration);
+      outcomes.push({
+        writerGeneration: entry.writerGeneration,
+        reason: entry.reason,
+        evidence,
+      });
+    }
+    return outcomes;
+  }
+
   async getWriter(
     scopeDigest: string,
     writerGeneration: number,
@@ -988,6 +1149,23 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     if (await this.readWriterRevocation(input.scopeDigest, input.writerGeneration)) {
       throw new WorkspaceWriterNotFencedError("该 writer 代际已被撤销");
     }
+    // A07 决策二：授权出口同样要核对"未确认停止的更旧写者集合"。
+    // 冻结只覆盖其中一个方向；若更旧代际仍有未确认停止的写者，签发新写权就等于
+    // 默认承认"两个可写者"。这条检查只看更旧代际，因此对正常路径是零代价的（无记录即通过）。
+    const stale = (await this.listWriterRecords(input.scopeDigest)).filter(
+      (record) =>
+        record.writerGeneration < input.writerGeneration && record.stop?.confirmed !== true,
+    );
+    if (stale.length > 0) {
+      throw new WorkspaceWriterNotFencedError(
+        `存在未确认停止的更旧 Writer（${stale
+          .map(
+            (record) =>
+              `generation ${record.writerGeneration}（${writerUnreconciledReason(record)}）`,
+          )
+          .join("、")}），拒绝签发写入授权`,
+      );
+    }
     const current = await this.readCurrentWriter(input.scopeDigest);
     if (
       !current ||
@@ -1002,6 +1180,88 @@ export class WorkspaceHostBroker implements WorkspaceHost {
       writerGeneration: current.writerGeneration,
       grantRef: current.grantRef,
     };
+  }
+
+  /**
+   * 受管写入的**锁内**授权复核（A07 决策六）。
+   *
+   * 与 `authorizeWrite` 同样读屏障，但更严：它核对的是**完整归属身份**，而不是
+   * `(generation, ownershipId)` 两个字段 —— 后者在"同 Attempt 换 Owner/Epoch"的重放
+   * 场景下会承认一份属于旧执行的写权。返回这次写入真正归属的那份 grant。
+   *
+   * 本方法**只能**在 scope 临界区内调用；它是"冻结期无新增/缓存旁路写入"的实现点。
+   */
+  private async assertManagedWriteGrant(
+    identity: WorkspaceWriterIdentity,
+    what: string,
+  ): Promise<WorkspaceWriterGrant> {
+    const freeze = await this.readFreeze(identity.scopeDigest);
+    if (freeze) {
+      throw new WorkspaceWriterNotFencedError(
+        `${what}：安全点冻结期间不接受受管写入（intent ${freeze.checkpointIntentId}）`,
+      );
+    }
+    if (await this.readWriterRevocation(identity.scopeDigest, identity.writerGeneration)) {
+      throw new WorkspaceWriterNotFencedError(`${what}：该 writer 代际已被撤销`);
+    }
+    const stale = (await this.listWriterRecords(identity.scopeDigest)).filter(
+      (record) =>
+        record.writerGeneration < identity.writerGeneration && record.stop?.confirmed !== true,
+    );
+    if (stale.length > 0) {
+      throw new WorkspaceWriterNotFencedError(
+        `${what}：存在未确认停止的更旧 Writer（${stale
+          .map(
+            (record) =>
+              `generation ${record.writerGeneration}（${writerUnreconciledReason(record)}）`,
+          )
+          .join("、")}），拒绝受管写入`,
+      );
+    }
+    const current = await this.readCurrentWriter(identity.scopeDigest);
+    if (!current || !current.oldWriterRevoked) {
+      throw new WorkspaceWriterNotFencedError(`${what}：写入未获当前 Writer 授权`);
+    }
+    const mismatch = writerIdentityMismatch(writerIdentityOf(current, identity.tenantId), identity);
+    if (mismatch) {
+      throw new WorkspaceWriterNotFencedError(
+        `${what}：请求身份与当前 Writer 不一致（${mismatch}）`,
+      );
+    }
+    return current;
+  }
+
+  /**
+   * 受管 File 写/删的唯一入口（A07 决策六）。
+   *
+   * 关键性质：**授权复核与真实 IO 在同一个 scope 临界区里完成**。调用方拿不到一个
+   * "稍后想写就写"的可写根，因此冻结一旦落盘，任何尚未执行的文件写入都会 fail closed ——
+   * 这正是 `authorizeWrite` 单独无法保证的那一段（授权与 IO 之间的交错）。
+   *
+   * 幂等性说明：允许的操作只有 write(path, content) 与 delete(path)，重复执行结果相同，
+   * 因此**不**另设 operation receipt 来判重；相反，写路径必须走 `grants/<generation>.json`
+   * 的归属复核。设计稿提到的"稳定 operationId"在本题面下不产生可核对的事新事实，
+   * 该偏离记录在 implementation-result.json。
+   */
+  async executeManagedFileOperation(input: {
+    identity: WorkspaceWriterIdentity;
+    operation: ManagedFileOperation;
+  }): Promise<ManagedFileOperationResult> {
+    const probe = await this.observeIdentity();
+    if (probe.scopeDigest !== input.identity.scopeDigest) {
+      throw new WorkspaceWriterNotFencedError("实际存储 scope 与请求 scope 不一致");
+    }
+    return await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      const grant = await this.assertManagedWriteGrant(input.identity, "受管文件操作");
+      const target = managedWriteTarget(grant.root, input.operation.path);
+      if (input.operation.kind === "write") {
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, input.operation.content, "utf8");
+      } else {
+        await rm(target, { force: true });
+      }
+      return { kind: input.operation.kind, path: target } satisfies ManagedFileOperationResult;
+    });
   }
 
   // ── 真实进程组管理 ─────────────────────────────────────
@@ -1044,7 +1304,7 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         throw new WorkspaceWriterNotFencedError("没有该 generation 的有效 writer grant");
       }
       const recordPath = await this.writerRecordPath(probe.scopeDigest, input.writerGeneration);
-      const existing = await readJson<WriterProcessRecord>(recordPath);
+      const existing = await readManagedWriterContainment<WriterProcessRecord>(recordPath);
       if (existing) {
         // `spawning` 表示"确定启动过、但进程组未知"：绝不能当成"没有 Writer"。
         const possiblyAlive =
@@ -1053,50 +1313,21 @@ export class WorkspaceHostBroker implements WorkspaceHost {
           throw new WorkspaceWriterNotFencedError("该 generation 已有(或可能有)存活的受管 Writer");
         }
       }
-      const base = {
+      // A07 决策三：用户 command 在 containment 定位**确认落盘之前**不得开始运行。
+      // 启动流程本身负责 ①意图 → ②wrapper → ③持久定位 → ④GO 的顺序与失败收口。
+      const launched = await startManagedWriter({
+        recordPath,
         scopeDigest: probe.scopeDigest,
         writerGeneration: input.writerGeneration,
-        command: [input.command, ...input.args].join(" "),
+        command: input.command,
+        args: input.args,
+        cwd: input.cwd,
         activityPath: input.activityPath ?? null,
-      };
-      // 先落**启动意图**：spawn 成功到写 PID 之间被强杀，也不会留下"没有持久归属记录"的写者。
-      await writeJsonStable(recordPath, {
-        ...base,
-        phase: "spawning",
-        pid: null,
-        processGroupId: null,
-        registeredAt: new Date().toISOString(),
-      } satisfies WriterProcessRecord);
-      let child: ChildProcess;
-      try {
-        child = spawn(input.command, input.args, {
-          cwd: input.cwd,
-          detached: true,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-      } catch (error) {
-        // spawn 直接失败：确定没有进程被创建，意图记录必须收回，否则会永久挡住后续启动。
-        await rm(recordPath, { force: true }).catch(() => undefined);
-        throw error;
-      }
-      if (child.pid === undefined) {
-        await rm(recordPath, { force: true }).catch(() => undefined);
-        throw new WorkspaceWriterNotFencedError("受管 Writer 启动失败");
-      }
-      child.stdout?.resume();
-      child.stderr?.resume();
-      child.unref();
-      await writeJsonStable(recordPath, {
-        ...base,
-        phase: "running",
-        pid: child.pid,
-        processGroupId: child.pid,
-        registeredAt: new Date().toISOString(),
-      } satisfies WriterProcessRecord);
+      });
       return {
         writerRef: `writer:${probe.scopeDigest}:${input.writerGeneration}`,
-        pid: child.pid,
-        processGroupId: child.pid,
+        pid: launched.pid,
+        processGroupId: launched.processGroupId,
       };
     });
   }
@@ -1108,21 +1339,48 @@ export class WorkspaceHostBroker implements WorkspaceHost {
    * 仍会承认 `current.json` 里那份 grant。撤销必须同时落一份持久墓碑，并把指向该代际的
    * `current.json` 摘掉；否则"DB 层可能还会拦"就成了唯一防线，而那不是物理撤销的证据。
    */
-  async revokeWriterGeneration(
-    scopeDigest: string,
-    writerGeneration: number,
-  ): Promise<WriterStopEvidence> {
+  async revokeWriterGeneration(identity: WorkspaceWriterIdentity): Promise<WriterStopEvidence> {
     const reason = "revoked_by_control_plane";
+    const scopeDigest = identity.scopeDigest;
+    const writerGeneration = identity.writerGeneration;
     const probe = await this.observeIdentity();
     return await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      // A07 决策五：**先核对"要撤的是不是这一份归属"，再碰任何进程**。
+      // 这一步必须发生在 `stopWriterGeneration` 之前 —— 一旦发了信号，误杀就已经是物理事实，
+      // 事后回滚不了"另一个健康 Writer 的进程组已经被停掉"。
+      const attribution = await this.readWriterAttribution(scopeDigest, writerGeneration);
+      if (attribution) {
+        const mismatch = writerIdentityMismatch(attribution, identity);
+        if (mismatch) {
+          throw new WorkspaceWriterNotFencedError(
+            `撤销请求的精确身份与该代际的持久归属不一致（${mismatch}）：不做任何物理停止`,
+          );
+        }
+      } else {
+        // 没有持久归属 = 这一代从未被授予过物理写权，因此不存在"属于它的"containment。
+        // 但盘上可能留有**无法归属**的写者记录（例如另一条路径登记过同一代际）：
+        // 那种情况下绝不能凭编号去停它 —— fail closed，交由人工/重试处置。
+        const orphan = await readManagedWriterContainment<WriterProcessRecord>(
+          await this.writerRecordPath(scopeDigest, writerGeneration),
+        );
+        if (orphan && orphan.stop?.confirmed !== true) {
+          throw new WorkspaceWriterNotFencedError(
+            `generation ${writerGeneration} 有未确认停止的 containment，但盘上没有可核对的持久归属：拒绝按编号停止`,
+          );
+        }
+      }
       const evidence = await this.stopWriterGeneration(scopeDigest, writerGeneration);
       await writeJsonStable(await this.revokedWriterPath(scopeDigest, writerGeneration), {
         scopeDigest,
         writerGeneration,
         reason,
         revokedAt: new Date().toISOString(),
+        identity,
         evidence,
       } satisfies WriterRevocationRecord);
+      // 先入账再摘指针：`current.json` 被摘掉之后，代际高水位仍必须由账本维持，
+      // 否则下一代可以从一个"指针为空"的 scope 回退到更低（甚至已被撤销）的代际。
+      await this.recordAllocatedGeneration(scopeDigest, writerGeneration);
       const current = await this.readCurrentWriter(scopeDigest);
       if (current?.writerGeneration === writerGeneration) {
         await rm(path.join(await this.grantsRootFor(scopeDigest), "current.json"), {
@@ -1133,12 +1391,23 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     });
   }
 
+  /**
+   * 真实停止某代际的受管 Writer，并把**停止确认事实**写回它自己的记录。
+   *
+   * A07 决策二：
+   * - `spawning`（只有启动意图、没有进程组定位）永远返回 `stopped: false`，
+   *   记录保留为"未确认" —— 确定启动过却无法核验，就不能声明已停止；
+   * - 只有在进程组实测清空**且** IO 排空之后才写 `confirmed = true`；
+   * - 失败时**不删记录**，只累加尝试次数与失败原因，供重试与可审计处置；
+   * - 记录即使已确认停止也保留（GC 与"停止事实"是两件事），因此"记录缺失"
+   *   只意味着"这一代从未登记过进程"，而不是"曾经有过、被清掉了"。
+   */
   private async stopWriterGeneration(
     scopeDigest: string,
     generation: number,
   ): Promise<WriterStopEvidence> {
     const recordPath = await this.writerRecordPath(scopeDigest, generation);
-    const record = await readJson<WriterProcessRecord>(recordPath);
+    const record = await readManagedWriterContainment<WriterProcessRecord>(recordPath);
     const signals: string[] = [];
     if (!record) {
       return {
@@ -1150,11 +1419,16 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         pids: [],
       };
     }
+    // 已确认停止：直接返回那份实测证据。停止是幂等的物理事实，不重复发信号。
+    if (record.stop?.confirmed === true) return record.stop.evidence;
+
+    const attempts = (record.stop?.attempts ?? 0) + 1;
+    const attemptedAt = new Date().toISOString();
     // A07 7.3：`spawning` 阶段只有"启动意图"，没有进程组。确定启动过、却无法核验，
     // 因此必须按"可能仍有写者"报告；声明 stopped=true 就等于把真实写者当成不存在。
     // 记录**保留**，让后续调用方（与运维）仍能看到这份归属。
     if (record.phase === "spawning" || record.processGroupId === null || record.pid === null) {
-      return {
+      const evidence: WriterStopEvidence = {
         previousWriterPresent: true,
         stopped: false,
         processGroupEmpty: false,
@@ -1162,6 +1436,8 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         signals,
         pids: [],
       };
+      await this.persistStopAttempt(recordPath, record, evidence, attempts, attemptedAt);
+      return evidence;
     }
     const pids = [record.pid];
     if (await this.processGroupAlive(record.processGroupId)) {
@@ -1176,15 +1452,50 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     }
     const processGroupEmpty = !(await this.processGroupAlive(record.processGroupId));
     const drained = processGroupEmpty && (await this.awaitActivityDrain(record));
-    await rm(recordPath, { force: true });
-    return {
+    const evidence: WriterStopEvidence = {
       previousWriterPresent: true,
-      stopped: processGroupEmpty,
+      stopped: processGroupEmpty && drained,
       processGroupEmpty,
       drained,
       signals,
       pids,
     };
+    await this.persistStopAttempt(recordPath, record, evidence, attempts, attemptedAt);
+    return evidence;
+  }
+
+  /**
+   * 把一次停止尝试写回**同一份记录**（A07 决策二）。
+   *
+   * 绝不 `rm(recordPath)`：记录里的进程组定位是后续重试的唯一依据，
+   * 无条件删除等于把"无法确认"伪造成"没有写者"。
+   */
+  private async persistStopAttempt(
+    recordPath: string,
+    record: WriterProcessRecord,
+    evidence: WriterStopEvidence,
+    attempts: number,
+    attemptedAt: string,
+  ): Promise<void> {
+    const confirmed = evidence.stopped && evidence.processGroupEmpty && evidence.drained;
+    const locationless =
+      record.phase === "spawning" || record.processGroupId === null || record.pid === null;
+    // 停止证据同样是"崩溃后必须能回读"的事实，因此走持久写入。
+    await writeJsonDurable(recordPath, {
+      ...record,
+      stop: {
+        confirmed,
+        confirmedAt: confirmed ? attemptedAt : null,
+        lastAttemptAt: attemptedAt,
+        attempts,
+        lastFailure: confirmed
+          ? null
+          : locationless
+            ? "只有启动意图、缺少可核验的进程组定位"
+            : "进程组在停止等待窗口内未确认清空，或写入活动未排空",
+        evidence,
+      },
+    } satisfies WriterProcessRecord);
   }
 
   /** 进程组内是否仍有存活成员（真实 `ps` 探测，不用内存推断）。 */
@@ -1412,6 +1723,69 @@ function processAlive(pid: number): boolean {
 }
 
 /** Grant 身份（不含易变 evidence）：回执幂等重放的比较基准。 */
+/**
+ * 从一份真实 grant 投影出**精确归属身份**（A07 决策五/六）。
+ *
+ * `tenantId` 不在 grant 里（它属于 scope 归属），因此由调用方显式给出。
+ */
+function writerIdentityOf(grant: WorkspaceWriterGrant, tenantId: string): WorkspaceWriterIdentity {
+  return {
+    tenantId,
+    scopeDigest: grant.scopeDigest,
+    writerGeneration: grant.writerGeneration,
+    invocationId: grant.invocationId,
+    attemptId: grant.attemptId,
+    ownershipId: grant.ownershipId,
+    operationId: grant.operationId,
+  };
+}
+
+/**
+ * 把受管文件操作的相对路径解析成受管根内的绝对路径（A07 决策六）。
+ *
+ * 只接受相对路径，并在解析后复核结果仍在根内：`..`、绝对路径、以及指向根自身的写法
+ * 一律拒绝。控制端口因此不可能借"文件能力"去写根外的东西。
+ */
+function managedWriteTarget(root: string, relPath: string): string {
+  if (!relPath || path.isAbsolute(relPath)) {
+    throw new WorkspaceWriterNotFencedError("受管文件操作只接受受管根内的相对路径");
+  }
+  const base = path.resolve(root);
+  const target = path.resolve(base, relPath);
+  const rel = path.relative(base, target);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new WorkspaceWriterNotFencedError(`受管文件操作路径越出受管根：${relPath}`);
+  }
+  return target;
+}
+
+/**
+ * 撤销请求与**持久归属**的逐项比对（A07 决策五）。
+ *
+ * 返回首个不一致的说明；`null` 表示逐字一致。刻意不做"generation 相等就算过"的短路 ——
+ * 那正是"按编号停别人"的实现形态。
+ */
+function writerIdentityMismatch(
+  attribution: WorkspaceWriterIdentity,
+  requested: WorkspaceWriterIdentity,
+): string | null {
+  const pairs: Array<[keyof WorkspaceWriterIdentity, unknown, unknown]> = [
+    ["tenantId", attribution.tenantId, requested.tenantId],
+    ["scopeDigest", attribution.scopeDigest, requested.scopeDigest],
+    ["writerGeneration", attribution.writerGeneration, requested.writerGeneration],
+    ["invocationId", attribution.invocationId, requested.invocationId],
+    ["attemptId", attribution.attemptId, requested.attemptId],
+    ["ownershipId", attribution.ownershipId, requested.ownershipId],
+    ["operationId", attribution.operationId, requested.operationId],
+  ];
+  for (const [field, actual, expected] of pairs) {
+    if (actual !== expected) {
+      return `${field}: 持久归属 ${String(actual)} ≠ 请求 ${String(expected)}`;
+    }
+  }
+  return null;
+}
+
 function grantIdentity(grant: WorkspaceWriterGrant): Record<string, unknown> {
   return {
     scopeDigest: grant.scopeDigest,
@@ -1481,6 +1855,7 @@ const RPC_METHODS = [
   "authorizeWrite",
   "spawnManagedWriter",
   "revokeWriterGeneration",
+  "executeManagedFileOperation",
   "freeze",
   "releaseFreeze",
   "snapshot",
@@ -1556,9 +1931,8 @@ function paramsToArgs(method: RpcMethod, params: Record<string, unknown> | undef
   const value = params ?? {};
   if (method === "getWriter") return [value.scopeDigest, value.writerGeneration];
   if (method === "assertWriter") return [value.grant];
-  if (method === "revokeWriterGeneration") {
-    return [value.scopeDigest, value.writerGeneration];
-  }
+  // `revokeWriterGeneration` 走默认分支：它的唯一参数就是**完整归属身份对象**。
+  // 之前这里把位置参数摊平，正好把"按编号撤销"固化进了 RPC 契约。
   return [value];
 }
 
@@ -1613,15 +1987,18 @@ export function createRemoteWorkspaceHost(baseUrl: string): WorkspaceHost & {
     cwd: string;
     activityPath?: string | null;
   }): Promise<{ writerRef: string; pid: number; processGroupId: number }>;
-  revokeWriterGeneration(
-    scopeDigest: string,
-    writerGeneration: number,
-  ): Promise<WriterStopEvidence>;
+  /** 撤销必须携带完整归属身份（A07 决策五），契约与 `WorkspaceHost` 逐字一致。 */
+  revokeWriterGeneration(identity: WorkspaceWriterIdentity): Promise<WriterStopEvidence>;
   authorizeWrite(input: {
     scopeDigest: string;
     writerGeneration: number;
     ownershipId: string;
   }): Promise<{ root: string; writerGeneration: number; grantRef: string }>;
+  /** 受管文件写/删的唯一入口（A07 决策六）：携带完整归属身份。 */
+  executeManagedFileOperation(input: {
+    identity: WorkspaceWriterIdentity;
+    operation: ManagedFileOperation;
+  }): Promise<ManagedFileOperationResult>;
 } {
   const call = async <T>(method: RpcMethod, params: Record<string, unknown>): Promise<T> => {
     // A06：契约守卫。带方法的实例（SnapshotStorage 之类）一旦进 JSON 就静默退化成普通
@@ -1662,8 +2039,16 @@ export function createRemoteWorkspaceHost(baseUrl: string): WorkspaceHost & {
         "spawnManagedWriter",
         input as unknown as Record<string, unknown>,
       ),
-    revokeWriterGeneration: (scopeDigest, writerGeneration) =>
-      call<WriterStopEvidence>("revokeWriterGeneration", { scopeDigest, writerGeneration }),
+    revokeWriterGeneration: (identity) =>
+      call<WriterStopEvidence>(
+        "revokeWriterGeneration",
+        identity as unknown as Record<string, unknown>,
+      ),
+    executeManagedFileOperation: (input) =>
+      call<ManagedFileOperationResult>(
+        "executeManagedFileOperation",
+        input as unknown as Record<string, unknown>,
+      ),
     freeze: (input) =>
       call<SafePointReceipt>("freeze", input as unknown as Record<string, unknown>),
     // A06：参数**不包装**。服务端把一个 params 对象当作"该方法的唯一参数"，

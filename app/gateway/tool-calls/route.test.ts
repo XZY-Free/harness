@@ -88,6 +88,8 @@ import {
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import {
+  type AcquireWorkspaceWriteLockResult,
+  type ReserveWorkspaceWriterOutcome,
   activateWorkspaceWriter,
   reserveWorkspaceWriter,
 } from "@/lib/workspace/workspace-write-lock-queries";
@@ -470,29 +472,39 @@ async function seedBinding(
   // HOST_AFFINE 桌面工作区：执行前必须持有 active WorkspaceWriteLock 并回填 writer generation。
   let workspaceWriterGeneration: number | null = null;
   if (frozen.desktopWorkspace) {
-    const reserved = await reserveWorkspaceWriter({
-      tenantId: TENANT,
-      storageScopeDigest: frozen.desktopWorkspace.storageScopeDigest,
-      invocationId,
-      attemptId: attempt.id,
-      ownershipId: acquired.ownership.id,
-      workspaceBindingId: frozen.desktopWorkspace.bindingId,
-      leaseExpiresAt: new Date(Date.now() + 3600_000),
-    });
-    await activateWorkspaceWriter({
-      tenantId: TENANT,
-      invocationId,
-      attemptId: attempt.id,
-      lockId: reserved.lock.id,
-      ownershipId: acquired.ownership.id,
-      leaseEpoch: acquired.ownership.leaseEpoch,
-      writerGeneration: reserved.writerGeneration,
-      backendGrantRef: "test-desktop-grant",
-      backendEvidence: {
-        scopeDigest: frozen.desktopWorkspace.storageScopeDigest,
-        writerGeneration: reserved.writerGeneration,
-      },
-    });
+    const scopeDigest = frozen.desktopWorkspace.storageScopeDigest;
+    const reserved = expectReserved(
+      await reserveWorkspaceWriter({
+        tenantId: TENANT,
+        storageScopeDigest: scopeDigest,
+        invocationId,
+        attemptId: attempt.id,
+        ownershipId: acquired.ownership.id,
+        workspaceBindingId: frozen.desktopWorkspace.bindingId,
+        leaseExpiresAt: new Date(Date.now() + 3600_000),
+      }),
+    );
+    // W→I 激活与预留共用同一条锁顺序，因此强制由真实事务驱动。
+    await db.transaction((tx) =>
+      activateWorkspaceWriter(
+        {
+          tenantId: TENANT,
+          storageScopeDigest: scopeDigest,
+          invocationId,
+          attemptId: attempt.id,
+          lockId: reserved.lock.id,
+          ownershipId: acquired.ownership.id,
+          leaseEpoch: acquired.ownership.leaseEpoch,
+          writerGeneration: reserved.writerGeneration,
+          backendGrantRef: "test-desktop-grant",
+          backendEvidence: {
+            scopeDigest,
+            writerGeneration: reserved.writerGeneration,
+          },
+        },
+        tx,
+      ),
+    );
     workspaceWriterGeneration = reserved.writerGeneration;
   }
   await db
@@ -1987,3 +1999,14 @@ it.each(["auto", "ask", "full_access"] as const)(
     expect(await db.select().from(userActionRequestTable)).toHaveLength(mode === "ask" ? 1 : 0);
   },
 );
+
+/**
+ * A07 决策四：预留的成功出口现在是**显式 outcome**。测试里凡是"预期预留成功"的地方都必须
+ * 穿过这个断言，避免直接读联合体上可能表示 `release_pending` 的字段。
+ */
+function expectReserved(outcome: ReserveWorkspaceWriterOutcome): AcquireWorkspaceWriteLockResult {
+  if (outcome.outcome !== "reserved") {
+    throw new Error(`预期预留成功，实际得到 release_pending（${outcome.reason}）`);
+  }
+  return outcome;
+}

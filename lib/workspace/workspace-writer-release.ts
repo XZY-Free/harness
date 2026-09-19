@@ -26,7 +26,23 @@ import {
   recordWorkspaceWriterReleaseFailure,
   releaseWorkspaceWriterClaim,
   scanWorkspaceWriteLocksNeedingRelease,
+  workspaceWriterIdentityFromLock,
 } from "@/lib/workspace/workspace-write-lock-queries";
+
+/**
+ * 持久行缺少可核对的完整归属 → **拒绝物理停止**（A07 决策五）。
+ *
+ * 这不是"跳过这一行"：异常会走 `recordWorkspaceWriterReleaseFailure`，该行保持 `releasing`
+ * 并按退避继续被扫到。宁可停不下来并告警，也不能凭一个 generation 数字去停别人的 Writer。
+ */
+export class WorkspaceWriterIdentityIncompleteError extends Error {
+  readonly lockId: string;
+  constructor(lockId: string) {
+    super(`WorkspaceWriteLock ${lockId} 缺少完整 holder 归属，拒绝按 generation 物理停止`);
+    this.name = "WorkspaceWriterIdentityIncomplete";
+    this.lockId = lockId;
+  }
+}
 
 /** 超过该尝试次数仍无法回收 → dead-letter 告警（不静默）。 */
 export const WORKSPACE_RELEASE_DEAD_LETTER_ATTEMPTS = WORKSPACE_RELEASE_BACKOFF_MS.length + 1;
@@ -99,11 +115,12 @@ export async function runWorkspaceWriterRelease(input: {
     if (!binding) {
       throw new Error("WorkspaceBindingMissing");
     }
+    // A07 决策五：撤销必须携带**精确归属身份**。行里少了 holder tuple 或
+    // `backendOperationId` 时不能退回"按 generation 停"——那正是误杀健康 Writer 的路径。
+    const identity = workspaceWriterIdentityFromLock(lock);
+    if (!identity) throw new WorkspaceWriterIdentityIncompleteError(lock.id);
     const host = await (input.deps?.resolveHost ?? defaultResolveHost)(binding);
-    const evidence = await host.revokeWriterGeneration(
-      lock.storageScopeDigest,
-      lock.writerGeneration,
-    );
+    const evidence = await host.revokeWriterGeneration(identity);
     if (!evidence.stopped || !evidence.processGroupEmpty) {
       throw new Error("WorkspaceWriterStopUnverified");
     }

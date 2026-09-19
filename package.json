@@ -6,6 +6,7 @@
   "main": "desktop/bundle/main/index.js",
   "private": true,
   "scripts": {
+    "build:workspace-lock": "node scripts/build-workspace-lock.mjs",
     "dev": "APP_ENV=development next dev --turbo",
     "dev:test": "APP_ENV=test next dev --turbo",
     "build": "next build",

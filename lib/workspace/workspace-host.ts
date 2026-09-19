@@ -54,6 +54,49 @@ export interface WorkspaceWriterGrant {
   backendEvidence: Record<string, unknown>;
 }
 
+/**
+ * A07 决策五：物理 Writer 的**精确归属身份**。
+ *
+ * 复审报告的原始缺陷是"A 的激活成功后，B 的失败补偿只凭一个 generation 数字就把 A 的
+ * 健康 Writer 停掉"。因此撤销契约不接受 `(scopeDigest, writerGeneration)` 这种位置参数 ——
+ * 那正是"按编号停别人"的形态；调用方必须交出这段物理写资源**属于谁**。
+ *
+ * 这里只列 Broker **真实持久且能逐项复核**的字段（`workspace-scope.json` 的租户归属 +
+ * `grants/<generation>.json` 的授予快照）。刻意**不**包含控制面的 `lockId` 与 `leaseEpoch`：
+ *
+ * - `leaseEpoch` 不落 Broker，但它被 `operationId` 传递绑定（`writer-activate:…:epoch:<n>`），
+ *   而 `operationId` 是逐字核对的；
+ * - `lockId` 是控制面主键，物理 Host 侧没有对应事实可核。
+ *
+ * 加一个核对不了的字段只会制造"已经核对过"的假象，比不写更危险；偏离设计稿九元组的部分
+ * 按 BASELINE.md 偏差规则记录在 `implementation-result.json`。
+ */
+export interface WorkspaceWriterIdentity {
+  tenantId: string;
+  scopeDigest: string;
+  writerGeneration: number;
+  invocationId: string;
+  attemptId: string;
+  ownershipId: string;
+  operationId: string;
+}
+
+/**
+ * 受管文件操作的**受限**形态（A07 决策六）。
+ *
+ * 只有"写一个相对路径"和"删一个相对路径"两种 —— 控制端口因此不会退化成任意管理命令
+ * 执行接口。路径必须落在该代际 grant 的受管根内。
+ */
+export type ManagedFileOperation =
+  | { kind: "write"; path: string; content: string }
+  | { kind: "delete"; path: string };
+
+export interface ManagedFileOperationResult {
+  kind: ManagedFileOperation["kind"];
+  /** 本次实际落盘/删除的绝对路径；只是这次操作的事实，调用方不得据此长期缓存写权。 */
+  path: string;
+}
+
 export interface SafePointReceipt {
   checkpointIntentId: string;
   scopeDigest: string;
@@ -80,11 +123,24 @@ export interface WorkspaceHost {
   }): Promise<WorkspaceWriterGrant>;
   getWriter(scopeDigest: string, writerGeneration: number): Promise<WorkspaceWriterGrant | null>;
   assertWriter(grant: WorkspaceWriterGrant): Promise<void>;
-  /** 真实停止某代际的受管 Writer 进程组并返回可核验证据。 */
-  revokeWriterGeneration(
-    scopeDigest: string,
-    writerGeneration: number,
-  ): Promise<WriterStopEvidence>;
+  /**
+   * 真实停止**该精确归属**的受管 Writer 进程组并返回可核验证据。
+   *
+   * 身份与持久归属不符时**不做任何物理停止**（fail closed，抛 `WorkspaceWriterNotFenced`）：
+   * 迟到的失败补偿因此不可能误杀接管后的健康 Writer。
+   */
+  revokeWriterGeneration(identity: WorkspaceWriterIdentity): Promise<WriterStopEvidence>;
+  /**
+   * 受管 File 写/删的**唯一入口**（A07 决策六）。
+   *
+   * 与 `authorizeWrite` 的关键差别：后者把可写根**交回**调用方，调用方可以稍后再写 ——
+   * 冻结若落在"发回路径"与"实际 IO"之间，那次写就绕过了屏障。本入口把 IO 放进 scope
+   * 临界区：取锁 → 复核完整归属/冻结/撤销/未确认停止的更旧写者 → 立刻完成 IO。
+   */
+  executeManagedFileOperation(input: {
+    identity: WorkspaceWriterIdentity;
+    operation: ManagedFileOperation;
+  }): Promise<ManagedFileOperationResult>;
   freeze(input: {
     grant: WorkspaceWriterGrant;
     checkpointIntentId: string;

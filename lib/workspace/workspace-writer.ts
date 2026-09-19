@@ -9,11 +9,32 @@ import {
 } from "@/lib/workspace/workspace-contract";
 import type { WorkspaceWriterGrant } from "@/lib/workspace/workspace-host";
 import {
+  type ReserveWorkspaceWriterOutcome,
+  type WorkspaceReleasePending,
   activateWorkspaceWriter,
   getActiveLocksByInvocation,
   requestWorkspaceWriterRelease,
   reserveWorkspaceWriter,
+  workspaceWriterIdentityFromLock,
 } from "@/lib/workspace/workspace-write-lock-queries";
+
+/**
+ * 旧代际的物理 Writer 尚未确认停止时的**可重试**失败（A07 决策四）。
+ *
+ * 它不是配置错误、也不是权限错误：释放 lane 会继续把旧代际停下来，等它写出 `released`
+ * 之后同一次激活路径会自然成功。因此调用方应当把它当作"本轮不做、稍后重试"，
+ * 绝不能降级成"直接抢下一代"。
+ */
+export class WorkspaceWriterReleasePendingError extends Error {
+  readonly reason: WorkspaceReleasePending["reason"];
+  readonly lockId: string;
+  constructor(message: string, lock: { id: string }, reason: WorkspaceReleasePending["reason"]) {
+    super(message);
+    this.name = "WorkspaceWriterReleasePending";
+    this.lockId = lock.id;
+    this.reason = reason;
+  }
+}
 
 export interface ActivatedWorkspaceWriter {
   grant: WorkspaceWriterGrant;
@@ -93,8 +114,8 @@ export async function activatePreparedWorkspaceWriter(input: {
       lock.holderOwnershipId === input.ownership.id &&
       lock.workspaceBindingId === input.candidate.binding.id,
   );
-  const reserved = existing
-    ? { lock: existing, writerGeneration: existing.writerGeneration }
+  const reservedOutcome: ReserveWorkspaceWriterOutcome = existing
+    ? { outcome: "reserved", lock: existing, writerGeneration: existing.writerGeneration }
     : await reserveWorkspaceWriter({
         tenantId: input.tenantId,
         storageScopeDigest: scopeDigest,
@@ -107,6 +128,16 @@ export async function activatePreparedWorkspaceWriter(input: {
         backendEvidence: { phase: "reserved", resourceId: input.candidate.preparation.resourceId },
         backendOperationId: operationId,
       });
+  if (reservedOutcome.outcome === "release_pending") {
+    // A07 决策四：本行仍背着一个未确认停止的物理 Writer。绝不覆盖它、也绝不抢下一代，
+    // 只把"稍后重试"如实报给调用方；释放 lane 会把该行推到 `released`。
+    throw new WorkspaceWriterReleasePendingError(
+      `Workspace writer 释放未完成（${reservedOutcome.reason}），本轮不分配下一代`,
+      reservedOutcome.lock,
+      reservedOutcome.reason,
+    );
+  }
+  const reserved = reservedOutcome;
   try {
     if (reserved.lock.lockState === "active") {
       // 已激活：只读真实 Backend 回执，绝不重复开 Writer。
@@ -134,6 +165,7 @@ export async function activatePreparedWorkspaceWriter(input: {
       activateWorkspaceWriter(
         {
           tenantId: input.tenantId,
+          storageScopeDigest: scopeDigest,
           invocationId: input.invocationId,
           attemptId: input.attemptId,
           lockId: reserved.lock.id,
@@ -153,9 +185,15 @@ export async function activatePreparedWorkspaceWriter(input: {
     // 先让 Backend 真实撤销该 generation 的 Writer（尽力而为，失败也会被释放 lane 重做），
     // 再写**持久**释放请求；控制面不直接写 released、也不清空 Backend 定位字段
     // （§7：不能先清空回执定位再失去清理能力）。
-    await input.candidate.backend.host
-      .revokeWriterGeneration(scopeDigest, reserved.writerGeneration)
-      .catch(() => undefined);
+    // A07 决策五：补偿也必须带**精确归属身份**。没有完整归属时**不撤销** ——
+    // 按 generation 撤回一个可能已属于别段执行权的 Writer，正是要消灭的误杀形态；
+    // 释放义务仍由 `requestWorkspaceWriterRelease` 落进持久状态去重试。
+    const compensationIdentity = workspaceWriterIdentityFromLock(reserved.lock);
+    if (compensationIdentity) {
+      await input.candidate.backend.host
+        .revokeWriterGeneration(compensationIdentity)
+        .catch(() => undefined);
+    }
     await requestWorkspaceWriterRelease({
       tenantId: input.tenantId,
       lockId: reserved.lock.id,

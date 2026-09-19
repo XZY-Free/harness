@@ -1,0 +1,11 @@
+{
+  "name": "@snowharness/workspace-lock",
+  "version": "0.0.0",
+  "private": true,
+  "description": "受管 Workspace scope 的稳定文件内核排他锁（A07 决策一）。",
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "gypfile": true,
+  "files": ["index.cjs", "index.d.ts", "src", "binding.gyp"],
+  "license": "UNLICENSED"
+}
