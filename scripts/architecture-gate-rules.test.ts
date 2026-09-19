@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type FinalClosureTestEntry,
   type SourceDocument,
   checkAgentCallFinalizationGate,
   checkAgentCallRuntimeBoundaryGate,
@@ -218,8 +219,20 @@ describe("Topic 01 final closure boundary gate", () => {
     ),
     doc(
       "lib/runtime/application/runtime-resume.ts",
-      "getActiveExecutionOwnership({}); const loop = new HostedHarnessLoop({}); const running = loop.run(); return await running; cancelActiveAgentCalls({});",
+      "getActiveExecutionOwnership({}); const loop = new HostedHarnessLoop({}); const running = loop.run(); const result = await running; if (!result.pending) return result; cancelActiveAgentCalls({}); return result;",
     ),
+  ];
+
+  /**
+   * A03：Resume 的源码形态可以被改写，"不可退化"这一意图不能 —— 因此真实行为回归必须
+   * 在测试收集清单里（`checkFinalClosureBoundaryGate` 的 resumeBehaviorRegressions）。
+   */
+  const resumeBehaviorTestFiles: FinalClosureTestEntry[] = [
+    {
+      file: "lib/runtime/adapters/hosted-adapter-resume.integration.test.ts",
+      group: "integration",
+    },
+    { file: "lib/runtime/__tests__/managed-resume-lifecycle.db.test.ts", group: "db" },
   ];
 
   it("接受单一 Schema Root、durable continuation 与真实 Hosted resume", () => {
@@ -229,9 +242,22 @@ describe("Topic 01 final closure boundary gate", () => {
       [
         { file: "a.test.ts", group: "unit" },
         { file: "b.test.ts", group: "db" },
+        ...resumeBehaviorTestFiles,
       ],
     );
     expect(result).toEqual({ passed: true, failures: [] });
+  });
+
+  it("Resume 行为回归未登记时失败（源码形态合规也不放行）", () => {
+    const result = checkFinalClosureBoundaryGate(
+      compliant(),
+      new Set(["lib/persistence/schema/example.ts", "lib/persistence/schema/agent-calls.ts"]),
+      [{ file: "a.test.ts", group: "unit" }],
+    );
+    expect(result.passed).toBe(false);
+    expect(result.failures).toEqual(
+      expect.arrayContaining([expect.stringContaining("Hosted Resume 行为回归未登记")]),
+    );
   });
 
   it("同时拒绝第二 Schema Root、越权状态写、固定 Subject、ACK-only 与重复测试", () => {
@@ -258,6 +284,8 @@ describe("Topic 01 final closure boundary gate", () => {
       [
         { file: "same.test.ts", group: "unit" },
         { file: "same.test.ts", group: "db" },
+        // 行为回归已登记 ⇒ "只 ACK" 只能由被改坏的 adapter 触发，而不是靠登记缺失兜底。
+        ...resumeBehaviorTestFiles,
       ],
     );
     expect(result.passed).toBe(false);

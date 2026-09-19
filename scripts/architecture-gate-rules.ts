@@ -1411,10 +1411,13 @@ export function checkFinalClosureBoundaryGate(
     !awaitsLoopOutcome ||
     !returnsLoopOutcome ||
     !runtimeResume.includes("getActiveExecutionOwnership(") ||
-    !runtimeResume.includes("cancelActiveAgentCalls(") ||
-    !resumeBehaviorRegressions.every((file) => registeredTestFiles.has(file))
+    !runtimeResume.includes("cancelActiveAgentCalls(")
   ) {
     failures.push("Hosted Resume 退化为只 ACK");
+  }
+  // 单独一行：源码形态合规、但守它的行为回归被摘掉时，同样是"不可退化"被破坏。
+  if (!resumeBehaviorRegressions.every((file) => registeredTestFiles.has(file))) {
+    failures.push("Hosted Resume 行为回归未登记");
   }
 
   const seen = new Map<string, string>();
