@@ -20,9 +20,9 @@ import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/
 import { hostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import {
+  CommandDispatchClaimSupersededError,
   type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,
-  CommandDispatchClaimSupersededError,
   dispatchCancelCommand,
   dispatchCheckpointCommand,
   dispatchResumeCommand,

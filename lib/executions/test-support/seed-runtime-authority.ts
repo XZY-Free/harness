@@ -18,7 +18,11 @@ import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import { admitQueuedJob } from "@/lib/job/job-admission";
 import { createJob } from "@/lib/job/job-queries";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
-import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  type InvocationAttempt,
+  executionOwnershipTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
 import { type JobType, jobTable } from "@/lib/persistence/schema/job";
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import {
@@ -258,6 +262,44 @@ export async function seedPreparedRuntimeAttempt(
     }),
   );
   return { tenantId, threadId, turnId, invocation, binding, workspace, attempt };
+}
+
+/**
+ * 建出「基础设施替换后的新 Attempt」（并写好准备槽）。
+ *
+ * 进程被杀 / 租约过期属于**基础设施替换**：`contracts/shared-contracts.md` 规定
+ * "按既定 Attempt 规则创建新 Attempt"，`FENCE-18` 把它写成"换实例必须新建 Attempt"。
+ * 接管事务会**收口**旧 Attempt，因此新代际绝不能沿用同一行 —— 否则 `prepareChecks`
+ * 在收口**之前**看到 `running` 而放行，而新 Ownership 建立时该行已是 `lost`：
+ * 守卫被自己所在的事务推翻，下游 `execution.started` 再写 `running` 必然违反
+ * `InvocationAttempt_terminal_shape`（`attemptState` 与 `finishedAt` 形态约束）。
+ *
+ * 生产各 Start/Redispatch 调用方同形：`dispatcher`、`redispatchRuntimeInvocation`、
+ * `dispatch-queued-invocation-attempt` 都是先 `createAttempt` 再 Start。
+ */
+export async function createPreparedTakeoverAttempt(input: {
+  tenantId: string;
+  invocationId: string;
+  retryReasonCode?: string | null;
+}): Promise<InvocationAttempt> {
+  const attempt = await createAttempt({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+    retryReasonCode: input.retryReasonCode ?? "infrastructure_replacement",
+  });
+  const evidence = {
+    kind: "test-candidate",
+    invocationId: input.invocationId,
+    attemptId: attempt.id,
+  };
+  await db.transaction((tx) =>
+    markAttemptPreparedInTransaction(tx, {
+      attemptId: attempt.id,
+      evidence,
+      digest: protocolDigest(evidence),
+    }),
+  );
+  return attempt;
 }
 
 export async function acquireTestRuntimeAuthority(input: {

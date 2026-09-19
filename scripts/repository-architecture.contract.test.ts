@@ -44,6 +44,7 @@ const NAMING_GUARD_EXCEPTION_PREFIXES = [
   "docs/topic-01/", // Topic-01 历史归档（LIVE 生产 manifest 位于 evidence/，但历史叙述允许保留旧引用）
   "docs/implementation/topic-01-", // Topic-01 历史实施笔记
   "docs/topic02/nexharness-topic02-closure/", // 专题02 收尾审查工程包：manifests 收录原验收义务，需写出已退役版本前缀本身
+  "docs/topic02/nexharness-topic02-repair/", // 专题02 完整修复工程包：正文必须写出"不得保留 V11/V3 式生产命名"这一清理目标本身
   "lib/architecture/", // Canonical Naming Guard 测试（负向断言必须持有禁止字符串）
 ];
 

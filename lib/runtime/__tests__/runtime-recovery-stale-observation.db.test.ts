@@ -10,6 +10,7 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
   acquireTestRuntimeAuthority,
+  createPreparedTakeoverAttempt,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
@@ -180,10 +181,14 @@ describe("Runtime recovery 陈旧观察防护（R03 §5）", () => {
     });
     expect(observed?.ownershipId).toBe(acquired.ownership.id);
     // 新代际真实接管：旧 Owner 过期 → 新 Attempt + 新 Ownership（真实 acquire 路径）。
+    const takeoverAttempt = await createPreparedTakeoverAttempt({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+    });
     const takeover = await acquireTestRuntimeAuthority({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
-      attemptId: fixture.attempt.id,
+      attemptId: takeoverAttempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
       runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
     });

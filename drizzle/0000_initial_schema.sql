@@ -1853,8 +1853,10 @@ CREATE TABLE `RuntimeSessionBinding` (
 	`lastDispatchAt` datetime(6),
 	`lastErrorCode` varchar(64),
 	`closedAt` datetime(6),
-	`supervisorLeaseOwner` varchar(128),
+	`supervisorClaimId` varchar(36),
+	`supervisorInstanceId` varchar(160),
 	`supervisorLeaseExpiresAt` datetime(6),
+	`supervisorReleasedAt` datetime(6),
 	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
 	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	`updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -1867,6 +1869,7 @@ CREATE TABLE `RuntimeSessionBinding` (
 	CONSTRAINT `RuntimeSessionBinding_intent_allowed` CHECK(`intentType` IN ('start', 'resume')),
 	CONSTRAINT `RuntimeSessionBinding_request_digest_shape` CHECK((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL)),
 	CONSTRAINT `RuntimeSessionBinding_active_started_shape` CHECK(`bindingState` <> 'active' OR `startedEventId` IS NOT NULL),
+	CONSTRAINT `RuntimeSessionBinding_supervisor_claim_shape` CHECK((`supervisorClaimId` IS NULL AND `supervisorInstanceId` IS NULL AND `supervisorLeaseExpiresAt` IS NULL AND `supervisorReleasedAt` IS NULL) OR (`supervisorClaimId` IS NOT NULL AND `supervisorInstanceId` IS NOT NULL AND `supervisorLeaseExpiresAt` IS NOT NULL)),
 	CONSTRAINT `RuntimeSessionBinding_dispatch_freeze_shape` CHECK(((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL AND `intentFrozenAt` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` NOT IN ('dispatching', 'active') OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` <> 'active' OR (`remoteSessionRef` IS NOT NULL AND `remoteExecutionRef` IS NOT NULL AND `startedEventId` IS NOT NULL)))
 );
 --> statement-breakpoint

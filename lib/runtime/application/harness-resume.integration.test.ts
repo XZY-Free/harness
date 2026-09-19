@@ -20,32 +20,63 @@ import type {
 } from "@/lib/persistence/schema/executions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+/**
+ * 未被打桩的 `setTimeout`（模块求值时捕获）。
+ *
+ * 用例会在假时钟下等待**真实**数据库事务完成，`vi.advanceTimersByTimeAsync` 只推进假时钟、
+ * 不推进真实 IO，因此这里必须有一个不会被 `vi.useFakeTimers()` 替换的让出点。
+ */
+const realSetTimeout = globalThis.setTimeout;
+
 const mocks = vi.hoisted(() => {
   /**
    * A03：Hosted Supervisor 的「工作身份」是 RuntimeSessionBinding 行上的**行锁 CAS**，
    * 不是进程内 Map。夹具必须同样记账——否则「重复交付不再起第二个 Loop」会因为模块被
    * 替换成「领取永远成功」而失去判别力（进程内 `liveRunners` 去重与跨进程领取是两件事，
    * 后者必须由行锁证明）。
+   *
+   * 记账口径跟着真实实现走：**一个代际最多分配一次 claim**，且 claimId 一经写入不可清零。
+   * 因此释放只写"已退休"墓碑（`released: true`），不把该代际变回"从未领取"——否则夹具会
+   * 放过真实实现明令禁止的"过期/释放后在同代际换执行者"。
    */
-  const supervisorLeases = new Map<string, string>();
+  const supervisorClaims = new Map<string, { claimId: string; released: boolean }>();
   const claimRuntimeSessionSupervisor = vi.fn(
-    async (_tx: unknown, input: { id: string; leaseOwner: string }) => {
-      const holder = supervisorLeases.get(input.id);
-      if (holder !== undefined && holder !== input.leaseOwner) {
-        return { claimed: false, session: null };
+    async (_tx: unknown, input: { id: string; claimId: string; instanceId: string }) => {
+      const held = supervisorClaims.get(input.id);
+      if (held !== undefined) {
+        const replayable = held.claimId === input.claimId && !held.released;
+        return {
+          claimed: replayable,
+          reason: replayable ? "granted" : held.released ? "retired" : "held",
+          session: null,
+        };
       }
-      supervisorLeases.set(input.id, input.leaseOwner);
-      return { claimed: true, session: null };
+      supervisorClaims.set(input.id, { claimId: input.claimId, released: false });
+      return { claimed: true, reason: "granted", session: null };
     },
   );
-  const renewRuntimeSessionSupervisor = vi.fn(
-    async (_tx: unknown, input: { id: string; leaseOwner: string }) =>
-      supervisorLeases.get(input.id) === input.leaseOwner,
+  /**
+   * A03-03：Hosted 的 Owner 与 claim 只能**同事务**续。默认实现把这条准入如实表达出来：
+   * 只有当前 claim 未退休且 nonce 相符才算续租成功；需要观察失权路径的用例再覆盖它。
+   */
+  const renewHostedExecutionLease = vi.fn(
+    async (input: { authority: { sessionBindingId: string }; claimId: string }) => {
+      const held = supervisorClaims.get(input.authority.sessionBindingId);
+      const renewed = held !== undefined && held.claimId === input.claimId && !held.released;
+      return {
+        renewed,
+        reason: renewed ? "renewed" : "claim_superseded",
+        leaseExpiresAt: renewed ? new Date() : null,
+        ownership: null,
+        session: null,
+      };
+    },
   );
   const releaseRuntimeSessionSupervisor = vi.fn(
-    async (_tx: unknown, input: { id: string; leaseOwner: string }) => {
-      if (supervisorLeases.get(input.id) !== input.leaseOwner) return false;
-      supervisorLeases.delete(input.id);
+    async (_tx: unknown, input: { id: string; claimId: string }) => {
+      const held = supervisorClaims.get(input.id);
+      if (!held || held.claimId !== input.claimId) return false;
+      held.released = true;
       return true;
     },
   );
@@ -66,9 +97,9 @@ const mocks = vi.hoisted(() => {
       waitingForUser: false,
     },
     hostedLoopResolveOnAbort: false,
-    supervisorLeases,
+    supervisorClaims,
     claimRuntimeSessionSupervisor,
-    renewRuntimeSessionSupervisor,
+    renewHostedExecutionLease,
     releaseRuntimeSessionSupervisor,
   };
 });
@@ -83,7 +114,16 @@ vi.mock("@/lib/executions/persistence/execution-binding-queries", () => ({
 vi.mock("@/lib/executions/persistence/execution-ownership-store", () => ({
   getActiveExecutionOwnership: mocks.getActiveExecutionOwnership,
   renewExecutionOwnership: mocks.renewExecutionOwnership,
+  // A03：Hosted 心跳改走联合续租；交接事务还要按真实事务类型关 Owner 并读数据库时间。
+  // 模块被整体替换时不给出这些导出，会以 "No ... export" 直接炸掉——那是模块错误，
+  // 不是对执行权行为的判别。
+  renewHostedExecutionLease: mocks.renewHostedExecutionLease,
   closeExecutionOwnership: vi.fn(),
+  closeExecutionOwnershipInTransaction: vi.fn(),
+  getAuthorityDatabaseTime: vi.fn(async () => new Date()),
+  lockInvocationRootIfExists: vi.fn(async () => ({ id: "invocation-1" })),
+  lockExecutionRootForProductWrite: vi.fn(),
+  requireCurrentExecutionOwnership: vi.fn(),
 }));
 vi.mock("@/lib/runtime/persistence/runtime-session-store", () => ({
   getRuntimeSessionBindingByOwnership: mocks.getRuntimeSessionBindingByOwnership,
@@ -92,8 +132,15 @@ vi.mock("@/lib/runtime/persistence/runtime-session-store", () => ({
   // 必须一并给出——否则真实实现会以 "No ... export" 直接炸掉，测试退化成模块错误，
   // 而不是对执行权行为的判别。
   claimRuntimeSessionSupervisorInTransaction: mocks.claimRuntimeSessionSupervisor,
-  renewRuntimeSessionSupervisorInTransaction: mocks.renewRuntimeSessionSupervisor,
   releaseRuntimeSessionSupervisorInTransaction: mocks.releaseRuntimeSessionSupervisor,
+  markRuntimeSessionLostInTransaction: vi.fn(async (_tx: unknown, input: { id: string }) =>
+    // 与真实实现一致：收口同时写 claim 墓碑，让该代际不可能再被领取。
+    (() => {
+      const held = mocks.supervisorClaims.get(input.id);
+      if (held) held.released = true;
+      return null;
+    })(),
+  ),
 }));
 vi.mock("@/lib/runtime/persistence/runtime-revision-queries", () => ({
   getRuntimeRevisionById: mocks.getRuntimeRevisionById,
@@ -233,9 +280,20 @@ function authorityOf(f: ReturnType<typeof fixture>) {
 }
 
 beforeEach(() => {
-  mocks.supervisorLeases.clear();
+  mocks.supervisorClaims.clear();
   mocks.claimRuntimeSessionSupervisor.mockClear();
-  mocks.renewRuntimeSessionSupervisor.mockClear();
+  mocks.renewHostedExecutionLease.mockClear();
+  mocks.renewHostedExecutionLease.mockImplementation(async (input) => {
+    const held = mocks.supervisorClaims.get(input.authority.sessionBindingId);
+    const renewed = held !== undefined && held.claimId === input.claimId && !held.released;
+    return {
+      renewed,
+      reason: renewed ? "renewed" : "claim_superseded",
+      leaseExpiresAt: renewed ? new Date() : null,
+      ownership: null,
+      session: null,
+    };
+  });
   mocks.releaseRuntimeSessionSupervisor.mockClear();
   mocks.hostedLoopOptions.length = 0;
   mocks.hostedLoopResolveOnAbort = false;
@@ -268,11 +326,18 @@ describe("Resume Harness Invocation", () => {
     expect(mocks.hostedLoopOptions).toHaveLength(1);
     // A03：执行权来自 Session 上的**排他领取**，不是进程内 Map 的副作用。
     expect(mocks.claimRuntimeSessionSupervisor).toHaveBeenCalledTimes(1);
-    expect(mocks.claimRuntimeSessionSupervisor.mock.calls[0]?.[1]).toMatchObject({
-      tenantId: "tenant-1",
-      id: "session-1",
-      leaseOwner: expect.stringContaining("ownership-1"),
-    });
+    const claimArgs = mocks.claimRuntimeSessionSupervisor.mock.calls[0]?.[1] as {
+      tenantId: string;
+      id: string;
+      claimId: string;
+      instanceId: string;
+    };
+    expect(claimArgs).toMatchObject({ tenantId: "tenant-1", id: "session-1" });
+    // A03-01：领取 nonce 每次新建，且**不是** PID/owner 字符串这类可复用标识。
+    expect(claimArgs.claimId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(claimArgs.claimId).not.toContain("ownership-1");
+    // 实例身份来自本进程的启动 id（生产默认值由 `workerInstanceId()` 给出）。
+    expect(claimArgs.instanceId).toMatch(/^worker-instance:/);
 
     // Owner 已释放（无活跃 ExecutionOwnership）→ 同一 Invocation 不能再次取得执行权。
     mocks.getActiveExecutionOwnership.mockResolvedValue(null as unknown as ExecutionOwnership);
@@ -370,7 +435,9 @@ describe("Resume Harness Invocation", () => {
     const f = fixture("running");
     stubAuthority(f);
     mocks.hostedLoopResolveOnAbort = true;
-    mocks.renewExecutionOwnership.mockRejectedValue(new Error("lease renew failed"));
+    // A03：取得 claim 之后 Owner 只经联合续租延长，因此这条失权路径必须打在联合续租上
+    // （打在裸 Owner 续租上等于什么都没测到）。
+    mocks.renewHostedExecutionLease.mockRejectedValue(new Error("lease renew failed"));
 
     vi.useFakeTimers();
     const promise = resumeHarnessInvocation({
@@ -380,7 +447,14 @@ describe("Resume Harness Invocation", () => {
       sourceVersion: 1,
       authority: authorityOf(f),
     });
-    // 心跳续约间隔 20s：推进时钟触发续约失败 → abort。
+    // A03：领取本身是一条**真实**数据库事务（期限按 DB 时间计算），假时钟不会推进它，
+    // 因此先让真实事件循环跑完领取。"Loop 已被构造"正是"claim 已取得"的可观察信号——
+    // 取得 claim 之前心跳走的是派发阶段续租，推进时钟只会打到另一条路径上。
+    for (let i = 0; i < 2_000 && mocks.hostedLoopOptions.length === 0; i += 1) {
+      await new Promise((resolve) => realSetTimeout(resolve, 1));
+    }
+    expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // 心跳续约间隔 20s：推进时钟触发（此时的）联合续租失败 → abort。
     await vi.advanceTimersByTimeAsync(20_000);
     await expect(promise).resolves.toMatchObject({ status: "resumed", completed: false });
     // 中止信号是**电平**事实：直接读 `aborted` / `reason`，不依赖"监听器恰好在

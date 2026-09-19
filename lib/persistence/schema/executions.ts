@@ -558,11 +558,19 @@ export const runtimeSessionBindingTable = mysqlTable(
     lastDispatchAt: timestamp("lastDispatchAt"),
     lastErrorCode: ascii("lastErrorCode", 64),
     closedAt: timestamp("closedAt"),
-    // A03：同代际只能有一个实际推进者（Supervisor 工作身份）。
+    // A03：同代际只能有一个实际推进者（Supervisor 工作身份），并且
+    // **一个 Ownership 代际最多分配一次实际 claim**。
+    // - `supervisorClaimId` 是每次真实领取另生的 nonce（UUID）。它一经写入就不可清零：
+    //   NULL 表示「从未领取」；释放/过期都**不**回退到未领取，因此同一代际不可能换执行者。
+    // - `supervisorInstanceId` 是领取者**进程启动**时的实例 id，仅用于诊断归属。
+    //   它不参与唯一性判定——PID/hostname 在容器里会碰撞，那正是被修复的缺陷。
+    // - `supervisorReleasedAt` 是主动结束墓碑：非空表示该代际的 claim 已退休、不可复活。
     // 与 `dispatchLease*` 分列是必需的：派发 lane 在 `prepared`/`dispatching` 持有派发票据，
     // 而 Supervisor 恰好也在 `dispatching` 入场，共用一列会让两者互相误判为"已被接管"。
-    supervisorLeaseOwner: ascii("supervisorLeaseOwner", 128),
+    supervisorClaimId: ascii("supervisorClaimId", 36),
+    supervisorInstanceId: ascii("supervisorInstanceId", 160),
     supervisorLeaseExpiresAt: timestamp("supervisorLeaseExpiresAt"),
+    supervisorReleasedAt: timestamp("supervisorReleasedAt"),
     versionNo: bigintUnsigned("versionNo").notNull().default(1),
     createdAt: timestamp("createdAt").notNull().default(currentTimestamp()),
     updatedAt: timestamp("updatedAt").notNull().default(currentTimestamp()),
@@ -625,6 +633,15 @@ export const runtimeSessionBindingTable = mysqlTable(
       t.ownershipId,
       t.leaseEpoch,
       t.id,
+    ),
+    // A03：claim 四列只有两种合法形态——「全空 = 从未领取」或
+    // 「claimId/instanceId/expiry 完整」。`releasedAt` 非空只能落在第二个分支
+    // （它已经蕴含 claimId 非空），所以"释放过却没领取过"在数据库层不可表达。
+    // 这条 CHECK 与「claimId 一经写入不可清零」的写入纪律合起来，让
+    // 「领取 → 释放/过期 → 变回未领取」既不可写入也不可表达。
+    supervisorClaimShape: check(
+      "RuntimeSessionBinding_supervisor_claim_shape",
+      sql`(\`supervisorClaimId\` IS NULL AND \`supervisorInstanceId\` IS NULL AND \`supervisorLeaseExpiresAt\` IS NULL AND \`supervisorReleasedAt\` IS NULL) OR (\`supervisorClaimId\` IS NOT NULL AND \`supervisorInstanceId\` IS NOT NULL AND \`supervisorLeaseExpiresAt\` IS NOT NULL)`,
     ),
     dispatchFreezeShape: check(
       "RuntimeSessionBinding_dispatch_freeze_shape",

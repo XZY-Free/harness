@@ -182,6 +182,7 @@ function checkExternalRuntimeTransport(): void {
 const RETIRED_NAMING_EXCEPTIONS = [
   /^docs\/V12\/02\/snowharness-execution-design\//,
   /^docs\/topic02\/nexharness-topic02-closure\//,
+  /^docs\/topic02\/nexharness-topic02-repair\//,
   /\.test\.tsx?$/,
 ];
 

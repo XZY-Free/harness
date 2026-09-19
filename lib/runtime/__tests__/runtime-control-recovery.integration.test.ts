@@ -65,8 +65,6 @@ import {
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchCancelCommand, dispatchResumeCommand } from "@/lib/runtime/command-dispatcher";
-import { claimInvocationCommandDispatch } from "@/lib/runtime/retry/dispatch-retry-queries";
-import { RUNTIME_DISPATCH_RETRY_POLICY } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
@@ -76,6 +74,8 @@ import {
   getRuntimeSessionBindingByOwnership,
   getRuntimeSessionBindingsByInvocation,
 } from "@/lib/runtime/persistence/runtime-session-store";
+import { claimInvocationCommandDispatch } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { RUNTIME_DISPATCH_RETRY_POLICY } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import {
   type RuntimeStartTransportRequest,
   createMockRuntimeClient,

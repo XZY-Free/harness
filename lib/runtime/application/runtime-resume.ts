@@ -14,14 +14,18 @@ import type { EnvironmentProvisioner } from "@/lib/environment/environment-provi
 import { closeInvocationTerminalInTransaction } from "@/lib/executions/application/close-invocation-terminal";
 import {
   ExecutionAuthorityError,
+  OWNERSHIP_LEASE_MS,
   authorityIdentity,
 } from "@/lib/executions/domain/execution-authority";
 import { getAttemptById, getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
+  closeExecutionOwnershipInTransaction,
   getActiveExecutionOwnership,
+  getAuthorityDatabaseTime,
   lockInvocationRootIfExists,
   renewExecutionOwnership,
+  renewHostedExecutionLease,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
@@ -66,11 +70,12 @@ import type {
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
+  type SupervisorClaimOutcome,
   claimRuntimeSessionSupervisorInTransaction,
   getRuntimeSessionBindingById,
   getRuntimeSessionBindingByOwnership,
+  markRuntimeSessionLostInTransaction,
   releaseRuntimeSessionSupervisorInTransaction,
-  renewRuntimeSessionSupervisorInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import type { RuntimeHttpClient, RuntimeStartTransportRequest } from "@/lib/runtime/runtime-client";
 import type {
@@ -81,6 +86,7 @@ import type {
 import { decimalStringToNumber, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
+import { newSupervisorClaimId, workerInstanceId } from "@/lib/workers/worker-instance-identity";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -216,7 +222,11 @@ interface HostedOverrides {
     pendingPollIntervalMs?: number;
     pendingWaitLimitMs?: number;
     loopWindowMs?: number;
-    /** 执行者身份（默认按进程 pid）。跨进程测试用两份不同实例模拟两个进程。 */
+    /**
+     * 执行者实例身份。**缺省值是本进程启动生成的 UUID**（`workerInstanceId()`），
+     * 不是 PID：PID 在不同容器里可以相同，用它当身份正是 A03 要修的缺陷。
+     * 这里只允许"覆盖成一个仍然稳定的实例身份"，不允许注入可复用的领取 nonce。
+     */
     instanceId?: string;
   };
 }
@@ -376,7 +386,10 @@ interface SupervisorSettings {
 
 function supervisorSettings(overrides: HostedOverrides | undefined): SupervisorSettings {
   const o = overrides?.supervisor;
-  const instanceId = o?.instanceId ?? `pid:${process.pid}`;
+  // A03-01：缺省实例身份 = **进程启动 UUID**。PID/hostname/时间戳都不是身份：
+  // 不同容器可以持有同一 PID，同机重启也会复用 PID。实例 id 只用于诊断归属，
+  // 真正决定"是哪一次领取"的是每次领取另生的 claimId（见 `claimSupervisorLease`）。
+  const instanceId = o?.instanceId ?? workerInstanceId();
   return {
     leaseMs: o?.leaseMs ?? SUPERVISOR_DEFAULT_LEASE_MS,
     renewIntervalMs: o?.renewIntervalMs ?? SUPERVISOR_DEFAULT_RENEW_INTERVAL_MS,
@@ -424,26 +437,95 @@ function waitForWakeOrPoll(
 }
 
 /**
- * 单次领取尝试（A03）。不做等待重试：领取失败只可能意味着**另一个执行者正持有该代际**，
- * 而它会自己轮询读回子结果；本进程再等下去也不会成为执行者，只会白白占用一次请求。
- * 持有者进程崩溃时租约自然过期，后续请求即可领取。
+ * 单次领取尝试（A03）。不做等待重试：领取失败意味着**本代际已经分配过实际推进者**
+ * （`held`）或它的 claim 已退休（`retired`）。两种情况下本进程再等也不会成为执行者，
+ * 只会白白占用一次请求。
+ *
+ * 注意与旧语义的区别：**过期不再等于可以领取**。按 A03 选定语义，一个 Ownership 代际
+ * 最多分配一次实际 claim；持有者崩溃后由正式恢复器建立**新的** Ownership 代际，
+ * 不在原代际上换执行者。这正是"旧进程迟到结果会被统一围栏拒绝"的前提。
+ *
+ * 期限用**数据库时间**计算：初始 claim 只租到本代际的 Supervisor 窗口
+ * （`settings.leaseMs`），之后的延长一律走联合续租。这里**不**施加"绝对执行期限"上限 ——
+ * 物理模型没有该事实，理由见 `HostedLeaseRenewalInput.absoluteDeadlineAt`。
  */
 async function claimSupervisorLease(input: {
   tenantId: string;
   sessionBindingId: string;
-  leaseOwner: string;
+  claimId: string;
+  instanceId: string;
   settings: SupervisorSettings;
-}): Promise<boolean> {
-  const outcome = await db.transaction(async (tx) =>
-    claimRuntimeSessionSupervisorInTransaction(tx, {
+  absoluteDeadlineAt: Date | null;
+}): Promise<SupervisorClaimOutcome> {
+  return db.transaction(async (tx) => {
+    const now = await getAuthorityDatabaseTime(tx);
+    const requested = new Date(now.getTime() + input.settings.leaseMs);
+    return claimRuntimeSessionSupervisorInTransaction(tx, {
       tenantId: input.tenantId,
       id: input.sessionBindingId,
-      leaseOwner: input.leaseOwner,
-      leaseExpiresAt: new Date(Date.now() + input.settings.leaseMs),
-      now: new Date(),
-    }),
-  );
-  return outcome.claimed;
+      claimId: input.claimId,
+      instanceId: input.instanceId,
+      leaseExpiresAt:
+        input.absoluteDeadlineAt !== null &&
+        input.absoluteDeadlineAt.getTime() < requested.getTime()
+          ? input.absoluteDeadlineAt
+          : requested,
+      now,
+    });
+  });
+}
+
+/**
+ * Supervisor 退出时的**交接事务**（A03-04 / A03-05）。
+ *
+ * 顺序（一条收口边界，不是三段各自为政的写入；锁序仍是 `I → O → S`）：
+ * 1. 退休本代际的 claim —— 只写墓碑，保留历史 claimId：该代际此后不可能再被领取；
+ * 2. 释放本 Owner（`released`），把本代际 Session 收为 `lost`。
+ *
+ * 为什么要**同时**释放 Owner：只退休 claim 而留着 active Owner，会让下一个推进者
+ * 既不能成为执行者（claim 不可复活），又不能通过正式恢复取得新代际（旧 Owner 仍然健康）
+ * ——那正是"无人推进、数据库却声称健康执行"。
+ *
+ * 为什么**不**把 Invocation 收为终态：未完成的持久子动作仍在执行，它的结果是正式的
+ * 持久义务（continuation 事件）。Invocation 保持非终态，下一个推进者经正式 Start /
+ * Redispatch 取得**新代际**（新 Ownership / epoch / Session）继续一次；旧代际迟到的
+ * 结果与动作由既有 Ownership fencing 统一拒绝。
+ *
+ * 幂等：代际已被终态收口（正常完成 / 暂停 / 取消）时两个关闭函数都原样返回。
+ */
+async function handOffSupervisorGeneration(input: {
+  tenantId: string;
+  invocationId: string;
+  ownershipId: string;
+  attemptId: string;
+  leaseEpoch: number;
+  sessionBindingId: string;
+  claimId: string;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    const invocation = await lockInvocationRootIfExists(tx, input.tenantId, input.invocationId);
+    if (!invocation) return;
+    const now = await getAuthorityDatabaseTime(tx);
+    await closeExecutionOwnershipInTransaction(tx, {
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      ownershipId: input.ownershipId,
+      attemptId: input.attemptId,
+      leaseEpoch: input.leaseEpoch,
+      state: "released",
+      reasonCode: "supervisor_handoff",
+    });
+    await markRuntimeSessionLostInTransaction(tx, {
+      tenantId: input.tenantId,
+      id: input.sessionBindingId,
+    });
+    await releaseRuntimeSessionSupervisorInTransaction(tx, {
+      tenantId: input.tenantId,
+      id: input.sessionBindingId,
+      claimId: input.claimId,
+      now,
+    });
+  });
 }
 
 async function runHostedInvocation(input: {
@@ -457,9 +539,22 @@ async function runHostedInvocation(input: {
   const current = await loadAuthorityFromTuple(input.tenantId, input.authority);
   const runnerKey = current.owner.id;
   const settings = supervisorSettings(input.overrides);
-  // A03：工作身份必须同时标识「代际」与「执行者」。仅按 Ownership id 去重无法区分进程，
-  // 因此令牌里带本实例身份，续租/释放都按它做 CAS。
-  const leaseOwner = `hosted-supervisor:${settings.instanceId}:${current.owner.id}:${current.owner.leaseEpoch}`;
+  // A03：本次**实际领取**的 nonce。实例 id 只回答"是哪个进程"，claimId 才回答
+  // "是哪一次领取"；后者决定该代际已经分配给了谁，且一经写入不可清零。
+  const claimId = newSupervisorClaimId();
+  // A03-T08：本次 Loop 的有界窗口在**进入前冻结一次**。旧实现每次重入 Loop 都
+  // `Date.now() + 窗口`，于是"重新进入 Loop"会把同一次执行的期限无限右移 —— 那不是等待
+  // 有界，而是永不结束。它只决定 Loop 何时退出（循环判据与交给 Loop 的 deadline），
+  // **不再**充当租约上限：拿它夹住续租会让心跳每轮算出同一个截止时间。
+  const loopDeadlineAt = new Date(Date.now() + settings.loopWindowMs);
+  const renewalAuthority = {
+    invocationId: input.authority.invocationId,
+    attemptId: input.authority.attemptId,
+    ownershipId: input.authority.ownershipId,
+    leaseEpoch: current.owner.leaseEpoch,
+    sessionBindingId: current.session.id,
+    runtimeRevisionId: input.authority.runtimeRevisionId,
+  };
 
   // R02 §2：相同 generation 最多一个 Supervisor 运行用户任务。重复交付的 Start（丢 ACK
   // 重发）或重复唤醒不得再起第二个 Loop —— 直接唤醒在跑的那个并回答"该代际仍在跑"。
@@ -487,24 +582,39 @@ async function runHostedInvocation(input: {
     heartbeat = setInterval(() => {
       void (async () => {
         try {
-          await renewExecutionOwnership({
-            tenantId: input.tenantId,
-            invocationId: input.invocation.id,
-            ownershipId: current.owner.id,
-            attemptId: current.owner.attemptId,
-            leaseEpoch: current.owner.leaseEpoch,
-          });
-          // 工作身份续期失败 = 本代际已被接管或已被收口：立刻停止推进，绝不与新执行者并发。
-          const stillHeld = await db.transaction(async (tx) =>
-            renewRuntimeSessionSupervisorInTransaction(tx, {
+          if (!claimed) {
+            // 尚未取得 claim：这仍是"派发阶段"的合法续租（契约允许首次 dispatch 未有
+            // Supervisor 时按既有规则续）。此时不能走联合续租——claim 还不存在，
+            // 联合续租会按"claim 已被别人拿走"拒绝，从而误杀正在等待领取的本进程。
+            await renewExecutionOwnership({
               tenantId: input.tenantId,
-              id: current.session.id,
-              leaseOwner,
-              leaseExpiresAt: new Date(Date.now() + settings.leaseMs),
-              now: new Date(),
-            }),
-          );
-          if (!stillHeld) slot.controller.abort(new Error("SupervisorClaimSuperseded"));
+              invocationId: input.invocation.id,
+              ownershipId: current.owner.id,
+              attemptId: current.owner.attemptId,
+              leaseEpoch: current.owner.leaseEpoch,
+            });
+            return;
+          }
+          // A03-03：一旦取得 claim，Owner 与 claim **只能**在同一条事务里一起续。
+          // 任何"先续 Owner、再看 claim"的顺序都会留下 Owner 被续活而 claim 已失效的窗口。
+          //
+          // TTL 用 **Owner 租约自己的契约长度**（`OWNERSHIP_LEASE_MS`），不是本次运行时会话的
+          // `settings.leaseMs`：契约要求两项写"同一个截止时间"（`contracts/shared-contracts.md`
+          // §3），而 Owner 行是由平台执行权契约（同一常量）建立的。若拿较短的会话 TTL 当基准，
+          // 首次续租会把 Owner 租约从 90s **缩短**到 60s —— 续租只应延长，不能倒退
+          // （`runtime-control-recovery` 的 CONTROL-04 正是守这一条）。
+          const renewal = await renewHostedExecutionLease({
+            tenantId: input.tenantId,
+            authority: renewalAuthority,
+            claimId,
+            instanceId: settings.instanceId,
+            leaseTtlMs: OWNERSHIP_LEASE_MS,
+            absoluteDeadlineAt: null,
+          });
+          // 续租失败 = 本代际已被接管 / claim 已退休 / 租约已过期 / 绝对期限已到：
+          // 立刻停止推进，绝不与新执行者并发。
+          if (!renewal.renewed)
+            slot.controller.abort(new Error(`SupervisorClaimLost:${renewal.reason}`));
         } catch {
           slot.controller.abort(new Error("OwnershipExpired"));
         }
@@ -514,12 +624,15 @@ async function runHostedInvocation(input: {
     // A03：跨进程排他。进程内 `liveRunners` 在别的进程里是空的，Session=active 也不是排他
     // 领取（它反而允许继续进入执行）。这里以 Session 级工作身份做行锁 CAS：拿不到就说明
     // 该代际正由别的执行者推进，本次请求不再产生第二个决策循环。
-    claimed = await claimSupervisorLease({
+    const claimOutcome = await claimSupervisorLease({
       tenantId: input.tenantId,
       sessionBindingId: current.session.id,
-      leaseOwner,
+      claimId,
+      instanceId: settings.instanceId,
       settings,
+      absoluteDeadlineAt: null,
     });
+    claimed = claimOutcome.claimed;
     if (!claimed) {
       // 该代际已由别的执行者（可能是另一个进程）持有执行权：只回答"仍在执行"，
       // 不写任何事件、不建第二个决策循环，也不把它当成一次失败启动。
@@ -677,7 +790,8 @@ async function runHostedInvocation(input: {
           }),
         modelRef: input.overrides?.modelRef ?? input.binding.modelId,
         abortSignal: controller.signal,
-        deadlineAt: new Date(Date.now() + settings.loopWindowMs),
+        // A03-T08：每次重入 Loop 都传**同一个**冻结期限，不重新计算。
+        deadlineAt: loopDeadlineAt,
       });
 
     // A03：pending 不结束 Supervisor。每次"新一轮"都新建 Loop 实例，让它带着**新的**
@@ -692,8 +806,13 @@ async function runHostedInvocation(input: {
       if (!result.pending) return result;
       if (controller.signal.aborted) return result;
       if (Date.now() - waitStartedAt >= settings.pendingWaitLimitMs) {
-        // 等待有界：超时后退出并把代际交还正式恢复流程（recovery lane 会按 Lease 事实
-        // 判定接管或收口），绝不留下"没人跑却声称健康"的窗口。
+        // 等待有界：超时后退出并按下面的交接事务把代际交还正式流程（claim 退休 +
+        // Owner 释放 + Session 收口），绝不留下"没人跑却声称健康"的窗口。
+        return result;
+      }
+      if (Date.now() >= loopDeadlineAt.getTime()) {
+        // A03-T08：冻结的绝对期限已到就不再重入 Loop。期满正式收口，不继续写合法结果；
+        // 交接事务会把本代际的 claim 一起退休掉。
         return result;
       }
       const reason = await waitForWakeOrPoll(
@@ -705,18 +824,20 @@ async function runHostedInvocation(input: {
     }
   } finally {
     if (heartbeat) clearInterval(heartbeat);
-    if (claimed) {
-      // 只释放自己的工作身份：代际已被接管时（持有者已变）本调用不会误删新执行者。
-      await db
-        .transaction(async (tx) =>
-          releaseRuntimeSessionSupervisorInTransaction(tx, {
-            tenantId: input.tenantId,
-            id: current.session.id,
-            leaseOwner,
-            now: new Date(),
-          }),
-        )
-        .catch(() => false);
+    const heldClaim = claimed;
+    // 先落标志再做事：心跳回调在 finally 期间不得再按"已持有 claim"去续租。
+    claimed = false;
+    if (heldClaim) {
+      // A03：退出即交接，不再"释放 claim 让下一个进程在原代际接着跑"。
+      await handOffSupervisorGeneration({
+        tenantId: input.tenantId,
+        invocationId: input.invocation.id,
+        ownershipId: current.owner.id,
+        attemptId: current.owner.attemptId,
+        leaseEpoch: current.owner.leaseEpoch,
+        sessionBindingId: current.session.id,
+        claimId,
+      }).catch(() => undefined);
     }
     slot.wake();
     // 只清理自己占的槽位：代际被替换后新 Supervisor 已占位时不得误删。

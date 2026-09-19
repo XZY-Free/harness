@@ -34,6 +34,7 @@ import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/a
 import { createInvocation } from "@/lib/executions/persistence/invocation-store";
 import {
   acquireTestRuntimeAuthority,
+  createPreparedTakeoverAttempt,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
@@ -473,11 +474,17 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
       },
       applicationService: idleHostedService(invocation.id),
     });
+    // 换代必须自带新 Attempt（基础设施替换规则）：接管事务会收口旧 Attempt，
+    // 沿用同一行会让新代际挂在一个已终态的 Attempt 上。
+    const takeoverAttempt = await createPreparedTakeoverAttempt({
+      tenantId,
+      invocationId: invocation.id,
+    });
     const startInput = {
       tenantId,
       invocation,
       binding,
-      attempt,
+      attempt: takeoverAttempt,
       runtimeClient: client,
       runtimeEndpoint: "in-process://hosted",
       auth: { mode: "workload_token" as const, token: "lock-order-token" },

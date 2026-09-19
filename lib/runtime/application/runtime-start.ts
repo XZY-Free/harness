@@ -10,9 +10,13 @@ import {
   authorityIdentity,
   sameAuthority,
 } from "@/lib/executions/domain/execution-authority";
-import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
+import {
+  getAttemptById,
+  markAttemptPreparedInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
 import {
   acquireExecutionOwnershipInTransaction,
+  assertAttemptAcceptsNewGeneration,
   getAuthorityDatabaseTime,
   lockInvocationRootIfExists,
 } from "@/lib/executions/persistence/execution-ownership-store";
@@ -162,6 +166,16 @@ export async function startRuntimeInvocation(
       throw new Error("EnvironmentRevisionMismatch");
     }
   }
+  // A03-05：**终态 Attempt 不可承载新代际**。判据必须按真实回读、并**先于任何写入**求值：
+  // 旧实现只在 `prepareChecks`（准备槽已写、Workspace 候选已登记）之后才拦，于是死了的代际
+  // 会先被写脏再被拒绝，还会留下没有清理义务的 Workspace 候选。生产各 Start 调用方一律先
+  // `createAttempt`（`dispatcher` / `redispatchRuntimeInvocation` /
+  // `dispatch-queued-invocation-attempt`），这里把该不变量显式化，不新增任何合法路径。
+  const declaredAttempt = await getAttemptById(input.attempt.id);
+  if (!declaredAttempt || declaredAttempt.invocationId !== input.invocation.id) {
+    throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于该 Invocation");
+  }
+  assertAttemptAcceptsNewGeneration(declaredAttempt);
   // 发布事实（RuntimeRevision capability manifest）是 External start 一致性的真值源。
   // 在输入冻结与环境校验之后加载——pure 校验失败语义优先。
   const runtimeRevision = await getRuntimeRevisionById(input.binding.runtimeRevisionId);

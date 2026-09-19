@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "13e7b2bb-4cbf-4da0-84e9-c018939efd38",
+  "id": "350aca96-75cf-4c76-9cd2-9fd9522a3355",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -15150,15 +15150,29 @@
           "notNull": false,
           "autoincrement": false
         },
-        "supervisorLeaseOwner": {
-          "name": "supervisorLeaseOwner",
-          "type": "varchar(128)",
+        "supervisorClaimId": {
+          "name": "supervisorClaimId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supervisorInstanceId": {
+          "name": "supervisorInstanceId",
+          "type": "varchar(160)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "supervisorLeaseExpiresAt": {
           "name": "supervisorLeaseExpiresAt",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supervisorReleasedAt": {
+          "name": "supervisorReleasedAt",
           "type": "datetime(6)",
           "primaryKey": false,
           "notNull": false,
@@ -15314,6 +15328,10 @@
         "RuntimeSessionBinding_active_started_shape": {
           "name": "RuntimeSessionBinding_active_started_shape",
           "value": "`bindingState` <> 'active' OR `startedEventId` IS NOT NULL"
+        },
+        "RuntimeSessionBinding_supervisor_claim_shape": {
+          "name": "RuntimeSessionBinding_supervisor_claim_shape",
+          "value": "(`supervisorClaimId` IS NULL AND `supervisorInstanceId` IS NULL AND `supervisorLeaseExpiresAt` IS NULL AND `supervisorReleasedAt` IS NULL) OR (`supervisorClaimId` IS NOT NULL AND `supervisorInstanceId` IS NOT NULL AND `supervisorLeaseExpiresAt` IS NOT NULL)"
         },
         "RuntimeSessionBinding_dispatch_freeze_shape": {
           "name": "RuntimeSessionBinding_dispatch_freeze_shape",

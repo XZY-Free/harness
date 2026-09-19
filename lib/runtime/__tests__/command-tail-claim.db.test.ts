@@ -25,16 +25,16 @@ import {
   invocationCommandTable,
 } from "@/lib/persistence/schema/executions";
 import {
-  CommandDispatchClaimSupersededError,
-  retryDispatchedInvocationCommand,
-} from "@/lib/runtime/command-dispatcher";
-import {
   dispatchCheckpointCommandToRuntime,
   dispatchInterruptCommandToRuntime,
   dispatchResumeCommandToRuntime,
   dispatchSteerCommandToRuntime,
   setCommandGatewayHostedApplicationServiceForTest,
 } from "@/lib/runtime/command-dispatch-gateway";
+import {
+  CommandDispatchClaimSupersededError,
+  retryDispatchedInvocationCommand,
+} from "@/lib/runtime/command-dispatcher";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { claimInvocationCommandDispatch } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createMockRuntimeClient } from "@/lib/runtime/runtime-client";
@@ -500,7 +500,9 @@ describe("A09：内联投递必须持真实领取身份（null 旁路已消除�
   ];
 
   /** 造出"另一路投递正持有有效领取"的行（`dispatched` + 未过期），并给出取景基线。 */
-  async function seedHeldByOtherDelivery(commandType: "cancel" | "resume" | "steer" | "checkpoint") {
+  async function seedHeldByOtherDelivery(
+    commandType: "cancel" | "resume" | "steer" | "checkpoint",
+  ) {
     const seeded = await seedQueuedCommand(commandType);
     const heldUntil = new Date(Date.now() + 60_000);
     await db
@@ -582,9 +584,9 @@ describe("A09：内联投递必须持真实领取身份（null 旁路已消除�
   ];
 
   function runInlineEntry(type: "cancel" | "resume" | "steer" | "checkpoint") {
-    return (
-      p: { tenantId: string; commandId: string },
-    ): ReturnType<typeof dispatchInterruptCommandToRuntime> =>
+    return (p: { tenantId: string; commandId: string }): ReturnType<
+      typeof dispatchInterruptCommandToRuntime
+    > =>
       type === "cancel"
         ? dispatchInterruptCommandToRuntime(p)
         : type === "resume"
@@ -607,7 +609,10 @@ describe("A09：内联投递必须持真实领取身份（null 旁路已消除�
           observed = (await readCommand(commandId))?.dispatchLeaseOwner ?? null;
         };
         setCommandGatewayHostedApplicationServiceForTest(
-          hostedService({ invocationId, ...(probe === "cancel" ? { cancel: read } : { steer: read }) }),
+          hostedService({
+            invocationId,
+            ...(probe === "cancel" ? { cancel: read } : { steer: read }),
+          }),
         );
         const result = await run({ tenantId, commandId });
         expect(result.dispatched).toBe(true);

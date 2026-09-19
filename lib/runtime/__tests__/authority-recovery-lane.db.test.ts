@@ -13,6 +13,7 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
   acquireTestRuntimeAuthority,
+  createPreparedTakeoverAttempt,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
@@ -254,10 +255,15 @@ describe("Authority recovery lane（R01 §3 Owner expired）", () => {
     await expireLease(fixture.tenantId, authority.ownership.id);
 
     // 新代际真实接管（走真实 acquire 路径），旧代际此时已是历史事实。
+    // 接管会收口旧 Attempt，所以新代际必须另有 Attempt（基础设施替换规则）。
+    const takeoverAttempt = await createPreparedTakeoverAttempt({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+    });
     const takeover = await acquireTestRuntimeAuthority({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
-      attemptId: fixture.attempt.id,
+      attemptId: takeoverAttempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
     });
     expect(takeover.ownership.id).not.toBe(authority.ownership.id);

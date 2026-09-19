@@ -59,6 +59,21 @@ const SESSION_TRANSITIONS: Record<RuntimeSessionBindingState, RuntimeSessionBind
 /** 终态代际不接受任何派发/ACK 写入（R02 §1）。 */
 const TERMINAL_SESSION_STATES = new Set<RuntimeSessionBindingState>(["closed", "lost"]);
 
+/**
+ * A03：收口/失联时把工作身份标记为「已退休」。
+ *
+ * 只写墓碑，**不清** claim 列：`supervisorClaimId` 非空表示该代际已经分配过唯一的实际
+ * 推进者；清零会让「同一代际换执行者」重新变得可表达，而那恰是本包要消除的漏洞。
+ * 从未领取过的代际（claimId 为 NULL）没有任何可退休的东西，返回空补丁。
+ */
+function retireSupervisorClaim(
+  current: RuntimeSessionBinding,
+  now: Date,
+): { supervisorReleasedAt?: Date } {
+  if (current.supervisorClaimId === null || current.supervisorReleasedAt !== null) return {};
+  return { supervisorReleasedAt: now };
+}
+
 function assertSessionTransition(
   current: RuntimeSessionBindingState,
   next: RuntimeSessionBindingState,
@@ -433,11 +448,12 @@ export async function closeRuntimeSessionBindingInTransaction(
   if (current.bindingState === "closed" || current.bindingState === "lost") return current;
   if (input.expectedVersionNo !== undefined) assertVersion(current, input.expectedVersionNo);
   // A03：收口即撤销工作身份。否则维护/回收视角会把一条已 closed 的 Session 看成"仍有人执行"。
+  // 撤销只写 `supervisorReleasedAt` 墓碑：`supervisorClaimId` 是**一经写入不可清零**的历史
+  // 领取证据，把它清掉就等于让该代际回到"从未领取"——那正是本包要消除的失权漏洞。
   return applySessionWrite(tx, current, {
     bindingState: "closed",
     closedAt: new Date(),
-    supervisorLeaseOwner: null,
-    supervisorLeaseExpiresAt: null,
+    ...retireSupervisorClaim(current, new Date()),
   });
 }
 
@@ -457,8 +473,7 @@ export async function markRuntimeSessionLostInTransaction(
     closedAt: new Date(),
     dispatchLeaseOwner: null,
     dispatchLeaseExpiresAt: null,
-    supervisorLeaseOwner: null,
-    supervisorLeaseExpiresAt: null,
+    ...retireSupervisorClaim(current, new Date()),
   });
 }
 
@@ -486,8 +501,7 @@ export async function markRuntimeSessionLostByOwnershipInTransaction(
     closedAt: new Date(),
     dispatchLeaseOwner: null,
     dispatchLeaseExpiresAt: null,
-    supervisorLeaseOwner: null,
-    supervisorLeaseExpiresAt: null,
+    ...retireSupervisorClaim(current, new Date()),
   });
 }
 
@@ -551,12 +565,34 @@ export async function rescheduleRuntimeSessionDispatchInTransaction(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// A03 · Session 级工作身份：同代际只能有一个实际推进者
+// A03 · Session 级工作身份：一个 Ownership 代际最多一次实际 claim
 // ───────────────────────────────────────────────────────────────────────────
 
-export interface SupervisorLeaseClaim {
-  /** 是否由本次调用取得工作身份。false 表示该代际正由别的执行者推进。 */
+/** 领取被拒绝的持久原因（`claimed === false` 时给出）。 */
+export type SupervisorClaimDenial =
+  /** 本代际已经分配过实际推进者 —— **包含已过期的历史 claim**。 */
+  | "held"
+  /** 该 claim 已由持有者主动退休（`supervisorReleasedAt` 非空）。 */
+  | "retired";
+
+export interface SupervisorClaimOutcome {
+  /** 是否由本次调用取得（或按同一 claim 重放确认）该代际的工作身份。 */
   claimed: boolean;
+  reason: "granted" | SupervisorClaimDenial;
+  session: RuntimeSessionBinding;
+}
+
+/** 联合续租失败的原因。每一种都表示「本进程不再是该代际的合法执行者」。 */
+export type SupervisorClaimRenewalReason =
+  | "renewed"
+  | "claim_superseded"
+  | "claim_released"
+  | "claim_expired"
+  | "session_terminal";
+
+export interface SupervisorClaimRenewal {
+  renewed: boolean;
+  reason: SupervisorClaimRenewalReason;
   session: RuntimeSessionBinding;
 }
 
@@ -567,98 +603,181 @@ export interface SupervisorLeaseClaim {
  * 领取——它反而明确允许"继续进入执行"，所以两个进程各自读到同一 active Owner/Session 后
  * 都能起一个决策循环（进程内 `liveRunners` 在对方进程里是空的）。
  *
- * 这里补上真正的排他依据：行锁内的 CAS。仅当当前无持有者、持有者就是自己、或租约已过期
- * 时才成功。它与 `dispatchLease*` **分列**是必需的：派发 lane 在 `prepared`/`dispatching`
- * 持有派发票据，而 Supervisor 恰好也在 `dispatching` 入场（它要先写 `execution.started`），
- * 共用一列会让两者互相误判成"已被接管"。
+ * 修复后的排他依据由三件**互不相同**的事实组成（`contracts/shared-contracts.md` §3）：
+ * - `claimId`：每次真实领取另生的 nonce，决定"是哪一次领取"。一经写入**不可清零**，
+ *   NULL 只表示"从未领取"。
+ * - `instanceId`：领取者**进程启动**的实例 id，仅用于诊断归属。PID/hostname/时间戳在容器
+ *   里会碰撞，因此不参与唯一性判定——用它们当身份正是被修复的缺陷。
+ * - `leaseExpiresAt`：与 Owner 在**同一事务**里写下的同一个截止时间。
  *
- * 本写入**不推进 `versionNo`**：工作身份不是生命周期状态。若续租推进版本号，
- * 会让并发的网络 ACK（`expectedVersionNo` CAS）因续租而失败——那是把两件不同的事
- * 绑在同一个乐观锁上。这里的 CAS 条件是工作身份列自身。
+ * 核心不变量：**过期不释权、释放不复位**。一旦写入 `claimId`，本代际就不再接受第二个
+ * 执行者；后续推进只能经正式恢复器建立**新的 Ownership 代际**（基础设施替换时按既定
+ * Attempt 规则建新 Attempt）。旧代际的迟到提交由既有 Ownership fencing 拒绝，不另造一个
+ * 与它并列的正式执行权。
+ *
+ * 本写入**不推进 `versionNo`**：工作身份不是生命周期状态。若领取推进版本号，会让并发的
+ * 网络 ACK（`expectedVersionNo` CAS）因为一次心跳而失败——那是把两件不同的事绑在同一个
+ * 乐观锁上。排他用例的 CAS 条件是工作身份列自身（下面的 `if`）。
  */
 export async function claimRuntimeSessionSupervisorInTransaction(
   tx: SessionTx,
   input: {
     tenantId: string;
     id: string;
-    leaseOwner: string;
+    /** 本次实际领取的 nonce。不接受 PID、workerName 或实例 id 作为它。 */
+    claimId: string;
+    /** 领取者进程启动 id（`workerInstanceId()`），仅诊断归属。 */
+    instanceId: string;
     leaseExpiresAt: Date;
     now: Date;
   },
-): Promise<SupervisorLeaseClaim> {
+): Promise<SupervisorClaimOutcome> {
   const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
   if (TERMINAL_SESSION_STATES.has(current.bindingState)) {
     throw new Error(
       `RuntimeSessionMismatch: ${current.bindingState} 已收口，不接受 Supervisor 领取`,
     );
   }
-  // 持有者不明（owner 非空但无到期时间）按「仍持有」处理：不能抢一个来源不清的身份。
-  const heldByOther =
-    current.supervisorLeaseOwner !== null &&
-    current.supervisorLeaseOwner !== input.leaseOwner &&
-    (current.supervisorLeaseExpiresAt === null || current.supervisorLeaseExpiresAt > input.now);
-  if (heldByOther) return { claimed: false, session: current };
-  const [updated] = await tx
-    .update(runtimeSessionBindingTable)
-    .set({
-      supervisorLeaseOwner: input.leaseOwner,
-      supervisorLeaseExpiresAt: input.leaseExpiresAt,
-      updatedAt: input.now,
-    })
-    .where(
-      and(
-        eq(runtimeSessionBindingTable.tenantId, current.tenantId),
-        eq(runtimeSessionBindingTable.id, current.id),
-      ),
-    );
-  if (!updated) throw new RuntimeSessionBindingNotFoundError(current.id);
-  return { claimed: true, session: await readSessionRow(tx, current.tenantId, current.id) };
+  if (current.supervisorClaimId !== null) {
+    if (current.supervisorClaimId === input.claimId && current.supervisorReleasedAt === null) {
+      // 同一次领取的重放（响应丢失后重试）：只刷新自己的截止时间，不产生第二次领取。
+      // 「不能另起 Loop」由调用方的进程内索引保证——同一个 claimId 在本进程只会有一个 Loop。
+      return {
+        claimed: true,
+        reason: "granted",
+        session: await writeSupervisorColumns(
+          tx,
+          current,
+          { leaseExpiresAt: input.leaseExpiresAt },
+          input.now,
+        ),
+      };
+    }
+    // 别的 nonce（哪怕 PID 相同、哪怕旧 claim 已过期）一律拒绝：本代际的推进者已经确定。
+    return {
+      claimed: false,
+      reason: current.supervisorReleasedAt === null ? "held" : "retired",
+      session: current,
+    };
+  }
+  return {
+    claimed: true,
+    reason: "granted",
+    session: await writeSupervisorColumns(
+      tx,
+      current,
+      {
+        claimId: input.claimId,
+        instanceId: input.instanceId,
+        leaseExpiresAt: input.leaseExpiresAt,
+        releasedAt: null,
+      },
+      input.now,
+    ),
+  };
 }
 
 /**
- * 续期 Supervisor 工作身份。仅当**本执行者**仍是持有者时成功。
+ * 按**同一 claim** 续期 Session 侧截止时间（A03-03）。
  *
- * 返回 false 表示身份已被接管或已被收口释放——调用方必须停止推进该代际
- * （这正是「旧 Owner 复活」在 Supervisor 侧的阻断点）。
+ * 它只写 Session 的 `supervisorLeaseExpiresAt`，因此**必须**由 Hosted 联合续租
+ * （`execution-ownership-store` 的 `renewHostedExecutionLeaseInTransaction`）在
+ * `I → Attempt → O → S` 同一事务里调用：Owner 与 claim 必须同步失效。契约明确禁止
+ * "先无条件续 Owner，再发现 Session claim 已失效"，也禁止"未取得 claim 的请求续 Owner"。
+ *
+ * `now` 必须来自**数据库时间**（`getAuthorityDatabaseTime`）。用本机 `Date.now()` 会让
+ * 两个进程对"是否已经过期"得出不同结论，那正是"过期 claim 被复活"的入口。
  */
-export async function renewRuntimeSessionSupervisorInTransaction(
+export async function renewSupervisorClaimInTransaction(
   tx: SessionTx,
-  input: { tenantId: string; id: string; leaseOwner: string; leaseExpiresAt: Date; now: Date },
-): Promise<boolean> {
+  input: {
+    tenantId: string;
+    id: string;
+    claimId: string;
+    instanceId: string;
+    leaseExpiresAt: Date;
+    now: Date;
+  },
+): Promise<SupervisorClaimRenewal> {
   const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
-  if (current.supervisorLeaseOwner !== input.leaseOwner) return false;
-  if (TERMINAL_SESSION_STATES.has(current.bindingState)) return false;
-  const [updated] = await tx
-    .update(runtimeSessionBindingTable)
-    .set({ supervisorLeaseExpiresAt: input.leaseExpiresAt, updatedAt: input.now })
-    .where(
-      and(
-        eq(runtimeSessionBindingTable.tenantId, current.tenantId),
-        eq(runtimeSessionBindingTable.id, current.id),
-      ),
-    );
-  if (!updated) throw new RuntimeSessionBindingNotFoundError(current.id);
-  return true;
+  if (TERMINAL_SESSION_STATES.has(current.bindingState)) {
+    return { renewed: false, reason: "session_terminal", session: current };
+  }
+  // 完整身份：claim nonce 与进程实例都必须逐项相符。少了后一项，"同 claim 但换了进程"
+  // 会被误判成本人续租。
+  if (
+    current.supervisorClaimId !== input.claimId ||
+    current.supervisorInstanceId !== input.instanceId
+  ) {
+    return { renewed: false, reason: "claim_superseded", session: current };
+  }
+  if (current.supervisorReleasedAt !== null) {
+    return { renewed: false, reason: "claim_released", session: current };
+  }
+  if (current.supervisorLeaseExpiresAt === null || current.supervisorLeaseExpiresAt <= input.now) {
+    // 过期不复活：唯一延长路径是"过期之前的续租"。
+    return { renewed: false, reason: "claim_expired", session: current };
+  }
+  return {
+    renewed: true,
+    reason: "renewed",
+    session: await writeSupervisorColumns(
+      tx,
+      current,
+      { leaseExpiresAt: input.leaseExpiresAt },
+      input.now,
+    ),
+  };
 }
 
 /**
- * 释放 Supervisor 工作身份（Supervisor 正常退出时）。
+ * 退休本代际的 Supervisor claim（持有者正常退出的握手点）。
  *
- * 只清自己的身份：代际已被接管（持有者已变）时原样返回 false，
- * 绝不误删新执行者的身份。
+ * 只写 `supervisorReleasedAt` 墓碑，**保留** claimId/instanceId/expiry：契约要求
+ * "领取过的代际保留历史 claim，关闭 Session"，并且"claimed 后释放或过期不得变回未领取"。
+ * `claimId` 一经写入不可清零，所以释放只是把该代际标记成"已经用过"，不会让它重新可领；
+ * 下一个推进者必须经正式恢复取得**新代际**。
+ *
+ * 只退休自己的 claim：代际身份已被别的执行者持有时原样返回 false，绝不误删他人身份。
  */
 export async function releaseRuntimeSessionSupervisorInTransaction(
   tx: SessionTx,
-  input: { tenantId: string; id: string; leaseOwner: string; now: Date },
+  input: { tenantId: string; id: string; claimId: string; now: Date },
 ): Promise<boolean> {
   const current = await lockRuntimeSessionBindingInTransaction(tx, input.tenantId, input.id);
-  if (current.supervisorLeaseOwner !== input.leaseOwner) return false;
-  const [updated] = await tx
+  if (current.supervisorClaimId !== input.claimId) return false;
+  if (current.supervisorReleasedAt !== null) return true;
+  await writeSupervisorColumns(tx, current, { releasedAt: input.now }, input.now);
+  return true;
+}
+
+/**
+ * 写 claim 列（**只写显式给出的列**）。
+ *
+ * 逐列判 `undefined` 而不是整体 `set(patch)`：`null` 与"未提供"在这里语义完全不同——
+ * 领取时显式写 `releasedAt: null` 表示"这次领取是活的"，而续租绝不能把墓碑抹掉。
+ */
+async function writeSupervisorColumns(
+  tx: SessionTx,
+  current: RuntimeSessionBinding,
+  patch: {
+    claimId?: string;
+    instanceId?: string;
+    leaseExpiresAt?: Date;
+    releasedAt?: Date | null;
+  },
+  now: Date,
+): Promise<RuntimeSessionBinding> {
+  await tx
     .update(runtimeSessionBindingTable)
     .set({
-      supervisorLeaseOwner: null,
-      supervisorLeaseExpiresAt: null,
-      updatedAt: input.now,
+      ...(patch.claimId !== undefined ? { supervisorClaimId: patch.claimId } : {}),
+      ...(patch.instanceId !== undefined ? { supervisorInstanceId: patch.instanceId } : {}),
+      ...(patch.leaseExpiresAt !== undefined
+        ? { supervisorLeaseExpiresAt: patch.leaseExpiresAt }
+        : {}),
+      ...(patch.releasedAt !== undefined ? { supervisorReleasedAt: patch.releasedAt } : {}),
+      updatedAt: now,
     })
     .where(
       and(
@@ -666,8 +785,7 @@ export async function releaseRuntimeSessionSupervisorInTransaction(
         eq(runtimeSessionBindingTable.id, current.id),
       ),
     );
-  if (!updated) throw new RuntimeSessionBindingNotFoundError(current.id);
-  return true;
+  return readSessionRow(tx, current.tenantId, current.id);
 }
 
 async function readSessionRow(
