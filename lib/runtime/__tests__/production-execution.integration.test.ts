@@ -58,6 +58,7 @@ import { getPermissionDecisionsByToolCall } from "@/lib/permission/permission-qu
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import {
   executionBindingTable,
+  executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
 } from "@/lib/persistence/schema/executions";
@@ -1130,12 +1131,28 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
       session.attemptId,
     );
     if (!lease) throw new Error("EnvironmentLease 缺失（MANAGED 必须真实准备实例）");
-    // MANAGED 执行的前置不变量（`requireCurrentExecutionAuthority`）：activating 阶段必须把
-    // Lease 从 prepared 推到 ready 并绑定当前 Owner，因此执行完成后读回的必然是 ready。
-    // 这一条同时证明「受管环境真的被激活」而不只是被准备过。
-    expect(lease.readinessState).toBe("ready");
-    expect(lease.leaseState).toBe("active");
-    expect(lease.activationOwnershipId).toBeTruthy();
+    // A08 8.1：Turn 已 completed ⇒ 统一终态收口已经按生命周期给这份 Lease 登记了真实清理
+    // 工作（`releasing` + 清空激活指针），"物理已释放"只由清理 Worker 拿到 Backend 回执后
+    // 才写。因此**不能**再用终态之后的 Lease 行来证明"受管环境被激活"——它此刻按定义
+    // 已经不在 ready/active 上了。
+    expect(lease.leaseState).toBe("releasing");
+    expect(lease.releasedAt).toBeNull();
+    expect(lease.readinessState).toBe("blocked");
+    expect(lease.activationOwnershipId).toBeNull();
+
+    // 激活事实改用持久取证：本 Invocation 的那一代 Ownership 明确绑定这份 Lease
+    // （activating 阶段由 `activateEnvironmentLease` 写回互指针）。
+    const [activatedOwner] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, session.ownershipId))
+      .limit(1);
+    expect(activatedOwner?.environmentLeaseId).toBe(lease.id);
+    // 而且这一代真的在受管环境里把执行跑完了（下面还有 docker_inspect 回读证据）——
+    // 这反证 activating 阶段确实把 Lease 推到了 ready+active 并绑定了当前 Owner，
+    // 否则 `requireCurrentExecutionAuthority` 会在执行前直接拒绝。
+    expect(activatedOwner?.ownershipState).toBe("released");
+    expect(activatedOwner?.reasonCode).toBe("execution_terminal");
     expect(lease.environmentDefinitionRevisionId).toBe(context.environmentRevisionId);
     // Lease 自身也冻结了同一份 WorkspaceBinding（运行根同源）。
     expect((lease.resourceManifest as Record<string, unknown>).workspaceBindingId).toBe(

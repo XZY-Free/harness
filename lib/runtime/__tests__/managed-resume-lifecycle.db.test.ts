@@ -87,6 +87,7 @@ import {
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
+import { runEnvironmentCleanupOnce } from "@/scripts/workers/environment-lease-cleanup";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -712,13 +713,9 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     // 两次 execution.started 是"真的又执行了一代"的持久证据（不是只写了 ACK）。
     expect(await countIngressEvents(invocation.id, "execution.started")).toBe(2);
 
-    // ── 5. 环境：Lease 被重新准备并绑定**新**代际，且恢复锚点证据已刷新 ──
-    const leaseAfter = await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id);
-    expect(leaseAfter?.leaseState).toBe("active");
-    expect(leaseAfter?.readinessState).toBe("ready");
-    expect(leaseAfter?.activationOwnershipId).toBe(resumedSession?.ownershipId);
-    // 恢复后的 Lease 绑定的必须是**真实存在**的新所有权代际，且它指向同一份
-    // EnvironmentLease（不是"另一个 Owner 复用了一个恰好 ready 的旧 Lease"）。
+    // ── 5. 环境：Lease 被 Resume 重新准备并绑定**新**代际 ──
+    // 恢复代际与受管资源的绑定用 `ExecutionOwnership.environmentLeaseId` 取证：它是持久事实，
+    // 不像 `EnvironmentLease.activationOwnershipId` 那样会按 A08 在终态收口时被清空。
     const [resumedOwner] = resumedSession
       ? await db
           .select()
@@ -727,10 +724,22 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
           .limit(1)
       : [];
     expect(resumedOwner?.attemptId).toBe(attempt.id);
+    // "另一个 Owner 复用了一个恰好 ready 的旧 Lease" 不成立：恢复代际自己绑的就是这份
+    // Lease（激活时 `activateEnvironmentLease` 写回互指针，DB CHECK 保证 ready 必有激活者）。
     expect(resumedOwner?.environmentLeaseId).toBe(leaseBefore.id);
     // 执行已正常收口（Invocation=completed）→ 代际走的是统一终态收口边界（A02）。
     expect(resumedOwner?.ownershipState).toBe("released");
     expect(resumedOwner?.reasonCode).toBe("execution_terminal");
+
+    // A08 8.1：**正常完成**同样是本 Attempt 的正式生命周期出口，必须登记真实清理工作。
+    // 出口只把 Lease 推进到非终态 `releasing` 并清空激活指针——它**不**声明容器已经消失。
+    const leaseAfter = await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id);
+    expect(leaseAfter?.leaseState).toBe("releasing");
+    expect(leaseAfter?.releasedAt).toBeNull();
+    expect(leaseAfter?.readinessState).toBe("blocked");
+    expect(leaseAfter?.activationOwnershipId).toBeNull();
+    // 逻辑收口 ≠ 物理释放：还没跑回收 Worker，真实实例必须原样还在。
+    expect((await inspectContainer(containerName))?.Id).toBe(containerBefore?.Id);
 
     const anchorDigest =
       pausedAttempt?.resumeAnchorDigest ??
@@ -765,6 +774,15 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
 
     const [turn] = await db.select().from(turnTable).where(eq(turnTable.id, ctx.turnId)).limit(1);
     expect(turn?.turnState).toBe("completed");
+
+    // ── 8. 后台回收闭环（A08 8.1）：走**生产 Worker 入口**，拿到真实释放回执才写 `released` ──
+    const sweep = await runEnvironmentCleanupOnce();
+    expect(sweep.released).toBeGreaterThanOrEqual(1);
+    const releasedLease = await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id);
+    expect(releasedLease?.leaseState).toBe("released");
+    expect(releasedLease?.releasedAt).toBeTruthy();
+    // `released` 必须对应真实资源消失，而不是只改了一个状态字段。
+    expect(await inspectContainer(containerName)).toBeNull();
   });
 
   it("A05-02: External continuation 必须携带同一份受管执行资源（缺参必然 EnvironmentRevisionMismatch）", async () => {
