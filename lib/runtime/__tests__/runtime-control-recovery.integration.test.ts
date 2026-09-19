@@ -65,6 +65,8 @@ import {
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchCancelCommand, dispatchResumeCommand } from "@/lib/runtime/command-dispatcher";
+import { claimInvocationCommandDispatch } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { RUNTIME_DISPATCH_RETRY_POLICY } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
@@ -305,6 +307,21 @@ function cannedRuntimeClient(capabilitiesDigest: string) {
   });
 }
 
+/**
+ * A09：真实投递必须先取得领取 nonce（内联路径同样走同一个原子领取服务）。
+ */
+async function claimCommandForDelivery(commandId: string, leaseOwner: string): Promise<string> {
+  const claim = await claimInvocationCommandDispatch({
+    commandId,
+    leaseOwner,
+    leaseDurationMs: RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs,
+    now: new Date(),
+    allowImmediateQueued: true,
+  });
+  if (!claim) throw new Error(`无法领取命令 ${commandId}`);
+  return claim.claimToken;
+}
+
 describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-01..06）", () => {
   beforeEach(async () => {
     process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
@@ -375,6 +392,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     const staleDispatch = await dispatchCancelCommand({
       tenantId,
       commandId: staleCancelId,
+      claimToken: await claimCommandForDelivery(staleCancelId, `claim-${randomUUID()}`),
       runtimeClient: staleTransport,
       runtimeEndpointResolver: async () => ({
         runtimeEndpoint: "https://stale-target.invalid",
@@ -598,6 +616,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     const result = await dispatchResumeCommand({
       tenantId,
       commandId: resumeCommandId,
+      claimToken: await claimCommandForDelivery(resumeCommandId, `claim-${randomUUID()}`),
       runtimeClient: ackOnlyRuntime,
       runtimeEndpointResolver: async () => ({
         runtimeEndpoint: "https://ack-only.invalid",

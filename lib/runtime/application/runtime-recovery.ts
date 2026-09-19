@@ -1,6 +1,6 @@
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
-import { scheduleEnvironmentLeaseCleanup } from "@/lib/environment/environment-lease-store";
+import { scheduleEnvironmentLeaseCleanupInTransaction } from "@/lib/environment/environment-lease-store";
 import { transitionInvocation } from "@/lib/executions/application/transition-invocation";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
@@ -272,16 +272,13 @@ export async function markInvocationLost(
       // "Owner 丢失、Invocation terminal 均生成持久清理工作"）。
       // 位置按 R04 §2 固定锁图：`… → Session → EnvironmentLease → …`。
       if (owner.environmentLeaseId) {
-        await scheduleEnvironmentLeaseCleanup(
-          {
-            tenantId: input.tenantId,
-            leaseId: owner.environmentLeaseId,
-            errorCode: input.reasonCode,
-            now,
-            immediate: true,
-          },
-          tx,
-        );
+        await scheduleEnvironmentLeaseCleanupInTransaction(tx, {
+          tenantId: input.tenantId,
+          leaseId: owner.environmentLeaseId,
+          errorCode: input.reasonCode,
+          now,
+          immediate: true,
+        });
       }
     }
 

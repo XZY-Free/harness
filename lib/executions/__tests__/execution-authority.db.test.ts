@@ -58,9 +58,12 @@ import { computeWorkspaceContractDigest } from "@/lib/workspace/workspace-contra
 import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import {
+  type AcquireWorkspaceWriteLockResult,
+  type ReserveWorkspaceWriterOutcome,
   activateWorkspaceWriter,
   claimWorkspaceWriterRelease,
   reserveWorkspaceWriter,
+  reserveWorkspaceWriterInTransaction,
 } from "@/lib/workspace/workspace-write-lock-queries";
 import {
   activatePreparedWorkspaceWriter,
@@ -942,27 +945,36 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
     // 交接复验：拿已被失效的老代际 tuple 去激活同一 scope 的预留行 → 必须拒绝，
     // 且不落下伪造的 Backend 回执。
     const lateAttemptId = await seedReplacementAttempt(first);
-    const lateReserved = await reserveWorkspaceWriter({
-      tenantId: TENANT_ID,
-      storageScopeDigest: scope,
-      invocationId: first.invocation.id,
-      attemptId: lateAttemptId,
-      ownershipId: run.acquired.ownership.id,
-      workspaceBindingId: binding.id,
-      leaseExpiresAt: new Date(Date.now() + 60_000),
-      backendOperationId: `auth-07-late:${lateAttemptId}`,
-    });
-    await expect(
-      activateWorkspaceWriter({
+    const lateReserved = expectReserved(
+      await reserveWorkspaceWriter({
         tenantId: TENANT_ID,
+        storageScopeDigest: scope,
         invocationId: first.invocation.id,
         attemptId: lateAttemptId,
-        lockId: lateReserved.lock.id,
-        writerGeneration: lateReserved.writerGeneration,
         ownershipId: run.acquired.ownership.id,
-        leaseEpoch: run.acquired.ownership.leaseEpoch,
-        backendGrantRef: "grant-should-not-land",
+        workspaceBindingId: binding.id,
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+        backendOperationId: `auth-07-late:${lateAttemptId}`,
       }),
+    );
+    await expect(
+      db.transaction((tx) =>
+        activateWorkspaceWriter(
+          {
+            tenantId: TENANT_ID,
+            storageScopeDigest: scope,
+            invocationId: first.invocation.id,
+            attemptId: lateAttemptId,
+            lockId: lateReserved.lock.id,
+            writerGeneration: lateReserved.writerGeneration,
+            ownershipId: run.acquired.ownership.id,
+            leaseEpoch: run.acquired.ownership.leaseEpoch,
+            backendGrantRef: "grant-should-not-land",
+            backendOperationId: `auth-07-late:${lateAttemptId}`,
+          },
+          tx,
+        ),
+      ),
     ).rejects.toThrow("Workspace writer 的父 Owner 已失权");
     const rejected = await readLock(lateReserved.lock.id);
     expect(rejected?.lockState).toBe("reserved");
@@ -982,6 +994,15 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       state: "lost",
       reasonCode: "handover",
     });
+    // A07 决策四：父 Owner 失权后仍占着 `active` 的行**不得被直接覆盖** —— 必须由释放 lane
+    // 拿到真实停止回执并写成 `released`，下一代才被分配。
+    const handoverRelease = await runWorkspaceWriterRelease({
+      tenantId: TENANT_ID,
+      lockId: secondRun.activated.lockId,
+      leaseOwner: "auth-07-handover-release",
+      deps: { resolveHost: async () => backend.host },
+    });
+    expect(handoverRelease.outcome).toBe("released");
     const handoverAttemptId = await seedReplacementAttempt(second);
     const handoverOwner = await acquireTestRuntimeAuthority({
       tenantId: TENANT_ID,
@@ -1026,6 +1047,17 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       ownershipState: "released",
       reasonCode: "execution_terminal",
     });
+
+    // (c) 段要在**同一个物理 scope** 上再起一代：仍必须先把交接代际真实停下
+    // （A07 决策四：`active` 行不得被覆盖；只有 `released` 才允许分配下一代）。
+    const handoverTerminalRelease = await runWorkspaceWriterRelease({
+      tenantId: TENANT_ID,
+      lockId: handover.lockId,
+      leaseOwner: "auth-07-handover-terminal-release",
+      deps: { resolveHost: async () => backend.host },
+    });
+    expect(handoverTerminalRelease.outcome).toBe("released");
+    expect((await readLock(handover.lockId))?.lockState).toBe("released");
 
     // ── (c) 真并发：同一 Invocation 上 I 根终态与 W→I 交接同时进行 ──
     const racing = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
@@ -1129,15 +1161,17 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
     const connA = secondDb();
 
     /** 造一个**真正 released** 的槽位：预留 → 生产释放 lane 收口（holder 不存在 ⇒ 父 Owner 已失权）。 */
-    const reserved = await reserveWorkspaceWriter({
-      tenantId: TENANT_ID,
-      storageScopeDigest: scope,
-      invocationId: randomUUID(),
-      attemptId: randomUUID(),
-      ownershipId: randomUUID(),
-      workspaceBindingId: binding.id,
-      leaseExpiresAt: new Date(Date.now() + 60_000),
-    });
+    const reserved = expectReserved(
+      await reserveWorkspaceWriter({
+        tenantId: TENANT_ID,
+        storageScopeDigest: scope,
+        invocationId: randomUUID(),
+        attemptId: randomUUID(),
+        ownershipId: randomUUID(),
+        workspaceBindingId: binding.id,
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      }),
+    );
     const seededRelease = await runWorkspaceWriterRelease({
       tenantId: TENANT_ID,
       lockId: reserved.lock.id,
@@ -1162,7 +1196,9 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
 
     // (a) 所有写都在同一个 Tx：提交之前，另一条真实连接看不到新 generation。
     const singleTx = await connA.transaction(async (tx) => {
-      const result = await reserveWorkspaceWriter(reserveInput(randomUUID()), tx);
+      const result = expectReserved(
+        await reserveWorkspaceWriterInTransaction(tx, reserveInput(randomUUID())),
+      );
       // 事务内：本连接已看到新 generation。
       expect((await readLock(result.lock.id, tx))?.writerGeneration).toBe(result.writerGeneration);
       // 事务外（另一条真实连接）：必须还是旧 generation —— 证明这不是两条自动提交写。
@@ -1183,7 +1219,9 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       executor.transaction(async (tx) => {
         const connectionId = await connectionIdOf(tx);
         await barrier();
-        const result = await reserveWorkspaceWriter(reserveInput(ownershipId), tx);
+        const result = expectReserved(
+          await reserveWorkspaceWriterInTransaction(tx, reserveInput(ownershipId)),
+        );
         return { connectionId, generation: result.writerGeneration, ownershipId };
       });
 
@@ -1297,7 +1335,9 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       state: "lost",
       reasonCode: "auth-09",
     });
-    const taken = await reserveWorkspaceWriter({
+    // A07 决策四：`active` 行 + 父 Owner 已失权时**不得直接覆盖**，否则旧 Writer 的
+    // 定位就丢了。本轮只能可靠登记释放，并如实回报 release_pending。
+    const pending = await reserveWorkspaceWriter({
       tenantId: TENANT_ID,
       storageScopeDigest: scope,
       invocationId: other.invocation.id,
@@ -1306,7 +1346,53 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       workspaceBindingId: binding.id,
       leaseExpiresAt: new Date(Date.now() + 60_000),
     });
+    expect(pending.outcome).toBe("release_pending");
+    if (pending.outcome !== "release_pending") throw new Error("unreachable");
+    expect(pending.reason).toBe("previous_writer_not_stopped");
+    // 义务已登记，而原 holder tuple / Backend 回执 / 定位字段一个都没被抹掉。
+    const pendingRow = await readLock(activated.lockId);
+    expect(pendingRow?.lockState).toBe("releasing");
+    expect(pendingRow?.releaseReasonCode).toBe("writer_holder_ownership_lost");
+    expect(pendingRow?.writerGeneration).toBe(lockBefore!.writerGeneration);
+    expect(pendingRow?.holderInvocationId).toBe(fixture.invocation.id);
+    expect(pendingRow?.holderOwnershipId).toBe(acquired.ownership.id);
+    expect(pendingRow?.backendGrantRef).toBe(lockBefore!.backendGrantRef);
+    expect(pendingRow?.leaseExpiresAt).not.toBeNull();
+    // 释放 lane 真实停止上一代（Backend 上确实还存在该 writer），行才进入 `released`。
+    const releasedOutcome = await runWorkspaceWriterRelease({
+      tenantId: TENANT_ID,
+      lockId: activated.lockId,
+      leaseOwner: "auth-09-release",
+      deps: { resolveHost: async () => backend.host },
+    });
+    expect(releasedOutcome.outcome).toBe("released");
+    expect((await readLock(activated.lockId))?.lockState).toBe("released");
+    expect(await backend.host.getWriter(scope, lockBefore!.writerGeneration)).toBeNull();
+
+    // 只有到这一步才分配下一代，且拿到 Backend 真实代际链上的下一格。
+    const taken = expectReserved(
+      await reserveWorkspaceWriter({
+        tenantId: TENANT_ID,
+        storageScopeDigest: scope,
+        invocationId: other.invocation.id,
+        attemptId: other.attempt.id,
+        ownershipId: "other-invocation-ownership",
+        workspaceBindingId: binding.id,
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      }),
+    );
     expect(taken.writerGeneration).toBe(lockBefore!.writerGeneration + 1);
     expect((await readLock(activated.lockId))?.holderInvocationId).toBe(other.invocation.id);
   });
 });
+
+/**
+ * A07 决策四：预留的成功出口现在是**显式 outcome**。测试里凡是"预期预留成功"的地方都必须
+ * 穿过这个断言，避免直接读联合体上可能表示 `release_pending` 的字段。
+ */
+function expectReserved(outcome: ReserveWorkspaceWriterOutcome): AcquireWorkspaceWriteLockResult {
+  if (outcome.outcome !== "reserved") {
+    throw new Error(`预期预留成功，实际得到 release_pending（${outcome.reason}）`);
+  }
+  return outcome;
+}

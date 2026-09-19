@@ -130,11 +130,15 @@ function isPostAuthorityResume(context: CommandContext): boolean {
   );
 }
 
-async function loadCommand(
-  tenantId: string,
-  commandId: string,
-  expectedState: "queued" | "dispatched",
-): Promise<CommandContext> {
+/**
+ * A09：投递前置状态**只有一种** —— `dispatched`。
+ *
+ * 领取（`claimInvocationCommandDispatch`）是投递的前置条件，而领取事务本身把行推进到
+ * `dispatched`。所以 dispatcher 只能按"已领取"进入：没有领取过的 `queued` 行在这里
+ * 直接拒绝。旧实现允许 `queued` 进入，于是内联路径可以在 `claimToken=null` 下推进
+ * 状态并写尾部结论 —— 那正是被删除的"空领取旁路"。
+ */
+async function loadCommand(tenantId: string, commandId: string): Promise<CommandContext> {
   const [command] = await db
     .select()
     .from(invocationCommandTable)
@@ -143,7 +147,7 @@ async function loadCommand(
     )
     .limit(1);
   if (!command) throw new CommandNotFoundError(commandId);
-  if (command.commandState !== expectedState)
+  if (command.commandState !== "dispatched")
     throw new CommandAlreadyDispatchedError(`${commandId}:${command.commandState}`);
   const invocation = await getInvocationById(tenantId, command.invocationId);
   if (!invocation) throw new CommandInvocationNotFoundError(command.invocationId);
@@ -169,38 +173,48 @@ async function loadCommand(
 }
 
 /**
- * R04 §5：命令尾部提交的**当前领取权**校验（A09）。
+ * A09：命令尾部提交的**当前领取权**校验。
  *
- * 在此之前只有"瞬态重试排定"和"superseded 专用收口"校验了 claim，而
- * `markDispatched` / `acknowledgeResumeCommand` / `acknowledge` / `reject` 只看
- * `commandState=dispatched`。这不足以区分「仍是这个状态」和「已经换了领取者」：
+ * 旧实现只在 `claimToken` **非空**时比较持有者，而请求内联投递恰恰传 `null`：
+ * 内联请求 `markDispatched` 后阻塞在网络上 → 后台 lane 发现该行 `dispatched`、租约空缺、
+ * 已到期 → 领取为 worker-B → 内联请求返回，以 `claimToken=null` 进入 ACK/失败尾部，
+ * 校验被整条跳过，于是覆盖命令结论并清空 worker-B 的领取字段。
  *
- * > 旧 Worker 发出请求后阻塞 → 领取租约到期 → 新 Worker 接管 → 旧 Worker 回来，
- * > 仍可把新领取者的命令写成 acknowledged/failed，让新执行结果被忽略、取消后续重试。
- *
- * 因此全部尾部提交共用这一条语义：`claimToken` 非空时必须等于该行当前的
- * `dispatchLeaseOwner`；**请求内联调度**从未领取租约（`null`），只按状态机复核。
- * 这不是"把 token 做成可选参数绕过去"——内联路径本来就不是一次 claim，
- * 它没有可被接管的领取身份。
+ * 现在这条语义**没有免检分支**：所有真实投递（内联与后台）都先在同一个原子领取服务里
+ * 取得 nonce（= 该行 `dispatchLeaseOwner`），尾部必须逐字带上它，并且该领取仍未过期。
+ * 「从未领取」不再是可执行状态，因此也不再需要"null 就跳过"的分支。
  */
 function assertCommandClaimHeld(
   current: InvocationCommand,
-  claimToken: string | null,
+  claimToken: string,
   commandId: string,
+  now: Date,
 ): void {
-  if (claimToken !== null && current.dispatchLeaseOwner !== claimToken) {
+  if (current.dispatchLeaseOwner !== claimToken) {
     throw new CommandDispatchClaimSupersededError(
       `Command ${commandId} 的领取权已被接管（holder=${current.dispatchLeaseOwner ?? "none"}）`,
     );
   }
+  if (!current.dispatchLeaseExpiresAt || current.dispatchLeaseExpiresAt <= now) {
+    // 过期但尚未被他人领取也不能提交结论：否则"等租约自然过期"就成了绕过校验的路径。
+    throw new CommandDispatchClaimSupersededError(`Command ${commandId} 的领取权已过期`);
+  }
 }
 
-async function markDispatched(
+/**
+ * A09：网络发送前的**发送尝试计数**。
+ *
+ * `queued → dispatched` 是**领取事务**的职责（`claimInvocationCommandDispatch`），
+ * 不再由本函数在无凭据的情况下顺手完成 —— 否则"没有领取身份也能把状态推进"又是一条旁路。
+ * 计数语义是一次真实发送尝试，因此必须与尾部共用同一 claim 谓词（同一 claim 只能计一次的是
+ * 重放，见 `claimInvocationCommandDispatch` 的既有领取语义）。
+ */
+async function recordCommandDispatchAttemptStarted(
   tenantId: string,
   commandId: string,
-  claimToken?: string,
+  claimToken: string,
 ): Promise<InvocationCommand> {
-  const token = claimToken ?? null;
+  const now = new Date();
   return db.transaction(async (tx) => {
     const [command] = await tx
       .select()
@@ -214,15 +228,16 @@ async function markDispatched(
       .for("update")
       .limit(1);
     if (!command) throw new CommandNotFoundError(commandId);
-    if (!["queued", "dispatched"].includes(command.commandState))
+    // 只有已经领取（`dispatched`）的行才能被计为一次真实发送尝试。
+    if (command.commandState !== "dispatched")
       throw new CommandAlreadyDispatchedError(`${commandId}:${command.commandState}`);
-    assertCommandClaimHeld(command, token, commandId);
+    assertCommandClaimHeld(command, claimToken, commandId, now);
     await tx
       .update(invocationCommandTable)
       .set({
         commandState: "dispatched",
         dispatchCount: sql`${invocationCommandTable.dispatchCount} + 1`,
-        updatedAt: new Date(),
+        updatedAt: now,
         versionNo: command.versionNo + 1,
       })
       .where(eq(invocationCommandTable.id, commandId));
@@ -247,10 +262,11 @@ async function acknowledgeResumeCommand(params: {
   tenantId: string;
   commandId: string;
   response: unknown;
-  /** R04 §5：本次领取令牌；内联调度为 `null`。 */
-  claimToken?: string | null;
+  /** A09：本次投递的领取 nonce（必填）。 */
+  claimToken: string;
 }): Promise<void> {
-  const token = params.claimToken ?? null;
+  const token = params.claimToken;
+  const now = new Date();
   await db.transaction(async (tx) => {
     const [command] = await tx
       .select()
@@ -265,16 +281,16 @@ async function acknowledgeResumeCommand(params: {
       .limit(1);
     if (!command) throw new CommandNotFoundError(params.commandId);
     if (command.commandState !== "dispatched") return;
-    assertCommandClaimHeld(command, token, params.commandId);
+    assertCommandClaimHeld(command, token, params.commandId, now);
     await tx
       .update(invocationCommandTable)
       .set({
         commandState: "acknowledged",
         receiptJson: params.response,
-        completedAt: new Date(),
+        completedAt: now,
         dispatchLeaseOwner: null,
         dispatchLeaseExpiresAt: null,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(invocationCommandTable.id, params.commandId));
   });
@@ -284,9 +300,10 @@ async function acknowledge(
   tenantId: string,
   commandId: string,
   response: unknown,
-  claimToken?: string | null,
+  claimToken: string,
 ): Promise<void> {
-  const token = claimToken ?? null;
+  const token = claimToken;
+  const now = new Date();
   await db.transaction(async (tx) => {
     const [command] = await tx
       .select()
@@ -301,16 +318,16 @@ async function acknowledge(
       .limit(1);
     if (!command) throw new CommandNotFoundError(commandId);
     if (command.commandState !== "dispatched") return;
-    assertCommandClaimHeld(command, token, commandId);
+    assertCommandClaimHeld(command, token, commandId, now);
     await tx
       .update(invocationCommandTable)
       .set({
         commandState: "acknowledged",
         receiptJson: response,
-        completedAt: new Date(),
+        completedAt: now,
         dispatchLeaseOwner: null,
         dispatchLeaseExpiresAt: null,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(invocationCommandTable.id, commandId));
   });
@@ -320,9 +337,10 @@ async function reject(
   tenantId: string,
   commandId: string,
   error: unknown,
-  claimToken?: string | null,
+  claimToken: string,
 ): Promise<void> {
-  const token = claimToken ?? null;
+  const token = claimToken;
+  const now = new Date();
   const code =
     error instanceof RuntimeHttpClientError ? error.stableCode : "RUNTIME_COMMAND_FAILED";
   await db.transaction(async (tx) => {
@@ -339,18 +357,18 @@ async function reject(
       .limit(1);
     if (!command) throw new CommandNotFoundError(commandId);
     if (command.commandState !== "dispatched") return;
-    assertCommandClaimHeld(command, token, commandId);
+    assertCommandClaimHeld(command, token, commandId, now);
     await tx
       .update(invocationCommandTable)
       .set({
         commandState: "failed",
         lastErrorCode: code,
         receiptJson: { code },
-        completedAt: new Date(),
+        completedAt: now,
         nextDispatchAt: null,
         dispatchLeaseOwner: null,
         dispatchLeaseExpiresAt: null,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(invocationCommandTable.id, commandId));
   });
@@ -362,18 +380,23 @@ async function dispatchCommand(params: {
   expectedType: "cancel" | "resume" | "steer" | "checkpoint";
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
-  expectedState?: "queued" | "dispatched";
-  /** R04 §5：维护 lane 的 claim 令牌；请求内联调度不带（undefined → null）。 */
-  claimToken?: string;
+  /**
+   * A09：本次真实投递的领取 nonce（必填）。
+   *
+   * 请求内联与后台 lane 的唯一差别是"谁来触发领取"，取得 claim 之后完全同一套规则；
+   * 因此这里没有 `undefined`/"未领取"的可执行状态，也不再有"按 `queued` 进入"的
+   * 旁路（见 `loadCommand`）。
+   */
+  claimToken: string;
 }): Promise<CommandDispatchResult> {
-  const context = await loadCommand(
-    params.tenantId,
-    params.commandId,
-    params.expectedState ?? "queued",
-  );
+  const context = await loadCommand(params.tenantId, params.commandId);
   if (context.command.commandType !== params.expectedType)
     throw new CommandNotFoundError(params.commandId);
-  const command = await markDispatched(params.tenantId, params.commandId, params.claimToken);
+  const command = await recordCommandDispatchAttemptStarted(
+    params.tenantId,
+    params.commandId,
+    params.claimToken,
+  );
   const endpoint = await params.runtimeEndpointResolver(context.binding);
   let resumeAcknowledged = false;
   try {
@@ -494,14 +517,20 @@ async function dispatchCommand(params: {
         tenantId: params.tenantId,
         commandId: params.commandId,
         response,
-        claimToken: params.claimToken ?? null,
+        claimToken: params.claimToken,
       });
       resumeAcknowledged = true;
     }
     if (!resumeAcknowledged)
-      await acknowledge(params.tenantId, params.commandId, response, params.claimToken ?? null);
+      await acknowledge(params.tenantId, params.commandId, response, params.claimToken);
     return { commandId: params.commandId, commandState: "acknowledged", response, events: [] };
   } catch (error) {
+    // A09：领取权已失效**必须**继续以 `CommandDispatchClaimSupersededError` 拒绝，
+    // 不能被下面的通用 catch 吸收成一次"投递失败"——那等于用一份陈旧结论递归提交一次
+    // 新持有者不认可的失败（`reject` / `scheduleCommandTransientRetry` 都会先做同一份
+    // claim 校验并再次抛出）。这里的边界语义是"本次投递无资格写结论"，由调用方
+    // （命令网关 / 维护 lane）决定如何对待，dispatcher 自己不产生任何持久事实。
+    if (error instanceof CommandDispatchClaimSupersededError) throw error;
     if (error instanceof RuntimeHttpClientError && error.retryable) {
       const errorCode =
         error.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
@@ -509,7 +538,7 @@ async function dispatchCommand(params: {
         {
           tenantId: params.tenantId,
           commandId: params.commandId,
-          claimToken: params.claimToken ?? null,
+          claimToken: params.claimToken,
         },
         { errorCode, now: new Date() },
       );
@@ -555,10 +584,10 @@ async function dispatchCommand(params: {
       await settleSupersededInvocationCommand({
         tenantId: params.tenantId,
         commandId: params.commandId,
-        claimToken: params.claimToken ?? null,
+        claimToken: params.claimToken,
       });
     } else {
-      await reject(params.tenantId, params.commandId, error, params.claimToken ?? null);
+      await reject(params.tenantId, params.commandId, error, params.claimToken);
     }
     return {
       commandId: params.commandId,
@@ -597,10 +626,9 @@ export function retryDispatchedInvocationCommand(
   },
 ): Promise<CommandDispatchResult> {
   return (async () => {
-    const context = await loadCommand(params.tenantId, params.commandId, "dispatched");
+    const context = await loadCommand(params.tenantId, params.commandId);
     return dispatchCommand({
       ...params,
-      expectedState: "dispatched",
       expectedType:
         params.expectedType ??
         (context.command.commandType as "cancel" | "resume" | "steer" | "checkpoint"),

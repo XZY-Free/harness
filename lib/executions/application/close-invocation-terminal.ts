@@ -22,7 +22,7 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  * 是否已终态由调用方（各自有不同的错误/空操作语义）判定。
  */
 import type { db } from "@/lib/db/client";
-import { registerEnvironmentLeaseCleanupForAttempt } from "@/lib/environment/environment-lease-store";
+import { registerEnvironmentLeaseCleanupForAttemptInTransaction } from "@/lib/environment/environment-lease-store";
 import { bridgeInvocationTerminalToJob } from "@/lib/job/job-terminal-bridge";
 import { threadItemTable, turnTable } from "@/lib/persistence/schema/conversation";
 import {
@@ -281,17 +281,15 @@ export async function closeInvocationTerminalInTransaction(
   //
   // 位置在 Session 收口之后、Invocation 终态之前：按 R04 §2 的固定锁图
   // `Invocation → Attempt → Ownership → Session → EnvironmentLease`，Lease 写在 Session 之后；
-  // 且 `scheduleEnvironmentLeaseCleanup` 只做一次单语句 UPDATE，不持有跨表行锁。
-  await registerEnvironmentLeaseCleanupForAttempt(
-    {
-      tenantId: invocation.tenantId,
-      invocationId: invocation.id,
-      attemptId: input.attemptId,
-      errorCode: errorCode ?? "InvocationTerminal",
-      now,
-    },
-    tx,
-  );
+  // 且 `registerEnvironmentLeaseCleanupForAttemptInTransaction` 只改本 Attempt 的 Lease 行，
+  // 不引入跨表行锁（Lease 行本身在锁图中位于 Session 之后）。
+  await registerEnvironmentLeaseCleanupForAttemptInTransaction(tx, {
+    tenantId: invocation.tenantId,
+    invocationId: invocation.id,
+    attemptId: input.attemptId,
+    errorCode: errorCode ?? "InvocationTerminal",
+    now,
+  });
   await tx
     .update(invocationTable)
     .set({

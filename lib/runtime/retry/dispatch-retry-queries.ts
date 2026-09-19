@@ -401,6 +401,14 @@ export async function claimInvocationCommandDispatch(params: {
   leaseOwner: string;
   leaseDurationMs: number;
   now: Date;
+  /**
+   * A09：请求内联投递对**刚由本请求创建**的 `queued` 命令允许立即领取。
+   *
+   * 后台 lane 走 30s 静默窗口（避免与创建请求竞争），内联请求本身就是创建者，
+   * 不存在"另一个进程正在写"的窗口；两侧仍使用**同一个**领取事务与同一套 claim 语义，
+   * 差别只在触发资格。
+   */
+  allowImmediateQueued?: boolean;
 }): Promise<CommandDispatchClaim | null> {
   return db.transaction(async (tx) => {
     const [candidate] = await tx
@@ -416,7 +424,8 @@ export async function claimInvocationCommandDispatch(params: {
     }
     const due =
       candidate.commandState === "queued"
-        ? candidate.updatedAt <= new Date(params.now.getTime() - DISPATCH_STUCK_GRACE_MS)
+        ? params.allowImmediateQueued === true ||
+          candidate.updatedAt <= new Date(params.now.getTime() - DISPATCH_STUCK_GRACE_MS)
         : candidate.nextDispatchAt !== null
           ? candidate.nextDispatchAt <= params.now
           : candidate.updatedAt <= params.now;
@@ -551,11 +560,11 @@ export type CommandTransientRetryOutcome =
 /**
  * 排定一次 Command 暂态重试（R04 §5：带 claim 身份）。
  *
- * `claimToken` 给出时必须仍是本行 `dispatchLeaseOwner`，否则拒绝（过期 Worker 的
- * 迟到结论不能改新 claim 的结果）；请求内联路径从未领取 lease，传 `null`。
+ * A09：`claimToken` **必填**，必须等于本行 `dispatchLeaseOwner` 且该领取仍未过期，
+ * 否则拒绝（过期 Worker 的迟到结论不能改新 claim 的结果，内联路径同样先正式领取）。
  */
 export async function scheduleCommandTransientRetry(
-  identity: { tenantId: string; commandId: string; claimToken: string | null },
+  identity: { tenantId: string; commandId: string; claimToken: string },
   params: {
     errorCode: TransientDispatchErrorCode;
     now: Date;
@@ -576,8 +585,13 @@ export async function scheduleCommandTransientRetry(
     if (!current) throw new Error(`InvocationCommand 不存在（id=${identity.commandId}）`);
     if (current.commandState !== "dispatched")
       throw new Error(`Command 已非 dispatched（id=${identity.commandId}）`);
-    if (identity.claimToken !== null && current.dispatchLeaseOwner !== identity.claimToken) {
+    // A09：领取凭证是**必需**的，且必须仍是当前未过期的那一次领取。
+    // 过期 claim 即使尚未被别人领走也不能提交新结论（否则"过期即免检"又是一条旁路）。
+    if (current.dispatchLeaseOwner !== identity.claimToken) {
       throw new SessionDispatchClaimSupersededError("Command dispatch claim 已被接管");
+    }
+    if (!current.dispatchLeaseExpiresAt || current.dispatchLeaseExpiresAt <= params.now) {
+      throw new SessionDispatchClaimSupersededError("Command dispatch claim 已过期");
     }
     const exhausted = isRetryExhausted(current.dispatchCount);
     const nextDispatchAt = exhausted
@@ -622,18 +636,22 @@ export async function scheduleCommandTransientRetry(
  * - `dispatched` 行：每次 30s 租约到期都被重新领取，形成永不排空的 durable work。
  *
  * 幂等：已在终态（`acknowledged`/`failed`）直接返回不改写；
- * `claimToken` 非空时要求行仍由本次领取持有，过期 Worker 的迟到结论不会覆盖被接管后的结论（R04 §5）。
+ * A09：`claimToken` 为**必填**且必须仍是当前未过期的那一次领取；过期 Worker 的迟到结论
+ * 不会覆盖被接管后的结论（R04 §5），也不能在被接管/过期后替新持有者写终态。
  */
 export type SupersededCommandSettlement =
   | { settled: true }
   | { settled: false; reason: "not_found" | "already_terminal" | "claim_taken_over" };
 
-export async function settleSupersededInvocationCommand(identity: {
-  tenantId: string;
-  commandId: string;
-  claimToken?: string | null;
-}): Promise<SupersededCommandSettlement> {
-  const claimToken = identity.claimToken ?? null;
+export async function settleSupersededInvocationCommand(
+  identity: {
+    tenantId: string;
+    commandId: string;
+    claimToken: string;
+  },
+  now: Date = new Date(),
+): Promise<SupersededCommandSettlement> {
+  const claimToken = identity.claimToken;
   return db.transaction(async (tx) => {
     const [current] = await tx
       .select()
@@ -650,10 +668,12 @@ export async function settleSupersededInvocationCommand(identity: {
     if (current.commandState === "acknowledged" || current.commandState === "failed") {
       return { settled: false as const, reason: "already_terminal" as const };
     }
-    if (claimToken !== null && current.dispatchLeaseOwner !== claimToken) {
+    if (current.dispatchLeaseOwner !== claimToken) {
       return { settled: false as const, reason: "claim_taken_over" as const };
     }
-    const now = new Date();
+    if (!current.dispatchLeaseExpiresAt || current.dispatchLeaseExpiresAt <= now) {
+      return { settled: false as const, reason: "claim_taken_over" as const };
+    }
     await tx
       .update(invocationCommandTable)
       .set({

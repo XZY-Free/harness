@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
@@ -21,6 +22,7 @@ import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabiliti
 import {
   type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,
+  CommandDispatchClaimSupersededError,
   dispatchCancelCommand,
   dispatchCheckpointCommand,
   dispatchResumeCommand,
@@ -35,7 +37,11 @@ import {
   getRuntimeSessionBindingById,
   getRuntimeSessionBindingsByInvocation,
 } from "@/lib/runtime/persistence/runtime-session-store";
-import { settleSupersededInvocationCommand } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  claimInvocationCommandDispatch,
+  settleSupersededInvocationCommand,
+} from "@/lib/runtime/retry/dispatch-retry-queries";
+import { RUNTIME_DISPATCH_RETRY_POLICY } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import {
   type BoundExecutionResources,
   resolveBoundExecutionResources,
@@ -58,7 +64,13 @@ export type CommandGatewayResult =
   | { dispatched: true; command: CommandDispatchResult }
   | {
       dispatched: false;
-      reason: "command_not_found" | "unsupported_capability" | "target_superseded";
+      reason:
+        | "command_not_found"
+        | "unsupported_capability"
+        | "target_superseded"
+        | "not_claimable"
+        /** 已取得领取，但在网络等待期间丢失（被接管或过期）：本次投递不产生任何交付。 */
+        | "claim_superseded";
     };
 
 type CommandContextLoad =
@@ -234,15 +246,37 @@ async function resolveTransport(
  * `queued` 行无人扫描、`dispatched` 行会被维护 lane 每 30s 反复领取，永不排空。
  */
 async function settleIfSuperseded(
-  params: CommandGatewayInput,
+  tenantId: string,
+  commandId: string,
+  claimToken: string,
   reason: "command_not_found" | "target_superseded",
 ): Promise<void> {
   if (reason !== "target_superseded") return;
-  await settleSupersededInvocationCommand({
-    tenantId: params.tenantId,
+  await settleSupersededInvocationCommand({ tenantId, commandId, claimToken });
+}
+
+/**
+ * A09：真实投递前**必须**持有领取 nonce。
+ *
+ * 后台 lane 已经在自己的领取事务里写过 `dispatchLeaseOwner`，直接沿用；
+ * 请求内联调度此前没有领取身份（`claimToken=null`），现在走**同一个**原子领取服务，
+ * 只是触发资格不同：内联请求即创建者，允许立即领取刚写的 `queued` 行。
+ * 取得 claim 之后，内联与后台的续期/尾部规则完全一致。
+ */
+async function acquireDeliveryClaim(params: {
+  tenantId: string;
+  commandId: string;
+  claimToken?: string;
+}): Promise<string | null> {
+  if (params.claimToken) return params.claimToken;
+  const claim = await claimInvocationCommandDispatch({
     commandId: params.commandId,
-    claimToken: params.claimToken ?? null,
+    leaseOwner: `inline-dispatch:${randomUUID()}`,
+    leaseDurationMs: RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs,
+    now: new Date(),
+    allowImmediateQueued: true,
   });
+  return claim?.claimToken ?? null;
 }
 
 async function dispatchCommand(params: {
@@ -253,9 +287,15 @@ async function dispatchCommand(params: {
   /** R04 §5：维护 lane 领取到的 claim 令牌；请求内联路径为 undefined。 */
   claimToken?: string;
 }): Promise<CommandGatewayResult> {
+  const claimToken = await acquireDeliveryClaim(params);
+  if (!claimToken) {
+    // 该命令当前不可领取（已被别的投递者持有 / 已终态）：不产生第二次交付，
+    // 也不在没有领取身份的情况下写任何尾部结论。
+    return { dispatched: false, reason: "not_claimable" };
+  }
   const loaded = await loadContext(params.tenantId, params.commandId);
   if (!loaded.ok) {
-    await settleIfSuperseded(params, loaded.reason);
+    await settleIfSuperseded(params.tenantId, params.commandId, claimToken, loaded.reason);
     return { dispatched: false, reason: loaded.reason };
   }
   const context = loaded;
@@ -280,17 +320,32 @@ async function dispatchCommand(params: {
     commandId: params.commandId,
     runtimeClient: transport.client,
     runtimeEndpointResolver: async (_binding: ExecutionBinding) => transport.endpoint,
-    ...(params.claimToken ? { claimToken: params.claimToken } : {}),
+    // A09：领取已在上面的 `acquireDeliveryClaim` 里完成（领取事务把行推进到
+    // `dispatched`），dispatcher 只按**已领取**状态进入 —— 没有 claim 就没有
+    // `dispatched` 行，也就没有尾部写入。
+    claimToken,
   };
-  const command = params.retry
-    ? await retryDispatchedInvocationCommand(input)
-    : params.type === "cancel"
-      ? await dispatchCancelCommand(input)
-      : params.type === "resume"
-        ? await dispatchResumeCommand(input)
-        : params.type === "steer"
-          ? await dispatchSteerCommand(input)
-          : await dispatchCheckpointCommand(input);
+  let command: CommandDispatchResult;
+  try {
+    command = params.retry
+      ? await retryDispatchedInvocationCommand(input)
+      : params.type === "cancel"
+        ? await dispatchCancelCommand(input)
+        : params.type === "resume"
+          ? await dispatchResumeCommand(input)
+          : params.type === "steer"
+            ? await dispatchSteerCommand(input)
+            : await dispatchCheckpointCommand(input);
+  } catch (error) {
+    // A09：等待网络期间领取被别人接管（或本领取已过期）。dispatcher 正确地以
+    // `CommandDispatchClaimSupersededError` 拒绝且零写入；网关把它收敛成一个稳定的
+    // **无交付**结果，让调用方（HTTP 入口 / 维护 lane）不会把它当成"投递失败"再去
+    // 生成新的失败事实，也不会重试同一份已失效的 claim。
+    if (error instanceof CommandDispatchClaimSupersededError) {
+      return { dispatched: false, reason: "claim_superseded" };
+    }
+    throw error;
+  }
   return { dispatched: true, command };
 }
 
@@ -326,9 +381,11 @@ export function dispatchCheckpointCommandToRuntime(
 export async function retryDispatchedCommandToRuntime(
   params: CommandGatewayInput,
 ): Promise<CommandGatewayResult> {
+  const claimToken = await acquireDeliveryClaim(params);
+  if (!claimToken) return { dispatched: false, reason: "not_claimable" };
   const loaded = await loadContext(params.tenantId, params.commandId);
   if (!loaded.ok) {
-    await settleIfSuperseded(params, loaded.reason);
+    await settleIfSuperseded(params.tenantId, params.commandId, claimToken, loaded.reason);
     return { dispatched: false, reason: loaded.reason };
   }
   const type = loaded.command.commandType;
@@ -336,5 +393,6 @@ export async function retryDispatchedCommandToRuntime(
     return { dispatched: false, reason: "unsupported_capability" };
   }
   // 重投沿用冻结目标；目标失效同样返回 target_superseded，不追随 current。
-  return dispatchCommand({ ...params, type, retry: true });
+  // 已取得的 claim 必须继续沿用，不能再次领取（否则会把本次领取自己顶掉）。
+  return dispatchCommand({ ...params, type, retry: true, claimToken });
 }

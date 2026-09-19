@@ -7,6 +7,14 @@ import {
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { type EnvironmentRevisionInput, validateEnvironmentRevision } from "./environment-revision";
 
+/**
+ * A01-03：本模块**多语句**操作的强制事务类型。
+ *
+ * 定义/版本的创建都是"锁 Definition 行 → 校验版本 → INSERT Revision → 回写 currentRevisionId
+ * → 回读"，这类操作不接受全局 `db`（否则每条语句各自 autocommit，If-Match 版本校验会退化成竞态）。
+ */
+export type EnvironmentDefinitionTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export class EnvironmentValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -136,33 +144,57 @@ export async function archiveEnvironmentDefinition(
   id: string,
   expectedVersionNo: number,
 ) {
-  const current = await getEnvironmentDefinitionById(tenantId, id);
-  if (!current) throw new EnvironmentNotFoundError(id);
-  if (current.versionNo !== expectedVersionNo)
-    throw new EnvironmentVersionConflictError(
-      "EnvironmentDefinition 版本冲突",
-      expectedVersionNo,
-      current.versionNo,
-    );
-  await db
-    .update(environmentDefinitionTable)
-    .set({ lifecycleState: "archived", versionNo: current.versionNo + 1, updatedAt: new Date() })
-    .where(
-      and(eq(environmentDefinitionTable.tenantId, tenantId), eq(environmentDefinitionTable.id, id)),
-    );
-  const updated = await getEnvironmentDefinitionById(tenantId, id);
-  if (!updated) throw new EnvironmentNotFoundError(id);
-  return updated;
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(environmentDefinitionTable)
+      .where(
+        and(
+          eq(environmentDefinitionTable.tenantId, tenantId),
+          eq(environmentDefinitionTable.id, id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!current) throw new EnvironmentNotFoundError(id);
+    if (current.versionNo !== expectedVersionNo)
+      throw new EnvironmentVersionConflictError(
+        "EnvironmentDefinition 版本冲突",
+        expectedVersionNo,
+        current.versionNo,
+      );
+    await tx
+      .update(environmentDefinitionTable)
+      .set({ lifecycleState: "archived", versionNo: current.versionNo + 1, updatedAt: new Date() })
+      .where(
+        and(
+          eq(environmentDefinitionTable.tenantId, tenantId),
+          eq(environmentDefinitionTable.id, id),
+        ),
+      );
+    const [updated] = await tx
+      .select()
+      .from(environmentDefinitionTable)
+      .where(
+        and(
+          eq(environmentDefinitionTable.tenantId, tenantId),
+          eq(environmentDefinitionTable.id, id),
+        ),
+      )
+      .limit(1);
+    if (!updated) throw new EnvironmentNotFoundError(id);
+    return updated;
+  });
 }
 
 export async function createEnvironmentRevisionInTransaction(
-  executor: DbOrTx,
+  tx: EnvironmentDefinitionTx,
   tenantId: string,
   definitionId: string,
   input: EnvironmentRevisionInput,
   options?: { expectedVersionNo?: number },
 ): Promise<EnvironmentDefinitionRevision> {
-  const [definition] = await executor
+  const [definition] = await tx
     .select()
     .from(environmentDefinitionTable)
     .where(
@@ -189,16 +221,16 @@ export async function createEnvironmentRevisionInTransaction(
   const revision = validateEnvironmentRevision(input);
   const revisionNo = definition.lastRevisionNo + 1;
   const id = crypto.randomUUID();
-  await executor
+  await tx
     .insert(environmentDefinitionRevisionTable)
     .values({ id, tenantId, definitionId, revisionNo, ...revision });
-  const [row] = await executor
+  const [row] = await tx
     .select()
     .from(environmentDefinitionRevisionTable)
     .where(eq(environmentDefinitionRevisionTable.id, id))
     .limit(1);
   if (!row) throw new EnvironmentNotFoundError("EnvironmentDefinitionRevision 创建后回查失败");
-  await executor
+  await tx
     .update(environmentDefinitionTable)
     .set({
       currentRevisionId: id,

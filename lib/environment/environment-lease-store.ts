@@ -33,6 +33,20 @@ export const ENVIRONMENT_CLEANUP_BACKOFF_MS = [5_000, 15_000, 60_000, 300_000] a
 /** 清理工作租约时长（毫秒）：超出即视为该 Worker 已死，允许他人重新认领。 */
 export const ENVIRONMENT_CLEANUP_LEASE_MS = 60_000 as const;
 
+/**
+ * A01-03：本模块所有**多语句**操作的强制事务类型。
+ *
+ * Lease 的生命周期操作（创建、准备、激活、重新准备、释放、清理登记）都不是单条语句：
+ * 它们要"先锁行读当前版本 → 条件判定 → 条件写 → 回读"。若这些语句各自落在全局 `db` 上，
+ * 每一条都是独立 autocommit 事务，行锁在第一条语句结束时即释放 —— 版本 CAS、状态转换表、
+ * 证据自洽校验都会退化成"读了再写"的竞态窗口。
+ *
+ * 因此这里区分两类 API：
+ * - `xxxInTransaction(tx, input)`：真实事务内部方法，参数类型即事务类型，不接受全局 `db`；
+ * - `xxx(input)`：公共入口，自己开启事务后调用前者。
+ */
+export type LeaseTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 function cleanupBackoffMs(cleanupCount: number): number {
   const index = Math.min(Math.max(cleanupCount, 0), ENVIRONMENT_CLEANUP_BACKOFF_MS.length - 1);
   return ENVIRONMENT_CLEANUP_BACKOFF_MS[index] ?? 300_000;
@@ -79,11 +93,18 @@ export interface CreateEnvironmentLeaseInput {
   expiresAt?: Date;
 }
 
+/** 公共入口：自开事务（Revision 校验 + INSERT + 回读必须原子）。 */
 export async function createEnvironmentLease(
   input: CreateEnvironmentLeaseInput,
-  executor: DbOrTx = db,
 ): Promise<EnvironmentLease> {
-  const [revision] = await executor
+  return db.transaction((tx) => createEnvironmentLeaseInTransaction(tx, input));
+}
+
+export async function createEnvironmentLeaseInTransaction(
+  tx: LeaseTx,
+  input: CreateEnvironmentLeaseInput,
+): Promise<EnvironmentLease> {
+  const [revision] = await tx
     .select()
     .from(environmentDefinitionRevisionTable)
     .where(
@@ -96,7 +117,7 @@ export async function createEnvironmentLease(
   if (!revision) throw new EnvironmentLeaseConflictError("EnvironmentRevision 不存在或租户不匹配");
   const id = randomUUID();
   const now = new Date();
-  await executor.insert(environmentLeaseTable).values({
+  await tx.insert(environmentLeaseTable).values({
     id,
     tenantId: input.tenantId,
     invocationId: input.invocationId,
@@ -127,7 +148,7 @@ export async function createEnvironmentLease(
     releasedAt: null,
     versionNo: 1,
   });
-  const [row] = await executor
+  const [row] = await tx
     .select()
     .from(environmentLeaseTable)
     .where(eq(environmentLeaseTable.id, id))
@@ -136,7 +157,7 @@ export async function createEnvironmentLease(
   return row;
 }
 
-/** Attempt 已有的非终态 Lease（同 Attempt Transport Retry 必须复用它）。 */
+/** Attempt 已有的非终态 Lease（同 Attempt Transport Retry 必须复用它）。单条 SELECT：纯读。 */
 export async function findReusableEnvironmentLease(
   tenantId: string,
   invocationId: string,
@@ -178,12 +199,19 @@ export interface PrepareEnvironmentLeaseInput {
  * 不代表 Writer 已激活。`readinessState=ready` 与 `activationOwnershipId` 只能在
  * 当前 Ownership 事务内、Workspace Writer 激活之后写（见 activateEnvironmentLease）。
  */
+/** 公共入口：自开事务（状态复核 + Revision/能力核对 + 证据写入必须原子）。 */
 export async function prepareEnvironmentLease(
   input: PrepareEnvironmentLeaseInput,
-  executor: DbOrTx = db,
+): Promise<EnvironmentLease> {
+  return db.transaction((tx) => prepareEnvironmentLeaseInTransaction(tx, input));
+}
+
+export async function prepareEnvironmentLeaseInTransaction(
+  tx: LeaseTx,
+  input: PrepareEnvironmentLeaseInput,
 ): Promise<EnvironmentLease> {
   const now = input.now ?? new Date();
-  const [lease] = await executor
+  const [lease] = await tx
     .select()
     .from(environmentLeaseTable)
     .where(
@@ -206,7 +234,7 @@ export async function prepareEnvironmentLease(
     throw new EnvironmentComplianceError("生产写入必须提供实际实例符合性证据（PreparedEvidence）");
   }
   // Revision 查询严格限定 tenant（跨租户引用必须失败，不能只按 id）。
-  const [revision] = await executor
+  const [revision] = await tx
     .select()
     .from(environmentDefinitionRevisionTable)
     .where(
@@ -251,7 +279,7 @@ export async function prepareEnvironmentLease(
     now,
   });
   const digest = environmentPreparedEvidenceDigest(evidence);
-  await executor
+  await tx
     .update(environmentLeaseTable)
     .set({
       capabilitiesJson: input.capabilitiesJson,
@@ -274,7 +302,7 @@ export async function prepareEnvironmentLease(
       versionNo: lease.versionNo + 1,
     })
     .where(eq(environmentLeaseTable.id, lease.id));
-  const [updated] = await executor
+  const [updated] = await tx
     .select()
     .from(environmentLeaseTable)
     .where(eq(environmentLeaseTable.id, lease.id))
@@ -304,12 +332,25 @@ export interface ActivateEnvironmentLeaseInput {
  * - Lease 未被释放/丢失（不能靠调用方先前读到的 row 绕过）；
  * - prepared → ready 时才写 `activationOwnershipId`（形状约束由 DB CHECK 兜底）。
  */
+/**
+ * 公共入口：自开事务。
+ *
+ * 生产路径**不应**走这里 —— Writer 激活必须在 Current Ownership 事务内与本函数同事务提交，
+ * 因此 `runtime-start` 直接调用 `activateEnvironmentLeaseInTransaction(tx, input)`。
+ * 本入口只服务"独立落库"的既有调用点（测试夹具与合规性用例）。
+ */
 export async function activateEnvironmentLease(
   input: ActivateEnvironmentLeaseInput,
-  executor: DbOrTx = db,
+): Promise<EnvironmentLease> {
+  return db.transaction((tx) => activateEnvironmentLeaseInTransaction(tx, input));
+}
+
+export async function activateEnvironmentLeaseInTransaction(
+  tx: LeaseTx,
+  input: ActivateEnvironmentLeaseInput,
 ): Promise<EnvironmentLease> {
   const now = input.now ?? new Date();
-  const [lease] = await executor
+  const [lease] = await tx
     .select()
     .from(environmentLeaseTable)
     .where(
@@ -347,7 +388,7 @@ export async function activateEnvironmentLease(
   if (typeof manifest.workspaceBindingId !== "string") {
     throw new EnvironmentComplianceError("EnvironmentLease 未关联 WorkspaceBinding");
   }
-  const [revision] = await executor
+  const [revision] = await tx
     .select()
     .from(environmentDefinitionRevisionTable)
     .where(
@@ -368,7 +409,7 @@ export async function activateEnvironmentLease(
     recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
     now,
   });
-  await executor
+  await tx
     .update(environmentLeaseTable)
     .set({
       leaseState: "active",
@@ -379,7 +420,7 @@ export async function activateEnvironmentLease(
       updatedAt: now,
     })
     .where(eq(environmentLeaseTable.id, lease.id));
-  const [updated] = await executor
+  const [updated] = await tx
     .select()
     .from(environmentLeaseTable)
     .where(eq(environmentLeaseTable.id, lease.id))
@@ -404,7 +445,19 @@ export async function activateEnvironmentLease(
  * `prepareEnvironmentLease` 写入。实例此刻已不存在时，`backend.create` 会按稳定
  * operationId 幂等重建，而不是把"没有实例"自报成 prepared。
  */
-export async function beginEnvironmentLeaseReprepare(
+/** 公共入口：自开事务（行锁读 + 条件写 + 回读必须原子，否则交接会被并发覆盖）。 */
+export async function beginEnvironmentLeaseReprepare(input: {
+  tenantId: string;
+  leaseId: string;
+  /** 本次 Resume 的恢复水位摘要；`null` 表示本次执行不从 Checkpoint/恢复水位承接。 */
+  recoveryAnchorDigest?: string | null;
+  now?: Date;
+}): Promise<EnvironmentLease> {
+  return db.transaction((tx) => beginEnvironmentLeaseReprepareInTransaction(tx, input));
+}
+
+export async function beginEnvironmentLeaseReprepareInTransaction(
+  tx: LeaseTx,
   input: {
     tenantId: string;
     leaseId: string;
@@ -412,10 +465,9 @@ export async function beginEnvironmentLeaseReprepare(
     recoveryAnchorDigest?: string | null;
     now?: Date;
   },
-  executor: DbOrTx = db,
 ): Promise<EnvironmentLease> {
   const now = input.now ?? new Date();
-  const [lease] = await executor
+  const [lease] = await tx
     .select()
     .from(environmentLeaseTable)
     .where(
@@ -431,7 +483,13 @@ export async function beginEnvironmentLeaseReprepare(
     throw new EnvironmentLeaseStateError(`EnvironmentLease 已非活跃：${lease.leaseState}`);
   }
   const manifest = (lease.resourceManifest ?? {}) as Record<string, unknown>;
-  await executor
+  // A01-03：交接必须是"锁内读到的版本"为条件的写（compare-and-set 语义），而不是仅按 id 的
+  // 无条件 UPDATE。这里在**同一真实事务**里持 `FOR UPDATE` 行锁完成读 → 判定 → 写 → 回读；
+  // 条件里的 `versionNo` 是显式断言：它一旦不等就说明本事务并未真正串行化该行
+  // （行锁失效/被绕过），此时静默覆盖会把一次 Resume 绑定到错误的 `recoveryAnchorDigest`
+  // 上，因此必须显式失败而不是继续。
+  const nextVersionNo = lease.versionNo + 1;
+  const [result] = await tx
     .update(environmentLeaseTable)
     .set({
       readinessState: "preparing",
@@ -440,11 +498,21 @@ export async function beginEnvironmentLeaseReprepare(
         ...manifest,
         recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
       },
-      versionNo: lease.versionNo + 1,
+      versionNo: nextVersionNo,
       updatedAt: now,
     })
-    .where(eq(environmentLeaseTable.id, lease.id));
-  const [updated] = await executor
+    .where(
+      and(
+        eq(environmentLeaseTable.id, lease.id),
+        eq(environmentLeaseTable.versionNo, lease.versionNo),
+      ),
+    );
+  if ((result?.affectedRows ?? 0) !== 1) {
+    throw new EnvironmentLeaseConflictError(
+      `${input.leaseId}: 交接期间 EnvironmentLease 版本已被并发推进`,
+    );
+  }
+  const [updated] = await tx
     .select()
     .from(environmentLeaseTable)
     .where(eq(environmentLeaseTable.id, lease.id))
@@ -492,15 +560,38 @@ export async function listEnvironmentLeasesByInvocation(tenantId: string, invoca
     )
     .orderBy(desc(environmentLeaseTable.createdAt));
 }
+/**
+ * Lease 心跳续期（独立落库入口，无事务调用方）。
+ *
+ * A01-03：读状态 + 条件写 + 回读在一个真实事务里完成；写以锁内读到的 `versionNo` 为条件，
+ * 该条件是对「本事务确实串行化了该行」的断言（并发心跳/激活不得互相覆盖版本与心跳时间）。
+ */
 export async function heartbeatEnvironmentLease(tenantId: string, id: string) {
-  const current = await getEnvironmentLeaseById(tenantId, id);
+  return db.transaction((tx) => heartbeatEnvironmentLeaseInTransaction(tx, tenantId, id));
+}
+
+export async function heartbeatEnvironmentLeaseInTransaction(
+  tx: LeaseTx,
+  tenantId: string,
+  id: string,
+) {
+  const [current] = await tx
+    .select()
+    .from(environmentLeaseTable)
+    .where(and(eq(environmentLeaseTable.tenantId, tenantId), eq(environmentLeaseTable.id, id)))
+    .for("update")
+    .limit(1);
   if (!current || !["allocated", "active"].includes(current.leaseState))
     throw new EnvironmentLeaseStateError(id);
-  await db
+  const now = new Date();
+  const [result] = await tx
     .update(environmentLeaseTable)
-    .set({ lastHeartbeatAt: new Date(), updatedAt: new Date(), versionNo: current.versionNo + 1 })
-    .where(eq(environmentLeaseTable.id, id));
-  return getEnvironmentLeaseById(tenantId, id);
+    .set({ lastHeartbeatAt: now, updatedAt: now, versionNo: current.versionNo + 1 })
+    .where(
+      and(eq(environmentLeaseTable.id, id), eq(environmentLeaseTable.versionNo, current.versionNo)),
+    );
+  if ((result?.affectedRows ?? 0) !== 1) throw new EnvironmentLeaseConflictError(id);
+  return getEnvironmentLeaseById(tenantId, id, tx);
 }
 
 /**
@@ -513,13 +604,22 @@ export async function releaseEnvironmentLease(
   tenantId: string,
   id: string,
   state: Extract<EnvironmentLeaseState, "released" | "expired" | "lost"> = "released",
-  executor: DbOrTx = db,
-) {
-  const current = await getEnvironmentLeaseById(tenantId, id, executor);
+): Promise<EnvironmentLease | null> {
+  return db.transaction((tx) => releaseEnvironmentLeaseInTransaction(tx, tenantId, id, state));
+}
+
+export async function releaseEnvironmentLeaseInTransaction(
+  tx: LeaseTx,
+  tenantId: string,
+  id: string,
+  state: Extract<EnvironmentLeaseState, "released" | "expired" | "lost"> = "released",
+): Promise<EnvironmentLease | null> {
+  const current = await getEnvironmentLeaseById(tenantId, id, tx);
   if (!current) return null;
   if (current.leaseState === state) return current;
   const now = new Date();
-  await executor
+  const nextVersionNo = current.versionNo + 1;
+  const [result] = await tx
     .update(environmentLeaseTable)
     .set({
       leaseState: state,
@@ -527,10 +627,13 @@ export async function releaseEnvironmentLease(
       activationOwnershipId: null,
       releasedAt: now,
       updatedAt: now,
-      versionNo: current.versionNo + 1,
+      versionNo: nextVersionNo,
     })
-    .where(eq(environmentLeaseTable.id, id));
-  return getEnvironmentLeaseById(tenantId, id, executor);
+    .where(
+      and(eq(environmentLeaseTable.id, id), eq(environmentLeaseTable.versionNo, current.versionNo)),
+    );
+  if ((result?.affectedRows ?? 0) !== 1) throw new EnvironmentLeaseConflictError(id);
+  return getEnvironmentLeaseById(tenantId, id, tx);
 }
 
 // ─── 持久清理工作（repairs/06-environment.md §5）─────────────
@@ -543,21 +646,30 @@ export async function releaseEnvironmentLease(
  * 调用点（provision 失败、activation 失败）。持久重试仍由 `recordEnvironmentLeaseCleanupFailure`
  * 按退避推进。
  */
+export interface ScheduleEnvironmentLeaseCleanupInput {
+  tenantId: string;
+  leaseId: string;
+  errorCode: string;
+  now?: Date;
+  /** 立即到期（第一次清理就在本次调用中尝试）。 */
+  immediate?: boolean;
+  /** 补充到 resourceManifest 的资源事实（例如已创建但未完成的资源）。 */
+  resourceManifestPatch?: Record<string, unknown>;
+}
+
+/** 公共入口：自开事务（状态判定 + 条件写 + 回读必须原子）。 */
 export async function scheduleEnvironmentLeaseCleanup(
-  input: {
-    tenantId: string;
-    leaseId: string;
-    errorCode: string;
-    now?: Date;
-    /** 立即到期（第一次清理就在本次调用中尝试）。 */
-    immediate?: boolean;
-    /** 补充到 resourceManifest 的资源事实（例如已创建但未完成的资源）。 */
-    resourceManifestPatch?: Record<string, unknown>;
-  },
-  executor: DbOrTx = db,
+  input: ScheduleEnvironmentLeaseCleanupInput,
+): Promise<EnvironmentLease | null> {
+  return db.transaction((tx) => scheduleEnvironmentLeaseCleanupInTransaction(tx, input));
+}
+
+export async function scheduleEnvironmentLeaseCleanupInTransaction(
+  tx: LeaseTx,
+  input: ScheduleEnvironmentLeaseCleanupInput,
 ): Promise<EnvironmentLease | null> {
   const now = input.now ?? new Date();
-  const current = await getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
+  const current = await getEnvironmentLeaseById(input.tenantId, input.leaseId, tx);
   if (!current) return null;
   // A08 8.1：只有 `released` 是"真实资源已释放"的事实。
   //
@@ -566,7 +678,7 @@ export async function scheduleEnvironmentLeaseCleanup(
   // 任一出口只要先写了 `lost`，该 Lease 就再也进不了 `releasing` 扫描，真实资源永久泄漏。
   // 因此这里只对 `released` 幂等短路，其余状态一律登记（或保持）持久清理工作。
   if (current.leaseState === "released") return current;
-  await executor
+  await tx
     .update(environmentLeaseTable)
     .set({
       leaseState: "releasing",
@@ -588,7 +700,7 @@ export async function scheduleEnvironmentLeaseCleanup(
       versionNo: current.versionNo + 1,
     })
     .where(eq(environmentLeaseTable.id, current.id));
-  return getEnvironmentLeaseById(input.tenantId, input.leaseId, executor);
+  return getEnvironmentLeaseById(input.tenantId, input.leaseId, tx);
 }
 
 /**
@@ -602,33 +714,39 @@ export async function scheduleEnvironmentLeaseCleanup(
  * 用 Attempt 定位 Lease（而不是靠 `activationOwnershipId`）：`prepared` 但尚未激活的
  * Lease 同样可能已经建好了真实容器，靠激活指针会漏掉它。
  */
+export interface RegisterEnvironmentLeaseCleanupForAttemptInput {
+  tenantId: string;
+  invocationId: string;
+  attemptId: string;
+  errorCode: string;
+  now?: Date;
+}
+
+/** 公共入口：自开事务（按 Attempt 定位 + 登记清理必须原子）。 */
 export async function registerEnvironmentLeaseCleanupForAttempt(
-  input: {
-    tenantId: string;
-    invocationId: string;
-    attemptId: string;
-    errorCode: string;
-    now?: Date;
-  },
-  executor: DbOrTx = db,
+  input: RegisterEnvironmentLeaseCleanupForAttemptInput,
+): Promise<EnvironmentLease | null> {
+  return db.transaction((tx) => registerEnvironmentLeaseCleanupForAttemptInTransaction(tx, input));
+}
+
+export async function registerEnvironmentLeaseCleanupForAttemptInTransaction(
+  tx: LeaseTx,
+  input: RegisterEnvironmentLeaseCleanupForAttemptInput,
 ): Promise<EnvironmentLease | null> {
   const lease = await getEnvironmentLeaseByAttempt(
     input.tenantId,
     input.invocationId,
     input.attemptId,
-    executor,
+    tx,
   );
   if (!lease) return null;
-  return scheduleEnvironmentLeaseCleanup(
-    {
-      tenantId: input.tenantId,
-      leaseId: lease.id,
-      errorCode: input.errorCode,
-      immediate: true,
-      ...(input.now ? { now: input.now } : {}),
-    },
-    executor,
-  );
+  return scheduleEnvironmentLeaseCleanupInTransaction(tx, {
+    tenantId: input.tenantId,
+    leaseId: lease.id,
+    errorCode: input.errorCode,
+    immediate: true,
+    ...(input.now ? { now: input.now } : {}),
+  });
 }
 
 /** 需要清理且已到重试时间的 Lease（Worker 扫描入口）。 */

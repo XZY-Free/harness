@@ -1,6 +1,8 @@
-import type { DbOrTx } from "@/lib/db/client";
 import { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
-import { requireCurrentExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  type OwnershipTx,
+  requireCurrentExecutionOwnership,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import {
   executionBindingTable,
@@ -11,6 +13,8 @@ import { workspaceBinding } from "@/lib/persistence/schema/workspace";
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import { isWorkspaceWriterFenced } from "@/lib/workspace/workspace-writer-fence";
 import { and, eq } from "drizzle-orm";
+
+export type { OwnershipTx };
 
 /**
  * 接纳请求的操作类别。Checkpoint Gate 只约束"新决策来源"的操作；
@@ -49,7 +53,12 @@ function normalizeRequiredPhase(
 export async function requireCurrentExecutionAuthority(input: {
   tenantId: string;
   authority: AuthorityIdentity;
-  executor?: DbOrTx;
+  /**
+   * A01-03：本围栏是多语句操作（Owner 复核 + Invocation/Session/Binding/EnvironmentLease/
+   * WorkspaceBinding 逐一 `FOR UPDATE`）。参数类型就是真实事务类型 —— 既没有"省略即落回
+   * 全局 db"的默认值，也不允许把全局 db 用类型断言伪装成事务。
+   */
+  executor: OwnershipTx;
   requiredPhase?: ExecutionPhase | readonly ExecutionPhase[];
   /** 操作类别；由服务端入口按事件 Schema 决定，不接受调用方任意字符串提权。 */
   operationKind: ExecutionOperationKind;

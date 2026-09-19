@@ -1,15 +1,20 @@
 import { db } from "@/lib/db/client";
 import {
-  activateEnvironmentLease,
+  activateEnvironmentLeaseInTransaction,
   getEnvironmentLeaseById,
   scheduleEnvironmentLeaseCleanup,
 } from "@/lib/environment/environment-lease-store";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
-import { authorityIdentity, sameAuthority } from "@/lib/executions/domain/execution-authority";
+import {
+  ExecutionAuthorityError,
+  authorityIdentity,
+  sameAuthority,
+} from "@/lib/executions/domain/execution-authority";
 import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
 import {
   acquireExecutionOwnershipInTransaction,
   getAuthorityDatabaseTime,
+  lockInvocationRootIfExists,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import type {
@@ -19,7 +24,9 @@ import type {
   InvocationAttempt,
 } from "@/lib/persistence/schema/executions";
 import {
+  INVOCATION_TERMINAL_STATES,
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
@@ -236,6 +243,11 @@ export async function startRuntimeInvocation(
     }
   }
   const preparedAttempt = await db.transaction(async (tx) => {
+    // A01：每个真实事务都先锁 Invocation 根（固定锁图 Invocation → Attempt → Ownership → …）。
+    // 本事务会写 InvocationAttempt，不能只对 Attempt 行取锁后离开。
+    if (!(await lockInvocationRootIfExists(tx, input.tenantId, input.invocation.id))) {
+      throw new ExecutionAuthorityError("NotCurrentExecutor", "Invocation 不存在或不可见");
+    }
     const evidence = {
       kind: "candidate-prepared",
       invocationId: input.invocation.id,
@@ -263,6 +275,39 @@ export async function startRuntimeInvocation(
   const recoveryAnchorDigest =
     input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
   const result = await db.transaction(async (tx) => {
+    // A01 §1：本事务此前先 `SELECT ExecutionOwnership … FOR UPDATE` 再经
+    // `acquireExecutionOwnershipInTransaction` 去锁 Invocation，与「先锁 I 再锁 O」的
+    // 心跳/守卫构成真实等待环。这里先无条件取得 Invocation 根锁，之后再按固定顺序
+    // 重新加载 Attempt → Owner → Session，并由这些**当前行**决定重放/换代/拒绝。
+    const lockedInvocation = await lockInvocationRootIfExists(
+      tx,
+      input.tenantId,
+      input.invocation.id,
+    );
+    if (!lockedInvocation)
+      throw new ExecutionAuthorityError("NotCurrentExecutor", "Invocation 不存在或不可见");
+    if (INVOCATION_TERMINAL_STATES.includes(lockedInvocation.executionState)) {
+      throw new ExecutionAuthorityError(
+        "NotCurrentExecutor",
+        `Invocation 已终态（${lockedInvocation.executionState}），不可取得执行权`,
+      );
+    }
+    // 根锁下重新加载 Attempt：复核它确实属于本 Invocation，且处于可承载执行权的阶段。
+    const [lockedAttempt] = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, input.attempt.id),
+          eq(invocationAttemptTable.invocationId, input.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!lockedAttempt || lockedAttempt.id !== preparedAttempt.id) {
+      throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于该 Invocation");
+    }
     const nowAtAuthority = await getAuthorityDatabaseTime(tx);
     const [existingOwnership] = await tx
       .select()
@@ -431,7 +476,9 @@ export async function startRuntimeInvocation(
           .limit(1);
         if (!current || current.leaseEpoch !== result.ownership.leaseEpoch)
           throw new Error("NotCurrentExecutor");
-        let environmentLease: Awaited<ReturnType<typeof activateEnvironmentLease>> | null = null;
+        let environmentLease: Awaited<
+          ReturnType<typeof activateEnvironmentLeaseInTransaction>
+        > | null = null;
         if (input.environmentLeaseId) {
           if (current.environmentLeaseId !== input.environmentLeaseId)
             throw new Error("EnvironmentRevisionMismatch");
@@ -439,18 +486,15 @@ export async function startRuntimeInvocation(
             throw new Error("EnvironmentRevisionMismatch");
           // Current Ownership 事务内复核：Lease 确属本 Attempt/Revision/Binding/恢复水位，
           // prepared 未过期且未被释放，才写 ready + activationOwnershipId。
-          environmentLease = await activateEnvironmentLease(
-            {
-              tenantId: input.tenantId,
-              leaseId: input.environmentLeaseId,
-              ownershipId: current.id,
-              attemptId: preparedAttempt.id,
-              invocationId: input.invocation.id,
-              environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId,
-              recoveryAnchorDigest,
-            },
-            tx,
-          );
+          environmentLease = await activateEnvironmentLeaseInTransaction(tx, {
+            tenantId: input.tenantId,
+            leaseId: input.environmentLeaseId,
+            ownershipId: current.id,
+            attemptId: preparedAttempt.id,
+            invocationId: input.invocation.id,
+            environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId,
+            recoveryAnchorDigest,
+          });
         }
         const activationEvidence = {
           kind: "execution-activated",
@@ -507,9 +551,11 @@ export async function startRuntimeInvocation(
         .catch(() => undefined);
     }
   } catch (error) {
-    await closeRuntimeSessionAfterActivationFailure(input.tenantId, session.id).catch(
-      () => undefined,
-    );
+    await closeRuntimeSessionAfterActivationFailure(
+      input.tenantId,
+      input.invocation.id,
+      session.id,
+    ).catch(() => undefined);
     if (activatedWorkspace) {
       // R04 §3：失败补偿也只写**持久**释放请求，不在这里直接写控制面 released。
       // 物理 stop/drain 由正式 Worker 的释放 lane 按 W→I 顺序完成；这里顺带跑一轮
@@ -764,10 +810,13 @@ async function closeOwnershipAfterActivationFailure(
 
 async function closeRuntimeSessionAfterActivationFailure(
   tenantId: string,
+  invocationId: string,
   sessionBindingId: string,
 ): Promise<void> {
   // R02 §8：Session 状态写入只经仓储方法（真实事务 + 行锁 + 单向转换表）。
-  await db.transaction((tx) =>
-    markRuntimeSessionLostInTransaction(tx, { tenantId, id: sessionBindingId }),
-  );
+  // A01：Session 写入同样必须先持 Invocation 根锁（I → S），不能只锁 Session 自身。
+  await db.transaction(async (tx) => {
+    if (!(await lockInvocationRootIfExists(tx, tenantId, invocationId))) return;
+    await markRuntimeSessionLostInTransaction(tx, { tenantId, id: sessionBindingId });
+  });
 }

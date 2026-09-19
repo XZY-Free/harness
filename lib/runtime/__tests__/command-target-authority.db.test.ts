@@ -41,6 +41,7 @@ import {
   claimInvocationCommandDispatch,
   scanDueInvocationCommandDispatches,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { RUNTIME_DISPATCH_RETRY_POLICY } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import {
   type RuntimeCancelTransportRequest,
   type RuntimeHttpClient,
@@ -178,6 +179,24 @@ async function readCommand(tenantId: string, commandId: string) {
   return row;
 }
 
+/**
+ * A09：真实投递必须先取得领取 nonce。
+ *
+ * 这些用例走在 `command-dispatcher` 的正式入口上（不经网关），因此必须自己调用
+ * **同一个**原子领取服务；不能再靠"传任意 token"绕过领取语义。
+ */
+async function claimCommandForDelivery(commandId: string, leaseOwner: string): Promise<string> {
+  const claim = await claimInvocationCommandDispatch({
+    commandId,
+    leaseOwner,
+    leaseDurationMs: RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs,
+    now: new Date(),
+    allowImmediateQueued: true,
+  });
+  if (!claim) throw new Error(`无法领取命令 ${commandId}`);
+  return claim.claimToken;
+}
+
 describe("R03 §6 控制命令固定目标", () => {
   beforeEach(async () => {
     await resetDatabase(db);
@@ -228,6 +247,7 @@ describe("R03 §6 控制命令固定目标", () => {
     const result = await dispatchCancelCommand({
       tenantId,
       commandId: staleCommandId,
+      claimToken: await claimCommandForDelivery(staleCommandId, `claim-${randomUUID()}`),
       runtimeClient: transport.client,
       runtimeEndpointResolver: async () => endpointResolution(),
     });
@@ -276,6 +296,7 @@ describe("R03 §6 控制命令固定目标", () => {
     const result = await dispatchCancelCommand({
       tenantId,
       commandId,
+      claimToken: await claimCommandForDelivery(commandId, `claim-${randomUUID()}`),
       runtimeClient: transport.client,
       runtimeEndpointResolver: async () => endpointResolution(),
     });
@@ -309,6 +330,7 @@ describe("R03 §6 控制命令固定目标", () => {
     const result = await dispatchSteerCommand({
       tenantId,
       commandId,
+      claimToken: await claimCommandForDelivery(commandId, `claim-${randomUUID()}`),
       runtimeClient: transport.client,
       runtimeEndpointResolver: async () => endpointResolution(),
     });

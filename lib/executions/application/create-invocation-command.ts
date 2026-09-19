@@ -1,6 +1,6 @@
 /** Creates a durable InvocationCommand and snapshots the current authority target. */
 import { randomUUID } from "node:crypto";
-import type { DbOrTx } from "@/lib/db/client";
+import type { OwnershipTx } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   executionOwnershipTable,
   invocationCommandTable,
@@ -20,8 +20,12 @@ export interface CreateInvocationCommandInput {
   commandId?: string;
 }
 
+/**
+ * A01-03：多语句（父 Owner 锁定 + Session 目标快照 + INSERT），**必须**在调用方事务内执行。
+ * 参数类型是真实事务类型，禁止传入全局 `db` 造成逐语句隐式 autocommit。
+ */
 export async function createInvocationCommandInTransaction(
-  tx: DbOrTx,
+  tx: OwnershipTx,
   input: CreateInvocationCommandInput,
 ): Promise<string> {
   const [owner] = await tx
