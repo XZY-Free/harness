@@ -29,7 +29,7 @@ describe("Topic 01 production wiring", () => {
     expect(worker).toContain("reconcileEffect");
     expect(worker).toContain('eventType: "tool_call.continuation.requested"');
     expect(provider).toContain('method: "POST"');
-    expect(bootstrap).toContain('runProductionWorkerProcess("tool-execution-worker")');
+    expect(bootstrap).toContain('runConfiguredWorkerProcess("tool-execution-worker")');
     expect(roleFactory).toContain("createToolExecutionWorker");
   });
 
@@ -89,7 +89,7 @@ describe("Topic 01 production wiring", () => {
     const resume = source("lib/runtime/application/production-resume-harness-invocation.ts");
     const resumeCore = source("lib/runtime/application/resume-harness-invocation.ts");
     const adapter = source("lib/runtime/adapters/hosted-adapter.ts");
-    expect(bootstrap).toContain('runProductionWorkerProcess("control-plane-outbox-worker")');
+    expect(bootstrap).toContain('runConfiguredWorkerProcess("control-plane-outbox-worker")');
     expect(roleFactory).toContain("createProductionInvocationContinuationWorker");
     expect(roleFactory).toContain("continuationWorker.pollOnce()");
     expect(worker).toContain("resumeHarnessInvocation");
@@ -141,6 +141,6 @@ describe("Topic 01 production wiring", () => {
       expect(roles).toContain(`"${role}"`);
       expect(compose).toContain(`WORKER_ROLE: ${role}`);
     }
-    expect(entrypoint).toContain("runProductionWorkerProcess");
+    expect(entrypoint).toContain("runConfiguredWorkerProcess");
   });
 });

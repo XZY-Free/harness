@@ -12,6 +12,7 @@ import {
   createProductionWorkerRole,
   parseDurableWorkerRole,
 } from "@/lib/workers/production-worker-role";
+import { loadWorkerEnvironment } from "@/lib/workers/worker-environment";
 import {
   type SourceDocument,
   checkWorkerProductionTopologyGate,
@@ -76,6 +77,16 @@ describe("canonical production worker topology", () => {
       "DATABASE_URL 缺失",
     );
     vi.unstubAllEnvs();
+  });
+
+  it("独立 Worker 默认读取项目 development 配置，生产角色读取 production 配置", () => {
+    const loader = vi.fn();
+
+    loadWorkerEnvironment("/workspace", {}, loader);
+    loadWorkerEnvironment("/workspace", { APP_ENV: "production" }, loader);
+
+    expect(loader).toHaveBeenNthCalledWith(1, "/workspace", true);
+    expect(loader).toHaveBeenNthCalledWith(2, "/workspace", false);
   });
 
   it("architecture gate 覆盖 package/image/topology 与 retry 默认接线", () => {

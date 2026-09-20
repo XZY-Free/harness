@@ -26,6 +26,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
+      '@next/env':
+        specifier: 16.3.3
+        version: 16.3.3
       '@tanstack/react-virtual':
         specifier: ^3.14.3
         version: 3.14.10(react-dom@19.0.1(react@19.0.1))(react@19.0.1)

@@ -5,9 +5,9 @@
  * 用法: pnpm worker:hosted-provisioning
  */
 
-import { runProductionWorkerProcess } from "@/lib/workers/production-worker-process";
+import { runConfiguredWorkerProcess } from "@/lib/workers/worker-environment";
 
-runProductionWorkerProcess("hosted-provisioning-worker").catch((error) => {
+runConfiguredWorkerProcess("hosted-provisioning-worker").catch((error) => {
   console.error("[hosted-provisioning-worker] 启动失败:", error);
   process.exitCode = 1;
 });

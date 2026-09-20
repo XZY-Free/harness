@@ -60,6 +60,7 @@
     "@ai-sdk/react": "3.0.118",
     "@base-ui/react": "^1.6.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@next/env": "16.3.3",
     "@tanstack/react-virtual": "^3.14.3",
     "ai": "6.0.116",
     "ajv": "^8.20.0",

@@ -135,7 +135,7 @@ export function checkWorkerProductionTopologyGate(
   const retryWorker = stripComments(source("lib/runtime/retry/runtime-dispatch-retry-worker.ts"));
 
   if (!packageJson.includes('"worker:start"')) failures.push("package 缺少统一 worker:start");
-  if (!entrypoint.includes("runProductionWorkerProcess"))
+  if (!entrypoint.includes("runConfiguredWorkerProcess"))
     failures.push("统一 worker entrypoint 缺失");
   if (!workerImage.includes("scripts/workers/worker-entrypoint.ts")) {
     failures.push("worker image 未启动统一 entrypoint");

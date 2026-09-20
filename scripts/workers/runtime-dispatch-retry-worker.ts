@@ -5,9 +5,9 @@
  * 用法: pnpm worker:runtime-dispatch-retry
  */
 
-import { runProductionWorkerProcess } from "@/lib/workers/production-worker-process";
+import { runConfiguredWorkerProcess } from "@/lib/workers/worker-environment";
 
-runProductionWorkerProcess("runtime-dispatch-retry-worker").catch((error) => {
+runConfiguredWorkerProcess("runtime-dispatch-retry-worker").catch((error) => {
   console.error("[runtime-dispatch-retry-worker] 启动失败:", error);
   process.exitCode = 1;
 });

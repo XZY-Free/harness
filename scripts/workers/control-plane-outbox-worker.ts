@@ -5,9 +5,9 @@
  * 用法: pnpm worker:control-plane-outbox
  */
 
-import { runProductionWorkerProcess } from "@/lib/workers/production-worker-process";
+import { runConfiguredWorkerProcess } from "@/lib/workers/worker-environment";
 
-runProductionWorkerProcess("control-plane-outbox-worker").catch((error) => {
+runConfiguredWorkerProcess("control-plane-outbox-worker").catch((error) => {
   console.error("[control-plane-outbox-worker] 启动失败:", error);
   process.exitCode = 1;
 });
