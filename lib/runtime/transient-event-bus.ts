@@ -125,16 +125,16 @@ export function publishThreadTransientEvent(event: ThreadTransientEvent): void {
  * 订阅句柄（A11 初始化 barrier）。
  *
  * 语义：subscribe 之后、release 之前，**任何事件都不会投递给 listener**——包括一次性 buffer
- * 的 drain 结果与这段时间内实时到达的事件，二者都进入 `staged`（有界）。调用方必须先取到
+ * 的 drain 结果与这段时间内实时到达的事件，二者都进入 `pendingEvents`（有界）。调用方必须先取到
  * 权威代际基线，再用 `release(accept)` 打开 barrier。
  */
 export interface ThreadTransientSubscription {
   /** 尚未投递的暂存事件（到达顺序，最多 `MAX_BUFFERED_EVENTS_PER_THREAD` 条）。 */
-  readonly staged: readonly ThreadTransientEvent[];
+  readonly pendingEvents: readonly ThreadTransientEvent[];
   /**
    * 打开 barrier（幂等）。
    *
-   * 先按 `accept` 过滤 `staged` 并投递（返回 false 的丢弃），再进入实时投递：后续事件同样
+   * 先按 `accept` 过滤 `pendingEvents` 并投递（返回 false 的丢弃），再进入实时投递：后续事件同样
    * 只在 `accept` 为真时投递。A11 要求调用方在拿到**权威代际基线之后**才调用本方法；
    * 基线之前调用即等于把旧代际增量输出在基线之前。
    */
@@ -148,7 +148,7 @@ export function subscribeThreadTransientEvents(
   listener: Listener,
 ): ThreadTransientSubscription {
   const { bufferByThread, listenersByThread } = getBusState();
-  const staged: ThreadTransientEvent[] = [];
+  const pendingEvents: ThreadTransientEvent[] = [];
   let released = false;
   let closed = false;
   let accept: ((event: ThreadTransientEvent) => boolean) | null = null;
@@ -157,11 +157,11 @@ export function subscribeThreadTransientEvents(
   const deliver = (event: ThreadTransientEvent): void => {
     if (closed) return;
     if (!released) {
-      staged.push(event);
+      pendingEvents.push(event);
       // 与一次性 buffer 同上限：barrier 打开前的暂存必须有界，否则"基线读取期间"的
       // 高频增量可以无限堆积（旧实现靠同步 drain 规避，代价是丢掉了代际隔离）。
-      if (staged.length > MAX_BUFFERED_EVENTS_PER_THREAD) {
-        staged.splice(0, staged.length - MAX_BUFFERED_EVENTS_PER_THREAD);
+      if (pendingEvents.length > MAX_BUFFERED_EVENTS_PER_THREAD) {
+        pendingEvents.splice(0, pendingEvents.length - MAX_BUFFERED_EVENTS_PER_THREAD);
       }
       return;
     }
@@ -181,15 +181,15 @@ export function subscribeThreadTransientEvents(
   for (const entry of drained) deliver(entry.event);
 
   return {
-    get staged(): readonly ThreadTransientEvent[] {
-      return staged;
+    get pendingEvents(): readonly ThreadTransientEvent[] {
+      return pendingEvents;
     },
     release: (acceptFn) => {
       if (released || closed) return;
       released = true;
       accept = acceptFn;
       // 复制后清空：投递过程中若发生嵌套 publish，新事件走实时分支而不是再进暂存。
-      const pending = staged.splice(0, staged.length);
+      const pending = pendingEvents.splice(0, pendingEvents.length);
       for (const event of pending) {
         if (acceptFn(event)) listener(event);
       }
@@ -200,7 +200,7 @@ export function subscribeThreadTransientEvents(
       const current = listenersByThread.get(threadId);
       current?.delete(deliver);
       if (current?.size === 0) listenersByThread.delete(threadId);
-      staged.length = 0;
+      pendingEvents.length = 0;
     },
   };
 }

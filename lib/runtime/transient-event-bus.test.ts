@@ -78,7 +78,7 @@ describe("thread transient event bus", () => {
     });
     // A11：drain 只进暂存区，barrier 打开前不得投递。
     expect(first).toEqual([]);
-    expect(firstSub.staged.map((event) => event.payload.delta)).toEqual(["你"]);
+    expect(firstSub.pendingEvents.map((event) => event.payload.delta)).toEqual(["你"]);
     firstSub.release(() => true);
     firstSub.unsubscribe();
 
@@ -105,7 +105,7 @@ describe("thread transient event bus", () => {
     publishThreadTransientEvent(makeEvent(threadId, "delta-1", "旧"));
     publishThreadTransientEvent(makeEvent(threadId, "delta-2", "代"));
     expect(received).toEqual([]);
-    expect(sub.staged.map((event) => event.transientId)).toEqual(["delta-1", "delta-2"]);
+    expect(sub.pendingEvents.map((event) => event.transientId)).toEqual(["delta-1", "delta-2"]);
 
     // release 时被拒的暂存事件（旧代际）不得进入正文。
     sub.release((event) => event.transientId !== "delta-1");
@@ -194,9 +194,9 @@ describe("thread transient event bus", () => {
     for (let i = 0; i < MAX_BUFFERED_EVENTS_PER_THREAD * 2; i++) {
       publishThreadTransientEvent(makeEvent(threadId, `delta-${i}`, `c${i}`));
     }
-    expect(sub.staged.length).toBe(MAX_BUFFERED_EVENTS_PER_THREAD);
+    expect(sub.pendingEvents.length).toBe(MAX_BUFFERED_EVENTS_PER_THREAD);
     // 保留最近 MAX 条。
-    expect(sub.staged[0]?.transientId).toBe(
+    expect(sub.pendingEvents[0]?.transientId).toBe(
       `delta-${MAX_BUFFERED_EVENTS_PER_THREAD * 2 - MAX_BUFFERED_EVENTS_PER_THREAD}`,
     );
     sub.unsubscribe();
