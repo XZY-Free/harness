@@ -205,19 +205,36 @@ describe("WorkspaceHost 控制端口契约（A06）", () => {
   });
 
   it("releaseFreeze 不再包装参数：解冻登记落在目标安全点上，而不是 undefined.released", async () => {
-    const { url } = await listenBroker();
+    const { probe, url } = await listenBroker();
     const remote = createRemoteWorkspaceHost(url);
     const checkpointIntentId = "00000000-0000-4000-8000-00000000000b";
     // 控制面根与 Broker 同源：realpath(root) + ".snow"（macOS 的 /var → /private/var）。
     const controlRoot = path.join(await realpath(hostRoot), ".snow");
-
-    await remote.releaseFreeze({
-      checkpointIntentId,
-      scopeDigest: "sha256:fixture",
+    const grant = await remote.activateWriter({
+      tenantId: "00000000-0000-4000-8000-000000000010",
+      scopeDigest: probe.scopeDigest,
       writerGeneration: 1,
-      anchorDigest: `sha256:${"b".repeat(64)}`,
-      frozenAt: new Date().toISOString(),
+      authority: {
+        invocationId: "00000000-0000-4000-8000-000000000011",
+        runtimeRevisionId: "00000000-0000-4000-8000-000000000012",
+        attemptId: "00000000-0000-4000-8000-000000000013",
+        ownershipId: "00000000-0000-4000-8000-000000000014",
+        leaseEpoch: "1",
+        sessionBindingId: "00000000-0000-4000-8000-000000000015",
+      },
+      expectedStorageIdentity: probe.storageIdentity,
+      operationId: "a06-release-freeze",
+      root: probe.canonicalRoot,
     });
+    const receipt = await remote.freeze({
+      grant,
+      checkpointIntentId,
+      anchorDigest: `sha256:${"b".repeat(64)}`,
+    });
+
+    // release 只能消费 Broker 真实签发且仍匹配当前屏障的完整 tuple；伪造 scope 的旧测试
+    // 会被 F04 的 fail-closed 边界正确拒绝，不能再拿它证明 RPC 参数未包装。
+    await remote.releaseFreeze(receipt);
 
     const released = path.join(controlRoot, "safe-points", `${checkpointIntentId}.released`);
     expect(await pathExists(released)).toBe(true);
@@ -226,7 +243,7 @@ describe("WorkspaceHost 控制端口契约（A06）", () => {
     expect(await pathExists(path.join(controlRoot, "safe-points", "undefined.released"))).toBe(
       false,
     );
-    expect(JSON.parse(await readFile(released, "utf8"))).toMatchObject({ checkpointIntentId });
+    expect(JSON.parse(await readFile(released, "utf8"))).toMatchObject(receipt);
   });
 
   it("候选运行目录与候选归属登记分离：目录在受管写根内，登记仍在控制面；cleanup 真实释放该目录", async () => {
