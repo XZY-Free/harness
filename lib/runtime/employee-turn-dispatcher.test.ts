@@ -1223,9 +1223,11 @@ describe("dispatchEmployeeTurn", () => {
   it("接纳的 Turn 会经内置 Hosted Runtime 生成并持久化真实 Agent 回复", async () => {
     const { tenantId, ownerId, thread, turn } = await seedReadyEmployeeTurn("v1");
     const deltas: string[] = [];
-    const unsubscribe = subscribeThreadTransientEvents(thread.id, (event) => {
+    const transientSubscription = subscribeThreadTransientEvents(thread.id, (event) => {
       if (event.type === "response.delta") deltas.push(event.payload.delta as string);
     });
+    // A11：barrier 打开后才进入实时投递（此处不关心代际过滤，全部接受）。
+    transientSubscription.release(() => true);
 
     const dispatched = await dispatchEmployeeTurn({
       tenantId,
@@ -1255,7 +1257,7 @@ describe("dispatchEmployeeTurn", () => {
       },
     });
     await dispatched.completion;
-    unsubscribe();
+    transientSubscription.unsubscribe();
 
     const updatedTurn = await getTurnById(tenantId, turn.id);
     const items = await listItemsByThread(tenantId, thread.id);

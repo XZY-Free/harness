@@ -22,6 +22,10 @@ import { THREAD_EVENT_STREAM } from "@/lib/conversations/projector";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
+import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
+import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { publishThreadTransientEvent } from "@/lib/runtime/transient-event-bus";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -169,6 +173,45 @@ async function readSSEMessages(
 }
 
 /**
+ * 读取连接建立时的**两条控制消息**：`stream.resumed` + `stream.generation`。
+ *
+ * A11：代际基线必须先于任何 transient 投递下发，因此它是连接初始化固定的一部分；
+ * 位置敏感的历史断言不应再假设"resumed 之后立刻就是持久事件"。
+ */
+async function readStreamPrelude(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<{ resumed: ParsedSSE; generation: ParsedSSE }> {
+  const messages = await readSSEMessages(reader, 2);
+  expect(messages).toHaveLength(2);
+  const resumed = messages[0];
+  const generation = messages[1];
+  expect(resumed?.event).toBe("stream.resumed");
+  expect(generation?.event).toBe("stream.generation");
+  if (!resumed || !generation) throw new Error("控制消息缺失");
+  return { resumed, generation };
+}
+
+/**
+ * 读到**第一条指定 event 名称**的消息（跳过持久 backlog 与其它控制消息）。
+ *
+ * A11：连接建立后流里既有持久 backlog，也可能插入代际控制消息，因此 transient 断言
+ * 不能再假设"prelude 之后的下一条就是 transient"。
+ */
+async function readUntilEvent(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  event: string,
+  timeoutMs = 3000,
+): Promise<ParsedSSE | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [message] = await readSSEMessages(reader, 1, Math.max(1, deadline - Date.now()));
+    if (!message) return null;
+    if (message.event === event) return message;
+  }
+  return null;
+}
+
+/**
  * 用 reader 执行测试回调，结束后自动 cancel reader 清理 SSE 轮询。
  */
 async function withSseReader<T>(
@@ -221,21 +264,17 @@ describe("GET /api/threads/{thread_id}/events — 核心场景", () => {
     expect(response.headers.get("content-type")).toContain("text/event-stream");
 
     await withSseReader(response, async (reader) => {
-      // stream.resumed + 3 个事件
-      const messages = await readSSEMessages(reader, 4);
-      expect(messages).toHaveLength(4);
-
-      // 第一条：stream.resumed
-      const resumed = messages[0];
-      expect(resumed?.event).toBe("stream.resumed");
-      expect(resumed?.id).toBeUndefined();
-      const resumedData = resumed?.data as { latest_sequence: number };
+      // A11：先读两条控制消息（stream.resumed + 权威代际基线），再读持久事件。
+      const { resumed } = await readStreamPrelude(reader);
+      expect(resumed.id).toBeUndefined();
+      const resumedData = resumed.data as { latest_sequence: number };
       // Hosted Runtime 会在 Turn 接纳后异步追加 response/execution 事件，
       // 因此建立连接时的最新序号可能已超过 seed 阶段的 3。
       expect(resumedData.latest_sequence).toBeGreaterThanOrEqual(3);
 
       // 后续 3 条：持久 Event，sequence 1/2/3
-      const events = messages.slice(1);
+      const events = await readSSEMessages(reader, 3);
+      expect(events).toHaveLength(3);
       expect(events[0]?.id).toBe(1);
       expect(events[1]?.id).toBe(2);
       expect(events[2]?.id).toBe(3);
@@ -250,12 +289,12 @@ describe("GET /api/threads/{thread_id}/events — 核心场景", () => {
     expect(response.status).toBe(200);
 
     await withSseReader(response, async (reader) => {
-      // stream.resumed + 事件 2, 3
-      const messages = await readSSEMessages(reader, 3);
-      expect(messages).toHaveLength(3);
-      expect(messages[0]?.event).toBe("stream.resumed");
-      expect(messages[1]?.id).toBe(2);
-      expect(messages[2]?.id).toBe(3);
+      await readStreamPrelude(reader);
+      // 事件 2, 3
+      const events = await readSSEMessages(reader, 2);
+      expect(events).toHaveLength(2);
+      expect(events[0]?.id).toBe(2);
+      expect(events[1]?.id).toBe(3);
     });
   });
 
@@ -267,11 +306,11 @@ describe("GET /api/threads/{thread_id}/events — 核心场景", () => {
     expect(response.status).toBe(200);
 
     await withSseReader(response, async (reader) => {
-      const messages = await readSSEMessages(reader, 3);
-      expect(messages).toHaveLength(3);
-      expect(messages[0]?.event).toBe("stream.resumed");
-      expect(messages[1]?.id).toBe(2);
-      expect(messages[2]?.id).toBe(3);
+      await readStreamPrelude(reader);
+      const events = await readSSEMessages(reader, 2);
+      expect(events).toHaveLength(2);
+      expect(events[0]?.id).toBe(2);
+      expect(events[1]?.id).toBe(3);
     });
   });
 
@@ -287,11 +326,11 @@ describe("GET /api/threads/{thread_id}/events — 核心场景", () => {
     expect(response.status).toBe(200);
 
     await withSseReader(response, async (reader) => {
+      await readStreamPrelude(reader);
       // 从 sequence 3 开始（Last-Event-ID=2 → 3）
-      const messages = await readSSEMessages(reader, 2);
-      expect(messages).toHaveLength(2);
-      expect(messages[0]?.event).toBe("stream.resumed");
-      expect(messages[1]?.id).toBe(3);
+      const events = await readSSEMessages(reader, 1);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.id).toBe(3);
     });
   });
 
@@ -303,10 +342,10 @@ describe("GET /api/threads/{thread_id}/events — 核心场景", () => {
     expect(response.status).toBe(200);
 
     await withSseReader(response, async (reader) => {
-      const messages = await readSSEMessages(reader, 4);
-      expect(messages).toHaveLength(4);
-      expect(messages[0]?.event).toBe("stream.resumed");
-      expect(messages[1]?.id).toBe(1);
+      await readStreamPrelude(reader);
+      const events = await readSSEMessages(reader, 3);
+      expect(events).toHaveLength(3);
+      expect(events[0]?.id).toBe(1);
     });
   });
 });
@@ -423,9 +462,9 @@ describe("GET /api/threads/{thread_id}/events — 事件格式", () => {
     expect(response.status).toBe(200);
 
     await withSseReader(response, async (reader) => {
-      const messages = await readSSEMessages(reader, 4);
-      // 跳过 stream.resumed，检查 3 个持久事件
-      const events = messages.slice(1);
+      // A11：控制消息固定两条（resumed + generation），之后才是持久事件。
+      await readStreamPrelude(reader);
+      const events = await readSSEMessages(reader, 3);
       expect(events).toHaveLength(3);
 
       for (let i = 0; i < events.length; i++) {
@@ -458,8 +497,8 @@ describe("GET /api/threads/{thread_id}/events — 事件格式", () => {
     expect(response.status).toBe(200);
 
     await withSseReader(response, async (reader) => {
-      const messages = await readSSEMessages(reader, 4);
-      const events = messages.slice(1);
+      await readStreamPrelude(reader);
+      const events = await readSSEMessages(reader, 3);
       // thread.created 是 sequence=1 的事件
       const created = events[0];
       expect(created?.id).toBe(1);
@@ -475,54 +514,152 @@ describe("GET /api/threads/{thread_id}/events — 事件格式", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("GET /api/threads/{thread_id}/events — 新事件推送", () => {
-  it("response.delta 通过无 id 的 transient SSE 立即推送", async () => {
-    const { agent } = await seedContext();
-    const createResponse = await createThreadPOST(
-      buildApiRequest({
-        audience: "employee",
-        method: "POST",
-        path: "/threads",
-        idempotencyKey: "transient-push-thread",
-        body: { agent_id: agent.id },
+  /**
+   * A11：建出"当前有一代 Hosted 执行者正在跑"的真实上下文（Thread/Turn 走真实调度链），
+   * 并返回该 Turn 的权威代际，供基线断言与 transient 发布使用。
+   */
+  async function seedExecutingTurn(agentKey: string) {
+    const ctx = await seedDispatchableTurn({ agentKey });
+    const dispatch = await dispatchInvocationForTurn({
+      tenantId: ctx.tenantId,
+      turnId: ctx.turnId,
+      executionSubject: {
+        tenantId: ctx.tenantId,
+        subjectType: "user",
+        subjectId: ctx.ownerId,
+      },
+    });
+    const { invocation, binding, attempt } = dispatch;
+    if (!invocation || !binding || !attempt) throw new Error("调度失败");
+    const evidence = {
+      kind: "sse-api-transient-generation",
+      invocationId: invocation.id,
+      attemptId: attempt.id,
+    };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: attempt.id,
+        evidence,
+        digest: protocolDigest(evidence),
       }),
     );
-    const { id: threadId } = (await createResponse.json()) as { id: string };
+    const gen = await acquireTestRuntimeAuthority({
+      tenantId: ctx.tenantId,
+      invocationId: invocation.id,
+      attemptId: attempt.id,
+      runtimeRevisionId: binding.runtimeRevisionId,
+      phase: "dispatching",
+    });
+    return {
+      ctx,
+      invocationId: invocation.id,
+      generation: {
+        invocationId: invocation.id,
+        attemptId: gen.ownership.attemptId,
+        ownershipId: gen.ownership.id,
+        leaseEpoch: String(gen.ownership.leaseEpoch),
+      },
+    };
+  }
+
+  it("response.delta 通过无 id 的 transient SSE 立即推送，且基线携带完整权威代际（A11）", async () => {
+    const { ctx, invocationId, generation } = await seedExecutingTurn("sse-agent-transient");
+    const { threadId, turnId } = ctx;
     const response = await callEventsRoute(threadId, { lastEventId: "1" });
 
     await withSseReader(response, async (reader) => {
-      const first = await readSSEMessages(reader, 1);
-      expect(first[0]?.event).toBe("stream.resumed");
+      // A11：基线必须来自**正式执行事实**，而不是"第一条 delta 自报"。
+      const { generation: baselineMsg } = await readStreamPrelude(reader);
+      const baseline = baselineMsg.data as {
+        thread_id: string;
+        generations: Array<{ turn_id: string; generation: unknown }>;
+      };
+      expect(baseline.thread_id).toBe(threadId);
+      const entry = baseline.generations.find((candidate) => candidate.turn_id === turnId);
+      expect(entry?.generation).toEqual({
+        invocation_id: invocationId,
+        attempt_id: generation.attemptId,
+        ownership_id: generation.ownershipId,
+        lease_epoch: generation.leaseEpoch,
+      });
 
       publishThreadTransientEvent({
         transientId: "delta-route-1",
         threadId,
-        turnId: "turn-transient-1",
-        // A11：transient 必须带执行代际标记，SSE 透传给消费侧做跨代隔离。
-        generation: {
-          attemptId: "attempt-route-1",
-          ownershipId: "ownership-route-1",
-          leaseEpoch: "7",
-        },
+        turnId,
+        // A11：transient 必须带完整代际；与基线 exact tuple 一致才允许进入展示流。
+        generation,
         type: "response.delta",
         occurredAt: "2026-07-21T00:00:00.000Z",
         payload: { delta: "增量正文" },
       });
 
-      const [delta] = await readSSEMessages(reader, 1);
+      // 跳过持久 backlog，读到的第一条 delta 必须就是刚发布的那条。
+      const delta = await readUntilEvent(reader, "response.delta");
       expect(delta?.event).toBe("response.delta");
       expect(delta?.id).toBeUndefined();
       expect(delta?.data).toMatchObject({
         transient_id: "delta-route-1",
         thread_id: threadId,
-        turn_id: "turn-transient-1",
+        turn_id: turnId,
         generation: {
-          attempt_id: "attempt-route-1",
-          ownership_id: "ownership-route-1",
-          lease_epoch: "7",
+          invocation_id: invocationId,
+          attempt_id: generation.attemptId,
+          ownership_id: generation.ownershipId,
+          lease_epoch: generation.leaseEpoch,
         },
         occurred_at: "2026-07-21T00:00:00.000Z",
         payload: { delta: "增量正文" },
       });
+    });
+  });
+
+  it("A11：旧代际的一次性 buffer 不得进入新正文 —— 基线先于缓冲应用", async () => {
+    const { ctx, invocationId, generation } = await seedExecutingTurn("sse-agent-stale-buffer");
+    const { threadId, turnId } = ctx;
+
+    // 连接建立**之前**产生一条旧代际 transient：此时无 listener → 落进一次性 buffer。
+    // 旧实现会在 subscribe 时同步 drain 并直接输出（早于基线），这正是要暴露的缺口。
+    publishThreadTransientEvent({
+      transientId: "stale-buffered",
+      threadId,
+      turnId,
+      generation: {
+        invocationId,
+        attemptId: "stale-attempt",
+        ownershipId: "stale-ownership",
+        leaseEpoch: "1",
+      },
+      type: "response.delta",
+      occurredAt: "2026-07-21T00:00:00.000Z",
+      payload: { delta: "旧代际残留" },
+    });
+
+    const response = await callEventsRoute(threadId, { lastEventId: "1" });
+
+    await withSseReader(response, async (reader) => {
+      // 1. 控制消息先到：resumed 在旧实现里会排在同步 drain 的 transient 之后，遂立即失败。
+      const { generation: baselineMsg } = await readStreamPrelude(reader);
+      const baseline = baselineMsg.data as { generations: Array<{ turn_id: string }> };
+      expect(baseline.generations.some((entry) => entry.turn_id === turnId)).toBe(true);
+
+      // 2. 与基线一致的代际才可投递；旧代际 buffer 已按 exact tuple 过滤掉。
+      publishThreadTransientEvent({
+        transientId: "fresh-after-baseline",
+        threadId,
+        turnId,
+        generation,
+        type: "response.delta",
+        occurredAt: "2026-07-21T00:00:01.000Z",
+        payload: { delta: "新代际正文" },
+      });
+
+      // 跳过持久 backlog：第一条 delta 必须已是新代际那条。
+      // 若旧代际 buffer 被展示，这里会先读到 stale-buffered。
+      const delta = await readUntilEvent(reader, "response.delta");
+      expect(delta?.event).toBe("response.delta");
+      expect((delta?.data as { transient_id: string }).transient_id).toBe("fresh-after-baseline");
+      expect((delta?.data as { payload: { delta: string } }).payload.delta).toBe("新代际正文");
     });
   });
 
@@ -531,14 +668,13 @@ describe("GET /api/threads/{thread_id}/events — 新事件推送", () => {
     const threadId = await seedThreadWithTurn(agent.id, "push");
     // 当前 latest_sequence=3
 
-    // 从 sequence 3 续订（只接收 stream.resumed，无 backlog）
+    // 从 sequence 3 续订（无 backlog）
     const response = await callEventsRoute(threadId, { lastEventId: "3" });
     expect(response.status).toBe(200);
 
     await withSseReader(response, async (reader) => {
-      // 先读 stream.resumed
-      const first = await readSSEMessages(reader, 1);
-      expect(first[0]?.event).toBe("stream.resumed");
+      // A11：先读两条控制消息（stream.resumed + 权威代际基线）
+      await readStreamPrelude(reader);
 
       // 在连接保持期间创建新 Turn（产生 sequence 4, 5）
       await createAnotherTurn(threadId, "push-2");

@@ -12,6 +12,9 @@
  * - 每条事件：id=event_sequence（十进制），event=event_type，data=投影 JSON。
  * - stream.resumed / stream.backpressure 是流控制事件，不进入 reducer 的投影路径。
  * - EVENT_CURSOR_EXPIRED 是 409 + JSON body（不是 SSE 流），需要在 fetch 层捕获。
+ * - A11：`stream.generation` 是**代际控制消息**（不推进业务 cursor）；`response.delta`
+ *   只有在代际合法且四项齐全（invocation/attempt/ownership/十进制 epoch）时才构造
+ *   ClientTransientDelta。缺项/畸形一律丢弃并请求有界权威刷新，不回退"只按 turn 拼接"。
  *
  * 重连策略：
  * - 网络中断 → 指数退避（500ms / 1s / 2s / 4s / 8s，最大 8s），最多 5 次后 failed。
@@ -21,11 +24,15 @@
  * - 5xx → 按网络中断处理（自动重试）。
  */
 import { apiPath } from "@/lib/api-fetch";
+import { isDecimalLeaseEpoch } from "@/lib/runtime/thread-generation";
 import { makeLocalVisibleError, toVisibleError } from "./error-messages";
 import type {
   ClientErrorBody,
   ClientEvent,
+  ClientGenerationBaseline,
   ClientTransientDelta,
+  ClientTransientGeneration,
+  ClientTurnGeneration,
   ClientVisibleError,
 } from "./types";
 
@@ -35,6 +42,15 @@ export interface SSEClientCallbacks {
   onEvent(event: ClientEvent): void;
   /** 收到不推进持久游标的模型正文增量。 */
   onTransient(event: ClientTransientDelta): void;
+  /** A11：收到权威代际基线（`stream.generation`）。 */
+  onGeneration(baseline: ClientGenerationBaseline): void;
+  /**
+   * A11：收到畸形/缺失代际的 transient（或无法解析的基线）。
+   *
+   * 已丢弃该消息，**不得**回退旧解析。消费侧应据此做**有界**的权威刷新（重新读取正式事实），
+   * 不得据此无限重连。
+   */
+  onTransientRejected(): void;
   /** 连接打开（fetch 拿到 200 header）。 */
   onOpen(): void;
   /** 进入重连流程。 */
@@ -113,6 +129,64 @@ function parseSSEChunk(buffer: string): {
     }
   }
   return { events, remaining };
+}
+
+/**
+ * 解析线上代际四项（A11）。
+ *
+ * 四项必须齐全且为字符串，`lease_epoch` 必须是十进制字符串（拒绝 `1e3` / `0x10` / 符号 /
+ * 空白 / 空串）。任何一项不满足返回 null —— 调用方必须**丢弃**该 delta，不得降级成旧解析。
+ */
+export function parseTransientGeneration(raw: unknown): ClientTransientGeneration | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+  const { invocation_id: invocationId, attempt_id: attemptId, ownership_id: ownershipId } = record;
+  const leaseEpoch = record.lease_epoch;
+  if (typeof invocationId !== "string" || !invocationId) return null;
+  if (typeof attemptId !== "string" || !attemptId) return null;
+  if (typeof ownershipId !== "string" || !ownershipId) return null;
+  if (!isDecimalLeaseEpoch(leaseEpoch)) return null;
+  return {
+    invocation_id: invocationId,
+    attempt_id: attemptId,
+    ownership_id: ownershipId,
+    lease_epoch: leaseEpoch,
+  };
+}
+
+/** 解析 `stream.generation` 的 data 负载；结构不合法返回 null。 */
+export function parseGenerationBaseline(
+  data: Record<string, unknown>,
+  fallbackThreadId: string,
+): ClientGenerationBaseline | null {
+  const { baseline_sequence: baselineSequence, issued_revision: issuedRevision } = data;
+  if (typeof baselineSequence !== "number" || !Number.isFinite(baselineSequence)) return null;
+  if (typeof issuedRevision !== "number" || !Number.isFinite(issuedRevision)) return null;
+  if (!Array.isArray(data.generations)) return null;
+
+  const generations: ClientTurnGeneration[] = [];
+  for (const raw of data.generations) {
+    if (typeof raw !== "object" || raw === null) return null;
+    const entry = raw as Record<string, unknown>;
+    const turnId = entry.turn_id;
+    if (typeof turnId !== "string" || !turnId) return null;
+    // generation=null 是**明确事实**（该 Turn 无活动执行），与"字段缺失"不同：缺失即畸形。
+    if (!("generation" in entry)) return null;
+    if (entry.generation === null) {
+      generations.push({ turn_id: turnId, generation: null });
+      continue;
+    }
+    const generation = parseTransientGeneration(entry.generation);
+    if (!generation) return null;
+    generations.push({ turn_id: turnId, generation });
+  }
+
+  return {
+    thread_id: typeof data.thread_id === "string" ? data.thread_id : fallbackThreadId,
+    baseline_sequence: baselineSequence,
+    issued_revision: issuedRevision,
+    generations,
+  };
 }
 
 /** 创建 SSE 客户端。 */
@@ -247,27 +321,42 @@ export function createSSEClient(
             continue;
           }
 
+          // A11：代际控制消息单独处理，不进入持久事件路径（不推进 cursor）。
+          if (raw.event === "stream.generation") {
+            const baseline = parseGenerationBaseline(data, config.threadId);
+            // 解析不了就丢弃控制消息并请求有界权威刷新；绝不退回"没有代际"的旧解析。
+            if (baseline) callbacks.onGeneration(baseline);
+            else callbacks.onTransientRejected();
+            continue;
+          }
+
           if (raw.event === "response.delta") {
             const payload =
               data.payload && typeof data.payload === "object"
                 ? (data.payload as Record<string, unknown>)
                 : null;
+            const generation = parseTransientGeneration(data.generation);
             if (
               typeof data.transient_id === "string" &&
               typeof data.thread_id === "string" &&
               typeof data.turn_id === "string" &&
-              typeof payload?.delta === "string"
+              typeof payload?.delta === "string" &&
+              generation
             ) {
               callbacks.onTransient({
                 transient_id: data.transient_id,
                 thread_id: data.thread_id,
                 turn_id: data.turn_id,
+                generation,
                 occurred_at:
                   typeof data.occurred_at === "string"
                     ? data.occurred_at
                     : new Date().toISOString(),
                 delta: payload.delta,
               });
+            } else {
+              // A11 fail closed：缺代际 / epoch 非十进制 → 不构造可拼接 delta。
+              callbacks.onTransientRejected();
             }
             continue;
           }

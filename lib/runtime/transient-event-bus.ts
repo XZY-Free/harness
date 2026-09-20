@@ -8,8 +8,15 @@
  * 一次性缓冲语义：
  * - 已有活跃 listener 时，publish 只实时投递，绝不写入重放 buffer。
  * - 无 listener 期间产生的事件才进入一次性 buffer；首个 subscribe 原子 drain（取出并
- *   删除）后最多重放一次，之后不再可见。
+ *   删除）后最多消费一次，之后不再可见。
  * - 因此 unsubscribe/reconnect 后，已实时投递过的事件绝不会被新 listener 再放一遍。
+ *
+ * A11 初始化 barrier（本模块的关键不变量）：
+ * - **drain 不等于投递**。subscribe 只把一次性 buffer 搬到订阅句柄的暂存区，不调用 listener。
+ *   调用方拿到权威代际基线（`stream.generation`）后调用 `release(accept)`，暂存才按 exact
+ *   tuple 过滤并投递；此后实时事件同样经 `accept` 过滤。
+ * - 修掉的缺口：旧实现"同步 drain 立即投递"，会让旧代际的增量输出在权威基线之前，客户端
+ *   于是把它当新代际正文拼接（复审报告 §9）。暂存区与一次性 buffer 同上限，保持有界。
  *
  * Next dev 会把本模块编译进多个 route chunk（publish 与 subscribe 可能落在不同
  * bundle 实例），模块级 Map 无法跨实例共享状态，导致同一 Node 进程内的流式增量
@@ -19,19 +26,14 @@
  */
 
 import { SSE_BUFFER_SIZE } from "@/lib/conversations/sse-transport";
+import type { ThreadTransientGeneration } from "@/lib/runtime/thread-generation";
 
 /**
- * 发布事件的**执行代际标记**（A11）。
+ * `ThreadTransientEvent.generation` 的执行代际标记（A11）。
  *
- * transient 不持久化，但同一个 Thread/Turn 会被后续代际继续使用；没有这个标记时，
- * 消费侧无法区分"这条 delta 属于当前展示代际"还是"属于已经被接管的旧执行者"。
+ * 定义在同源契约模块 `lib/runtime/thread-generation.ts`：服务端发布与浏览器解析必须使用
+ * 同一份定义（invocation/attempt/ownership/epoch），因此不在这里另立一份。
  */
-export interface ThreadTransientGeneration {
-  readonly attemptId: string;
-  readonly ownershipId: string;
-  readonly leaseEpoch: string;
-}
-
 export interface ThreadTransientEvent {
   readonly transientId: string;
   readonly threadId: string;
@@ -119,24 +121,86 @@ export function publishThreadTransientEvent(event: ThreadTransientEvent): void {
   bufferByThread.set(event.threadId, next);
 }
 
-export function subscribeThreadTransientEvents(threadId: string, listener: Listener): () => void {
+/**
+ * 订阅句柄（A11 初始化 barrier）。
+ *
+ * 语义：subscribe 之后、release 之前，**任何事件都不会投递给 listener**——包括一次性 buffer
+ * 的 drain 结果与这段时间内实时到达的事件，二者都进入 `staged`（有界）。调用方必须先取到
+ * 权威代际基线，再用 `release(accept)` 打开 barrier。
+ */
+export interface ThreadTransientSubscription {
+  /** 尚未投递的暂存事件（到达顺序，最多 `MAX_BUFFERED_EVENTS_PER_THREAD` 条）。 */
+  readonly staged: readonly ThreadTransientEvent[];
+  /**
+   * 打开 barrier（幂等）。
+   *
+   * 先按 `accept` 过滤 `staged` 并投递（返回 false 的丢弃），再进入实时投递：后续事件同样
+   * 只在 `accept` 为真时投递。A11 要求调用方在拿到**权威代际基线之后**才调用本方法；
+   * 基线之前调用即等于把旧代际增量输出在基线之前。
+   */
+  release(accept: (event: ThreadTransientEvent) => boolean): void;
+  /** 取消订阅（幂等）；未投递的暂存一并丢弃。 */
+  unsubscribe(): void;
+}
+
+export function subscribeThreadTransientEvents(
+  threadId: string,
+  listener: Listener,
+): ThreadTransientSubscription {
   const { bufferByThread, listenersByThread } = getBusState();
+  const staged: ThreadTransientEvent[] = [];
+  let released = false;
+  let closed = false;
+  let accept: ((event: ThreadTransientEvent) => boolean) | null = null;
+
+  /** publish/订阅句柄内部统一的投递入口：barrier 未打开 → 暂存；打开后 → 过滤后投递。 */
+  const deliver = (event: ThreadTransientEvent): void => {
+    if (closed) return;
+    if (!released) {
+      staged.push(event);
+      // 与一次性 buffer 同上限：barrier 打开前的暂存必须有界，否则"基线读取期间"的
+      // 高频增量可以无限堆积（旧实现靠同步 drain 规避，代价是丢掉了代际隔离）。
+      if (staged.length > MAX_BUFFERED_EVENTS_PER_THREAD) {
+        staged.splice(0, staged.length - MAX_BUFFERED_EVENTS_PER_THREAD);
+      }
+      return;
+    }
+    if (accept && !accept(event)) return;
+    listener(event);
+  };
+
   const listeners = listenersByThread.get(threadId) ?? new Set<Listener>();
-  listeners.add(listener);
+  listeners.add(deliver);
   listenersByThread.set(threadId, listeners);
 
-  // 原子 drain：取出当前一次性 buffer 并立即删除，最多重放一次。
-  // 此函数同步执行，add-listener 与 drain 之间不会被 publish 插队；之后产生的 transient
-  // 事件走实时投递（不回流 buffer），因此重连/后续 listener 不会再看到这批已 drain 的历史。
+  // 原子 drain：取出当前一次性 buffer 并立即删除，最多消费一次。
+  // 注意：**取出即删除**保证"最多一次"，但**不直接调用 listener** —— 交给 barrier 暂存，
+  // 等权威基线到来后按 exact tuple 过滤。这正是 A11 修掉的缺口。
   const drained = pruneBuffer(threadId);
   bufferByThread.delete(threadId);
-  for (const entry of drained) {
-    listener(entry.event);
-  }
+  for (const entry of drained) deliver(entry.event);
 
-  return () => {
-    const current = listenersByThread.get(threadId);
-    current?.delete(listener);
-    if (current?.size === 0) listenersByThread.delete(threadId);
+  return {
+    get staged(): readonly ThreadTransientEvent[] {
+      return staged;
+    },
+    release: (acceptFn) => {
+      if (released || closed) return;
+      released = true;
+      accept = acceptFn;
+      // 复制后清空：投递过程中若发生嵌套 publish，新事件走实时分支而不是再进暂存。
+      const pending = staged.splice(0, staged.length);
+      for (const event of pending) {
+        if (acceptFn(event)) listener(event);
+      }
+    },
+    unsubscribe: () => {
+      if (closed) return;
+      closed = true;
+      const current = listenersByThread.get(threadId);
+      current?.delete(deliver);
+      if (current?.size === 0) listenersByThread.delete(threadId);
+      staged.length = 0;
+    },
   };
 }

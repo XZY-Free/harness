@@ -110,10 +110,11 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
   it("TRANSIENT-GEN-01: 当前代际的 delta 被接纳，投递项带同一代际标记", async () => {
     const { ctx, invocation, gen } = await seedExecuting();
     const received: ThreadTransientEvent[] = [];
-    // 先建活跃 listener：publish 走实时投递，不会落进一次性 buffer 干扰断言。
-    const unsubscribe = subscribeThreadTransientEvents(ctx.threadId, (event) =>
+    // 先建活跃 listener 并打开 barrier：publish 走实时投递，不会落进一次性 buffer 干扰断言。
+    const subscription = subscribeThreadTransientEvents(ctx.threadId, (event) =>
       received.push(event),
     );
+    subscription.release(() => true);
 
     const result = await ingressTransientBatch({
       tenantId: ctx.tenantId,
@@ -135,13 +136,14 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
         },
       ],
     });
-    unsubscribe();
+    subscription.unsubscribe();
 
     expect(result.persisted).toBe(false);
     expect(result.acceptedThroughTransientSequence).toBe(2);
     expect(received.map((event) => event.payload.delta)).toEqual(["你", "好"]);
     for (const event of received) {
       expect(event.generation).toEqual({
+        invocationId: invocation.id,
         attemptId: gen.ownership.attemptId,
         ownershipId: gen.ownership.id,
         leaseEpoch: String(gen.ownership.leaseEpoch),
@@ -153,9 +155,10 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
     const { ctx, invocation, binding, gen } = await seedExecuting();
     const tenantId = ctx.tenantId;
     const received: ThreadTransientEvent[] = [];
-    const unsubscribe = subscribeThreadTransientEvents(ctx.threadId, (event) =>
+    const subscription = subscribeThreadTransientEvents(ctx.threadId, (event) =>
       received.push(event),
     );
+    subscription.release(() => true);
 
     // 接管：旧 Owner 正式关闭 → 新 Attempt + 第 2 代 Acquire（与生产接管同一条路径）。
     await closeExecutionOwnership({
@@ -198,7 +201,7 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
       authority: gen2.authority,
       ...batchOf(6, "新代际正文"),
     });
-    unsubscribe();
+    subscription.unsubscribe();
 
     expect(received).toHaveLength(1);
     expect(received[0]?.payload.delta).toBe("新代际正文");
@@ -210,9 +213,10 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
   it("TRANSIENT-GEN-03: 代际逐项复核——epoch / Session / RuntimeRevision 任一不符都拒绝", async () => {
     const { ctx, invocation, gen } = await seedExecuting();
     const received: ThreadTransientEvent[] = [];
-    const unsubscribe = subscribeThreadTransientEvents(ctx.threadId, (event) =>
+    const subscription = subscribeThreadTransientEvents(ctx.threadId, (event) =>
       received.push(event),
     );
+    subscription.release(() => true);
 
     const send = (authority: AuthorityIdentity, seq: number, delta: string) =>
       ingressTransientBatch({
@@ -250,7 +254,7 @@ describe("A11：Hosted transient 的当前代际隔离", () => {
 
     // 四项逐项都对时正常发布。
     await send(gen.authority, 5, "合法批次");
-    unsubscribe();
+    subscription.unsubscribe();
 
     expect(received).toHaveLength(1);
     expect(received[0]?.payload.delta).toBe("合法批次");

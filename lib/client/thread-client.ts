@@ -7,6 +7,12 @@
  * - EVENT_CURSOR_EXPIRED / EVENT_SEQUENCE_GAP → 自动 resnapshot。
  * - 网络中断 → SSE 客户端自动重连（用 lastAppliedEventSequence 作为 Last-Event-ID）。
  *
+ * A11（执行代际）：
+ * - 每次建立新连接时**重置代际比较基准**（服务端发号只保证单进程单调，跨连接不可比），
+ *   等待本连接的第一条 `stream.generation` 权威基线。
+ * - 收到畸形/缺失代际的 delta、或同 epoch 换 Owner/Attempt 的协议冲突 → 丢弃该 delta 并做
+ *   **有界**权威刷新；超限后不再刷新，交由下一次权威基线纠正，绝不无限重连。
+ *
  * 消费方式：
  * ```ts
  * const client = createThreadClient({ threadId });
@@ -22,7 +28,7 @@
 import { apiPath } from "@/lib/api-fetch";
 import { toVisibleError } from "./error-messages";
 import { type SSEClientHandle, SSE_DEFAULT_MAX_RETRIES, createSSEClient } from "./sse-client";
-import { createInitialState } from "./thread-reducer";
+import { classifyTransientDelta, createInitialState } from "./thread-reducer";
 import { type ThreadStore, createThreadStore } from "./thread-store";
 import type { ClientErrorBody, ClientEvent, ClientItemsResponse } from "./types";
 
@@ -57,6 +63,15 @@ export function requiresSnapshotRefresh(event: ClientEvent): boolean {
   return !payload || typeof payload !== "object" || !("item" in payload);
 }
 
+/**
+ * A11：窗口内有界的权威刷新次数上限。
+ *
+ * 畸形代际或协议冲突可能连续出现；超限后不再刷新，避免"每条坏消息 → 重连"退化成无限重连。
+ */
+export const MAX_AUTHORITATIVE_REFRESHES_PER_WINDOW = 3;
+/** A11：权威刷新计数窗口（毫秒）。 */
+export const AUTHORITATIVE_REFRESH_WINDOW_MS = 30_000;
+
 /** 创建 Thread 客户端。 */
 export function createThreadClient(config: ThreadClientConfig): ThreadClient {
   const fetchImpl = config.fetchImpl ?? fetch;
@@ -69,9 +84,40 @@ export function createThreadClient(config: ThreadClientConfig): ThreadClient {
   // 由此 start/stop/resnapshot 可取消、幂等，任意时刻最多一个活跃 SSE。
   let generation = 0;
 
+  /**
+   * A11：权威刷新的有界记忆（窗口内时间戳）。
+   *
+   * 畸形代际 / 协议冲突都可能连续出现；刷新必须**有界**，否则每次坏消息都重连会退化成
+   * 无限重连。超限后不再刷新，等待下一次权威基线（服务端每有正式事件推进就会重发）纠正。
+   */
+  const authoritativeRefreshAt: number[] = [];
+
   /** 该代是否已过期（旧异步完成必须失效）。 */
   function isStale(gen: number): boolean {
     return gen !== generation;
+  }
+
+  /**
+   * A11：请求一次**有界**的权威刷新（重新读取正式事实并重建连接）。
+   *
+   * - 窗口外的时间戳被丢弃，只看最近 `AUTHORITATIVE_REFRESH_WINDOW_MS` 内的次数。
+   * - 已达上限 → 本次不刷新（不产生任何重连）；由下一次权威基线自行纠正。
+   */
+  function requestAuthoritativeRefresh(): void {
+    if (stopped || resnapshotInFlight) return;
+    const now = Date.now();
+    while (
+      authoritativeRefreshAt.length > 0 &&
+      now - (authoritativeRefreshAt[0] as number) >= AUTHORITATIVE_REFRESH_WINDOW_MS
+    ) {
+      authoritativeRefreshAt.shift();
+    }
+    if (authoritativeRefreshAt.length >= MAX_AUTHORITATIVE_REFRESHES_PER_WINDOW) return;
+    authoritativeRefreshAt.push(now);
+    resnapshotInFlight = true;
+    void resnapshot().finally(() => {
+      resnapshotInFlight = false;
+    });
   }
 
   async function loadSnapshot(gen: number): Promise<boolean> {
@@ -186,7 +232,20 @@ export function createThreadClient(config: ThreadClientConfig): ThreadClient {
           }
         },
         onTransient: (event) => {
+          // A11：同 epoch 换 Owner/Attempt = 协议冲突 → 停止应用并刷新权威事实。
+          // 判定与 reducer 共用同一实现（classifyTransientDelta）；这里只决定"是否刷新"，
+          // 正文改动一律由 reducer 按同一判定处理。
+          if (classifyTransientDelta(store.getState().generationBaseline, event) === "conflict") {
+            requestAuthoritativeRefresh();
+          }
           store.dispatch({ type: "stream.delta", event });
+        },
+        onGeneration: (baseline) => {
+          store.dispatch({ type: "stream.generation", baseline });
+        },
+        onTransientRejected: () => {
+          // A11：缺代际 / 畸形 epoch → 该 delta 已被 parser 丢弃；此处只做有界权威刷新。
+          requestAuthoritativeRefresh();
         },
         onCursorExpired: (error) => {
           store.dispatch({ type: "stream.cursor_expired", error });
@@ -199,6 +258,9 @@ export function createThreadClient(config: ThreadClientConfig): ThreadClient {
       },
     );
     store.dispatch({ type: "stream.status", status: "connecting" });
+    // A11：新连接 = 新的比较基准。先丢弃上一连接的暂存与旧基准，等待本连接的第一条
+    // `stream.generation`；已显示的临时正文不在这里预先删除（换代由新基线证明）。
+    store.dispatch({ type: "stream.generation_reset" });
     sseHandle.start();
   }
 

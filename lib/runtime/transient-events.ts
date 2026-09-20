@@ -29,7 +29,8 @@ import {
   IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
 import { getRuntimeSessionBindingByOwnership } from "@/lib/runtime/persistence/runtime-session-store";
-import { type AuthorityIdentity, decimalStringToNumber } from "@/lib/runtime/runtime-protocol";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
+import { isDecimalLeaseEpoch } from "@/lib/runtime/thread-generation";
 import { publishThreadTransientEvent } from "@/lib/runtime/transient-event-bus";
 
 /** Transient 事件输入（不持久化）。 */
@@ -132,10 +133,11 @@ export async function ingressTransientBatch(
   }
 
   // 6. 不持久化；会话模式下推送给当前 Thread 的 SSE 订阅者。
-  //    发布出去的事件带**代际标记**：消费侧（SSE 客户端）即使收到跨代的乱序到达，
-  //    也能按 (attemptId, ownershipId, leaseEpoch) 判定它是否属于当前展示代际。
+  //    发布出去的事件带**完整代际标记**：消费侧（SSE 客户端）即使收到跨代的乱序到达，
+  //    也能按 (Invocation, Attempt, Ownership, leaseEpoch) 判定它是否属于当前展示代际。
   if (invocation.threadId && invocation.turnId) {
     const generation = {
+      invocationId: params.invocationId,
       attemptId: params.authority.attemptId,
       ownershipId: params.authority.ownershipId,
       leaseEpoch: params.authority.leaseEpoch,
@@ -175,11 +177,16 @@ async function requireCurrentTransientGeneration(
     tenantId: params.tenantId,
     invocationId: params.invocationId,
   });
+  // epoch 逐字符复核：先要求线上形态是**规范十进制字符串**，再与持久代际的十进制写法精确比较。
+  // 不经 Number —— A11：`2^53` 以上会静默丢精度，一旦"比较相等"就再也分不出两代。
+  if (!isDecimalLeaseEpoch(params.authority.leaseEpoch)) {
+    throw new IngressAuthorityMismatchError(params.invocationId);
+  }
   if (
     !owner ||
     owner.id !== params.authority.ownershipId ||
     owner.attemptId !== params.authority.attemptId ||
-    owner.leaseEpoch !== decimalStringToNumber(params.authority.leaseEpoch)
+    String(owner.leaseEpoch) !== params.authority.leaseEpoch
   ) {
     throw new IngressAuthorityMismatchError(params.invocationId);
   }

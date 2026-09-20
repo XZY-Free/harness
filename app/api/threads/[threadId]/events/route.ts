@@ -30,7 +30,8 @@ import {
  * 5. 创建 SSE 流，发送 stream.resumed {latest_sequence}。
  * 6. 发送已有 backlog（cursor 之后的事件），再轮询新事件（200ms）。
  * 7. 每条持久 Event：id=event_sequence，event=eventType，data=投影 JSON。
- * 8. include_transient=true 时把 response.delta 等 transient 事件推给当前订阅者，不分配 SSE id。
+ * 8. include_transient=true 时先发 `stream.generation` 权威代际基线，再按 exact tuple 过滤并
+ *    投递 response.delta 等 transient 事件（不分配 SSE id）。
  * 9. 缓冲满 → stream.backpressure + 关闭；客户端断开 → 清理 interval + 释放配额。
  *
  * 关键约束：
@@ -38,12 +39,24 @@ import {
  * - 慢客户端断开不拖垮 Event 写入（AbortSignal + stream.cancel 清理 + 配额释放）。
  * - 连接配额 acquire/release 必须配对（在所有退出路径释放：流关闭/断开/错误）。
  * - 隐藏式 404：Thread 不存在或非 owner 一律 404 RESOURCE_NOT_FOUND。
+ * - A11：transient 不得输出在权威代际基线之前 —— 先注册暂存监听器、先发基线，再 drain 暂存。
  */
 import { buildStreamBackpressureResponse } from "@/lib/gateway/rate-limit-helpers";
 import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
 import { REQUEST_ID_HEADER, apiError, getRequestId, resourceNotFound } from "@/lib/http";
 import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
-import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
+import {
+  type ThreadGenerationBaseline,
+  matchesGenerationBaseline,
+  sameThreadGenerationTuples,
+  serializeThreadGenerationBaseline,
+} from "@/lib/runtime/thread-generation";
+import { issueThreadGenerationBaseline } from "@/lib/runtime/thread-generation-queries";
+import {
+  type ThreadTransientEvent,
+  type ThreadTransientSubscription,
+  subscribeThreadTransientEvents,
+} from "@/lib/runtime/transient-event-bus";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -169,8 +182,15 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 6. 创建 SSE 流
   let streamClosed = false;
   let pollInterval: ReturnType<typeof setInterval> | null = null;
-  let unsubscribeTransient = () => {};
+  /** A11 暂存订阅句柄；barrier 打开前只暂存，不投递。 */
+  let transientSub: ThreadTransientSubscription | null = null;
   const encoder = new TextEncoder();
+
+  /** 释放 transient 订阅（幂等）。 */
+  const releaseTransient = (): void => {
+    transientSub?.unsubscribe();
+    transientSub = null;
+  };
 
   /** 释放 SSE 连接配额（幂等，仅释放一次）。 */
   let sseReleased = false;
@@ -196,7 +216,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       }
       streamClosed = true;
       if (pollInterval) clearInterval(pollInterval);
-      unsubscribeTransient();
+      releaseTransient();
       releaseSSE();
       handle.close();
     },
@@ -204,32 +224,56 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       // 消费者取消流（客户端断开）：清理轮询 + 释放配额
       streamClosed = true;
       if (pollInterval) clearInterval(pollInterval);
-      unsubscribeTransient();
+      releaseTransient();
       releaseSSE();
     },
   });
 
-  if (includeTransient) {
-    unsubscribeTransient = subscribeThreadTransientEvents(threadId, (event) => {
-      if (streamClosed) return;
-      handle.enqueue(event.type, {
-        transient_id: event.transientId,
-        thread_id: event.threadId,
-        turn_id: event.turnId,
-        // A11：transient 不持久化，但必须带代际标记，消费侧才能隔离"旧执行者混入新执行"。
-        generation: {
-          attempt_id: event.generation.attemptId,
-          ownership_id: event.generation.ownershipId,
-          lease_epoch: event.generation.leaseEpoch,
-        },
-        occurred_at: event.occurredAt,
-        payload: event.payload,
-      });
+  /**
+   * A11：把一条 transient 事件投影为 SSE 消息。
+   *
+   * 必须携带**完整代际**（invocation/attempt/ownership/epoch）；消费侧据此隔离跨代增量。
+   */
+  const emitTransient = (event: ThreadTransientEvent): void => {
+    if (streamClosed) return;
+    handle.enqueue(event.type, {
+      transient_id: event.transientId,
+      thread_id: event.threadId,
+      turn_id: event.turnId,
+      generation: {
+        invocation_id: event.generation.invocationId,
+        attempt_id: event.generation.attemptId,
+        ownership_id: event.generation.ownershipId,
+        lease_epoch: event.generation.leaseEpoch,
+      },
+      occurred_at: event.occurredAt,
+      payload: event.payload,
     });
+  };
+
+  // 6.5 A11 初始化 barrier 第 1 步：先注册**暂存**监听器（此时不投递任何东西）。
+  //     一次性 buffer 的 drain 结果也进入暂存区，不再像旧实现那样同步输出在基线之前。
+  if (includeTransient) {
+    transientSub = subscribeThreadTransientEvents(threadId, emitTransient);
   }
 
   // 7. 发送 stream.resumed（让客户端确认连接建立）
   handle.enqueue("stream.resumed", { latest_sequence: latestSeq });
+
+  // 7.5 A11 初始化 barrier 第 2 步：读取正式执行事实并发出权威代际基线。
+  //     来源是 `Turn.activeInvocationId` → 当前 active Ownership，不是"第一条 delta 自报"。
+  let generationBaseline: ThreadGenerationBaseline | null = null;
+  if (transientSub && !streamClosed) {
+    generationBaseline = await issueThreadGenerationBaseline({
+      tenantId: principal.tenantId,
+      threadId,
+      baselineSequence: latestSeq,
+    });
+    handle.enqueue("stream.generation", serializeThreadGenerationBaseline(generationBaseline));
+    // 7.6 A11 初始化 barrier 第 3 步：基线已下发，才打开 barrier。暂存按 exact tuple 过滤，
+    //     之后进入实时投递（同一 accept 规则，基线换代时自动跟随最新事实）。
+    transientSub.release((event) => matchesGenerationBaseline(event, generationBaseline));
+  }
 
   // 8. 发送已有 backlog（cursor 之后的事件）
   let lastSentSequence = cursor;
@@ -245,6 +289,27 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   }
 
   // 9. 轮询新事件（仅当流未关闭时）
+  //
+  // A11：正式事件推进即视为"可能有活动执行换代"（接管/恢复/终结都会写正式事件），
+  // 此时重读正式事实；代际 tuple 真的变了才重发 `stream.generation`。换代通知丢失时，
+  // 下一次权威读取即可纠正 —— 不依赖客户端猜测。
+  const refreshGenerationBaseline = async (): Promise<void> => {
+    if (!transientSub || streamClosed) return;
+    const next = await issueThreadGenerationBaseline({
+      tenantId: principal.tenantId,
+      threadId,
+      baselineSequence: lastSentSequence,
+    });
+    if (
+      generationBaseline &&
+      sameThreadGenerationTuples(next.generations, generationBaseline.generations)
+    ) {
+      return;
+    }
+    generationBaseline = next;
+    handle.enqueue("stream.generation", serializeThreadGenerationBaseline(next));
+  };
+
   let polling = false;
   if (!streamClosed) {
     pollInterval = setInterval(async () => {
@@ -256,12 +321,15 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
           limit: POLL_LIMIT,
         });
         if (streamClosed) return;
+        let advanced = false;
         for (const event of events) {
           if (streamClosed) break;
           const ok = handle.enqueue(event.eventType, projectEvent(event), event.eventSequence);
           if (!ok) break;
           lastSentSequence = event.eventSequence;
+          advanced = true;
         }
+        if (advanced) await refreshGenerationBaseline();
       } catch {
         // 轮询失败不中断流，下次重试
       } finally {
@@ -274,7 +342,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   request.signal.addEventListener("abort", () => {
     streamClosed = true;
     if (pollInterval) clearInterval(pollInterval);
-    unsubscribeTransient();
+    releaseTransient();
     releaseSSE();
     handle.close();
   });
