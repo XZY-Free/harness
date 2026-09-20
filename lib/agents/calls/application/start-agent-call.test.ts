@@ -49,6 +49,7 @@ const NOW = new Date("2026-08-29T00:00:00.000Z");
 
 /** 已清理的 env 变量名集合（afterEach 删除，避免测试间泄漏 TEST token）。 */
 const trackedEnvVars = new Set<string>();
+const originalAuthMode = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 
 /** 生成 trusted executionSubject（tenant 与 call 一致，满足"verify its tenant equals call tenant"）。 */
 function subjectFor(
@@ -121,11 +122,15 @@ async function mysqlCall(scenario: ExecutionScenario) {
 }
 
 beforeEach(async () => {
+  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
   trackedEnvVars.clear();
 });
 
 afterEach(async () => {
+  if (originalAuthMode === undefined)
+    Reflect.deleteProperty(process.env, "SNOW_VITEST_IDENTITY_FIXTURE");
+  else process.env.SNOW_VITEST_IDENTITY_FIXTURE = originalAuthMode;
   vi.restoreAllMocks();
   for (const key of trackedEnvVars) delete process.env[key];
   trackedEnvVars.clear();
