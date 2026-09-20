@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { cancelActiveAgentCalls } from "@/lib/agents/calls/application/cancel-active-agent-calls";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import {
@@ -48,7 +47,7 @@ describe("cancelAgentCall 冻结能力真值", () => {
         locale: "zh-CN",
         executionSubject: executionSubjectFromUserIdentity(
           scenario.tenantId,
-          `user:${randomUUID()}`,
+          scenario.userIdentityId,
         ),
       },
     });

@@ -11,10 +11,7 @@ import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-pl
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import {
-  TEST_EXECUTION_BINDING_EVIDENCE,
-  createExecutionBinding,
-} from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { TEST_EXECUTION_BINDING_EVIDENCE } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
@@ -129,25 +126,7 @@ describe("生产 continuation worker durable topology", () => {
         email: "owner@snow-harness.local",
         displayName: "SnowHarness 管理员",
       });
-      const scenario = await seedAgentCallExecutionScenario({
-        tenantId: DEFAULT_TENANT_ID,
-        threadOwnerUserId: defaultUserIdentity.id,
-        providerScenario: resolution === "cancel" ? "input_required" : "confirmation_resolution",
-        contract: {
-          ...EXECUTION_FIXTURE_CONTRACT,
-          interaction: {
-            ...EXECUTION_FIXTURE_CONTRACT.interaction,
-            input_required: true,
-            cancel: cancelSupported,
-            resume: true,
-          },
-        },
-        agentInterfaceRequirements: {
-          host_controls: { confirmation_action_keys: ["hr.leave.submit"] },
-        },
-      });
-      scenarios.push(scenario);
-      const runtime = await startExternalRuntime(scenario.tenantId);
+      const runtime = await startExternalRuntime(DEFAULT_TENANT_ID);
       runtimes.push(runtime);
 
       const runtimeId = randomUUID();
@@ -156,7 +135,7 @@ describe("生产 continuation worker durable topology", () => {
       const now = new Date();
       await db.insert(runtimeTable).values({
         id: runtimeId,
-        tenantId: scenario.tenantId,
+        tenantId: DEFAULT_TENANT_ID,
         runtimeKey: `continuation-test-${runtimeId}`,
         displayName: "Continuation Test Runtime",
         runtimeKind: "external",
@@ -189,27 +168,39 @@ describe("生产 continuation worker durable topology", () => {
         createdAt: now,
         publishedAt: now,
       });
-      await createExecutionBinding({
-        invocationId: scenario.parentInvocationId,
-        tenantId: scenario.tenantId,
-        runtimeRevisionId,
-        deploymentRouteId: "continuation-test-route",
-        modelProvider: "test",
-        modelId: "test-model",
-        controlPlaneEvidence: {
-          ...TEST_EXECUTION_BINDING_EVIDENCE,
-          runtimeEvidenceKind: "external_endpoint",
-          runtimeTargetDigest,
-          runtimeArtifactId: null,
-          runtimeArtifactDigest: null,
-          runtimeAttestationIds: [],
+      const scenario = await seedAgentCallExecutionScenario({
+        tenantId: DEFAULT_TENANT_ID,
+        threadOwnerUserId: defaultUserIdentity.id,
+        providerScenario: resolution === "cancel" ? "input_required" : "confirmation_resolution",
+        contract: {
+          ...EXECUTION_FIXTURE_CONTRACT,
+          interaction: {
+            ...EXECUTION_FIXTURE_CONTRACT.interaction,
+            input_required: true,
+            cancel: cancelSupported,
+            resume: true,
+          },
         },
-        projectionVersionNo: 1,
-        executionSubject: executionSubjectFromUserIdentity(
-          scenario.tenantId,
-          defaultUserIdentity.id,
-        ),
+        agentInterfaceRequirements: {
+          host_controls: { confirmation_action_keys: ["hr.leave.submit"] },
+        },
+        parentExecutionBinding: {
+          controlPlaneEvidence: {
+            ...TEST_EXECUTION_BINDING_EVIDENCE,
+            runtimeEvidenceKind: "external_endpoint",
+            runtimeTargetDigest,
+            runtimeArtifactId: null,
+            runtimeArtifactDigest: null,
+            runtimeAttestationIds: [],
+          },
+          projectionVersionNo: 1,
+          runtimeRevisionId,
+          deploymentRouteId: "continuation-test-route",
+          modelProvider: "test",
+          modelId: "test-model",
+        },
       });
+      scenarios.push(scenario);
 
       const execute = createAgentActionExecutor({
         tenantId: scenario.tenantId,

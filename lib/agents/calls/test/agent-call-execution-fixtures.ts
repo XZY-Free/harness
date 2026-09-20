@@ -41,6 +41,7 @@ import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-que
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { db } from "@/lib/db/client";
 import {
+  type CreateExecutionBindingParams,
   TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
@@ -66,6 +67,7 @@ import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-s
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { and, eq } from "drizzle-orm";
 
 /** sha256 指纹 helper（与 resolveOutboundRuntimeAuth 重算逻辑一致）。 */
@@ -219,6 +221,11 @@ export async function seedAgentCallExecutionScenario(options?: {
   tenantId?: string;
   /** Thread owner 的可信 UserIdentity id；缺省生成独立测试 owner。 */
   threadOwnerUserId?: string;
+  /** 覆盖父 Invocation 的测试执行绑定；用于需要真实外部 Runtime 的恢复测试。 */
+  parentExecutionBinding?: Omit<
+    CreateExecutionBindingParams,
+    "invocationId" | "tenantId" | "executionSubject"
+  >;
   /**
    * 正式冻结完成后，仅为 startAgentCall fail-closed 测试篡改已持久化 binding。
    * 不得用于绕过 finalizeAgentCall Authority 校验。
@@ -251,7 +258,7 @@ export async function seedAgentCallExecutionScenario(options?: {
         displayName: "调用测试用户",
       });
   if (!identity || identity.tenantId !== tenantId) throw new Error("调用夹具需要同租户真实身份");
-  await upsertPrincipalBinding({
+  const principalBinding = await upsertPrincipalBinding({
     tenantId,
     subjectType: "user",
     externalId: identity.externalSubject,
@@ -261,12 +268,13 @@ export async function seedAgentCallExecutionScenario(options?: {
   const parentInvocationId = await seedInvocation(tenantId);
   await createExecutionBinding({
     ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
-    invocationId: parentInvocationId,
-    tenantId,
     runtimeRevisionId: randomUUID(),
     deploymentRouteId: randomUUID(),
     modelProvider: "test",
     modelId: "test",
+    ...options?.parentExecutionBinding,
+    invocationId: parentInvocationId,
+    tenantId,
     executionSubject: executionSubjectFromUserIdentity(tenantId, identity.id),
   });
   const threadId = randomUUID();
@@ -305,6 +313,12 @@ export async function seedAgentCallExecutionScenario(options?: {
     ownerUserId: randomUUID(),
   });
   await updateAgentLifecycle(tenantId, agent.id, "enabled", agent.versionNo);
+  await seedActionPermission({
+    tenantId,
+    principalBindingId: principalBinding.id,
+    actionCode: "agent.invoke",
+    resourceScope: { type: "agent", ids: [agent.id] },
+  });
   const enabledAgent = await getAgentById(tenantId, agent.id);
   if (!enabledAgent) throw new Error("Agent 启用后无法回读");
 
