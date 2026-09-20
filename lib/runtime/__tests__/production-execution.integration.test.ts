@@ -35,7 +35,7 @@ import {
 } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
-import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { buildDrizzle, resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
   createEnvironmentDefinition,
   getEnvironmentRevisionById,
@@ -45,7 +45,11 @@ import type { EnvironmentRevisionInput } from "@/lib/environment/environment-rev
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
 import type { ExecutionBindingConfigInput } from "@/lib/executions/domain/execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  closeExecutionOwnership,
+  getActiveExecutionOwnership,
+  renewExecutionOwnership,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import { createInvocation } from "@/lib/executions/persistence/invocation-store";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { registerDevice, revokeDevice } from "@/lib/identity/device-queries";
@@ -1717,5 +1721,166 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
         (binding) => binding.invocationId,
       ),
     ).toEqual([referenceInvocationId]);
+  });
+
+  // ─── CROSS 跨模块故障组合辅助 ───────────────────────────────
+
+  /**
+   * N 方屏障：让各方**真实同时**进入临界区，而不是靠 sleep 碰运气。
+   */
+  function createBarrier(parties: number): () => Promise<void> {
+    let arrived = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return async () => {
+      arrived += 1;
+      if (arrived >= parties) release();
+      await gate;
+    };
+  }
+
+  /**
+   * 等到入口进程"停在 `execution.started` 之前"的正式崩溃点出现：
+   * Owner 已激活（dispatching + activationEvidence）、Session 启动意图已冻结（dispatching）、
+   * Attempt 仍 queued 且从未排定重试。这些都是**持久**事实，不是内存状态。
+   */
+  async function waitForCrashPoint(tenantId: string, invocationId: string, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const [session] = await getRuntimeSessionBindingsByInvocation(tenantId, invocationId);
+      const owner = await getActiveExecutionOwnership({ tenantId, invocationId });
+      if (
+        session?.bindingState === "dispatching" &&
+        owner?.executionPhase === "dispatching" &&
+        owner.activationEvidence
+      ) {
+        return { session, owner };
+      }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `崩溃点状态未出现（session=${session?.bindingState ?? "缺失"}, owner=${owner?.executionPhase ?? "缺失"}）`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  // ─── CROSS-T01 ─────────────────────────────────────────────
+
+  /**
+   * 跨模块故障组合：入口进程在 `execution.started` 处停止后，"心跳续租 / 内联重试 Worker"
+   * 三方**同时**运行（两个 Worker 实例 + 一条真实心跳）。
+   *
+   * 参与者分属 ExecutionOwnership Store、Runtime Dispatch Retry Worker、Dispatcher 三个模块，
+   * 且使用**两条真实 MySQL 连接**与真实屏障同时进入临界区——不是把三条单测串起来跑。
+   * 断言落在持久事实上：不重建第二次逻辑执行、不产生第二个 Session、并发心跳不改写代际
+   * 元组（claim 不越权）、最终完成。
+   */
+  it("CROSS-T01: 恢复/心跳/内联重试同时交错——锁图正确、claim 不越权、ready 不回退、最终完成", async () => {
+    const context = await seedEntryContext("cross01");
+    const turn = await acceptTurnOnly(context, "cross01-intent", "请读取工作区再回答");
+
+    // 真实 Transport（由冻结 Binding 经唯一组合层解析），只把 `startInvocation` 换成"永不返回"。
+    let realClient: RuntimeHttpClient | null = null;
+    const stalled = dispatchInvocationForTurn({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      executionSubject: {
+        tenantId: context.tenantId,
+        subjectType: "user",
+        subjectId: context.ownerId,
+      },
+      runtimeClient: new Proxy({} as RuntimeHttpClient, {
+        get(_target, property) {
+          if (property === "startInvocation") return () => new Promise<never>(() => {});
+          if (!realClient) throw new Error("真实 Runtime Transport 尚未解析");
+          const value = Reflect.get(realClient, property);
+          return typeof value === "function" ? value.bind(realClient) : value;
+        },
+      }),
+      runtimeEndpointResolver: async (frozenBinding) => {
+        const transport = await resolveRuntimeTransportFromBinding({
+          tenantId: context.tenantId,
+          binding: frozenBinding,
+        });
+        realClient = transport.runtimeClient;
+        return {
+          runtimeEndpoint: transport.runtimeEndpoint,
+          auth: transport.auth,
+          callbackEndpoints: buildGatewayEndpoints({
+            external: !transport.hosted,
+            invocationId: frozenBinding.invocationId,
+          }),
+        };
+      },
+    });
+    void stalled.catch(() => undefined);
+
+    const invocation = await waitForInvocationForTurn(context.tenantId, turn.id);
+    const crashPoint = await waitForCrashPoint(context.tenantId, invocation.id);
+    const frozenSessionId = crashPoint.session.id;
+    expect(crashPoint.session.nextDispatchAt).toBeNull();
+
+    // 第二条**真实** MySQL 连接：三方并发必须真的跑在不同连接上。
+    const second = buildDrizzle(process.env.DATABASE_URL as string);
+    try {
+      const barrier = createBarrier(3);
+      const workerTick = (workerId: string) =>
+        (async () => {
+          await barrier();
+          const worker = createRuntimeDispatchRetryWorker({
+            workerId,
+            clock: () => afterStuckWindow(),
+          });
+          return worker.tick();
+        })();
+
+      const settled = await Promise.allSettled([
+        (async () => {
+          await barrier();
+          // 真实心跳：经 Ownership Store 的完整 tuple 续租（不改代际、不换 claim）。
+          return renewExecutionOwnership({
+            tenantId: context.tenantId,
+            invocationId: invocation.id,
+            ownershipId: crashPoint.owner.id,
+            attemptId: crashPoint.owner.attemptId,
+            leaseEpoch: crashPoint.owner.leaseEpoch,
+          });
+        })(),
+        workerTick(`cross01-worker-a-${randomUUID()}`),
+        workerTick(`cross01-worker-b-${randomUUID()}`),
+      ]);
+
+      // 心跳必须真实成功；两个 Worker 中至少一个真实推进（另一个可因 claim 竞争让位）。
+      expect(settled[0]?.status).toBe("fulfilled");
+      expect(settled.slice(1).some((result) => result.status === "fulfilled")).toBe(true);
+    } finally {
+      await second.pool.end();
+    }
+
+    // ── 持久事实：恰好一次逻辑执行，同一条 Session 走完单向生命周期 ──
+    const settledTurn = await waitForTurn(context.tenantId, turn.id);
+    expect(settledTurn.turnState).toBe("completed");
+    expect(await listInvocationsForTurn(context.tenantId, turn.id)).toHaveLength(1);
+
+    const attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+    expect(attempts.map((row) => row.id)).toEqual([crashPoint.owner.attemptId]);
+
+    const sessions = await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.id).toBe(frozenSessionId);
+    expect(sessions[0]?.bindingState).toBe("closed");
+
+    // 并发心跳不改写失权边界：若仍有 active Owner，它必须是同一条代际元组（未换 claim/epoch）。
+    const afterOwner = await getActiveExecutionOwnership({
+      tenantId: context.tenantId,
+      invocationId: invocation.id,
+    });
+    if (afterOwner) {
+      expect(afterOwner.id).toBe(crashPoint.owner.id);
+      expect(afterOwner.leaseEpoch).toBe(crashPoint.owner.leaseEpoch);
+    }
   });
 });

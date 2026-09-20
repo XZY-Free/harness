@@ -285,6 +285,14 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     // 父进程通常已退出；登记它只是为了让收尾清理对 ESRCH 也保持幂等。
     childPids.push(spawned.processGroupId);
     const childPid = await readDetachedWriterPid(pidFile);
+    // 孙进程先落 PID 文件，**下一个 tick（20ms）才第一次 append**。断言"写入尚未排空"
+    // 之前必须先证明它真的在写：否则活动文件尚不存在时，Broker 的排空判定会把
+    // "观测不到活动"当成"没有活动"（`awaitActivityDrain` 对缺失文件返回 true），
+    // 从而把 stopped 伪造成 true —— 这正是本文件要排除的假阳性。
+    await waitForFileExists(activityPath);
+    if (!(await fileStillGrowing(activityPath))) {
+      throw new Error(`游离 Writer 未建立真实写入活动：${activityPath}`);
+    }
     // 真正在写的是这个游离孙进程：必须由收尾真实收掉，否则会污染后续用例。
     externalHolderPids.push(childPid);
     return { spawned, childPid, activityPath, pidFile };
