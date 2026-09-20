@@ -468,9 +468,11 @@ describe("HarnessLoop", () => {
     ]);
   });
 
-  it("committed action 缺少执行器时写 action.failed 并正式失败，不生成正文", async () => {
+  it("committed action 缺少执行器时记录失败并生成可继续的正文", async () => {
     const writer = eventWriter();
-    const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);
+    const generateFinalResponse = vi.fn(
+      finalPort("当前无法读取制度信息。你可以稍后重试，或提供已有资料继续。").generateFinalResponse,
+    );
     const loop = new HarnessLoop(
       baseParams({
         eventWriter: writer,
@@ -491,22 +493,28 @@ describe("HarnessLoop", () => {
     const result = await loop.run();
 
     expect(result).toMatchObject({
-      completed: false,
-      errorCode: "HARNESS_ACTION_EXECUTOR_UNAVAILABLE",
+      completed: true,
+      responseText: "当前无法读取制度信息。你可以稍后重试，或提供已有资料继续。",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
       "progress.snapshot",
       "progress.snapshot",
       "harness.action.proposed",
       "harness.action.failed",
-      "execution.failed",
+      "progress.snapshot",
+      "response.completed",
+      "execution.completed",
     ]);
-    expect(generateFinalResponse).not.toHaveBeenCalled();
+    expect(generateFinalResponse).toHaveBeenCalledOnce();
   });
 
-  it("knowledge executor 失败使用稳定错误码且不回到 respond", async () => {
+  it("knowledge executor 失败后仍生成可继续对话的正常答复", async () => {
     const writer = eventWriter();
-    const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);
+    const finalViews: Array<any> = [];
+    const generateFinalResponse = vi.fn(async (view) => {
+      finalViews.push(view);
+      return "知识检索暂时不可用，我现在无法确认制度内容。你可以稍后重试，或提供已有制度文件继续。";
+    });
     const loop = new HarnessLoop(
       baseParams({
         eventWriter: writer,
@@ -531,16 +539,68 @@ describe("HarnessLoop", () => {
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({ completed: false, errorCode: "KNOWLEDGE_ACTION_FAILED" });
+    expect(result).toMatchObject({
+      completed: true,
+      responseText:
+        "知识检索暂时不可用，我现在无法确认制度内容。你可以稍后重试，或提供已有制度文件继续。",
+    });
     expect(writer.events.map((event) => event.type)).toEqual([
       "progress.snapshot",
       "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
       "harness.action.failed",
-      "execution.failed",
+      "progress.snapshot",
+      "response.completed",
+      "execution.completed",
     ]);
-    expect(generateFinalResponse).not.toHaveBeenCalled();
+    expect(generateFinalResponse).toHaveBeenCalledOnce();
+    expect(finalViews[0].observations).toContainEqual(
+      expect.objectContaining({
+        observationType: "knowledge",
+        data: expect.objectContaining({
+          state: "failed",
+          errorCode: "KNOWLEDGE_ACTION_FAILED",
+        }),
+      }),
+    );
+  });
+
+  it("行动失败且模型答复也不可用时仍写入安全的助手消息", async () => {
+    const writer = eventWriter();
+    const generateFinalResponse = vi.fn(async () => {
+      throw new Error("模型服务不可用");
+    });
+    const loop = new HarnessLoop(
+      baseParams({
+        eventWriter: writer,
+        decisionPort: decisionPort([
+          {
+            actionId: "action-knowledge-fallback",
+            stepNo: 1,
+            actionType: "knowledge.search",
+            purposeCode: "load_policy",
+            shortPurpose: "读取年假制度",
+            payload: { query: "年假制度" },
+          },
+        ]),
+        executors: {
+          "knowledge.search": async () => {
+            throw new Error("索引不可用");
+          },
+        },
+        finalResponsePort: { generateFinalResponse },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result.completed).toBe(true);
+    expect(result.responseText).toContain("“读取年假制度”暂时没有完成");
+    expect(result.responseText).toContain("你可以稍后重试");
+    expect(generateFinalResponse).toHaveBeenCalledOnce();
+    expect(writer.events.at(-2)?.type).toBe("response.completed");
+    expect(writer.events.at(-1)?.type).toBe("execution.completed");
   });
 
   it("request_user_input 形成正式用户操作事件并暂停同一 Invocation", async () => {
@@ -595,7 +655,7 @@ describe("HarnessLoop", () => {
     ]);
   });
 
-  it("agent.call 只能指向本 Turn preferred Agent", async () => {
+  it("agent.call 目标越权时拒绝调用并以正常答复说明", async () => {
     const agent = vi.fn();
     const writer = eventWriter();
     const loop = new HarnessLoop(
@@ -620,14 +680,19 @@ describe("HarnessLoop", () => {
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({ completed: false, errorCode: "AGENT_ACTION_NOT_ALLOWED" });
+    expect(result.completed).toBe(true);
+    expect(result.responseText).toContain("暂时没有完成");
     expect(agent).not.toHaveBeenCalled();
     expect(writer.events.some((event) => event.type === "harness.action.started")).toBe(false);
+    expect(writer.events.at(-1)?.type).toBe("execution.completed");
   });
 
-  it("已提交的 agent.call 缺少执行器时父执行正式失败且不生成最终正文", async () => {
+  it("已提交的 agent.call 缺少执行器时记录失败并正常回复", async () => {
     const writer = eventWriter();
-    const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);
+    const generateFinalResponse = vi.fn(
+      finalPort("企业人力智能助手当前不可用。你可以稍后重试或继续咨询其他问题。")
+        .generateFinalResponse,
+    );
     const loop = new HarnessLoop(
       baseParams({
         capabilityDirectives: [
@@ -651,17 +716,19 @@ describe("HarnessLoop", () => {
     const result = await loop.run();
 
     expect(result).toMatchObject({
-      completed: false,
-      errorCode: "AGENT_CALL_EXECUTOR_UNAVAILABLE",
+      completed: true,
+      responseText: "企业人力智能助手当前不可用。你可以稍后重试或继续咨询其他问题。",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
       "progress.snapshot",
       "progress.snapshot",
       "harness.action.proposed",
       "harness.action.failed",
-      "execution.failed",
+      "progress.snapshot",
+      "response.completed",
+      "execution.completed",
     ]);
-    expect(generateFinalResponse).not.toHaveBeenCalled();
+    expect(generateFinalResponse).toHaveBeenCalledOnce();
   });
 
   it("AgentCall 仍在运行时保留 action.started，不写 completed 或最终正文", async () => {
@@ -706,9 +773,13 @@ describe("HarnessLoop", () => {
     expect(generateFinalResponse).not.toHaveBeenCalled();
   });
 
-  it("Agent 执行错误码原样传播，不回退为普通最终回答", async () => {
+  it("Agent 执行异常进入失败观察并由 Harness 正常说明", async () => {
     const writer = eventWriter();
-    const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);
+    const finalViews: Array<any> = [];
+    const generateFinalResponse = vi.fn(async (view) => {
+      finalViews.push(view);
+      return "企业人力智能助手当前不可用。你可以稍后重试，当前会话仍可继续使用。";
+    });
     const loop = new HarnessLoop(
       baseParams({
         capabilityDirectives: [
@@ -738,16 +809,30 @@ describe("HarnessLoop", () => {
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({ completed: false, errorCode: "AGENT_ROUTE_UNAVAILABLE" });
+    expect(result).toMatchObject({
+      completed: true,
+      responseText: "企业人力智能助手当前不可用。你可以稍后重试，当前会话仍可继续使用。",
+    });
     expect(writer.events.map((event) => event.type)).toEqual([
       "progress.snapshot",
       "progress.snapshot",
       "harness.action.proposed",
       "harness.action.started",
       "harness.action.failed",
-      "execution.failed",
+      "progress.snapshot",
+      "response.completed",
+      "execution.completed",
     ]);
-    expect(generateFinalResponse).not.toHaveBeenCalled();
+    expect(generateFinalResponse).toHaveBeenCalledOnce();
+    expect(finalViews[0].observations).toContainEqual(
+      expect.objectContaining({
+        observationType: "agent",
+        data: expect.objectContaining({
+          state: "failed",
+          errorCode: "AGENT_ROUTE_UNAVAILABLE",
+        }),
+      }),
+    );
   });
 
   it("preferred Agent 返回业务失败后只允许组织失败答复，不再调用其他能力", async () => {
@@ -755,7 +840,9 @@ describe("HarnessLoop", () => {
       capabilities: { supportedActionTypes: string[] };
     }> = [];
     const tool = vi.fn();
-    const generateFinalResponse = vi.fn(async () => "已生成草稿");
+    const generateFinalResponse = vi.fn(
+      async () => "暂时无法取得排班数据，因此这次没有生成请假草稿。你可以稍后重试。",
+    );
     const loop = new HarnessLoop(
       baseParams({
         capabilityDirectives: [
@@ -799,11 +886,11 @@ describe("HarnessLoop", () => {
 
     expect(result).toMatchObject({
       completed: true,
-      responseText: "所选智能体未能完成本次请求：暂时无法取得排班数据，请稍后再试。",
+      responseText: "暂时无法取得排班数据，因此这次没有生成请假草稿。你可以稍后重试。",
     });
     expect(views).toHaveLength(1);
     expect(tool).not.toHaveBeenCalled();
-    expect(generateFinalResponse).not.toHaveBeenCalled();
+    expect(generateFinalResponse).toHaveBeenCalledOnce();
   });
 
   it("preferred Agent 失败后直接结束，不给模型机会提议工具兜底", async () => {
@@ -852,7 +939,7 @@ describe("HarnessLoop", () => {
     expect(tool).not.toHaveBeenCalled();
   });
 
-  it("超过连续相同行动预算时失败且不执行第三次", async () => {
+  it("超过连续相同行动预算时停止重试并正常说明", async () => {
     const knowledge = vi.fn(async () => ({
       observation: {
         observationType: "knowledge" as const,
@@ -882,14 +969,12 @@ describe("HarnessLoop", () => {
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({
-      completed: false,
-      errorCode: "HARNESS_LOOP_REPEATED_ACTION",
-    });
+    expect(result.completed).toBe(true);
+    expect(result.responseText).toContain("暂时没有完成");
     expect(knowledge).toHaveBeenCalledTimes(2);
   });
 
-  it("超过最大步骤数时失败，不向决策模型请求额外 action", async () => {
+  it("超过最大步骤数时停止执行并正常说明，不向决策模型请求额外 action", async () => {
     const decideNextAction = vi.fn(async ({ actionHistory }: any) => ({
       actionId: `action-${actionHistory.length + 1}`,
       stepNo: actionHistory.length + 1,
@@ -917,14 +1002,12 @@ describe("HarnessLoop", () => {
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({
-      completed: false,
-      errorCode: "HARNESS_LOOP_STEP_LIMIT_EXCEEDED",
-    });
+    expect(result.completed).toBe(true);
+    expect(result.responseText).toContain("暂时没有完成");
     expect(decideNextAction).toHaveBeenCalledTimes(2);
   });
 
-  it("严格拒绝 action payload 多余字段", async () => {
+  it("严格拒绝 action payload 多余字段并以正常消息收口", async () => {
     const loop = new HarnessLoop(
       baseParams({
         decisionPort: decisionPort([
@@ -942,10 +1025,8 @@ describe("HarnessLoop", () => {
 
     const result = await loop.run();
 
-    expect(result).toMatchObject({
-      completed: false,
-      errorCode: "HARNESS_ACTION_SCHEMA_INVALID",
-    });
+    expect(result.completed).toBe(true);
+    expect(result.responseText).toContain("暂时没有完成");
   });
 
   it("从 completed action 恢复 observation，不重复执行既有副作用", async () => {

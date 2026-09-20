@@ -36,7 +36,6 @@ vi.mock("@/components/thread/items/user-action-item", () => ({
     <div data-testid={`user-action-${item.id}`} />
   ),
 }));
-vi.mock("@/components/thread/turn-failure-notice", () => ({ TurnFailureNotice: () => null }));
 vi.mock("@/components/desktop/desktop-workbench", () => ({
   DesktopWorkbench: ({ isOpen }: { readonly isOpen?: boolean }) => (
     <div data-testid="workbench" data-open={String(isOpen)} />
@@ -116,6 +115,32 @@ describe("ThreadPage 把平台默认模型传给 ThreadInput（Web 与 Desktop �
 });
 
 describe("ThreadPage 输出区", () => {
+  it.each(["web", "desktop"] as const)("%s Turn 失败时不在输入框上方渲染错误横幅", (variant) => {
+    mocks.useThreadDetail.mockReturnValue({
+      thread,
+      activeGoal: null,
+      latestTurn: {
+        id: "turn-failed",
+        turn_state: "failed",
+        error_code: "AGENT_ROUTE_UNAVAILABLE",
+        controls: {
+          cancel_supported: false,
+          resume_supported: false,
+          steer_supported: false,
+        },
+      },
+      turns: [],
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    render(<ThreadPage threadId="t-1" variant={variant} />);
+
+    expect(screen.queryByText("本次回复失败")).toBeNull();
+    expect(screen.queryByText(/请查看上方失败原因/)).toBeNull();
+  });
+
   it.each(["web", "desktop"] as const)(
     "%s 默认隐藏输出工作台，用户点击标题栏入口后展开",
     (variant) => {

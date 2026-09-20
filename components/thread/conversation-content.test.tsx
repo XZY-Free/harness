@@ -8,7 +8,6 @@ import { UserMessageItem } from "./items/user-message-item";
 import { NewThreadPage } from "./new-thread-page";
 import { ThreadInput } from "./thread-input";
 import { ThreadTimeline } from "./thread-timeline";
-import { TurnFailureNotice } from "./turn-failure-notice";
 
 const globalsCss = readFileSync(resolve(process.cwd(), "app/globals.css"), "utf8");
 
@@ -202,12 +201,6 @@ describe("消息轨道与输入轨道拆分", () => {
     expect(composer.closest(".sticky")?.className).toContain("bottom-0");
   });
 
-  it("TurnFailureNotice 使用输入轨道 .composer-track", () => {
-    const { container } = render(<TurnFailureNotice turnState="failed" errorCode="X" />);
-    firstByClass(container, "composer-track");
-    expect(container.querySelector(".message-track")).toBeNull();
-  });
-
   it("消息轨道与 composer 轨道是两类不同规则（Timeline 与 ThreadInput 各自轨道互不相同）", () => {
     stubModelsFetch();
     const timelineEls = render(
@@ -222,7 +215,7 @@ describe("消息轨道与输入轨道拆分", () => {
     expect(timelineEls[0]).not.toBe(composerEls[0]);
   });
 
-  it("新会话空态按语义选轨道：时间线走 .message-track，错误提示走 .composer-track", () => {
+  it("新会话空态按语义选轨道：时间线走 .message-track，提交错误走 .composer-track", () => {
     stubModelsFetch();
     const { container } = render(
       <NewThreadPage agents={[]} error="发送失败" onSubmit={async () => true} surface="web" />,

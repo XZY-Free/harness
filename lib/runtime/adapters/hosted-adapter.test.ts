@@ -198,7 +198,7 @@ describe("S05-C05 HostedAdapter 基本能力", () => {
     );
   });
 
-  it("未配置模型执行器时回传 execution.failed，不生成回复", async () => {
+  it("未配置模型执行器时仍生成安全回复并正常收口", async () => {
     const { sink, events } = createMockSink();
     const adapter = createHostedAdapter({
       platformEndpoint: "https://platform.internal",
@@ -216,14 +216,16 @@ describe("S05-C05 HostedAdapter 基本能力", () => {
     });
 
     const result = await adapter.getLastLoopPromise?.();
-    expect(result?.completed).toBe(false);
-    expect(result?.failureReason).toContain("未配置 HarnessDecisionPort");
-    expect(events).toHaveLength(2);
+    expect(result?.completed).toBe(true);
+    expect(result?.responseText).toContain("暂时没有完成");
+    expect(events).toHaveLength(4);
     expect(events[0]).toMatchObject({ type: "progress.snapshot" });
     expect(events[1]).toMatchObject({
-      type: "execution.failed",
-      payload: { error_code: "MODEL_EXECUTOR_UNAVAILABLE" },
+      type: "progress.snapshot",
+      payload: { message: "正在整理失败原因和可行建议…" },
     });
+    expect(events[2]).toMatchObject({ type: "response.completed" });
+    expect(events[3]).toMatchObject({ type: "execution.completed" });
   });
 
   it("probeCapabilities 返回 Hosted 能力声明", async () => {

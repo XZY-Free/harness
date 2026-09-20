@@ -330,20 +330,46 @@ export class HarnessLoop {
                         : "HARNESS_ACTION_EXECUTION_FAILED",
               errorMessage(failure),
             );
+      // 执行租约丢失代表当前执行者已不再拥有写入权，继续生成回复会与接管者竞争并产生重复输出。
+      // 这类一致性故障必须保持 fail-closed，由恢复权威接管；它不是普通业务行动失败。
+      if (leaseLost) {
+        await this.safeWriteExecutionFailed(loopError);
+        return {
+          completed: false,
+          responseText: "",
+          errorCode: loopError.code,
+          failureReason: loopError.message,
+          observations: [...this.observations],
+          actionHistory: [...this.actionHistory],
+        };
+      }
       if (current?.state === "proposed" || current?.state === "started") {
         current.state = "failed";
         current.errorCode = loopError.code;
+        const observation = failureObservation(current.actionType, loopError.code);
+        if (observation) {
+          current.observation = observation;
+          this.observations.push(observation);
+        }
         await this.safeWriteActionFailed(current);
       }
-      await this.safeWriteExecutionFailed(loopError);
-      return {
-        completed: false,
-        responseText: "",
-        errorCode: loopError.code,
-        failureReason: loopError.message,
-        observations: [...this.observations],
-        actionHistory: [...this.actionHistory],
-      };
+      try {
+        return await this.completeFailureResponse(loopError, current);
+      } catch (recoveryError) {
+        const terminalError =
+          recoveryError instanceof HarnessLoopError
+            ? recoveryError
+            : new HarnessLoopError("HARNESS_FAILURE_RESPONSE_FAILED", errorMessage(recoveryError));
+        await this.safeWriteExecutionFailed(terminalError);
+        return {
+          completed: false,
+          responseText: "",
+          errorCode: terminalError.code,
+          failureReason: terminalError.message,
+          observations: [...this.observations],
+          actionHistory: [...this.actionHistory],
+        };
+      }
     }
   }
 
@@ -423,30 +449,13 @@ export class HarnessLoop {
   private async completeAgentFailureResponse(
     observation: HarnessObservation,
   ): Promise<HarnessLoopResult> {
-    await this.params.eventWriter.write("progress.snapshot", {
-      message: "正在整理智能体返回的失败原因…",
-    });
-    const responseText = `所选智能体未能完成本次请求：${
-      observation.summary.trim().slice(0, 2_000) || "智能体执行失败"
-    }`;
-    await this.params.emitTextDelta?.(responseText);
-    this.throwIfCancelled();
-    await this.params.eventWriter.write("response.completed", {
-      text: responseText,
-      item_type: "assistant_message",
-      model_ref: this.params.modelRef,
-      finish_reason: "stop",
-      evidence_refs: observation.sourceRefs,
-    });
-    await this.params.eventWriter.write("execution.completed", {
-      finish_reason: "execution.completed",
-    });
-    return {
-      completed: true,
-      responseText,
-      observations: [...this.observations],
-      actionHistory: [...this.actionHistory],
-    };
+    const data = recordValue(observation.data);
+    const code = typeof data.errorCode === "string" ? data.errorCode : "AGENT_CALL_FAILED";
+    return await this.completeFailureResponse(
+      new HarnessLoopError(code, observation.summary),
+      this.actionHistory.at(-1),
+      observation,
+    );
   }
 
   private async respond(
@@ -464,15 +473,20 @@ export class HarnessLoop {
     });
     const agentFailure = this.terminalPreferredAgentFailure();
     const responseText = agentFailure
-      ? `所选智能体未能完成本次请求：${
-          agentFailure.summary.trim().slice(0, 2_000) || "智能体执行失败"
-        }`
+      ? await this.generateFailureResponse(
+          new HarnessLoopError(
+            typeof recordValue(agentFailure.data).errorCode === "string"
+              ? (recordValue(agentFailure.data).errorCode as string)
+              : "AGENT_CALL_FAILED",
+            agentFailure.summary,
+          ),
+          historyEntry,
+        )
       : await this.params.finalResponsePort.generateFinalResponse(
           this.buildView(),
           this.params.emitTextDelta,
           this.params.abortSignal,
         );
-    if (agentFailure) await this.params.emitTextDelta?.(responseText);
     this.throwIfCancelled();
     if (!responseText.trim()) {
       throw new HarnessLoopError("MODEL_EXECUTION_FAILED", "最终正文为空");
@@ -495,6 +509,62 @@ export class HarnessLoop {
       observations: [...this.observations],
       actionHistory: [...this.actionHistory],
     };
+  }
+
+  /**
+   * 行动失败是可回答的执行事实，不应直接结束整轮对话。
+   * 先让模型结合目标和失败观察给出解释；模型不可用时仍生成安全、可继续的兜底答复。
+   */
+  private async completeFailureResponse(
+    error: HarnessLoopError,
+    historyEntry?: HarnessActionHistoryEntry,
+    observation?: HarnessObservation,
+  ): Promise<HarnessLoopResult> {
+    await this.params.eventWriter.write("progress.snapshot", {
+      message: "正在整理失败原因和可行建议…",
+    });
+    const responseText = await this.generateFailureResponse(error, historyEntry);
+    this.throwIfCancelled();
+    await this.params.eventWriter.write("response.completed", {
+      text: responseText,
+      item_type: "assistant_message",
+      model_ref: this.params.modelRef,
+      finish_reason: "stop",
+      evidence_refs: observation?.sourceRefs ?? historyEntry?.observation?.sourceRefs ?? [],
+    });
+    await this.params.eventWriter.write("execution.completed", {
+      finish_reason: "execution.completed_with_action_failure",
+    });
+    return {
+      completed: true,
+      responseText,
+      observations: [...this.observations],
+      actionHistory: [...this.actionHistory],
+    };
+  }
+
+  private async generateFailureResponse(
+    error: HarnessLoopError,
+    historyEntry?: HarnessActionHistoryEntry,
+  ): Promise<string> {
+    // 只有失败事实已进入模型视图时才让模型组织说明。Schema/预算/模型本身等
+    // Harness 内部故障没有可信 observation，直接使用受控文案，避免模型猜测原因。
+    if (historyEntry?.observation && isFailureObservation(historyEntry.observation)) {
+      try {
+        const generated = await this.params.finalResponsePort.generateFinalResponse(
+          this.buildView(),
+          this.params.emitTextDelta,
+          this.params.abortSignal,
+        );
+        if (generated.trim()) return generated;
+      } catch (generationError) {
+        if (this.params.abortSignal?.aborted || isAbortError(generationError))
+          throw generationError;
+      }
+    }
+    const fallback = fallbackFailureResponse(error.code, historyEntry?.shortPurpose);
+    await this.params.emitTextDelta?.(fallback);
+    return fallback;
   }
 
   private validateAction(action: HarnessNextAction, expectedStepNo: number): void {
@@ -670,7 +740,7 @@ export class HarnessLoop {
     const failed = this.actionHistory.findLast((entry) => {
       if (
         entry.action.actionType !== "agent.call" ||
-        entry.state !== "completed" ||
+        (entry.state !== "completed" && entry.state !== "failed") ||
         entry.action.payload.agentId !== preferredAgentId ||
         entry.observation?.observationType !== "agent"
       ) {
@@ -825,4 +895,74 @@ function errorMessage(error: unknown): string {
 function errorCode(error: unknown): string | null {
   if (!error || typeof error !== "object" || !("code" in error)) return null;
   return typeof error.code === "string" && error.code ? error.code : null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function failureObservation(
+  actionType: HarnessActionType,
+  code: string,
+): HarnessObservation | null {
+  const observationType =
+    actionType === "knowledge.search"
+      ? "knowledge"
+      : actionType === "tool.call"
+        ? "tool"
+        : actionType === "agent.call"
+          ? "agent"
+          : actionType === "request_user_input"
+            ? "user_input"
+            : null;
+  if (!observationType) return null;
+  return {
+    observationType,
+    summary: failureExplanation(code),
+    sourceRefs: [],
+    data: { state: "failed", errorCode: code },
+  };
+}
+
+function failureExplanation(code: string): string {
+  if (code === "AGENT_CONTEXT_REQUIREMENT_UNSATISFIED") {
+    return "当前登录身份或企业资料没有满足所选智能体的使用要求。";
+  }
+  if (code === "AGENT_ROUTE_UNAVAILABLE" || code === "AGENT_CALL_EXECUTOR_UNAVAILABLE") {
+    return "所选智能体当前没有可用的调用服务。";
+  }
+  if (code === "AGENT_CALL_CREDENTIAL_UNAVAILABLE") {
+    return "所选智能体的服务凭证当前不可用。";
+  }
+  if (code.startsWith("AGENT_")) {
+    return "所选智能体本次未能完成请求，可能是服务暂时不可用或连接中断。";
+  }
+  if (code.startsWith("KNOWLEDGE_")) {
+    return "知识检索本次未能完成，因此暂时无法确认相关资料。";
+  }
+  if (code.startsWith("TOOL_") || code === "HARNESS_ACTION_EXECUTOR_UNAVAILABLE") {
+    return "本次需要的外部操作没有完成。";
+  }
+  if (code.startsWith("MODEL_") || code.startsWith("HARNESS_")) {
+    return "回复处理过程中出现了暂时性问题。";
+  }
+  return "本次处理中的一个步骤没有完成。";
+}
+
+function fallbackFailureResponse(code: string, shortPurpose?: string): string {
+  const task = shortPurpose?.trim() ? `“${shortPurpose.trim()}”` : "这项请求";
+  const nextStep =
+    code === "AGENT_CONTEXT_REQUIREMENT_UNSATISFIED"
+      ? "请重新登录后再试；如果仍然失败，请联系管理员检查企业资料和智能体使用范围。"
+      : code === "AGENT_CALL_CREDENTIAL_UNAVAILABLE"
+        ? "请稍后重试；如果持续失败，请联系管理员检查智能体服务凭证。"
+        : "你可以稍后重试、换一种说法，或者继续提出其他需求。";
+  return `${task}暂时没有完成。${failureExplanation(code)}${nextStep}`;
+}
+
+function isFailureObservation(observation: HarnessObservation): boolean {
+  const state = recordValue(observation.data).state;
+  return state === "failed" || state === "cancelled" || state === "lost";
 }

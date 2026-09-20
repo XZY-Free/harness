@@ -14,7 +14,7 @@
  * - 组合 ThreadHeader（顶部固定）+ ThreadTimeline（时间线）+ ThreadInput（输入框，内嵌运行控制与待办队列）。
  * - 加载 Thread 详情（useThreadDetail）+ Item 投影（useThread）。
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
- * - 错误展示（visibleError → ErrorCard）。
+ * - 会话加载错误展示（visibleError → ErrorCard）；Turn 执行失败由时间线内的 Harness 答复承接。
  * - 输入区集成助手单次调用选择、模型选择；不绑定主 Agent，不做 handoff。
  * - Agent 与 Runtime Authority §35：不再绑定主 Agent（primary_agent_id 已移除），无 Agent 时输入区照常可用。
  * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 ThreadInput 内部，
@@ -48,7 +48,6 @@ import { useOptionalSidebar } from "./sidebar/sidebar-context";
 import { ThreadHeader } from "./thread-header";
 import { ThreadInput } from "./thread-input";
 import { ThreadTimeline } from "./thread-timeline";
-import { TurnFailureNotice } from "./turn-failure-notice";
 
 interface ThreadPageProps {
   readonly threadId: string;
@@ -343,10 +342,6 @@ export function ThreadPage({
                 turns={turns}
                 activity={activity}
               />
-              <TurnFailureNotice
-                turnState={latestTurn?.turn_state}
-                errorCode={latestTurn?.error_code}
-              />
               {pendingUserActionDock}
             </>
           )}
@@ -396,10 +391,6 @@ export function ThreadPage({
                   activeTurn={latestTurn}
                   turns={turns}
                   activity={activity}
-                />
-                <TurnFailureNotice
-                  turnState={latestTurn?.turn_state}
-                  errorCode={latestTurn?.error_code}
                 />
                 {pendingUserActionDock}
               </>

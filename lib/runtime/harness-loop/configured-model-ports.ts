@@ -37,6 +37,7 @@ export function configuredFinalResponsePort(modelRef: string): HarnessFinalRespo
           model: getChatModel(modelRef),
           prompt: [
             "根据当前用户目标与已完成 observations 生成最终可见回答。不得声称执行过 actionHistory 中不存在或未 completed 的行动。user_input 只证明用户提供了字段，不证明任何业务处理已执行；没有对应的 agent 或 tool observation 时，不得生成或声称业务草稿、校验、查询或处理结果。",
+            "如果 actionHistory 或 observations 表明某个步骤失败，仍要像正常聊天一样回答：明确哪些内容没有完成，用用户能理解的语言说明已知原因，并给出可以重试、补充信息或改走其他路径的建议。不要把单个步骤失败描述成会话不可用，不要要求用户填写系统已经能够从登录身份取得的字段，也不要暴露内部错误堆栈、凭证或技术载荷。",
             `系统当前时间（UTC）：${new Date().toISOString()}。回答日期时使用用户明确的时区，否则说明采用的时区。`,
             JSON.stringify(view),
           ].join("\n\n"),
