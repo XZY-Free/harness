@@ -40,4 +40,17 @@ export function isReleased(handle: WorkspaceLockHandle): boolean;
 /** 锁文件的 inode 身份（诊断用：证明锁文件不被 rename/unlink/recreate）。 */
 export function lockFileIdentity(stablePath: string): WorkspaceLockFileIdentity;
 
+/** 以受管根目录描述符为锚写入；拒绝祖先及最终符号链接。 */
+export function secureWriteFile(
+  root: string,
+  relativePath: string,
+  content: string,
+): { readonly state: "written" };
+
+/** 以受管根目录描述符为锚删除普通文件；拒绝祖先及最终符号链接。 */
+export function secureDeleteFile(
+  root: string,
+  relativePath: string,
+): { readonly state: "deleted" | "absent" };
+
 export const BINARY_PATHS: readonly string[];

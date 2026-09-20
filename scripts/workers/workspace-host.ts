@@ -1,3 +1,4 @@
+import { assertScopeLockProviderAvailable } from "@/lib/workspace/scope-lock";
 /**
  * 受管 WorkspaceHost 服务进程入口。
  *
@@ -14,6 +15,7 @@ function required(name: string): string {
 }
 
 export function createWorkspaceHostFromEnvironment(): WorkspaceHostBroker {
+  assertScopeLockProviderAvailable();
   const root = required("SNOWHARNESS_WORKSPACE_HOST_ROOT");
   const snapshotRoot = required("SNOWHARNESS_SNAPSHOT_STORAGE_ROOT");
   const hostIdentity = process.env.SNOWHARNESS_WORKSPACE_HOST_IDENTITY?.trim();

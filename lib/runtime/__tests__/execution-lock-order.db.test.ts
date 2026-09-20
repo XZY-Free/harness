@@ -42,6 +42,7 @@ import { threadEventTable, turnTable } from "@/lib/persistence/schema/conversati
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import {
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationCommandTable,
   invocationTable,
   runtimeSessionBindingTable,
@@ -55,6 +56,8 @@ import { resumeRuntimeInvocation } from "@/lib/runtime/application/runtime-resum
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
+import { rescheduleRuntimeSessionDispatchInTransaction } from "@/lib/runtime/persistence/runtime-session-store";
+import { recordAttemptDispatchTransientFailure } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { type AuthorityIdentity, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
@@ -612,6 +615,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
       turnId: ctx.turnId,
       executionSubject: { tenantId: ctx.tenantId, subjectType: "user", subjectId: ctx.ownerId },
     });
+
     const invocation = dispatch.invocation;
     const binding = dispatch.binding;
     const attempt = dispatch.attempt;
@@ -664,6 +668,88 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
       expect(["ER_LOCK_DEADLOCK", "ER_LOCK_WAIT_TIMEOUT"]).not.toContain(name);
     }
   }, 30_000);
+
+  it.each([
+    { dispatchCount: 1, expectedOutcome: "scheduled" as const },
+    { dispatchCount: 5, expectedOutcome: "exhausted" as const },
+  ])(
+    "A01-F01：Session 派发失败（$expectedOutcome）在等待 Invocation 根时不得先持有 Attempt/Session",
+    async ({ dispatchCount, expectedOutcome }) => {
+      const fixture = await seedActiveOwner({ phase: "dispatching" });
+      const tenantId = fixture.ctx.tenantId;
+      const invocationId = fixture.invocation.id;
+      const claimToken = `dispatch-claim:${randomUUID()}`;
+      const semanticRequest = { kind: "a01-f01", invocationId };
+      await db.transaction((tx) =>
+        rescheduleRuntimeSessionDispatchInTransaction(tx, {
+          tenantId,
+          id: fixture.gen.session.id,
+          expectedVersionNo: fixture.gen.session.versionNo,
+          dispatchCount,
+          nextDispatchAt: null,
+          lastErrorCode: null,
+        }),
+      );
+      await applyRuntimeSessionDispatchForTest(tenantId, fixture.gen.session.id, {
+        bindingState: "dispatching",
+        semanticRequestJson: semanticRequest,
+        semanticRequestDigest: protocolDigest(semanticRequest),
+        dispatchLeaseOwner: claimToken,
+        dispatchLeaseExpiresAt: new Date(Date.now() + 30_000),
+      });
+
+      const holder = holdInvocationRoot(tenantId, invocationId);
+      await holder.locked.promise;
+
+      let failureSettled = false;
+      const pendingFailure = recordAttemptDispatchTransientFailure(
+        {
+          tenantId,
+          sessionBindingId: fixture.gen.session.id,
+          attemptId: fixture.attempt.id,
+          ownershipId: fixture.gen.ownership.id,
+          leaseEpoch: fixture.gen.ownership.leaseEpoch,
+          claimToken,
+        },
+        { errorCode: "runtime_unavailable", now: new Date(), counted: true },
+      ).then(
+        (result) => {
+          failureSettled = true;
+          return result;
+        },
+        (error: unknown) => {
+          failureSettled = true;
+          throw error;
+        },
+      );
+      await sleep(200);
+
+      const attemptFree = await rowIsFree((tx) =>
+        tx
+          .select({ id: invocationAttemptTable.id })
+          .from(invocationAttemptTable)
+          .where(eq(invocationAttemptTable.id, fixture.attempt.id))
+          .for("update")
+          .limit(1),
+      );
+      const sessionFree = await rowIsFree((tx) =>
+        tx
+          .select({ id: runtimeSessionBindingTable.id })
+          .from(runtimeSessionBindingTable)
+          .where(eq(runtimeSessionBindingTable.id, fixture.gen.session.id))
+          .for("update")
+          .limit(1),
+      );
+      expect(attemptFree, "失败收口在等 I 时不得先锁 Attempt").toBe(true);
+      expect(sessionFree, "失败收口在等 I 时不得先锁 Session").toBe(true);
+      expect(failureSettled, "失败收口应被 Invocation 根锁阻塞").toBe(false);
+
+      holder.release.resolve();
+      await holder.transaction;
+      await expect(pendingFailure).resolves.toMatchObject({ outcome: expectedOutcome });
+    },
+    30_000,
+  );
   /**
    * A01-T05：内部多语句函数不能接全局 `db`。
    *

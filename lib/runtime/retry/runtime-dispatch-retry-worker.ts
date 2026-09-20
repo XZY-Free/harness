@@ -94,6 +94,8 @@ export interface RuntimeDispatchRetryWorker {
     stuckCheckpointGates: number;
     /** 本轮收口的 Checkpoint 解冻行数（Backend 腿 + 据实关闭的 Runtime 腿）。 */
     checkpointReleases: number;
+    /** 本轮由正式消费者建立的 Supervisor 交接继任代际数。 */
+    supervisorHandoffs: number;
   }>;
 }
 
@@ -155,6 +157,7 @@ export function createRuntimeDispatchRetryWorker(
     checkpointReleases: number;
     undispatchedTurns: number;
     undispatchedInvocations: number;
+    supervisorHandoffs: number;
   }> {
     const now = clock();
     // 扫描只取候选 ID；每条工作在自己的领取事务里按对象自身根重新验证 due/state/lease。
@@ -251,10 +254,12 @@ export function createRuntimeDispatchRetryWorker(
     // 在本次修复前没有任何发现者，会永久停在半程（客户端永远看不到终态）。
     let undispatchedTurns = 0;
     let undispatchedInvocations = 0;
+    let supervisorHandoffs = 0;
     try {
       const summary = await recoverUndispatchedIntents({ now: clock(), batchSize });
       undispatchedTurns = summary.turns.recovered;
       undispatchedInvocations = summary.invocations.recovered;
+      supervisorHandoffs = summary.handoffs.recovered;
     } catch (error) {
       logger.error("[runtime-dispatch-retry-worker] 半程意图恢复 lane 失败", {
         error: String(error),
@@ -270,6 +275,7 @@ export function createRuntimeDispatchRetryWorker(
       checkpointReleases,
       undispatchedTurns,
       undispatchedInvocations,
+      supervisorHandoffs,
     };
   }
 

@@ -37,6 +37,8 @@ interface NativeBinding {
   unlockAndClose(handle: WorkspaceLockHandle): { state: "released" | "already_released" };
   isReleased(handle: WorkspaceLockHandle): boolean;
   lockFileIdentity(stablePath: string): WorkspaceLockFileIdentity;
+  secureWriteFile(root: string, relativePath: string, content: string): { state: "written" };
+  secureDeleteFile(root: string, relativePath: string): { state: "deleted" | "absent" };
 }
 
 /** 默认等待上限（毫秒）。 */
@@ -81,7 +83,20 @@ function loadNativeBinding(): NativeBinding {
   if (cachedBinding) return cachedBinding;
   try {
     const require = createRequire(/* turbopackIgnore: true */ join(NATIVE_MODULE_DIR, "index.cjs"));
-    cachedBinding = require(NATIVE_MODULE_DIR) as NativeBinding;
+    const loaded = require(NATIVE_MODULE_DIR) as Partial<NativeBinding>;
+    for (const endpoint of [
+      "openAndTryLock",
+      "unlockAndClose",
+      "isReleased",
+      "lockFileIdentity",
+      "secureWriteFile",
+      "secureDeleteFile",
+    ] satisfies Array<keyof NativeBinding>) {
+      if (typeof loaded[endpoint] !== "function") {
+        throw new Error(`原生 provider 缺少必需入口 ${endpoint}`);
+      }
+    }
+    cachedBinding = loaded as NativeBinding;
     return cachedBinding;
   } catch (error) {
     throw new ScopeLockUnavailableError(
@@ -99,6 +114,16 @@ export function scopeLockFilePath(grantsRoot: string): string {
 /** 锁文件身份（诊断/证据：证明锁文件不被 rename / unlink / recreate）。 */
 export function scopeLockIdentity(lockPath: string): WorkspaceLockFileIdentity {
   return loadNativeBinding().lockFileIdentity(lockPath);
+}
+
+/** descriptor-relative 受管写入；祖先或最终符号链接会由内核级门禁拒绝。 */
+export function secureManagedFileWrite(root: string, relativePath: string, content: string): void {
+  loadNativeBinding().secureWriteFile(root, relativePath, content);
+}
+
+/** descriptor-relative 受管删除；不存在幂等，符号链接 fail closed。 */
+export function secureManagedFileDelete(root: string, relativePath: string): void {
+  loadNativeBinding().secureDeleteFile(root, relativePath);
 }
 
 export interface AcquiredScopeLock {
@@ -222,6 +247,11 @@ export function scopeLockProviderAvailable(): boolean {
   } catch {
     return false;
   }
+}
+
+/** 启动自检：正式受管 Host 缺少原生 provider 时立即失败，不等首个写请求才暴露。 */
+export function assertScopeLockProviderAvailable(): void {
+  loadNativeBinding();
 }
 
 /** 只读探测：锁文件是否存在（诊断用）。 */

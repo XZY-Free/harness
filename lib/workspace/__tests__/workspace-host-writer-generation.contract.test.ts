@@ -20,7 +20,17 @@
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
@@ -203,7 +213,9 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     roots = [];
   });
 
-  async function setup(): Promise<Fixture> {
+  async function setup(testHooks?: {
+    beforeFreezeScopeLock?: () => Promise<void>;
+  }): Promise<Fixture> {
     const base = await mkdtemp(path.join(tmpdir(), "a07-writer-"));
     roots.push(base);
     const hostRoot = path.join(base, "host");
@@ -211,7 +223,11 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     const runRoot = path.join(writerRoot, "run");
     await mkdir(hostRoot, { recursive: true });
     await mkdir(runRoot, { recursive: true });
-    const broker = createWorkspaceHostBroker({ root: hostRoot, managedRoot: writerRoot });
+    const broker = createWorkspaceHostBroker({
+      root: hostRoot,
+      managedRoot: writerRoot,
+      testHooks,
+    });
     const probe = await broker.probeIdentity();
     const controlRoot = path.join(await realpath(hostRoot), ".snow");
     return {
@@ -1048,6 +1064,80 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     expect(after.stop?.evidence.stopped).toBe(true);
   }, 40_000);
 
+  it("A07-F04 旧 freeze 在取锁前停顿：新代际屏障建立后旧请求必须被锁内复核拒绝", async () => {
+    let signalEntered!: () => void;
+    let resumeOldFreeze!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      resumeOldFreeze = resolve;
+    });
+    let pauseFirstFreeze = true;
+    const fixture = await setup({
+      async beforeFreezeScopeLock() {
+        if (!pauseFirstFreeze) return;
+        pauseFirstFreeze = false;
+        signalEntered();
+        await resume;
+      },
+    });
+    const oldGrant = await activate(fixture);
+    const oldFreeze = fixture.broker.freeze({
+      grant: oldGrant,
+      checkpointIntentId: INTENT_ID,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    await entered;
+
+    const currentGrant = await activate(fixture, {
+      writerGeneration: 2,
+      operationId: "op-freeze-race-2",
+      authority: authority({
+        attemptId: "00000000-0000-4000-8000-0000000000b3",
+        ownershipId: "00000000-0000-4000-8000-0000000000b4",
+        leaseEpoch: "2",
+        sessionBindingId: "00000000-0000-4000-8000-0000000000b5",
+      }),
+    });
+    const currentReceipt = await fixture.broker.freeze({
+      grant: currentGrant,
+      checkpointIntentId: "00000000-0000-4000-8000-0000000000f2",
+      anchorDigest: `sha256:${"b".repeat(64)}`,
+    });
+
+    resumeOldFreeze();
+    await expect(oldFreeze).rejects.toThrow(WorkspaceWriterNotFencedError);
+    await expect(
+      fixture.broker.snapshot({
+        grant: currentGrant,
+        checkpointIntentId: currentReceipt.checkpointIntentId,
+        anchorDigest: currentReceipt.anchorDigest,
+        requirements: {
+          checkpointPolicy: {
+            safePointTimeoutSeconds: 120,
+            chunkBytes: 4 * 1024 * 1024,
+            maxTotalBytes: "10485760",
+            maxEntries: 200,
+            trigger: "before_suspend_and_explicit",
+            retention: "retain_while_referenced",
+          },
+          filesystemSemantics: {
+            kind: "portable",
+            caseSensitive: true,
+            symlinks: true,
+            permissions: true,
+            hardlinks: false,
+            specialFiles: false,
+            xattrsAcl: false,
+            mtime: "preserved",
+          },
+        },
+      }),
+    ).resolves.toHaveProperty("manifestRef");
+    await fixture.broker.releaseFreeze(currentReceipt);
+  }, 40_000);
+
   /**
    * A07-T13 / A07-07：冻结与新的受管写入并发 —— 屏障必须在**锁内**生效，文件 IO 不能
    * "先拿可写路径、稍后再写"。
@@ -1082,6 +1172,44 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     ).rejects.toThrow(WorkspaceWriterNotFencedError);
     expect(await pathExists(path.join(fixture.writerRoot, "escape.txt"))).toBe(false);
 
+    // F05：字面仍在受管根内的路径，不得通过祖先/最终符号链接把 IO 导向根外。
+    const outside = await mkdtemp(path.join(tmpdir(), "snow-a07-managed-file-outside-"));
+    roots.push(outside);
+    await writeFile(path.join(outside, "protected.txt"), "outside-original", "utf8");
+    await symlink(outside, path.join(fixture.runRoot, "linked-directory"), "dir");
+    await expect(
+      fixture.broker.executeManagedFileOperation({
+        identity,
+        operation: {
+          kind: "write",
+          path: "linked-directory/protected.txt",
+          content: "escaped-write",
+        },
+      }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    expect(await readFile(path.join(outside, "protected.txt"), "utf8")).toBe("outside-original");
+
+    await symlink(
+      path.join(outside, "protected.txt"),
+      path.join(fixture.runRoot, "final-link.txt"),
+    );
+    await expect(
+      fixture.broker.executeManagedFileOperation({
+        identity,
+        operation: { kind: "write", path: "final-link.txt", content: "escaped-final" },
+      }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    await expect(
+      fixture.broker.executeManagedFileOperation({
+        identity,
+        operation: { kind: "delete", path: "final-link.txt" },
+      }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    expect(await readFile(path.join(outside, "protected.txt"), "utf8")).toBe("outside-original");
+    // 恶意链接只是本段反例夹具；移除后再验证正常快照，避免把内容策略拒绝误当成冻结失败。
+    await rm(path.join(fixture.runRoot, "linked-directory"), { force: true });
+    await rm(path.join(fixture.runRoot, "final-link.txt"), { force: true });
+
     // ③ 陈旧身份（同 generation、换 Ownership）不得写：精确归属才是授权单位。
     const staleIdentity = {
       ...identity,
@@ -1104,11 +1232,57 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
       }),
     ).resolves.toMatchObject({ writerGeneration: 1 });
 
+    const snapshotRequirements = {
+      checkpointPolicy: {
+        safePointTimeoutSeconds: 120,
+        chunkBytes: 4 * 1024 * 1024,
+        maxTotalBytes: "10485760",
+        maxEntries: 200,
+        trigger: "before_suspend_and_explicit" as const,
+        retention: "retain_while_referenced" as const,
+      },
+      filesystemSemantics: {
+        kind: "portable" as const,
+        caseSensitive: true,
+        symlinks: true,
+        permissions: true,
+        hardlinks: false,
+        specialFiles: false,
+        xattrsAcl: false,
+        mtime: "preserved" as const,
+      },
+    };
+    // F04：没有与请求精确匹配的冻结屏障时，snapshot 必须 fail closed。
+    await expect(
+      fixture.broker.snapshot({
+        grant,
+        checkpointIntentId: INTENT_ID,
+        anchorDigest: ANCHOR_DIGEST,
+        requirements: snapshotRequirements,
+      }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+
     const receiptA = await fixture.broker.freeze({
       grant,
       checkpointIntentId: INTENT_ID,
       anchorDigest: ANCHOR_DIGEST,
     });
+    await expect(
+      fixture.broker.snapshot({
+        grant,
+        checkpointIntentId: INTENT_ID,
+        anchorDigest: `sha256:${"f".repeat(64)}`,
+        requirements: snapshotRequirements,
+      }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    await expect(
+      fixture.broker.snapshot({
+        grant,
+        checkpointIntentId: INTENT_ID,
+        anchorDigest: ANCHOR_DIGEST,
+        requirements: snapshotRequirements,
+      }),
+    ).resolves.toHaveProperty("manifestRef");
     // 冻结是物理事实：已登记的真实 Writer 被停止并排空，屏障期间不再有新增写入。
     expect(await waitForProcessGone(writer.pid)).toBe(true);
     expect(await waitForActivityIdle(activityPath)).toBe(true);
@@ -1137,6 +1311,7 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     expect(await scanTree(fixture.runRoot)).toEqual(scanWhileFrozen);
 
     // ⑥ 迟到的旧 release 不得解掉新 intent。
+    await fixture.broker.releaseFreeze(receiptA);
     const receiptB = await fixture.broker.freeze({
       grant,
       checkpointIntentId: "00000000-0000-4000-8000-0000000000f2",
@@ -1170,7 +1345,6 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
   }, 40_000);
 });
 
-/**
 /**
  * 起一个真实**第二进程**，用原生 provider 在同一个稳定锁文件上尝试取锁。
  *

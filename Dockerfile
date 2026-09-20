@@ -14,14 +14,16 @@
 ARG APP_ENV=production
 
 # ---------- Stage 1: 依赖 ----------
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
+RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ---------- Stage 2: 构建 ----------
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
+RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -31,10 +33,10 @@ COPY . .
 # 构建阶段仅需 APP_ENV 决定环境语义；DATABASE_URL / LLM_API_KEY 等真实值运行时由部署平台注入。
 ENV APP_ENV=production
 
-RUN pnpm build
+RUN pnpm build:workspace-lock && pnpm build
 
 # ---------- Stage 3: 运行时 ----------
-FROM node:22-alpine AS runner
+FROM node:24-alpine AS runner
 # git：lib/git/deliver.ts 的 simple-git 运行时要调 git CLI；tini 做 PID 1 收割子进程
 # chromium 依赖：QA gate 用 Playwright 跑确定性浏览器检查（console error / 白屏 / 404），
 # 需要 chromium 可执行文件。Alpine 用 system chromium（比 playwright 自带更小），
@@ -58,6 +60,7 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
+COPY --from=builder /app/native ./native
 
 # DATABASE_URL / LLM_API_KEY / LLM_BASE_URL 等由运行环境（K8s / docker -e）注入，不写死
 # 启动时 instrumentation.ts 会校验必填变量，缺失则 fail fast

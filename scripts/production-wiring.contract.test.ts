@@ -5,6 +5,7 @@
  * 与验收计划 `production-wiring` 阶段的入口 `scripts/production-wiring.ts` 共用同一套
  * 检查。本文件只负责在 contract 组里对**真实生产文档**逐条取证，并证明规则不是空转。
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   PRODUCTION_WIRING_CHECKS,
@@ -21,6 +22,18 @@ function runWiringCheck(id: string): string[] {
 }
 
 describe("Topic 01 production wiring", () => {
+  it("Web 与 Worker 标准镜像均在目标平台构建并复制 workspace-lock provider", () => {
+    for (const dockerfile of ["Dockerfile", "docker/worker/Dockerfile"]) {
+      const source = readFileSync(dockerfile, "utf8");
+      expect(source, `${dockerfile} 必须在镜像构建阶段编译原生 provider`).toContain(
+        "pnpm build:workspace-lock",
+      );
+      expect(source, `${dockerfile} 必须把目标平台产物带入运行镜像`).toMatch(
+        /COPY\s+--from=\S+\s+\/app\/native\s+\.\/native/,
+      );
+    }
+  });
+
   it("检查清单固定为 10 条，编号唯一且标题不重复", () => {
     const ids = PRODUCTION_WIRING_CHECKS.map((entry) => entry.id);
     expect(ids).toEqual([

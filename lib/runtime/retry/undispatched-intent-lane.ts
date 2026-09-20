@@ -26,7 +26,12 @@ import { getTurnById } from "@/lib/conversations/turn-queries";
  * 因此两类对象都使用与 Session/Command 相同的安全窗口 `DISPATCH_STUCK_GRACE_MS`。
  */
 import { db } from "@/lib/db/client";
-import { createAttempt, getAttemptById } from "@/lib/executions/persistence/attempt-store";
+import {
+  createAttempt,
+  createAttemptInternal,
+  getAttemptById,
+} from "@/lib/executions/persistence/attempt-store";
+import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import {
   TURN_TERMINAL_STATES,
@@ -35,12 +40,14 @@ import {
   turnTable,
 } from "@/lib/persistence/schema/conversation";
 import {
+  INVOCATION_TERMINAL_STATES,
   type Invocation,
   executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
+import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { transitionTurnToQueued } from "@/lib/runtime/dispatcher";
 import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
@@ -54,7 +61,18 @@ import {
   resolveBoundExecutionResources,
   resolveRuntimeTransportFromBinding,
 } from "@/lib/runtime/retry/runtime-transport-from-binding";
-import { and, asc, eq, isNotNull, isNull, lte, notExists, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 
 /** accepted Turn 的调度领取候选（只回 ID + 领取所见版本，扫描不做结论）。 */
 export interface UndispatchedTurnCandidate {
@@ -71,9 +89,18 @@ export interface UndispatchedInvocationCandidate {
   invocationId: string;
 }
 
+/** Supervisor 主动退休后留下的持久交接义务。 */
+export interface SupervisorHandoffCandidate {
+  tenantId: string;
+  invocationId: string;
+  sourceOwnershipId: string;
+  sourceAttemptId: string;
+}
+
 export interface UndispatchedIntentSummary {
   turns: { scanned: number; recovered: number; skipped: number };
   invocations: { scanned: number; recovered: number; skipped: number };
+  handoffs: { scanned: number; recovered: number; skipped: number };
 }
 
 export interface UndispatchedIntentDependencies {
@@ -81,6 +108,53 @@ export interface UndispatchedIntentDependencies {
   dispatchTurn?: typeof dispatchEmployeeTurn;
   /** 默认即 canonical persisted Attempt 派发；测试可注入。 */
   dispatchAttempt?: typeof dispatchQueuedInvocationAttempt;
+  /** Hosted 交接恢复使用正式 Transport，仅允许测试替换末端应用服务。 */
+  hostedApplicationService?: HostedRuntimeApplicationService;
+}
+
+/**
+ * 扫描 Supervisor 主动交接事实。`released + supervisor_handoff` 本身就是稳定义务身份；
+ * 是否仍待消费在领取事务中以最新 Owner、活跃 Owner 与继任 Attempt 重新判定。
+ */
+export async function scanSupervisorHandoffs(params: {
+  limit: number;
+}): Promise<SupervisorHandoffCandidate[]> {
+  return db
+    .select({
+      tenantId: invocationTable.tenantId,
+      invocationId: invocationTable.id,
+      sourceOwnershipId: executionOwnershipTable.id,
+      sourceAttemptId: executionOwnershipTable.attemptId,
+    })
+    .from(executionOwnershipTable)
+    .innerJoin(
+      invocationTable,
+      and(
+        eq(invocationTable.id, executionOwnershipTable.invocationId),
+        eq(invocationTable.tenantId, executionOwnershipTable.tenantId),
+      ),
+    )
+    .where(
+      and(
+        eq(executionOwnershipTable.ownershipState, "released"),
+        eq(executionOwnershipTable.reasonCode, "supervisor_handoff"),
+        notInArray(invocationTable.executionState, [...INVOCATION_TERMINAL_STATES]),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(executionOwnershipTable)
+            .where(
+              and(
+                eq(executionOwnershipTable.invocationId, invocationTable.id),
+                eq(executionOwnershipTable.tenantId, invocationTable.tenantId),
+                eq(executionOwnershipTable.ownershipState, "active"),
+              ),
+            ),
+        ),
+      ),
+    )
+    .orderBy(desc(executionOwnershipTable.releasedAt))
+    .limit(params.limit);
 }
 
 /**
@@ -172,6 +246,7 @@ export async function runDueUndispatchedIntentRecoveries(
   const summary: UndispatchedIntentSummary = {
     turns: { scanned: 0, recovered: 0, skipped: 0 },
     invocations: { scanned: 0, recovered: 0, skipped: 0 },
+    handoffs: { scanned: 0, recovered: 0, skipped: 0 },
   };
 
   const turns = await scanUndispatchedAcceptedTurns({ now, limit: batchSize });
@@ -204,6 +279,14 @@ export async function runDueUndispatchedIntentRecoveries(
     summary.turns.recovered += 1;
   }
 
+  const handoffs = await scanSupervisorHandoffs({ limit: batchSize });
+  summary.handoffs.scanned = handoffs.length;
+  for (const candidate of handoffs) {
+    const recovered = await recoverSupervisorHandoff(candidate, now, params.dependencies);
+    if (recovered) summary.handoffs.recovered += 1;
+    else summary.handoffs.skipped += 1;
+  }
+
   const invocations = await scanUndispatchedInvocations({ now, limit: batchSize });
   summary.invocations.scanned = invocations.length;
   for (const candidate of invocations) {
@@ -212,6 +295,150 @@ export async function runDueUndispatchedIntentRecoveries(
     else summary.invocations.skipped += 1;
   }
   return summary;
+}
+
+interface SupervisorHandoffClaim {
+  invocation: Invocation;
+  attemptId: string;
+}
+
+/**
+ * 领取并物化一个交接继任 Attempt。
+ *
+ * Invocation 根锁让“最新交接事实 / 无活跃 Owner / 唯一继任 Attempt”成为一个原子判定。
+ * 新建后以 Attempt.updatedAt 作为可恢复领取窗口：Worker 在派发前崩溃，安全窗口后会复用
+ * 同一 queued Attempt；并发 Worker 看见新鲜 Attempt 则跳过，绝不再造第二候选。
+ */
+export async function claimSupervisorHandoff(
+  candidate: SupervisorHandoffCandidate,
+  now: Date,
+): Promise<SupervisorHandoffClaim | null> {
+  return db.transaction(async (tx) => {
+    const invocation = await lockInvocationRootIfExists(
+      tx,
+      candidate.tenantId,
+      candidate.invocationId,
+    );
+    if (!invocation || INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) return null;
+
+    // 固定锁图 I → A → O：先锁定本 Invocation 的 Attempt 集，再复核 Owner。
+    const attempts = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, candidate.tenantId),
+          eq(invocationAttemptTable.invocationId, candidate.invocationId),
+        ),
+      )
+      .orderBy(desc(invocationAttemptTable.attemptNo))
+      .for("update");
+    const sourceAttempt = attempts.find((attempt) => attempt.id === candidate.sourceAttemptId);
+    if (!sourceAttempt) return null;
+
+    const owners = await tx
+      .select()
+      .from(executionOwnershipTable)
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, candidate.tenantId),
+          eq(executionOwnershipTable.invocationId, candidate.invocationId),
+        ),
+      )
+      .orderBy(desc(executionOwnershipTable.leaseEpoch))
+      .for("update");
+    if (owners.some((owner) => owner.ownershipState === "active")) return null;
+    const latest = owners[0];
+    if (
+      !latest ||
+      latest.id !== candidate.sourceOwnershipId ||
+      latest.attemptId !== candidate.sourceAttemptId ||
+      latest.ownershipState !== "released" ||
+      latest.reasonCode !== "supervisor_handoff"
+    ) {
+      return null;
+    }
+
+    let successor = attempts.find(
+      (attempt) =>
+        attempt.attemptNo > sourceAttempt.attemptNo &&
+        attempt.attemptState === "queued" &&
+        attempt.retryReasonCode === "supervisor_handoff",
+    );
+    if (successor) {
+      if (successor.updatedAt > new Date(now.getTime() - DISPATCH_STUCK_GRACE_MS)) return null;
+      await tx
+        .update(invocationAttemptTable)
+        .set({ updatedAt: now, versionNo: successor.versionNo + 1 })
+        .where(eq(invocationAttemptTable.id, successor.id));
+      successor = { ...successor, updatedAt: now, versionNo: successor.versionNo + 1 };
+    } else {
+      successor = await createAttemptInternal(tx, {
+        tenantId: candidate.tenantId,
+        invocationId: candidate.invocationId,
+        retryReasonCode: "supervisor_handoff",
+      });
+    }
+    await tx
+      .update(invocationTable)
+      .set({ updatedAt: now, versionNo: invocation.versionNo + 1 })
+      .where(eq(invocationTable.id, invocation.id));
+    return { invocation: { ...invocation, updatedAt: now }, attemptId: successor.id };
+  });
+}
+
+async function recoverSupervisorHandoff(
+  candidate: SupervisorHandoffCandidate,
+  now: Date,
+  dependencies: UndispatchedIntentDependencies | undefined,
+): Promise<boolean> {
+  const claim = await claimSupervisorHandoff(candidate, now);
+  if (!claim) return false;
+  const attempt = await getAttemptById(claim.attemptId);
+  if (!attempt) return false;
+  let transport: Awaited<ReturnType<typeof resolveRuntimeTransportFromBinding>>;
+  let resources: Awaited<ReturnType<typeof resolveBoundExecutionResources>>;
+  try {
+    const binding = await requireExecutionBinding(candidate.tenantId, candidate.invocationId);
+    transport = await resolveRuntimeTransportFromBinding({
+      tenantId: candidate.tenantId,
+      binding,
+      hostedApplicationService: dependencies?.hostedApplicationService,
+    });
+    resources = await resolveBoundExecutionResources({
+      tenantId: candidate.tenantId,
+      binding,
+      purpose: "thread",
+    });
+  } catch (error) {
+    await failAttemptAndInvokeRecoveryAuthority({
+      tenantId: candidate.tenantId,
+      attempt,
+      invocation: claim.invocation,
+      errorCode: error instanceof Error ? error.name : "RuntimeDispatchFailed",
+      errorSummary: error instanceof Error ? error.message : String(error),
+      now,
+      claim: null,
+    });
+    return true;
+  }
+  await (dependencies?.dispatchAttempt ?? dispatchQueuedInvocationAttempt)({
+    tenantId: candidate.tenantId,
+    attemptId: attempt.id,
+    claim: null,
+    runtimeClient: transport.runtimeClient,
+    runtimeEndpointResolver: async () => ({
+      runtimeEndpoint: transport.runtimeEndpoint,
+      auth: transport.auth,
+      callbackEndpoints: buildGatewayEndpoints({
+        external: !transport.hosted,
+        invocationId: candidate.invocationId,
+      }),
+      ...resources,
+    }),
+    correlationId: `supervisor-handoff:${candidate.sourceOwnershipId}`,
+  });
+  return true;
 }
 
 /**

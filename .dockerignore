@@ -1,7 +1,15 @@
 # 构建镜像时排除的内容（context 内不进 builder 层）
 node_modules
 .next
+.next-*
 out
+output
+release
+tmp
+test-results
+*.tsbuildinfo
+.playwright-cli
+.snow
 
 # 运行时产物（不该进镜像）
 .data

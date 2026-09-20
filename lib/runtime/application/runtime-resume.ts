@@ -168,11 +168,13 @@ export async function resumeRuntimeInvocation(input: {
     }
     // A05：把"这次恢复是哪一个意图"变成持久事实，再动环境。
     //
-    // 来源意图取**已持久事实**（Invocation/Attempt 与冻结资源），不取当前时间或调用序号：
+    // 来源意图取**已持久命令身份**，不取当前时间或调用序号：
     // 只有稳定，ACK/started 丢失后的第二次投递才会被认出来是"同一意图重投"，
     // 从而沿用已建好的 ready/激活，而不是重做准备把它们抹掉。
+    // 同一 Attempt 可以发生多轮合法暂停/恢复，因此不能退化成 `Invocation + Attempt`：
+    // 那会把第二轮不同命令误判为第一轮同意图的摘要冲突。
     // 语义摘要覆盖锚点/检查点/Revision/Binding —— 同来源换其中任何一项都必须被拒。
-    const preparationIntentKey = `resume:${invocation.id}:${attempt.id}`;
+    const preparationIntentKey = input.sourceOperationKey;
     const preparationRequestDigest = protocolDigest({
       scope: "environment-reprepare",
       tenantId: input.tenantId,
@@ -537,7 +539,20 @@ async function handOffSupervisorGeneration(input: {
     const invocation = await lockInvocationRootIfExists(tx, input.tenantId, input.invocationId);
     if (!invocation) return;
     const now = await getAuthorityDatabaseTime(tx);
-    await closeExecutionOwnershipInTransaction(tx, {
+    // 固定锁图 I → A → O → S：交接会结束本执行代际，因此先把旧 Attempt 据实收口。
+    const [attempt] = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, input.attemptId),
+          eq(invocationAttemptTable.invocationId, input.invocationId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    const closedOwner = await closeExecutionOwnershipInTransaction(tx, {
       tenantId: input.tenantId,
       invocationId: input.invocationId,
       ownershipId: input.ownershipId,
@@ -546,6 +561,25 @@ async function handOffSupervisorGeneration(input: {
       state: "released",
       reasonCode: "supervisor_handoff",
     });
+    // 正常完成/暂停可能已先收口 Owner 与 Attempt；这种情况下 close 是幂等回读，不能把
+    // suspended/completed Attempt 改写成 lost。只有本事务确实留下 handoff 墓碑才结束旧代际。
+    if (
+      closedOwner.reasonCode === "supervisor_handoff" &&
+      attempt &&
+      !INVOCATION_ATTEMPT_TERMINAL_STATES.includes(attempt.attemptState)
+    ) {
+      await tx
+        .update(invocationAttemptTable)
+        .set({
+          attemptState: "lost",
+          finishedAt: now,
+          errorCode: "supervisor_handoff",
+          errorSummary: "Hosted Supervisor reached its durable handoff boundary",
+          updatedAt: now,
+          versionNo: attempt.versionNo + 1,
+        })
+        .where(eq(invocationAttemptTable.id, attempt.id));
+    }
     await markRuntimeSessionLostInTransaction(tx, {
       tenantId: input.tenantId,
       id: input.sessionBindingId,

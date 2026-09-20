@@ -71,6 +71,7 @@ NAPI_MODULE_INIT() {
 #include <unistd.h>
 
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -116,6 +117,175 @@ void ThrowErrno(napi_env env, const char* syscall, const std::string& path, int 
   std::string message = std::string("workspace-lock: ") + syscall + " 失败 path=" + path +
                         " errno=" + std::to_string(err) + " (" + strerror(err) + ")";
   napi_throw_error(env, "lock_syscall_failed", message.c_str());
+}
+
+bool GetRelativeComponents(napi_env env, const std::string& relative_path,
+                           std::vector<std::string>* components) {
+  if (relative_path.empty() || relative_path.front() == '/') {
+    napi_throw_type_error(env, "invalid_argument",
+                          "workspace-lock: managed path 必须是非空相对路径");
+    return false;
+  }
+  size_t start = 0;
+  while (start <= relative_path.size()) {
+    const size_t end = relative_path.find('/', start);
+    const std::string component = relative_path.substr(
+        start, end == std::string::npos ? std::string::npos : end - start);
+    if (component.empty() || component == "." || component == "..") {
+      napi_throw_type_error(env, "invalid_argument",
+                            "workspace-lock: managed path 含空段、. 或 ..");
+      return false;
+    }
+    components->push_back(component);
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
+  return !components->empty();
+}
+
+int OpenManagedParent(napi_env env, const std::string& root,
+                      const std::vector<std::string>& components, bool create_missing,
+                      bool* absent = nullptr) {
+  int current = ::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+  if (current < 0) {
+    ThrowErrno(env, "open managed root", root, errno);
+    return -1;
+  }
+  for (size_t index = 0; index + 1 < components.size(); ++index) {
+    int next = ::openat(current, components[index].c_str(),
+                        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (next < 0 && errno == ENOENT && !create_missing && absent != nullptr) {
+      *absent = true;
+      ::close(current);
+      return -1;
+    }
+    if (next < 0 && errno == ENOENT && create_missing) {
+      if (::mkdirat(current, components[index].c_str(), 0755) != 0 && errno != EEXIST) {
+        const int err = errno;
+        ::close(current);
+        ThrowErrno(env, "mkdirat managed parent", components[index], err);
+        return -1;
+      }
+      next = ::openat(current, components[index].c_str(),
+                      O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    }
+    if (next < 0) {
+      const int err = errno;
+      ::close(current);
+      ThrowErrno(env, "openat managed parent", components[index], err);
+      return -1;
+    }
+    ::close(current);
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * 以 root 目录描述符为锚写文件。每一级目录和最终文件都拒绝符号链接；路径查找与 IO
+ * 不再重新从字面绝对路径开始，因此无法在授权后借链接替换逃出受管根。
+ */
+napi_value SecureWriteFile(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value argv[3];
+  if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) != napi_ok || argc < 3) {
+    napi_throw_type_error(env, "invalid_argument",
+                          "secureWriteFile(root, relativePath, content) 需要 3 个字符串参数");
+    return nullptr;
+  }
+  std::string root;
+  std::string relative_path;
+  std::string content;
+  if (!GetStringArgument(env, argv[0], &root) ||
+      !GetStringArgument(env, argv[1], &relative_path) ||
+      !GetStringArgument(env, argv[2], &content)) {
+    napi_throw_type_error(env, "invalid_argument", "secureWriteFile 参数必须都是字符串");
+    return nullptr;
+  }
+  std::vector<std::string> components;
+  if (!GetRelativeComponents(env, relative_path, &components)) return nullptr;
+  const int parent = OpenManagedParent(env, root, components, true);
+  if (parent < 0) return nullptr;
+  const std::string& name = components.back();
+  const int fd = ::openat(parent, name.c_str(),
+                          O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0644);
+  if (fd < 0) {
+    const int err = errno;
+    ::close(parent);
+    ThrowErrno(env, "openat managed file", relative_path, err);
+    return nullptr;
+  }
+  size_t offset = 0;
+  while (offset < content.size()) {
+    const ssize_t written = ::write(fd, content.data() + offset, content.size() - offset);
+    if (written < 0) {
+      if (errno == EINTR) continue;
+      const int err = errno;
+      ::close(fd);
+      ::close(parent);
+      ThrowErrno(env, "write managed file", relative_path, err);
+      return nullptr;
+    }
+    offset += static_cast<size_t>(written);
+  }
+  if (::fsync(fd) != 0) {
+    const int err = errno;
+    ::close(fd);
+    ::close(parent);
+    ThrowErrno(env, "fsync managed file", relative_path, err);
+    return nullptr;
+  }
+  ::close(fd);
+  ::close(parent);
+  return MakeStateObject(env, "written");
+}
+
+/** 删除普通文件时同样拒绝最终符号链接；不存在视为幂等成功。 */
+napi_value SecureDeleteFile(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2];
+  if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) != napi_ok || argc < 2) {
+    napi_throw_type_error(env, "invalid_argument",
+                          "secureDeleteFile(root, relativePath) 需要 2 个字符串参数");
+    return nullptr;
+  }
+  std::string root;
+  std::string relative_path;
+  if (!GetStringArgument(env, argv[0], &root) ||
+      !GetStringArgument(env, argv[1], &relative_path)) {
+    napi_throw_type_error(env, "invalid_argument", "secureDeleteFile 参数必须都是字符串");
+    return nullptr;
+  }
+  std::vector<std::string> components;
+  if (!GetRelativeComponents(env, relative_path, &components)) return nullptr;
+  bool parent_absent = false;
+  const int parent = OpenManagedParent(env, root, components, false, &parent_absent);
+  if (parent_absent) return MakeStateObject(env, "absent");
+  if (parent < 0) return nullptr;
+  const std::string& name = components.back();
+  struct stat stats;
+  if (::fstatat(parent, name.c_str(), &stats, AT_SYMLINK_NOFOLLOW) != 0) {
+    const int err = errno;
+    ::close(parent);
+    if (err == ENOENT) return MakeStateObject(env, "absent");
+    ThrowErrno(env, "fstatat managed file", relative_path, err);
+    return nullptr;
+  }
+  if (S_ISLNK(stats.st_mode)) {
+    ::close(parent);
+    napi_throw_error(env, "managed_path_symlink",
+                     "workspace-lock: 拒绝删除符号链接形式的受管文件目标");
+    return nullptr;
+  }
+  if (::unlinkat(parent, name.c_str(), 0) != 0) {
+    const int err = errno;
+    ::close(parent);
+    if (err == ENOENT) return MakeStateObject(env, "absent");
+    ThrowErrno(env, "unlinkat managed file", relative_path, err);
+    return nullptr;
+  }
+  ::close(parent);
+  return MakeStateObject(env, "deleted");
 }
 
 /**
@@ -266,6 +436,16 @@ NAPI_MODULE_INIT() {
   napi_create_function(env, "lockFileIdentity", NAPI_AUTO_LENGTH, LockFileIdentity, nullptr,
                        &lock_file_identity);
   napi_set_named_property(env, exports, "lockFileIdentity", lock_file_identity);
+
+  napi_value secure_write_file;
+  napi_create_function(env, "secureWriteFile", NAPI_AUTO_LENGTH, SecureWriteFile, nullptr,
+                       &secure_write_file);
+  napi_set_named_property(env, exports, "secureWriteFile", secure_write_file);
+
+  napi_value secure_delete_file;
+  napi_create_function(env, "secureDeleteFile", NAPI_AUTO_LENGTH, SecureDeleteFile, nullptr,
+                       &secure_delete_file);
+  napi_set_named_property(env, exports, "secureDeleteFile", secure_delete_file);
 
   return exports;
 }

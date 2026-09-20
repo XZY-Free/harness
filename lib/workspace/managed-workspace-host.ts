@@ -8,6 +8,7 @@
  * **绝不**降级成 NO_PLATFORM_WORKSPACE。
  */
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
+import { assertScopeLockProviderAvailable } from "@/lib/workspace/scope-lock";
 import {
   FileSnapshotStorage,
   type SnapshotStorageRef,
@@ -82,6 +83,7 @@ function createLocalManagedWorkspaceHost(
   binding: WorkspaceBinding,
   overrides: ManagedWorkspaceHostOverrides,
 ): WorkspaceHost {
+  assertScopeLockProviderAvailable();
   const root = overrides.root ?? envValue("SNOWHARNESS_WORKSPACE_HOST_ROOT");
   if (!root) {
     throw new WorkspaceNotReadyError(

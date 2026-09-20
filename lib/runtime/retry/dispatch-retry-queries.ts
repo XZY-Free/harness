@@ -12,6 +12,7 @@
  *   claim token** 条件，过期 Worker 不能改新 claim 的结果。
  */
 import { db } from "@/lib/db/client";
+import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
 import type { InvocationAttempt, InvocationCommand } from "@/lib/persistence/schema/executions";
 import {
   invocationAttemptTable,
@@ -479,8 +480,27 @@ export async function recordAttemptDispatchTransientFailure(
     counted?: boolean;
   },
 ): Promise<AttemptTransientFailureOutcome> {
+  // 非锁定预读只用于定位执行根；事务内仍会在取得 Invocation 根锁后重新验证 Attempt。
+  // 不能从 Session 开始加锁，否则会与 Start 的 I → A → O → S 顺序形成真实死锁环。
+  const [attemptLocator] = await db
+    .select({ invocationId: invocationAttemptTable.invocationId })
+    .from(invocationAttemptTable)
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, identity.tenantId),
+        eq(invocationAttemptTable.id, identity.attemptId),
+      ),
+    )
+    .limit(1);
+  if (!attemptLocator) throw new Error(`InvocationAttempt 不存在（id=${identity.attemptId}）`);
+
   return db.transaction(async (tx) => {
-    const session = await lockClaimedSessionInTransaction(tx, identity);
+    const invocation = await lockInvocationRootIfExists(
+      tx,
+      identity.tenantId,
+      attemptLocator.invocationId,
+    );
+    if (!invocation) throw new Error(`Invocation 不存在（id=${attemptLocator.invocationId}）`);
     const [currentAttempt] = await tx
       .select()
       .from(invocationAttemptTable)
@@ -493,11 +513,15 @@ export async function recordAttemptDispatchTransientFailure(
       .for("update")
       .limit(1);
     if (!currentAttempt) throw new Error(`InvocationAttempt 不存在（id=${identity.attemptId}）`);
+    if (currentAttempt.invocationId !== invocation.id) {
+      throw new SessionDispatchClaimSupersededError("Attempt 已不属于预读定位的 Invocation");
+    }
     if (currentAttempt.attemptState !== "queued") {
       throw new SessionDispatchClaimSupersededError(
         `Attempt 已非 queued（id=${identity.attemptId}）`,
       );
     }
+    const session = await lockClaimedSessionInTransaction(tx, identity);
     const dispatchCount = params.counted ? session.dispatchCount : session.dispatchCount + 1;
     const exhausted = isRetryExhausted(dispatchCount);
     const nextDispatchAt = exhausted

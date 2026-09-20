@@ -58,6 +58,7 @@ import {
   markRuntimeSessionLostInTransaction,
   releaseRuntimeSessionSupervisorInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
+import { runDueUndispatchedIntentRecoveries } from "@/lib/runtime/retry/undispatched-intent-lane";
 import { type AuthorityIdentity, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import {
@@ -1078,8 +1079,7 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
   }, 40_000);
 
   it("A03-T07: 主动交接有持久消费者——不存在无人推进却仍在 healthy 的代际", async () => {
-    const { ctx, invocation, binding, attempt, gen } =
-      await seedActiveGenerationWithInFlightChild();
+    const { ctx, invocation, attempt, gen } = await seedActiveGenerationWithInFlightChild();
     const tenantId = ctx.tenantId;
 
     // Supervisor 触达已定义的退出边界（等待有界），子工作尚未完成。
@@ -1113,43 +1113,26 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
     expect(recovery.recovered).toBe(0);
     expect(await invocationState(invocation.id)).toBe(stateAfterHandoff);
 
-    // 下一个推进者经正式 Start 入口取得新代际，并把在途动作继续一次。
-    //
-    // A03-05：**新代际必须带新 Attempt**。主动交接已经把旧 Owner 正式释放，因此这里不再有
-    // "接管"分支会替我们收口 Attempt —— 但"InvocationAttempt 承载执行代际"这条不变量与
-    // 旧 Owner 是否 still-active 无关：沿用同一个 Attempt 会让两代共用一个代际身份。
-    // 交接后的旧 Attempt 已被记为 `lost`（supervisor 退出边界），它的执行事实已经收口，
-    // 任何新执行权挂上去都是复活一个已结算的代际。
-    //
-    // A05 让这件事从"看不出来"变成"写不进去"：来源意图唯一键
-    // `(tenant, invocation, attempt, intentType, sourceOperationKey)` 不允许同一 Attempt 上
-    // 出现第二个同意图 Session —— 没有这个修正，A05 的 T07 会以 `StartIntentConflict` 失败。
-    const successorAttempt = await createPreparedTakeoverAttempt({
-      tenantId,
-      invocationId: invocation.id,
-      retryReasonCode: "supervisor_handover_successor",
-    });
-    expect(successorAttempt.id).not.toBe(attempt.id);
+    // 只运行生产 Worker 实际装配的持久消费者。测试不得手工创建 Attempt 或手工调用 Start；
+    // released/supervisor_handoff 是消费者可在崩溃后回读的义务身份。
     const counters = { decisions: 0, actions: 0 };
-    await startRuntimeInvocation(
-      startInputFor({
-        tenantId,
-        ctx,
-        invocation,
-        binding,
-        attempt: successorAttempt,
-        applicationService: hostedService({
+    const handoffRecovery = await runDueUndispatchedIntentRecoveries({
+      now: new Date(),
+      dependencies: {
+        hostedApplicationService: hostedService({
           leaseMs: 2_000,
           pendingWaitLimitMs: 400,
           loopWindowMs: 30_000,
           counters,
         }),
-      }),
-    );
+      },
+    });
+    expect(handoffRecovery.handoffs.recovered).toBe(1);
 
     const newOwner = await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id });
     expect(newOwner?.id).not.toBe(gen.ownership.id);
     expect(newOwner?.leaseEpoch).toBeGreaterThan(gen.ownership.leaseEpoch);
+    expect(newOwner?.attemptId).not.toBe(attempt.id);
     // 见 T03：`startRuntimeInvocation` 只**建立**代际，Hosted 侧推进是异步的。
     await waitForFact(async () => counters.actions >= 1, "新代际继续一次在途子调用");
 

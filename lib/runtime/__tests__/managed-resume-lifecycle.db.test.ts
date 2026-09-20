@@ -314,20 +314,21 @@ async function seedManagedResumeContext(suffix: string): Promise<ManagedResumeCo
   };
 }
 
-/** 决策端口：第一轮要求用户补充输入（真实持久暂停），第二轮正常回答。 */
+/** 决策端口：连续两轮要求用户补充输入，第三轮正常回答。 */
 function pauseThenRespondService() {
   const decisionViews: Array<{ observations: unknown[] }> = [];
   const service = createConfiguredHostedRuntimeApplicationService({
     decisionPort: {
       async decideNextAction(view) {
         decisionViews.push(view);
-        if (view.actionHistory.length === 0) {
+        if (view.actionHistory.length < 2) {
+          const round = view.actionHistory.length + 1;
           return {
-            actionId: "a05-ask-input",
-            stepNo: 1,
+            actionId: `a05-ask-input-${round}`,
+            stepNo: round,
             actionType: "request_user_input",
             purposeCode: "missing_scope",
-            shortPurpose: "缺少范围",
+            shortPurpose: `第 ${round} 轮缺少范围`,
             payload: {
               purpose: "missing_scope",
               prompt: "请补充处理范围",
@@ -342,7 +343,7 @@ function pauseThenRespondService() {
         }
         return {
           actionId: "a05-respond",
-          stepNo: 2,
+          stepNo: 3,
           actionType: "respond",
           purposeCode: "answer_ready",
           shortPurpose: "回答",
@@ -427,6 +428,29 @@ async function waitForPausedFacts(
           `lease=${lease?.readinessState ?? "缺失"}/${String(lease?.activationOwnershipId)})`,
       );
     }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+async function waitForPendingUserAction(
+  invocationId: string,
+  excludedId: string,
+  timeoutMs = 30_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const rows = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(
+        and(
+          eq(userActionRequestTable.invocationId, invocationId),
+          eq(userActionRequestTable.requestState, "pending"),
+        ),
+      );
+    const pending = rows.find((row) => row.id !== excludedId);
+    if (pending) return pending;
+    if (Date.now() > deadline) throw new Error("第二轮 UserActionRequest 未在时限内进入 pending");
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
@@ -720,20 +744,55 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
       `resolve 返回 ${resumeResponse.status}（Resume 命令结论 ${resumeOutcome}）: ${responseText}`,
     ).toBe(200);
 
-    // ── 4. 再次执行：同 Invocation/Attempt，新 Ownership + 新 Session（intentType=resume）──
+    // ── 4. 第一轮恢复后再次真实暂停；同 Attempt 上形成第二条持久 Resume 命令 ──
+    const secondUar = await waitForPendingUserAction(invocation.id, uar.id);
+    await waitForPausedFacts(ctx.tenantId, invocation.id, attempt.id, leaseBefore.id);
+    const secondPausedAttempt = await getLatestAttempt(invocation.id);
+    expect(secondPausedAttempt?.attemptState).toBe("suspended");
+    const firstRoundSessions = await getRuntimeSessionBindingsByInvocation(
+      ctx.tenantId,
+      invocation.id,
+    );
+    expect(firstRoundSessions).toHaveLength(2);
+    const firstResumedSession = firstRoundSessions.find((row) => row.id !== pausedSessionId);
+    expect(firstResumedSession?.intentType).toBe("resume");
+    const firstPreparationSlot = await readPreparationSlot(ctx.tenantId, attempt.id);
+    expect(firstPreparationSlot.preparationIntentKey).toBe(firstResumedSession?.sourceOperationKey);
+
+    const secondResumeResponse = await resolveUserActionPOST(
+      buildApiRequest({
+        audience: "employee",
+        method: "POST",
+        path: `/threads/${ctx.threadId}/user-actions/${secondUar.id}/resolve`,
+        idempotencyKey: `resolve:${randomUUID()}`,
+        body: { resolution: "submit", response_redacted: { text: "范围=最近 7 天" } },
+      }),
+      { params: Promise.resolve({ threadId: ctx.threadId, requestId: secondUar.id }) },
+    );
+    const secondResponseText = await secondResumeResponse.text();
+    expect(
+      secondResumeResponse.status,
+      `第二轮 resolve 返回 ${secondResumeResponse.status}: ${secondResponseText}`,
+    ).toBe(200);
+
+    // ── 5. 同 Invocation/Attempt 的第二轮恢复拥有独立来源键与新 O/S，最终正常完成 ──
     await waitForInvocationState(ctx.tenantId, invocation.id, "completed");
     const sessions = await getRuntimeSessionBindingsByInvocation(ctx.tenantId, invocation.id);
-    expect(sessions).toHaveLength(2);
-    const resumedSession = sessions.find((row) => row.id !== pausedSessionId);
+    expect(sessions).toHaveLength(3);
+    const resumeSessions = sessions.filter((row) => row.intentType === "resume");
+    expect(resumeSessions).toHaveLength(2);
+    const resumedSession = resumeSessions.find((row) => row.id !== firstResumedSession?.id);
     expect(resumedSession).toBeTruthy();
-    expect(resumedSession?.intentType).toBe("resume");
+    expect(resumedSession?.sourceOperationKey).not.toBe(firstResumedSession?.sourceOperationKey);
+    const secondPreparationSlot = await readPreparationSlot(ctx.tenantId, attempt.id);
+    expect(secondPreparationSlot.preparationIntentKey).toBe(resumedSession?.sourceOperationKey);
     // 同 Attempt、**新**所有权代际（暂停时那一代已 released）。
     expect(resumedSession?.attemptId).toBe(attempt.id);
     expect(resumedSession?.ownershipId).not.toBe(pausedOwnershipId);
-    // 两次 execution.started 是"真的又执行了一代"的持久证据（不是只写了 ACK）。
-    expect(await countIngressEvents(invocation.id, "execution.started")).toBe(2);
+    // 三次 execution.started 是两轮恢复都真的执行了新代际的持久证据。
+    expect(await countIngressEvents(invocation.id, "execution.started")).toBe(3);
 
-    // ── 5. 环境：Lease 被 Resume 重新准备并绑定**新**代际 ──
+    // ── 6. 环境：Lease 被 Resume 重新准备并绑定**新**代际 ──
     // 恢复代际与受管资源的绑定用 `ExecutionOwnership.environmentLeaseId` 取证：它是持久事实，
     // 不像 `EnvironmentLease.activationOwnershipId` 那样会按 A08 在终态收口时被清空。
     const [resumedOwner] = resumedSession
@@ -762,9 +821,9 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     expect((await inspectContainer(containerName))?.Id).toBe(containerBefore?.Id);
 
     const anchorDigest =
-      pausedAttempt?.resumeAnchorDigest ??
+      secondPausedAttempt?.resumeAnchorDigest ??
       protocolDigest(
-        pausedAttempt?.resumeAnchor ??
+        secondPausedAttempt?.resumeAnchor ??
           `invocation:${invocation.id}:recovery:${invocation.recoveryVersion}`,
       );
     const preparedEvidence = leaseAfter?.preparedEvidence as {
@@ -776,18 +835,27 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     // 仍是真实 docker 回读产生的证据，不是自报通过。
     expect(preparedEvidence?.verifier?.kind).toBe("docker_inspect");
 
-    // ── 6. 真实实例被复用（不是重建）──
+    // ── 7. 真实实例被复用（不是重建）──
     const containerAfter = await inspectContainer(containerName);
     expect(containerAfter?.Id).toBe(containerBefore?.Id);
 
-    // ── 7. 正确继续：恢复后的 Loop 读到"已解决输入"这一子事实 ──
-    expect(decisionViews).toHaveLength(2);
+    // ── 8. 正确继续：每轮恢复后的 Loop 都读到已解决输入 ──
+    expect(decisionViews).toHaveLength(3);
     expect(decisionViews[1]?.observations).toContainEqual(
       expect.objectContaining({
         observationType: "user_input",
         data: expect.objectContaining({
-          harnessActionId: "a05-ask-input",
+          harnessActionId: "a05-ask-input-1",
           response: { text: "范围=近 30 天" },
+        }),
+      }),
+    );
+    expect(decisionViews[2]?.observations).toContainEqual(
+      expect.objectContaining({
+        observationType: "user_input",
+        data: expect.objectContaining({
+          harnessActionId: "a05-ask-input-2",
+          response: { text: "范围=最近 7 天" },
         }),
       }),
     );
@@ -795,7 +863,7 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     const [turn] = await db.select().from(turnTable).where(eq(turnTable.id, ctx.turnId)).limit(1);
     expect(turn?.turnState).toBe("completed");
 
-    // ── 8. 后台回收闭环（A08 8.1）：走**生产 Worker 入口**，拿到真实释放回执才写 `released` ──
+    // ── 9. 后台回收闭环（A08 8.1）：走**生产 Worker 入口**，拿到真实释放回执才写 `released` ──
     const sweep = await runEnvironmentCleanupOnce();
     expect(sweep.released).toBeGreaterThanOrEqual(1);
     const releasedLease = await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id);

@@ -3,11 +3,13 @@
 /**
  * workspace-lock 原生模块加载器（A07 决策一）。
  *
- * 只暴露三个入口，且**没有 fallback**：
+ * 暴露内核锁与 descriptor-relative 受管文件 IO，且**没有 fallback**：
  *
  *   openAndTryLock(stablePath) -> { state: "held", handle } | { state: "busy" }
  *   unlockAndClose(handle)     -> { state: "released" | "already_released" }
  *   lockFileIdentity(path)     -> { device, inode, exists }
+ *   secureWriteFile(root, relativePath, content)
+ *   secureDeleteFile(root, relativePath)
  *
  * 二进制缺失时**抛出**，绝不安静降级成"总是成功"的纯 JS 实现 —— 那会让
  * "内核排他锁"退化成 `mkdir` 时代同样的竞态，而且测试会假绿。

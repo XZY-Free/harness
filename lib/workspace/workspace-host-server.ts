@@ -25,6 +25,8 @@ import {
   ScopeLockBusyError,
   ScopeLockUnavailableError,
   scopeLockFilePath,
+  secureManagedFileDelete,
+  secureManagedFileWrite,
   withScopeLock as withNativeScopeLock,
 } from "@/lib/workspace/scope-lock";
 import type {
@@ -428,6 +430,9 @@ export class WorkspaceHostBroker implements WorkspaceHost {
   private readonly managedRootOverride: string;
   private readonly hostIdentityOverride: string | null;
   private readonly storage: SnapshotStorage;
+  private readonly testHooks: {
+    beforeFreezeScopeLock?: () => Promise<void>;
+  } | null;
   private controlRootCache: string | null = null;
 
   constructor(input: {
@@ -436,10 +441,15 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     managedRoot?: string;
     hostIdentity?: string;
     snapshotStorage?: SnapshotStorage;
+    /** 仅供真实并发测试控制交错；生产装配不得传入。 */
+    testHooks?: {
+      beforeFreezeScopeLock?: () => Promise<void>;
+    };
   }) {
     this.rootOverride = path.resolve(input.root);
     this.managedRootOverride = path.resolve(input.managedRoot ?? input.root);
     this.hostIdentityOverride = input.hostIdentity?.trim() || null;
+    this.testHooks = input.testHooks ?? null;
     this.storage =
       input.snapshotStorage ?? new FileSnapshotStorage(path.join(this.rootOverride, SNAPSHOT_DIR));
   }
@@ -1254,11 +1264,16 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     return await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
       const grant = await this.assertManagedWriteGrant(input.identity, "受管文件操作");
       const target = managedWriteTarget(grant.root, input.operation.path);
-      if (input.operation.kind === "write") {
-        await mkdir(path.dirname(target), { recursive: true });
-        await writeFile(target, input.operation.content, "utf8");
-      } else {
-        await rm(target, { force: true });
+      try {
+        if (input.operation.kind === "write") {
+          secureManagedFileWrite(grant.root, input.operation.path, input.operation.content);
+        } else {
+          secureManagedFileDelete(grant.root, input.operation.path);
+        }
+      } catch (error) {
+        throw new WorkspaceWriterNotFencedError(
+          `受管文件操作拒绝了不安全路径：${error instanceof Error ? error.message : String(error)}`,
+        );
       }
       return { kind: input.operation.kind, path: target } satisfies ManagedFileOperationResult;
     });
@@ -1557,9 +1572,34 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     checkpointIntentId: string;
     anchorDigest: string;
   }): Promise<SafePointReceipt> {
-    await this.assertWriter(input.grant);
     const probe = await this.observeIdentity();
+    if (probe.scopeDigest !== input.grant.scopeDigest) {
+      throw new WorkspaceWriterNotFencedError("实际存储 scope 与冻结 grant 不一致");
+    }
+    await this.testHooks?.beforeFreezeScopeLock?.();
     return this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      // grant 的当前性必须在 scope 锁内复核；否则 activate/revoke 可插在复核与落屏障之间。
+      await this.assertWriter(input.grant);
+      const existing = await this.readFreeze(probe.scopeDigest);
+      if (existing) {
+        if (
+          existing.scopeDigest === input.grant.scopeDigest &&
+          existing.checkpointIntentId === input.checkpointIntentId &&
+          existing.writerGeneration === input.grant.writerGeneration &&
+          existing.anchorDigest === input.anchorDigest
+        ) {
+          return {
+            checkpointIntentId: existing.checkpointIntentId,
+            scopeDigest: existing.scopeDigest,
+            writerGeneration: existing.writerGeneration,
+            anchorDigest: existing.anchorDigest,
+            frozenAt: existing.frozenAt,
+          };
+        }
+        throw new WorkspaceWriterNotFencedError(
+          `scope 已由另一安全点冻结（intent ${existing.checkpointIntentId}）`,
+        );
+      }
       const stopEvidence = await this.stopWriterGeneration(
         probe.scopeDigest,
         input.grant.writerGeneration,
@@ -1592,24 +1632,30 @@ export class WorkspaceHostBroker implements WorkspaceHost {
 
   async releaseFreeze(receipt: SafePointReceipt): Promise<void> {
     const probe = await this.observeIdentity();
-    // A06：解冻登记是**追加式持久事实**，必须可重复执行。不能假设本进程/本代际
-    // 曾在本机写过 `<intentId>.json`：控制面目录可能整体缺失（新进程、目录被清理、
-    // 冻结证据在别处、或先前写入失败后的重试）。缺目录直接 ENOENT 会让"重试"
-    // 变成永久失败，所以这里显式建父目录再以 `a` 追加。
-    const file = path.join(
-      await this.controlRoot(),
-      SAFE_POINTS_DIR,
-      `${receipt.checkpointIntentId}.released`,
-    );
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, JSON.stringify(receipt), { flag: "a" });
+    if (probe.scopeDigest !== receipt.scopeDigest) {
+      throw new WorkspaceWriterNotFencedError("实际存储 scope 与解冻回执不一致");
+    }
     // A07 7.1：屏障必须随解冻一起撤销，否则安全点结束后该 scope 永久拒绝写入。
-    // 只撤销**匹配本 intent** 的屏障：迟到的旧 release 不得解掉更新的冻结。
+    // 只撤销**完整 tuple 匹配**的屏障：迟到的旧 release 不得解掉更新的冻结。
     await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
       const freeze = await this.readFreeze(probe.scopeDigest);
-      if (freeze && freeze.checkpointIntentId === receipt.checkpointIntentId) {
+      if (
+        freeze &&
+        freeze.scopeDigest === receipt.scopeDigest &&
+        freeze.checkpointIntentId === receipt.checkpointIntentId &&
+        freeze.writerGeneration === receipt.writerGeneration &&
+        freeze.anchorDigest === receipt.anchorDigest
+      ) {
         await rm(await this.freezePath(probe.scopeDigest), { force: true }).catch(() => undefined);
       }
+      // A06：解冻登记是追加式持久事实，且与屏障判定处于同一临界区。
+      const file = path.join(
+        await this.controlRoot(),
+        SAFE_POINTS_DIR,
+        `${receipt.checkpointIntentId}.released`,
+      );
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, JSON.stringify(receipt), { flag: "a" });
     });
   }
 
@@ -1620,11 +1666,27 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     storage?: SnapshotStorageRef;
     requirements: SnapshotRequirements;
   }): Promise<SnapshotStorageReceipt> {
-    await this.assertWriter(input.grant);
+    const probe = await this.observeIdentity();
+    if (probe.scopeDigest !== input.grant.scopeDigest) {
+      throw new WorkspaceWriterNotFencedError("实际存储 scope 与快照 grant 不一致");
+    }
     const storage = resolveSnapshotStorage(input.storage, this.storage);
-    return (
-      await storage.writeSnapshot(input.grant.root, input.checkpointIntentId, input.requirements)
-    ).receipt;
+    return this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      await this.assertWriter(input.grant);
+      const freeze = await this.readFreeze(probe.scopeDigest);
+      if (
+        !freeze ||
+        freeze.scopeDigest !== input.grant.scopeDigest ||
+        freeze.checkpointIntentId !== input.checkpointIntentId ||
+        freeze.writerGeneration !== input.grant.writerGeneration ||
+        freeze.anchorDigest !== input.anchorDigest
+      ) {
+        throw new WorkspaceWriterNotFencedError("快照缺少与请求完整匹配的冻结屏障");
+      }
+      return (
+        await storage.writeSnapshot(input.grant.root, input.checkpointIntentId, input.requirements)
+      ).receipt;
+    });
   }
 
   async restore(input: {
@@ -1837,6 +1899,10 @@ export function createWorkspaceHostBroker(input: {
   managedRoot?: string;
   hostIdentity?: string;
   snapshotStorage?: SnapshotStorage;
+  /** 仅供真实并发测试控制交错；生产装配不得传入。 */
+  testHooks?: {
+    beforeFreezeScopeLock?: () => Promise<void>;
+  };
 }): WorkspaceHostBroker {
   return new WorkspaceHostBroker(input);
 }

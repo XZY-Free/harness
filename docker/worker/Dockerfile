@@ -5,6 +5,10 @@ RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile
+RUN npm install --global node-gyp@12.4.0
+COPY native ./native
+COPY scripts/build-workspace-lock.mjs ./scripts/build-workspace-lock.mjs
+RUN SNOWHARNESS_NODE_GYP_PATH=/usr/local/lib/node_modules/node-gyp/bin/node-gyp.js pnpm build:workspace-lock
 
 FROM node:24-alpine AS worker
 RUN apk add --no-cache tini git libstdc++
@@ -12,6 +16,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV WORKER_HEALTH_PORT=8080
 COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=dependencies /app/native ./native
 COPY package.json tsconfig.json ./
 COPY lib ./lib
 COPY scripts ./scripts
