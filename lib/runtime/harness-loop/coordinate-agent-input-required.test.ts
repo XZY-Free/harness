@@ -8,6 +8,7 @@ describe("coordinateAgentInputRequired", () => {
     externalTaskRef: "task-1",
     externalContextRef: "context-1",
     agentDisplayName: "外部助手",
+    cancelSupported: false,
     prompt: "请补充请假日期",
     inputSchema: {
       type: "object",
@@ -40,6 +41,7 @@ describe("coordinateAgentInputRequired", () => {
     expect(second.action_id).not.toBe(first.action_id);
     expect(first.action_id).not.toBe(base.sourceRef);
     expect(first.harness_action_id).toBe(base.sourceRef);
+    expect(first.cancel_supported).toBe(false);
   });
 
   it("确认提议用 AgentCall/task/context/proposal 的稳定幂等键，且由平台写入不可为空的过期时间", () => {

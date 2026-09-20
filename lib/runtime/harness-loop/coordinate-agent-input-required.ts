@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
+import { loadAgentCallContract } from "@/lib/agents/calls/transport/agent-call-transport-factory";
 import {
   type ConfirmationProposal,
   parseHostControls,
@@ -45,6 +46,7 @@ interface AgentInputRequiredRuntimePayload {
   expires_at?: string;
   agent_call_id: string;
   agent_display_name: string | null;
+  cancel_supported: boolean;
   agent_call_event_id: string;
   task_id: string;
   context_id: string;
@@ -62,6 +64,7 @@ export function buildAgentInputRequiredRuntimePayload(params: {
   externalTaskRef: string;
   externalContextRef: string;
   agentDisplayName: string | null;
+  cancelSupported: boolean;
   inputEventId: string;
   prompt: string;
   inputSchema: Record<string, unknown>;
@@ -73,6 +76,7 @@ export function buildAgentInputRequiredRuntimePayload(params: {
     harness_action_id: params.sourceRef,
     agent_call_id: params.callId,
     agent_display_name: params.agentDisplayName,
+    cancel_supported: params.cancelSupported,
     agent_call_event_id: params.inputEventId,
     task_id: params.externalTaskRef,
     context_id: params.externalContextRef,
@@ -162,6 +166,12 @@ export async function coordinateAgentInputRequired(
   }
   const binding = await mysqlAgentCallStore.getBinding({ callId, tenantId });
   if (!binding) throw new Error(`AgentCall ${callId} 缺少冻结 Binding`);
+  const { capabilities } = await loadAgentCallContract(tenantId, callId, {
+    agentContractSnapshotId: binding.agentContractSnapshotId,
+    agentContractDigest: binding.agentContractDigest,
+    agentCapabilityDigest: binding.agentCapabilityDigest,
+    agentContextDigest: binding.agentContextDigest,
+  });
   const hostControlPolicy = await loadHostControlCapabilityPolicy(
     tenantId,
     binding.agentRevisionId,
@@ -179,6 +189,7 @@ export async function coordinateAgentInputRequired(
     externalTaskRef: call.currentAttempt.externalTaskRef,
     externalContextRef: call.sessionBinding.externalContextRef,
     agentDisplayName: agent?.displayName ?? null,
+    cancelSupported: capabilities.cancel,
     inputEventId: inputEvent.id,
     prompt,
     inputSchema,

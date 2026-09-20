@@ -34,6 +34,7 @@ function makeInputItem(overrides?: Record<string, unknown>) {
       kind: "user_action.requested",
       request_type: "input",
       purpose: "a2a_input_required",
+      cancel_supported: true,
       state: "pending",
       prompt: "请提供请假事由",
       request_id: "request-1",
@@ -57,6 +58,15 @@ afterEach(() => {
 });
 
 describe("UserActionItem input submit 主流程", () => {
+  it("冻结合同不支持取消时不展示关闭或跳过入口", () => {
+    render(<UserActionItem threadId="thread-1" item={makeInputItem({ cancel_supported: false })} />);
+
+    expect(screen.queryByRole("button", { name: "关闭输入请求" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+    expect(screen.queryByText("跳过")).toBeNull();
+    expect(screen.getByRole("button", { name: "继续同一任务" })).toBeTruthy();
+  });
+
   it("输入请求沿用中性等待语法，不显示橙色告警或后台待处理标签", () => {
     const { container } = render(<UserActionItem threadId="thread-1" item={makeInputItem()} />);
     const panel = screen.getByRole("region", { name: "需要用户输入" });

@@ -76,6 +76,8 @@ interface UserActionContent {
   prompt?: string;
   /** Agent input-required 的安全目录名称。 */
   agent_display_name?: string | null;
+  /** Agent 冻结合同是否支持取消；缺失时 fail-closed。 */
+  cancel_supported?: boolean;
   /** 外部 Agent confirmation 经过服务端协议校验后的安全预览。 */
   preview?: Record<string, unknown>;
   resolution?: UserActionResolution;
@@ -355,6 +357,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const requestTypeLabel = getRequestTypeLabel(content.request_type);
   const isAgentInputRequired =
     content.request_type === "input" && content.purpose === "a2a_input_required";
+  const inputCancelSupported = !isAgentInputRequired || content.cancel_supported === true;
   const agentDisplayName =
     typeof content.agent_display_name === "string" && content.agent_display_name.trim().length > 0
       ? content.agent_display_name.trim()
@@ -683,15 +686,17 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
                 </p>
               ) : null}
             </div>
-            <button
-              type="button"
-              onClick={() => handleUserActionResolve("cancel")}
-              disabled={busy || !requestId}
-              aria-label="关闭输入请求"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <X aria-hidden="true" className="size-3.5" strokeWidth={1.5} />
-            </button>
+            {inputCancelSupported ? (
+              <button
+                type="button"
+                onClick={() => handleUserActionResolve("cancel")}
+                disabled={busy || !requestId}
+                aria-label="关闭输入请求"
+                className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <X aria-hidden="true" className="size-3.5" strokeWidth={1.5} />
+              </button>
+            ) : null}
           </header>
 
           {!inputSchema.ok ? (
@@ -811,15 +816,17 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
 
           {customReply}
           <footer className="mt-3 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => handleUserActionResolve("cancel")}
-              disabled={busy || !requestId}
-              aria-label="取消"
-              className="rounded-full border border-border px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              跳过
-            </button>
+            {inputCancelSupported ? (
+              <button
+                type="button"
+                onClick={() => handleUserActionResolve("cancel")}
+                disabled={busy || !requestId}
+                aria-label="取消"
+                className="rounded-full border border-border px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                跳过
+              </button>
+            ) : null}
             {!singleChoiceField ? (
               <button
                 type="button"
