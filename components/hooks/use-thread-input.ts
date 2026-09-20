@@ -28,6 +28,7 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/client/error-messages";
+import { uploadThreadAttachment } from "@/lib/client/thread-attachments";
 import type { ClientErrorBody, ClientTurn, ClientVisibleError } from "@/lib/client/types";
 import { useCallback, useRef, useState } from "react";
 
@@ -48,7 +49,11 @@ export interface UseThreadInputResult {
   /** 根据当前 Turn 状态推断发送路由。 */
   readonly route: SendRoute;
   /** 发送消息。返回 true 表示成功，false 表示失败（错误已写入 error）。 */
-  readonly send: (text: string, agentId?: string | null) => Promise<boolean>;
+  readonly send: (
+    text: string,
+    agentId?: string | null,
+    files?: readonly File[],
+  ) => Promise<boolean>;
   /** 清除错误。 */
   readonly clearError: () => void;
 }
@@ -108,7 +113,11 @@ export function useThreadInput({
   const route = threadId === null ? "none" : deriveSendRoute(latestTurn);
 
   const send = useCallback(
-    async (text: string, agentId?: string | null): Promise<boolean> => {
+    async (
+      text: string,
+      agentId?: string | null,
+      files: readonly File[] = [],
+    ): Promise<boolean> => {
       if (sending.current) return false;
       if (!text.trim()) {
         setError({
@@ -143,6 +152,17 @@ export function useThreadInput({
       setLastRoute(targetRoute);
       try {
         if (targetRoute === "pending_input") {
+          if (files.length > 0) {
+            setError({
+              code: "REQUEST_SCHEMA_INVALID",
+              title: "暂时无法添加附件",
+              description: "当前任务仍在运行，请等待完成后再发送附件。",
+              retryable: false,
+              recoveryAction: "none",
+              requestId: null,
+            });
+            return false;
+          }
           // 运行中：创建 PendingInput
           const resp = await apiFetch(`/api/v1/threads/${threadId}/pending-inputs`, {
             method: "POST",
@@ -163,6 +183,11 @@ export function useThreadInput({
           }
           return true;
         }
+        const attachmentIds: string[] = [];
+        for (const file of files) {
+          const uploaded = await uploadThreadAttachment(threadId, file, generateIdempotencyKey());
+          attachmentIds.push(uploaded.attachmentId);
+        }
         // 空闲：创建正式 Turn
         const resp = await apiFetch(`/api/v1/threads/${threadId}/turns`, {
           method: "POST",
@@ -174,6 +199,7 @@ export function useThreadInput({
           body: JSON.stringify({
             input: { type: "message", text },
             ...(agentId ? { agent_use: { mode: "preferred", agent_id: agentId } } : {}),
+            ...(attachmentIds.length > 0 ? { workspace_attachment_ids: attachmentIds } : {}),
           }),
         });
         if (!resp.ok) {
@@ -182,11 +208,14 @@ export function useThreadInput({
           return false;
         }
         return true;
-      } catch {
+      } catch (caught) {
         setError({
           code: "NETWORK_ERROR",
-          title: "网络异常",
-          description: "无法连接服务器，请检查网络后再试。",
+          title: files.length > 0 ? "文件发送失败" : "网络异常",
+          description:
+            caught instanceof Error && caught.message
+              ? caught.message
+              : "无法连接服务器，请检查网络后再试。",
           retryable: true,
           recoveryAction: "reload_page",
           requestId: null,

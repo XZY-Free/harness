@@ -57,6 +57,8 @@ export interface ClientNewThreadSubmission {
    * null/undefined = 不带 agent_use，本 Turn 不继承上一 Turn。
    */
   readonly agentId?: string | null;
+  /** 首条消息随附的本地文件；创建 Thread 后上传，再绑定到首个 Turn。 */
+  readonly files?: readonly File[];
 }
 
 // ─── Item ────────────────────────────────────────────────────

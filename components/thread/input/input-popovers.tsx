@@ -21,7 +21,13 @@ import { useState } from "react";
 
 /* ─── ＋ 菜单 ─── */
 
-export function PlusMenuPopover() {
+export function PlusMenuPopover({
+  onFileSelect,
+  fileDisabled = false,
+}: {
+  readonly onFileSelect?: () => void;
+  readonly fileDisabled?: boolean;
+} = {}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -45,9 +51,10 @@ export function PlusMenuPopover() {
             icon={<FilePlus className="size-4" />}
             label="文件和文件夹"
             shortcut="⌘O"
+            disabled={fileDisabled}
             onClick={() => {
-              /* W3-5 后接入文件选择 */
               setOpen(false);
+              onFileSelect?.();
             }}
           />
           <PlusMenuItem
@@ -101,18 +108,21 @@ function PlusMenuItem({
   subtitle,
   shortcut,
   onClick,
+  disabled = false,
 }: {
   readonly icon: React.ReactNode;
   readonly label: string;
   readonly subtitle?: string;
   readonly shortcut?: string;
   readonly onClick?: () => void;
+  readonly disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-11 w-full items-center gap-2.5 rounded-[11px] px-2.5 py-1.5 text-left outline-none transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.05] active:scale-[0.99]"
+      disabled={disabled}
+      className="flex min-h-11 w-full items-center gap-2.5 rounded-[11px] px-2.5 py-1.5 text-left outline-none transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.05] active:scale-[0.99] disabled:pointer-events-none disabled:opacity-45"
     >
       <div
         data-slot="plus-menu-icon"

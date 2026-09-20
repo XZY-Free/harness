@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import type { ClientPendingInput, ClientThread, ClientTurn } from "@/lib/client/types";
 import type { ToolPermissionMode } from "@/lib/permission/tool-permission-mode";
 import { cn } from "@/lib/utils";
-import { Folder, Loader2, Play, Send, Square, X } from "lucide-react";
+import { FileText, Folder, Loader2, Play, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type AgentOption,
@@ -50,7 +50,11 @@ interface ThreadInputProps {
   /** 草稿隔离键；默认使用 threadId。 */
   readonly draftKey?: string;
   /** 新建页首条消息提交器；存在时不调用既有 Thread 的 turns 接口。 */
-  readonly onSubmitText?: (text: string, permissionMode: ToolPermissionMode) => Promise<boolean>;
+  readonly onSubmitText?: (
+    text: string,
+    permissionMode: ToolPermissionMode,
+    files: readonly File[],
+  ) => Promise<boolean>;
   readonly currentAgentId?: string | null;
   readonly currentModelRef?: string | null;
   /** 平台默认模型（shell.default_model_ref）；未显式选择时的即时展示。 */
@@ -133,8 +137,11 @@ export function ThreadInput({
   const { text, setText, clear: clearDraft } = useThreadDraft(draftKey ?? threadId ?? "new-thread");
   const [customBusy, setCustomBusy] = useState(false);
   const [resumeRequested, setResumeRequested] = useState(false);
+  const [files, setFiles] = useState<readonly File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
   const sending = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const busy = threadBusy || customBusy || turnBusy;
   const isRunning = route === "pending_input";
   const isPaused =
@@ -154,6 +161,17 @@ export function ThreadInput({
   useEffect(() => {
     if (!isPaused) setResumeRequested(false);
   }, [isPaused]);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        if (!busy && !isRunning) fileInputRef.current?.click();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [busy, isRunning]);
 
   // textarea 自增高
   // biome-ignore lint/correctness/useExhaustiveDependencies: text 变化后必须重新测量 textarea 的 scrollHeight
@@ -178,19 +196,46 @@ export function ThreadInput({
     let ok = false;
     try {
       ok = onSubmitText
-        ? await onSubmitText(text, permissionMode)
-        : await send(text, selectedAgentId);
+        ? await onSubmitText(text, permissionMode, files)
+        : await send(text, selectedAgentId, files);
     } finally {
       sending.current = false;
       setCustomBusy(false);
     }
     if (ok) {
       clearDraft();
+      setFiles([]);
+      setFileError(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       // 重置高度
       const el = textareaRef.current;
       if (el) el.style.height = "auto";
       clearError();
     }
+  };
+
+  const handleFilesSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (selected.length === 0) return;
+    setFiles((current) => {
+      const next = [...current];
+      for (const file of selected) {
+        const duplicate = next.some(
+          (item) =>
+            item.name === file.name &&
+            item.size === file.size &&
+            item.lastModified === file.lastModified,
+        );
+        if (!duplicate && next.length < 20) next.push(file);
+      }
+      setFileError(
+        next.length >= 20 && current.length + selected.length > 20
+          ? "每条消息最多添加 20 个文件。"
+          : null,
+      );
+      return next;
+    });
   };
 
   /** 暂停当前 Turn（无确认对话框）。 */
@@ -255,6 +300,12 @@ export function ThreadInput({
           </div>
         )}
 
+        {fileError && (
+          <div role="alert" className="mb-2 text-xs text-destructive">
+            {fileError}
+          </div>
+        )}
+
         {/* 大圆角容器 */}
         <div
           className={cn(
@@ -262,6 +313,44 @@ export function ThreadInput({
             "focus-within:border-border-strong focus-within:shadow-md",
           )}
         >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.odp,.ods,.rtf,.txt,.md,.csv,.html,.htm"
+            className="sr-only"
+            aria-label="选择要添加的文件"
+            onChange={handleFilesSelected}
+            disabled={busy || isRunning}
+          />
+          {files.length > 0 && (
+            <div className="mb-2.5 flex flex-wrap gap-1.5" aria-label="待发送文件">
+              {files.map((file, index) => (
+                <div
+                  key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                  className="flex h-8 max-w-full items-center gap-1.5 rounded-lg border border-border bg-muted/45 pl-2.5 pr-1.5 text-xs text-foreground/85"
+                >
+                  <FileText
+                    aria-hidden="true"
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                  <span className="max-w-[220px] truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`移除文件 ${file.name}`}
+                    title="移除文件"
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+                    onClick={() =>
+                      setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                    }
+                    disabled={busy}
+                  >
+                    <X aria-hidden="true" className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={text}
@@ -280,7 +369,10 @@ export function ThreadInput({
 
           {/* 底部工具行：窄屏标签收缩/截断，关键按钮不被挤出 */}
           <div className="mt-2 flex min-w-0 items-center gap-1">
-            <PlusMenuPopover />
+            <PlusMenuPopover
+              onFileSelect={() => fileInputRef.current?.click()}
+              fileDisabled={busy || isRunning}
+            />
 
             {/* 助手按次选择；运行或等待补充信息时不能重定向正在执行的任务。 */}
             <AgentSelectorPopover

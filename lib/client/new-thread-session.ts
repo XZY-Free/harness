@@ -1,5 +1,6 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { fallbackTitleFromUserText } from "@/lib/thread-title";
+import { uploadThreadAttachment } from "./thread-attachments";
 import type {
   ClientNewThreadSubmission,
   ClientThreadShellResponse,
@@ -17,6 +18,11 @@ interface PendingFirstTurn {
   readonly thread: ClientThreadSummary;
   readonly submission: ClientNewThreadSubmission;
   readonly turnIdempotencyKey: string;
+  readonly attachments: Array<{
+    readonly file: File;
+    readonly idempotencyKey: string;
+    attachmentId: string | null;
+  }>;
 }
 
 export interface NewThreadSession {
@@ -73,7 +79,18 @@ function submissionsEqual(
     left.modelRef === right.modelRef &&
     (left.permissionMode ?? "auto") === (right.permissionMode ?? "auto") &&
     (left.workspaceId ?? null) === (right.workspaceId ?? null) &&
-    (left.agentId ?? null) === (right.agentId ?? null)
+    (left.agentId ?? null) === (right.agentId ?? null) &&
+    (left.files?.length ?? 0) === (right.files?.length ?? 0) &&
+    (left.files ?? []).every((file, index) => {
+      const other = right.files?.[index];
+      return (
+        other !== undefined &&
+        file.name === other.name &&
+        file.size === other.size &&
+        file.type === other.type &&
+        file.lastModified === other.lastModified
+      );
+    })
   );
 }
 
@@ -116,8 +133,28 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
           },
           submission,
           turnIdempotencyKey: idempotencyKeyFactory(),
+          attachments: (submission.files ?? []).map((file) => ({
+            file,
+            idempotencyKey: idempotencyKeyFactory(),
+            attachmentId: null,
+          })),
         };
       }
+
+      for (const attachment of pending.attachments) {
+        if (attachment.attachmentId) continue;
+        const uploaded = await uploadThreadAttachment(
+          pending.thread.id,
+          attachment.file,
+          attachment.idempotencyKey,
+          fetchImpl,
+        );
+        attachment.attachmentId = uploaded.attachmentId;
+      }
+
+      const attachmentIds = pending.attachments.flatMap((attachment) =>
+        attachment.attachmentId ? [attachment.attachmentId] : [],
+      );
 
       const turnResponse = await fetchImpl(`/api/v1/threads/${pending.thread.id}/turns`, {
         method: "POST",
@@ -133,6 +170,7 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
           ...(pending.submission.agentId
             ? { agent_use: { mode: "preferred", agent_id: pending.submission.agentId } }
             : {}),
+          ...(attachmentIds.length > 0 ? { workspace_attachment_ids: attachmentIds } : {}),
         }),
       });
       await requireJson(turnResponse, "消息发送失败，请稍后重试。");

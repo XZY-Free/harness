@@ -70,6 +70,60 @@ describe("new thread client session", () => {
     );
   });
 
+  it("uploads first-message attachments after Thread creation and binds them to the Turn", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "thread-1", title: "附件任务" }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            kind: "attachment",
+            attachment_id: "attachment-1",
+            url: "/attachment-1",
+            filename: "说明.txt",
+            size: 6,
+            type: "text/plain",
+          }),
+          { status: 201 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ turn: { id: "turn-1" } }), { status: 201 }),
+      );
+    const keys = ["thread-key", "turn-key", "attachment-key"];
+    const session = createNewThreadSession({
+      fetchImpl,
+      idempotencyKeyFactory: () => keys.shift() ?? "unexpected",
+    });
+    const file = new File(["说明内容"], "说明.txt", { type: "text/plain" });
+
+    await session.submit({ text: "请读取附件", modelRef: null, files: [file] });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/threads/thread-1/attachments",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "idempotency-key": "attachment-key" },
+        body: expect.any(FormData),
+      }),
+    );
+    const uploadBody = fetchImpl.mock.calls[1]?.[1]?.body as FormData;
+    expect(uploadBody.get("file")).toBe(file);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/threads/thread-1/turns",
+      expect.objectContaining({
+        body: JSON.stringify({
+          input: { type: "message", text: "请读取附件" },
+          workspace_attachment_ids: ["attachment-1"],
+        }),
+      }),
+    );
+  });
+
   it("binds a selected Desktop workspace when creating the Thread", async () => {
     const fetchImpl = vi
       .fn()

@@ -104,6 +104,16 @@ describe("ModelSelectorPopover", () => {
 });
 
 describe("PlusMenuPopover", () => {
+  it("点击文件入口后调用选择器并关闭菜单", () => {
+    const onFileSelect = vi.fn();
+    render(<PlusMenuPopover onFileSelect={onFileSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    fireEvent.click(screen.getByRole("button", { name: /文件和文件夹/ }));
+
+    expect(onFileSelect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /文件和文件夹/ })).toBeNull();
+  });
+
   it("使用统一中性色图标，不按能力类型着色", () => {
     render(<PlusMenuPopover />);
     fireEvent.click(screen.getByRole("button", { name: "添加" }));

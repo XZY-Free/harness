@@ -46,6 +46,40 @@ describe("useThreadInput fail-closed（threadId=null）", () => {
 });
 
 describe("useThreadInput 既有 Thread 正式路径", () => {
+  it("先上传附件，再把附件 id 绑定到正式 Turn", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            kind: "attachment",
+            attachment_id: "attachment-1",
+            url: "/attachment-1",
+            filename: "证明.txt",
+            size: 6,
+            type: "text/plain",
+          },
+          { status: 201 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ ok: true }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["证明内容"], "证明.txt", { type: "text/plain" });
+    const { result } = renderHook(() => useThreadInput({ threadId: "thread-1", latestTurn: null }));
+
+    await act(async () => {
+      await result.current.send("请读取附件", "hr-agent", [file]);
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/threads/thread-1/attachments");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeInstanceOf(FormData);
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({
+      input: { type: "message", text: "请读取附件" },
+      agent_use: { mode: "preferred", agent_id: "hr-agent" },
+      workspace_attachment_ids: ["attachment-1"],
+    });
+  });
+
   it.each([undefined, null, "hr-agent"])("每次发送独立携带显式助手选择 %s", async (agentId) => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
