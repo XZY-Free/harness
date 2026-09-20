@@ -1232,20 +1232,18 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
       }),
     );
     const newOwner = await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id });
-    expect(newOwner).not.toBeNull();
-    expect(newOwner?.id).not.toBe(gen.ownership.id);
-    const newOwnerId = newOwner?.id ?? "";
+    if (!newOwner) throw new Error("新代际未建立 active Owner");
+    expect(newOwner.id).not.toBe(gen.ownership.id);
+    const newOwnerId = newOwner.id;
     // 新代际的推进是异步的（`startRuntimeInvocation` 只**建立**代际）。必须先等它真的接管了
     // 在途子调用再取样：否则取样点落在启动写入中间，B 自己的启动写入会被误读成
     // "A 的迟到结果被接纳"。
     await waitForFact(async () => counters.actions >= 1, "新代际继续一次在途子调用");
-    const eventsAfterTakeover = await countAllIngressEvents(tenantId, invocation.id);
-    const newOwnerBefore = await ownerRow(tenantId, newOwnerId);
-    const actionsBefore = counters.actions;
 
     // A 的结果这时才到达：行动接纳、持久事件、transient 三条路都必须被拒。
     const lateGuard = await runActionGuard({ tenantId, authority: gen.authority });
     expect(lateGuard.allowed).toBe(false);
+    const lateEventId = randomUUID();
     await expect(
       ingressRuntimeEvents({
         tenantId,
@@ -1255,7 +1253,7 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
           authority: gen.authority,
           events: [
             {
-              eventId: randomUUID(),
+              eventId: lateEventId,
               producerSequence: String(invocation.lastProducerSequence + 3),
               type: "harness.action.proposed",
               schemaVersion: 1,
@@ -1282,15 +1280,29 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
       }),
     ).rejects.toThrow();
 
-    // B 的结果与计数不受影响。
-    expect(await countAllIngressEvents(tenantId, invocation.id)).toBe(eventsAfterTakeover);
-    expect(counters.actions).toBe(actionsBefore);
+    // 只观察 A 的精确事件/动作身份；B 的异步 pending Loop 可以在此期间合法继续轮询，
+    // 不能用 Invocation 全局事件总数或动作计数把 B 的正常进展误判为 A 越权。
+    const lateEvents = await db
+      .select({ id: runtimeEventIngressTable.id })
+      .from(runtimeEventIngressTable)
+      .where(
+        and(
+          eq(runtimeEventIngressTable.tenantId, tenantId),
+          eq(runtimeEventIngressTable.invocationId, invocation.id),
+          eq(runtimeEventIngressTable.producerEventId, lateEventId),
+        ),
+      );
+    expect(lateEvents).toHaveLength(0);
+    expect(
+      await countActionEvents(tenantId, invocation.id, "late-a-action", "harness.action.proposed"),
+    ).toBe(0);
+    expect(counters.actions).toBeGreaterThanOrEqual(1);
     expect(counters.decisions).toBe(0);
     // 代际身份按 `leaseEpoch` 判：它是代际的不变量；而租约到期时间与 versionNo 会被 B
     // **自己**的合法心跳推进（默认间隔 60ms），拿它们当判据等于把 B 的正常心跳误判成
     // "A 的迟到影响"—— 旧断言只有在那次启动崩溃（即本包要修的那个缺陷）时才成立。
     const newOwnerAfter = await ownerRow(tenantId, newOwnerId);
-    expect(newOwnerAfter.leaseEpoch).toBe(newOwnerBefore.leaseEpoch);
+    expect(newOwnerAfter.leaseEpoch).toBe(newOwner.leaseEpoch);
     // A 的原代际仍是失权态：旧 heartbeat 不得把旧代际重新激活。
     expect((await ownerRow(tenantId, gen.ownership.id)).ownershipState).toBe("lost");
   }, 150_000);
