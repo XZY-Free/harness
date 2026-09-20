@@ -379,6 +379,8 @@ function startInputFor(input: {
   });
   return {
     tenantId: input.tenantId,
+    // A05：夹具的来源意图取 Invocation 自身身份，与 dispatcher 的首次 Start 同源。
+    sourceOperationKey: `invocation:${input.invocation.id}`,
     invocation: input.invocation,
     binding: input.binding,
     attempt: input.attempt,
@@ -1112,6 +1114,22 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
     expect(await invocationState(invocation.id)).toBe(stateAfterHandoff);
 
     // 下一个推进者经正式 Start 入口取得新代际，并把在途动作继续一次。
+    //
+    // A03-05：**新代际必须带新 Attempt**。主动交接已经把旧 Owner 正式释放，因此这里不再有
+    // "接管"分支会替我们收口 Attempt —— 但"InvocationAttempt 承载执行代际"这条不变量与
+    // 旧 Owner 是否 still-active 无关：沿用同一个 Attempt 会让两代共用一个代际身份。
+    // 交接后的旧 Attempt 已被记为 `lost`（supervisor 退出边界），它的执行事实已经收口，
+    // 任何新执行权挂上去都是复活一个已结算的代际。
+    //
+    // A05 让这件事从"看不出来"变成"写不进去"：来源意图唯一键
+    // `(tenant, invocation, attempt, intentType, sourceOperationKey)` 不允许同一 Attempt 上
+    // 出现第二个同意图 Session —— 没有这个修正，A05 的 T07 会以 `StartIntentConflict` 失败。
+    const successorAttempt = await createPreparedTakeoverAttempt({
+      tenantId,
+      invocationId: invocation.id,
+      retryReasonCode: "supervisor_handover_successor",
+    });
+    expect(successorAttempt.id).not.toBe(attempt.id);
     const counters = { decisions: 0, actions: 0 };
     await startRuntimeInvocation(
       startInputFor({
@@ -1119,7 +1137,7 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
         ctx,
         invocation,
         binding,
-        attempt,
+        attempt: successorAttempt,
         applicationService: hostedService({
           leaseMs: 2_000,
           pendingWaitLimitMs: 400,

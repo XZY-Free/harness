@@ -21,6 +21,7 @@ import {
 } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   acquireTestRuntimeAuthority,
+  createPreparedTakeoverAttempt,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
@@ -230,10 +231,18 @@ describe("R03 §6 控制命令固定目标", () => {
       state: "lost",
       reasonCode: "OwnershipExpired",
     });
+    // 换代必须另有 Attempt：接管会收口旧 Attempt（基础设施替换规则），且 A05 的来源意图
+    // 比对域是 (Invocation, Attempt, intentType, sourceOperationKey) —— 同一 Attempt 上
+    // 不可能存在第二个来源意图；生产每个 Start 调用方也都是先 createAttempt 再 Start。
+    const takeoverAttempt = await createPreparedTakeoverAttempt({
+      tenantId,
+      invocationId: invocation.id,
+      retryReasonCode: "ownership_replaced",
+    });
     const second = await acquireTestRuntimeAuthority({
       tenantId,
       invocationId: invocation.id,
-      attemptId: fixture.attempt.id,
+      attemptId: takeoverAttempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
     });
     expect(second.ownership.id).not.toBe(first.ownership.id);
@@ -406,10 +415,16 @@ describe("R03 §6 控制命令固定目标", () => {
       state: "lost",
       reasonCode: "OwnershipExpired",
     });
+    // 同 TGT-01：换代另有 Attempt。
+    const takeoverAttempt = await createPreparedTakeoverAttempt({
+      tenantId,
+      invocationId: invocation.id,
+      retryReasonCode: "ownership_replaced",
+    });
     await acquireTestRuntimeAuthority({
       tenantId,
       invocationId: invocation.id,
-      attemptId: fixture.attempt.id,
+      attemptId: takeoverAttempt.id,
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
     });
 

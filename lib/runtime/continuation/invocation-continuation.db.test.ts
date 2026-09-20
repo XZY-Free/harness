@@ -182,19 +182,21 @@ describe("Invocation continuation execution ownership", () => {
         digest: protocolDigest(attemptEvidence),
       }),
     );
-    const acquire = (acquiredById: string) =>
+    const acquire = (acquiredById: string, attemptId: string) =>
       acquireExecutionOwnership({
         tenantId: tenant.id,
         invocationId: "invocation-lease",
-        attemptId: attempt.id,
+        attemptId,
         runtimeRevisionId: TEST_RUNTIME_REVISION_ID,
         acquiredByType: "service",
         acquiredById,
       });
 
-    const first = await acquire("worker-a");
+    const first = await acquire("worker-a", attempt.id);
     // 新鲜 owner 存活期间，竞争者无法取得执行权。
-    await expect(acquire("worker-b")).rejects.toMatchObject({ code: "HealthyOwnerExists" });
+    await expect(acquire("worker-b", attempt.id)).rejects.toMatchObject({
+      code: "HealthyOwnerExists",
+    });
     // 租约过期后按新 epoch 接管：旧 owner 置 lost，新 owner epoch+1。
     // 过期必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：客户端
     // `Date.now()` 与 DB 时钟存在毫秒级偏差，只留 1ms 余量并不足以表达「已过期」，
@@ -203,7 +205,22 @@ describe("Invocation continuation execution ownership", () => {
       .update(executionOwnershipTable)
       .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
-    const reclaimed = await acquire("worker-b");
+    // A03-05：接管会**收口**旧 Attempt，所以新代际必须另有 Prepared Attempt
+    // （基础设施替换规则；`dispatcher`/`redispatchRuntimeInvocation`/
+    // `dispatch-queued-invocation-attempt` 都是先 createAttempt 再 Acquire 的形态）。
+    const successorAttempt = await createAttempt({
+      tenantId: tenant.id,
+      invocationId: "invocation-lease",
+    });
+    const successorEvidence = { kind: "invocation-continuation-lease-successor" };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: successorAttempt.id,
+        evidence: successorEvidence,
+        digest: protocolDigest(successorEvidence),
+      }),
+    );
+    const reclaimed = await acquire("worker-b", successorAttempt.id);
 
     expect(first.ownership.leaseEpoch).toBe(1);
     expect(reclaimed.ownership.leaseEpoch).not.toBe(first.ownership.leaseEpoch);

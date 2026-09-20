@@ -131,6 +131,9 @@ export async function dispatchQueuedInvocationAttempt(
       environmentLeaseId: environmentLease?.id ?? null,
       environmentProvisioner: endpoint.environmentProvisioner ?? null,
       workspace: endpoint.workspace,
+      // A05：投递重试仍是**同一个**来源意图（Invocation 身份），不是新请求。
+      // 用时间戳或投递序号会让"ACK 丢失后的第二次投递"被判成新意图而重做准备。
+      sourceOperationKey: `invocation:${invocation.id}`,
       now: params.now,
     });
     const session = await import("@/lib/runtime/persistence/runtime-session-store").then((module) =>

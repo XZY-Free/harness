@@ -31,7 +31,10 @@ import {
 } from "@/lib/routes/application/deployment-route-service";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
-import { createRuntimeSessionBindingForTest } from "@/lib/runtime/test-support/session-write-fixtures";
+import {
+  createRuntimeSessionBindingForTest,
+  sourceIntentForFixture,
+} from "@/lib/runtime/test-support/session-write-fixtures";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { ensureTenantWithBaselines } from "@/lib/test-support/ensure-tenant-with-baselines";
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
@@ -325,6 +328,14 @@ export async function acquireTestRuntimeAuthority(input: {
    */
   activationEvidence?: unknown;
   activationDigest?: string | null;
+  /**
+   * A05：本次取得执行权所依据的恢复水位摘要（`start` 为 null，`resume` 为当次 Anchor）。
+   *
+   * 必须原样转发给 `acquireExecutionOwnership` —— `prepareChecks` 会拿它与 Lease 上冻结的
+   * Prepared 证据逐字比对。夹具若把它吞掉（默认 null），正式 Resume 按新 Anchor 重写过的
+   * 证据就会被判成"恢复 Anchor 已变化"，这是夹具缺参，不是实现拒绝。
+   */
+  recoveryAnchorDigest?: string | null;
 }) {
   const acquired = await acquireExecutionOwnership({
     tenantId: input.tenantId,
@@ -332,6 +343,7 @@ export async function acquireTestRuntimeAuthority(input: {
     attemptId: input.attemptId,
     runtimeRevisionId: input.runtimeRevisionId,
     environmentLeaseId: input.environmentLeaseId,
+    recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
     acquiredByType: "service",
     acquiredById: "test-runtime",
   });
@@ -344,6 +356,12 @@ export async function acquireTestRuntimeAuthority(input: {
     leaseEpoch: acquired.ownership.leaseEpoch,
     intentType: "start",
     startIntentKey: `start:${acquired.ownership.id}`,
+    ...sourceIntentForFixture({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      attemptId: input.attemptId,
+      intentType: "start",
+    }),
     runtimeCapabilitiesJson: input.runtimeCapabilitiesJson ?? null,
   });
   const phase = input.phase ?? "dispatching";

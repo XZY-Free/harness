@@ -482,6 +482,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
     });
     const startInput = {
       tenantId,
+      sourceOperationKey: `invocation:${invocation.id}`,
       invocation,
       binding,
       attempt: takeoverAttempt,
@@ -622,6 +623,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
 
     const makeInput = () => ({
       tenantId,
+      sourceOperationKey: `invocation:${invocation.id}`,
       invocation,
       binding,
       attempt,
@@ -900,6 +902,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
     const anchor = `resume:${input.invocation.id}`;
     return {
       tenantId: input.tenantId,
+      sourceOperationKey: `invocation:${input.invocation.id}`,
       invocation: input.invocation,
       binding: input.binding,
       attempt: input.attempt,

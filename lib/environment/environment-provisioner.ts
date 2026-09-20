@@ -17,6 +17,7 @@
 import {
   EnvironmentComplianceError,
   EnvironmentInstanceOperationError,
+  EnvironmentPreparationClaimSupersededError,
 } from "@/lib/environment/environment-errors";
 import {
   type EnvironmentInstanceBackend,
@@ -74,6 +75,10 @@ export interface EnvironmentRevalidateInput {
   workspaceRoot?: string | null;
   recoveryAnchorDigest?: string | null;
   now?: Date;
+  /** A05：仅 `reprepare` 需要（见 `EnvironmentReprepareInput`）；`revalidate` 不用。 */
+  preparationIntentKey?: string;
+  preparationRequestDigest?: string;
+  preparationClaimId?: string;
 }
 
 /**
@@ -90,7 +95,23 @@ export interface EnvironmentRevalidateInput {
  * "`preparing` 不是可恢复的受管实例"上被拒，要么在 Start 事务内以
  * "恢复 Anchor 已变化，Prepared 证据失效"被拒 —— 两条都是真实缺陷。
  */
-export type EnvironmentReprepareInput = EnvironmentRevalidateInput;
+export type EnvironmentReprepareInput = EnvironmentRevalidateInput & {
+  /**
+   * A05：这次准备为哪个**稳定来源意图**服务。
+   *
+   * 它必须来自已持久事实（用户恢复=已持久命令身份；续接=已持久 continuation 身份），
+   * 不能是当前时间或本次调用序号——否则"同一次 Resume 的第二次投递"会被判成新恢复，
+   * 于是无条件重做准备、把上一次建好的 ready/激活当场抹掉。
+   */
+  preparationIntentKey: string;
+  /**
+   * A05：该来源意图的**语义摘要**。同来源换语义（换锚点/换 Revision/换 Binding）必须被拒，
+   * 而不是"采用最新输入"。
+   */
+  preparationRequestDigest: string;
+  /** A05：本次准备的领取 nonce（UUID）。迟到的旧工作按它判定自己是否仍是当前准备者。 */
+  preparationClaimId: string;
+};
 
 export interface EnvironmentProvisioner {
   /** 真实实例化并核验；失败时登记持久清理工作后 fail closed。 */
@@ -267,6 +288,8 @@ async function provisionWithBackend(input: {
   workspaceBindingId: string;
   workspaceRoot: string | null;
   recoveryAnchorDigest: string | null;
+  /** A05：仅 `reprepare` 提供；见 `PrepareEnvironmentLeaseInput.preparationClaim`。 */
+  preparationClaim?: { attemptId: string; preparationClaimId: string };
   now: Date;
 }): Promise<EnvironmentLease> {
   // §1：同 Attempt 复用既有 Lease（不重复创建真实资源）。
@@ -316,6 +339,10 @@ async function provisionWithBackend(input: {
   try {
     facts = await input.backend.create(request);
   } catch (error) {
+    // A05：准备 claim 已被换手 → 本次完成无权提交结论，也**不得**登记清理义务：
+    // 实例按稳定 operationId 复用，其归属属于当前准备者；在这里登记清理会把继任者
+    // 刚建立好的实例真实释放掉。旧工作只丢弃自己的观察结果。
+    if (error instanceof EnvironmentPreparationClaimSupersededError) throw error;
     // 真实资源可能已创建一部分：登记持久清理工作（归属 + 重试），不吞掉错误。
     await scheduleEnvironmentLeaseCleanup({
       tenantId: input.tenantId,
@@ -383,9 +410,13 @@ async function provisionWithBackend(input: {
       leaseId: lease.id,
       capabilitiesJson: facts.capabilities,
       evidence,
+      preparationClaim: input.preparationClaim,
       now: input.now,
     });
   } catch (error) {
+    // A05：同上 —— 准备 claim 换手属于"本次完成已无权提交"，不是资源异常，
+    // 不能借这条清理路径释放继任者的实例。
+    if (error instanceof EnvironmentPreparationClaimSupersededError) throw error;
     // 真实资源已经建立，但控制面拒绝承认（能力不满足 / 证据自洽失败 / Lease 状态非法）：
     // 必须登记归属并尝试真实释放，不能留下无主容器。
     await scheduleEnvironmentLeaseCleanup({
@@ -575,6 +606,10 @@ export function createEnvironmentProvisioner(dependencies: {
       await beginEnvironmentLeaseReprepare({
         tenantId: input.tenantId,
         leaseId: current.id,
+        attemptId: current.attemptId,
+        preparationIntentKey: input.preparationIntentKey,
+        preparationRequestDigest: input.preparationRequestDigest,
+        preparationClaimId: input.preparationClaimId,
         recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
         now,
       });
@@ -588,6 +623,13 @@ export function createEnvironmentProvisioner(dependencies: {
         workspaceBindingId: input.workspaceBindingId,
         workspaceRoot: input.workspaceRoot ?? null,
         recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
+        // A05：IO 走完之后回来核对"我是不是仍然是当前准备者"。没有这一步，迟到的
+        // 旧完成会盖掉继任者的 Prepared 证据（`provisionWithBackend` 在它被拒时
+        // 必须**不**登记清理义务 —— 实例按稳定 operationId 复用，归属属于继任者）。
+        preparationClaim: {
+          attemptId: current.attemptId,
+          preparationClaimId: input.preparationClaimId,
+        },
         now,
       });
     },

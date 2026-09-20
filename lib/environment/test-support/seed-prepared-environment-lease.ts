@@ -37,6 +37,11 @@ export async function seedPreparedEnvironmentLease(input: {
   workerRef?: string;
   hostIdentity?: string;
   storageIdentity?: string;
+  /**
+   * A05：本次完成所依据的准备 claim。用于验证"迟到的旧完成不得提交证据"：
+   * 提供时 `prepareEnvironmentLease` 会在事务内复核准备槽归属。
+   */
+  preparationClaim?: { attemptId: string; preparationClaimId: string };
   now?: Date;
 }): Promise<EnvironmentLease> {
   const now = input.now ?? new Date();
@@ -108,6 +113,7 @@ export async function seedPreparedEnvironmentLease(input: {
     leaseId: lease.id,
     capabilitiesJson: input.capabilitiesJson ?? input.revision.requiredCapabilities,
     evidence,
+    preparationClaim: input.preparationClaim,
     now,
   });
 }

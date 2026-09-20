@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "350aca96-75cf-4c76-9cd2-9fd9522a3355",
+  "id": "813be9da-df33-4f21-91e5-5426873d53ff",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -13893,9 +13893,23 @@
           "notNull": false,
           "autoincrement": false
         },
-        "preparationLeaseOwner": {
-          "name": "preparationLeaseOwner",
+        "preparationIntentKey": {
+          "name": "preparationIntentKey",
           "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparationRequestDigest": {
+          "name": "preparationRequestDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "preparationClaimId": {
+          "name": "preparationClaimId",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -14089,6 +14103,14 @@
         "InvocationAttempt_attempt_no_positive": {
           "name": "InvocationAttempt_attempt_no_positive",
           "value": "`attemptNo` >= 1"
+        },
+        "InvocationAttempt_preparing_claim_shape": {
+          "name": "InvocationAttempt_preparing_claim_shape",
+          "value": "`preparationState` <> 'preparing' OR (`preparationClaimId` IS NOT NULL AND `preparationLeaseExpiresAt` IS NOT NULL)"
+        },
+        "InvocationAttempt_preparation_intent_shape": {
+          "name": "InvocationAttempt_preparation_intent_shape",
+          "value": "(`preparationIntentKey` IS NULL AND `preparationRequestDigest` IS NULL) OR (`preparationIntentKey` IS NOT NULL AND `preparationRequestDigest` IS NOT NULL)"
         },
         "InvocationAttempt_preparation_evidence_shape": {
           "name": "InvocationAttempt_preparation_evidence_shape",
@@ -15037,6 +15059,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "sourceOperationKey": {
+          "name": "sourceOperationKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sourceRequestDigest": {
+          "name": "sourceRequestDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "semanticRequestJson": {
           "name": "semanticRequestJson",
           "type": "json",
@@ -15228,6 +15264,17 @@
           ],
           "isUnique": true
         },
+        "RuntimeSessionBinding_tenant_source_intent_uq": {
+          "name": "RuntimeSessionBinding_tenant_source_intent_uq",
+          "columns": [
+            "tenantId",
+            "invocationId",
+            "attemptId",
+            "intentType",
+            "sourceOperationKey"
+          ],
+          "isUnique": true
+        },
         "RuntimeSessionBinding_state_dispatch_idx": {
           "name": "RuntimeSessionBinding_state_dispatch_idx",
           "columns": [
@@ -15332,6 +15379,10 @@
         "RuntimeSessionBinding_supervisor_claim_shape": {
           "name": "RuntimeSessionBinding_supervisor_claim_shape",
           "value": "(`supervisorClaimId` IS NULL AND `supervisorInstanceId` IS NULL AND `supervisorLeaseExpiresAt` IS NULL AND `supervisorReleasedAt` IS NULL) OR (`supervisorClaimId` IS NOT NULL AND `supervisorInstanceId` IS NOT NULL AND `supervisorLeaseExpiresAt` IS NOT NULL)"
+        },
+        "RuntimeSessionBinding_source_intent_shape": {
+          "name": "RuntimeSessionBinding_source_intent_shape",
+          "value": "(`sourceOperationKey` IS NULL AND `sourceRequestDigest` IS NULL) OR (`sourceOperationKey` IS NOT NULL AND `sourceRequestDigest` IS NOT NULL)"
         },
         "RuntimeSessionBinding_dispatch_freeze_shape": {
           "name": "RuntimeSessionBinding_dispatch_freeze_shape",

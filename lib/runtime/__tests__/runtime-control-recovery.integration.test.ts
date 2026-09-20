@@ -777,6 +777,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     });
     const started = await startRuntimeInvocation({
       tenantId: ctx.tenantId,
+      sourceOperationKey: `invocation:${invocation.id}`,
       invocation,
       binding,
       attempt,
@@ -988,6 +989,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     try {
       await startRuntimeInvocation({
         tenantId,
+        sourceOperationKey: `invocation:${invocation.id}`,
         invocation,
         binding,
         attempt,
@@ -1198,6 +1200,8 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     if (!reRead) throw new Error("Invocation 回读失败");
     const resumed = await resumeRuntimeInvocation({
       tenantId,
+      // A05：RESUME 的来源意图取已持久命令/Invocation 身份，不用时间或调用序号。
+      sourceOperationKey: `invocation:${reRead.id}`,
       invocation: reRead,
       binding,
       attempt: attempt2,
@@ -1310,6 +1314,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     // 第 1 代：正式 Start（intentType=start），Session 意图为 start。
     await startRuntimeInvocation({
       tenantId,
+      sourceOperationKey: `invocation:${invocation.id}`,
       invocation,
       binding,
       attempt,
@@ -1334,6 +1339,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       if (!current) throw new Error("Invocation 回读失败");
       return resumeRuntimeInvocation({
         tenantId,
+        sourceOperationKey: `invocation:${current.id}`,
         invocation: current,
         binding,
         attempt,

@@ -41,6 +41,7 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import {
   createRuntimeSessionBindingInTransaction,
   getRuntimeSessionBindingByOwnership,
+  getRuntimeSessionBindingBySourceIntent,
   markRuntimeSessionLostByOwnershipInTransaction,
   markRuntimeSessionLostInTransaction,
   updateRuntimeSessionDispatchInTransaction,
@@ -64,7 +65,9 @@ import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-back
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { requestWorkspaceWriterRelease } from "@/lib/workspace/workspace-write-lock-queries";
 import {
+  type ActivatedWorkspaceWriter,
   type PreparedWorkspaceCandidate,
+  WorkspaceWriterReleasePendingError,
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
 } from "@/lib/workspace/workspace-writer";
@@ -95,6 +98,17 @@ export interface RuntimeStartInput {
   workspace?: WorkspaceExecutionResources;
   intentType?: "start" | "resume";
   recovery?: Recovery;
+  /**
+   * A05：**来源操作键** —— 稳定、重投不变，回答"哪一个外部请求要求这次执行/恢复"。
+   *
+   * - 用户恢复：已持久 `InvocationCommand.id`（`command:<id>`）；
+   * - 子调用续接：已持久 continuation 的原始身份（`agent-call:<id>:<version>`）；
+   * - 首次 Start / 内联重投：Invocation 自身身份（`invocation:<id>`）。
+   *
+   * 必填而不是可选：没有来源意图，"同一次请求的第二次投递"就无法与"另一次合法恢复"区分，
+   * 唯一能省事的做法就只剩"按最新 Attempt 猜"——那正是 A05 要消灭的东西。
+   */
+  sourceOperationKey: string;
   now?: Date;
   /**
    * Job-backed Invocation 的输入冻结校验：调用方（领域解析器）解析出的输入摘要。
@@ -126,6 +140,54 @@ export function buildExecutionCredentials(
     gatewayToken: issueWorkloadToken({ ...base, audience: "gateway" }),
     expiresAt,
   };
+}
+
+/**
+ * A07 决策四的**调用方义务**：把"上一代物理 Writer 尚未确认停止"在本次启动/恢复里跑完。
+ *
+ * `reserveWorkspaceWriter` 面对"旧 `active` holder 已失权"时**只**登记释放义务并返回
+ * `release_pending`（即 `WorkspaceWriterReleasePendingError`）——它绝不覆盖那一行、也绝不
+ * 抢下一代，因为定位一旦丢失就再也停不掉原来的写者。这条义务必须有人真正兑现：真实撤销
+ * 旧代际、取得 `stopped && processGroupEmpty` 回执、把行推到 `released`；只有那之后，
+ * 下一次预留才会分配新代际。
+ *
+ * 生产 Start/Resume 就是那个"有人"。后台清理 Worker 也会收敛，但把一次合法恢复的成败押在
+ * "等 Worker 巡检"上是不可接受的不确定延迟（A06-04：默认完整暂停恢复链必须真正执行）。
+ *
+ * 只兑现**一轮**并重试**一次**：真实停止没成立时（`retry_scheduled`，例如旧 Host 暂时
+ * 联系不上）如实把原错误抛回去 —— "本轮不做、稍后重试"，绝不留半个新代际。
+ */
+async function activateWorkspaceWriterConvergingStaleRelease(input: {
+  tenantId: string;
+  invocationId: string;
+  attemptId: string;
+  ownership: ExecutionOwnership;
+  authority: AuthorityIdentity;
+  candidate: PreparedWorkspaceCandidate;
+}): Promise<ActivatedWorkspaceWriter> {
+  const attemptActivation = () =>
+    activatePreparedWorkspaceWriter({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      attemptId: input.attemptId,
+      ownership: input.ownership,
+      authority: input.authority,
+      candidate: input.candidate,
+    });
+  try {
+    return await attemptActivation();
+  } catch (error) {
+    if (!(error instanceof WorkspaceWriterReleasePendingError)) throw error;
+    const release = await runWorkspaceWriterRelease({
+      tenantId: input.tenantId,
+      lockId: error.lockId,
+      leaseOwner: `start-converge:${input.attemptId}`,
+      // 撤销必须到达**该 Binding 的受管 Host**：与候选同源解析，不另起一套定位逻辑。
+      deps: { resolveHost: async () => input.candidate.backend.host },
+    });
+    if (release.outcome === "retry_scheduled") throw error;
+    return await attemptActivation();
+  }
 }
 
 /** Candidate preparation, ownership fencing, physical writer activation, durable intent registration, then transport. */
@@ -288,6 +350,22 @@ export async function startRuntimeInvocation(
   // "恢复 Anchor 已变化"（同一份事实两套判据）。
   const recoveryAnchorDigest =
     input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
+  // A05：来源意图的**语义摘要**只在这里定义一次 —— 让每个调用方各算一份必然漂移，
+  // 而漂移的后果是"同一个请求被判成两个意图"（重复准备）或"两个请求被判成同一个"（吞掉冲突）。
+  // 摘要覆盖 tenant/Invocation/Attempt/intentType/冻结资源/锚点；凭据、trace、重试次数不进入。
+  const intentType = input.intentType ?? "start";
+  const sourceRequestDigest = protocolDigest({
+    scope: "runtime-start-source-intent",
+    tenantId: input.tenantId,
+    invocationId: input.invocation.id,
+    attemptId: input.attempt.id,
+    intentType,
+    runtimeRevisionId: input.binding.runtimeRevisionId,
+    workspaceBindingId: input.binding.workspaceBindingId ?? null,
+    environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId ?? null,
+    anchorDigest: recoveryAnchorDigest,
+    checkpointId: input.recovery?.kind === "resume" ? (input.recovery.checkpointId ?? null) : null,
+  });
   const result = await db.transaction(async (tx) => {
     // A01 §1：本事务此前先 `SELECT ExecutionOwnership … FOR UPDATE` 再经
     // `acquireExecutionOwnershipInTransaction` 去锁 Invocation，与「先锁 I 再锁 O」的
@@ -408,26 +486,68 @@ export async function startRuntimeInvocation(
       });
       ownership = ownershipResult.ownership;
     }
-    let session = await getRuntimeSessionBindingByOwnership(input.tenantId, ownership.id, tx);
-    if (!session) {
-      session = await createRuntimeSessionBindingInTransaction(tx, {
-        tenantId: input.tenantId,
+    // A05 唯一决策表第 1/2/3/6 行：**先按来源意图**回读，再谈"要不要另造一个 S"。
+    //
+    // 来源意图先于 O 生成就存在，因此这是唯一能把"同一请求的第二次投递"与"另一次合法恢复"
+    // 区分开的事实。旧实现在这里只看 `ownershipId`：一旦重投落在一个**新**代际上，
+    // 就再也认不出旧意图，只能另造 S/O 并重新准备环境。
+    let session = await getRuntimeSessionBindingBySourceIntent(
+      input.tenantId,
+      {
         invocationId: input.invocation.id,
         attemptId: preparedAttempt.id,
-        ownershipId: ownership.id,
-        runtimeRevisionId: input.binding.runtimeRevisionId,
-        leaseEpoch: ownership.leaseEpoch,
-        intentType: input.intentType ?? "start",
-        startIntentKey: `start:${ownership.id}`,
-        // External start capabilities 成为 RuntimeSessionBinding / effective capability 事实。
-        runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
-      });
+        intentType,
+        sourceOperationKey: input.sourceOperationKey,
+      },
+      tx,
+    );
+    if (session) {
+      if (session.sourceRequestDigest !== sourceRequestDigest) {
+        // 第 2 行：同来源换语义 → 拒绝且无变更。绝不"采用最新锚点/Revision 凑通过"。
+        throw new Error("StartIntentConflict");
+      }
+      if (["closed", "lost"].includes(session.bindingState)) {
+        // 第 6 行：原 O/S 已终态或失权 → **原请求不复活**。合法新代际必须由正式恢复器
+        // 携带**新的 Attempt** 形成（A03-05：接管必须新建 Attempt），因此走到这里意味着
+        // 调用方正在用一个已死的代际身份重放，只能拒绝。
+        throw new ExecutionAuthorityError(
+          "NotCurrentExecutor",
+          `来源意图的 Session 已收口（${session.bindingState}），不可复活；请由正式恢复器建立新代际`,
+        );
+      }
+    } else {
+      session = await getRuntimeSessionBindingByOwnership(input.tenantId, ownership.id, tx);
+      if (session && session.sourceOperationKey !== input.sourceOperationKey) {
+        // 同一个 O 上挂着**另一个**来源意图：这是"健康执行不属于本恢复意图"的一种，
+        // 不得把它改写成新意图（那等于让旧请求接管当前执行）。
+        throw new ExecutionAuthorityError(
+          "NotCurrentExecutor",
+          "当前执行权属于另一个来源意图，不能改写为本次请求",
+        );
+      }
+      if (!session) {
+        session = await createRuntimeSessionBindingInTransaction(tx, {
+          tenantId: input.tenantId,
+          invocationId: input.invocation.id,
+          attemptId: preparedAttempt.id,
+          ownershipId: ownership.id,
+          runtimeRevisionId: input.binding.runtimeRevisionId,
+          leaseEpoch: ownership.leaseEpoch,
+          intentType,
+          startIntentKey: `start:${ownership.id}`,
+          sourceOperationKey: input.sourceOperationKey,
+          sourceRequestDigest,
+          // External start capabilities 成为 RuntimeSessionBinding / effective capability 事实。
+          runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
+        });
+      }
     }
     if (
       session.attemptId !== preparedAttempt.id ||
       session.runtimeRevisionId !== input.binding.runtimeRevisionId ||
       session.leaseEpoch !== ownership.leaseEpoch ||
-      session.intentType !== (input.intentType ?? "start") ||
+      session.intentType !== intentType ||
+      session.sourceOperationKey !== input.sourceOperationKey ||
       ["closed", "lost"].includes(session.bindingState)
     ) {
       throw new Error("RuntimeSessionMismatch");
@@ -451,7 +571,7 @@ export async function startRuntimeInvocation(
           leaseEpoch: ownership.leaseEpoch,
           sessionBindingId: session.id,
         });
-        activatedWorkspace = await activatePreparedWorkspaceWriter({
+        activatedWorkspace = await activateWorkspaceWriterConvergingStaleRelease({
           tenantId: input.tenantId,
           invocationId: input.invocation.id,
           attemptId: preparedAttempt.id,

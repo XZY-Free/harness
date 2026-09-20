@@ -110,6 +110,8 @@ export async function redispatchRuntimeInvocation(
     environmentLeaseId: environmentLease?.id ?? null,
     environmentProvisioner: input.environmentProvisioner ?? null,
     workspace: input.workspace,
+    // A05：redispatch 是同一 Invocation 的**重投**，来源意图与首次一致。
+    sourceOperationKey: `invocation:${invocation.id}`,
   });
   const current = await getInvocationById(input.tenantId, input.invocationId);
   return {

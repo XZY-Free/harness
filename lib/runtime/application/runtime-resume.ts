@@ -114,6 +114,15 @@ export async function resumeRuntimeInvocation(input: {
   environmentProvisioner?: EnvironmentProvisioner;
   anchor: string;
   anchorDigest: string;
+  /**
+   * A05：本次恢复的**来源操作键**，必须来自已持久事实。
+   *
+   * 用户恢复取 `command:<InvocationCommand.id>`（命令网关唯一入口给出）；
+   * External continuation 取已持久 continuation 的原始身份（`agent-call:<id>:<version>`）。
+   * 不用当前时间、不用调用序号：否则"同一次恢复的第二次投递"会被当成新恢复，
+   * 于是再跑一遍环境重准备、把上一次建好的 ready/激活抹掉 —— 那正是 A05 修的问题。
+   */
+  sourceOperationKey: string;
 }): Promise<RuntimeStartResponse> {
   const invocation = await getInvocationById(input.tenantId, input.invocation.id);
   const attempt = await getAttemptById(input.attempt.id);
@@ -157,6 +166,24 @@ export async function resumeRuntimeInvocation(input: {
     ) {
       throw new Error("EnvironmentRevisionMismatch");
     }
+    // A05：把"这次恢复是哪一个意图"变成持久事实，再动环境。
+    //
+    // 来源意图取**已持久事实**（Invocation/Attempt 与冻结资源），不取当前时间或调用序号：
+    // 只有稳定，ACK/started 丢失后的第二次投递才会被认出来是"同一意图重投"，
+    // 从而沿用已建好的 ready/激活，而不是重做准备把它们抹掉。
+    // 语义摘要覆盖锚点/检查点/Revision/Binding —— 同来源换其中任何一项都必须被拒。
+    const preparationIntentKey = `resume:${invocation.id}:${attempt.id}`;
+    const preparationRequestDigest = protocolDigest({
+      scope: "environment-reprepare",
+      tenantId: input.tenantId,
+      invocationId: invocation.id,
+      attemptId: attempt.id,
+      runtimeRevisionId: input.binding.runtimeRevisionId,
+      workspaceBindingId: input.binding.workspaceBindingId,
+      environmentDefinitionRevisionId: revision.id,
+      anchorDigest: input.anchorDigest ?? null,
+      checkpointId: input.checkpointId ?? attempt.filesystemCheckpointId ?? null,
+    });
     environmentLease = await input.environmentProvisioner.reprepare({
       tenantId: input.tenantId,
       lease: current,
@@ -165,6 +192,9 @@ export async function resumeRuntimeInvocation(input: {
       workspaceBindingId: input.binding.workspaceBindingId,
       workspaceRoot: input.workspace?.root ?? null,
       recoveryAnchorDigest: input.anchorDigest ?? null,
+      preparationIntentKey,
+      preparationRequestDigest,
+      preparationClaimId: newSupervisorClaimId(),
     });
     if (
       !isPreparedReadinessState(environmentLease.readinessState) ||
@@ -187,6 +217,7 @@ export async function resumeRuntimeInvocation(input: {
     environmentProvisioner: input.environmentProvisioner ?? null,
     workspace: input.workspace,
     intentType: "resume",
+    sourceOperationKey: input.sourceOperationKey,
     recovery: {
       kind: "resume",
       anchor: input.anchor,
@@ -925,6 +956,10 @@ export async function resumeHarnessInvocation(input: {
         : {}),
       anchor,
       anchorDigest: attempt.resumeAnchorDigest ?? protocolDigest(anchor),
+      // A05：子调用续接的来源意图 = 已持久 continuation 的**原始身份**
+      // （`agentCallId` + 该次结果的 `sourceVersion`），不是当前时间或本次调用序号。
+      // 同一次续接因 ACK/started 丢失而重投时会拿到同一个键，从而命中原 O/S。
+      sourceOperationKey: `agent-call:${input.agentCallId}:${input.sourceVersion}`,
     });
     return {
       status: "resumed",

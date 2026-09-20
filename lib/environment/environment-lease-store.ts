@@ -4,6 +4,7 @@ import {
   EnvironmentComplianceError,
   EnvironmentLeaseConflictError,
   EnvironmentLeaseStateError,
+  EnvironmentPreparationClaimSupersededError,
 } from "@/lib/environment/environment-errors";
 import { capabilitiesMeet, unmetCapabilities } from "@/lib/environment/environment-instance-spec";
 import {
@@ -19,6 +20,10 @@ import {
   environmentLeaseTable,
 } from "@/lib/persistence/schema/environment";
 import { environmentDefinitionRevisionTable } from "@/lib/persistence/schema/environment-definition-revision";
+import {
+  INVOCATION_ATTEMPT_TERMINAL_STATES,
+  invocationAttemptTable,
+} from "@/lib/persistence/schema/executions";
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 export {
@@ -26,12 +31,21 @@ export {
   EnvironmentInstanceOperationError,
   EnvironmentLeaseConflictError,
   EnvironmentLeaseStateError,
+  EnvironmentPreparationClaimSupersededError,
 } from "@/lib/environment/environment-errors";
 
 /** Prepared→ready 的清理重试退避（毫秒），按 cleanupCount 指数增长，上限 5 分钟。 */
 export const ENVIRONMENT_CLEANUP_BACKOFF_MS = [5_000, 15_000, 60_000, 300_000] as const;
 /** 清理工作租约时长（毫秒）：超出即视为该 Worker 已死，允许他人重新认领。 */
 export const ENVIRONMENT_CLEANUP_LEASE_MS = 60_000 as const;
+/**
+ * A05：环境准备的领取租约时长（毫秒）。
+ *
+ * 准备槽回答的是"这次准备由谁在做、做到什么时候"——它必须是**可过期的持久事实**，
+ * 而不是内存标志：只有这样才能在准备进程崩溃后由正式消费者接续同一逻辑 operation，
+ * 也才能在旧准备者迟到回来时判定"它的证据已经不属于当前意图"。
+ */
+export const ENVIRONMENT_PREPARATION_LEASE_MS = 120_000 as const;
 
 /**
  * A01-03：本模块所有**多语句**操作的强制事务类型。
@@ -190,6 +204,20 @@ export interface PrepareEnvironmentLeaseInput {
   evidence: EnvironmentPreparedEvidence;
   /** 复核上下文（与 Lease 冻结论证比对）。 */
   now?: Date;
+  /**
+   * A05：本次完成所依据的准备 claim（只有 `reprepare` 路径提供）。
+   *
+   * 真实 IO 在事务外，回来时准备槽可能已经被另一个合法准备者接管。提供本字段时，
+   * 写入 Prepared 证据前必须在**同一事务内**复核"我仍是当前准备者"；否则迟到的旧
+   * 完成会覆盖新代际的证据（甚至把继任者的实例释放掉）。不提供即沿用既有行为
+   * （首次准备、测试夹具）。
+   */
+  preparationClaim?: {
+    /** Lease 所属 Attempt（锁序上位于 Lease **之前**，必须先锁它）。 */
+    attemptId: string;
+    /** 本次准备的领取 nonce。 */
+    preparationClaimId: string;
+  };
 }
 
 /**
@@ -211,6 +239,34 @@ export async function prepareEnvironmentLeaseInTransaction(
   input: PrepareEnvironmentLeaseInput,
 ): Promise<EnvironmentLease> {
   const now = input.now ?? new Date();
+  // A05：IO 返回后的 claim CAS。必须先锁 Attempt（本模块锁序：Attempt → Lease），
+  // 否则"读到自己是当前准备者"与"写入证据"之间会被接管事务插进来，迟到的旧完成
+  // 就会盖掉继任者已经建立好的证据与激活。
+  if (input.preparationClaim) {
+    const [claimHolder] = await tx
+      .select({
+        preparationState: invocationAttemptTable.preparationState,
+        preparationClaimId: invocationAttemptTable.preparationClaimId,
+      })
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, input.preparationClaim.attemptId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (
+      !claimHolder ||
+      claimHolder.preparationState !== "preparing" ||
+      claimHolder.preparationClaimId !== input.preparationClaim.preparationClaimId
+    ) {
+      throw new EnvironmentPreparationClaimSupersededError(
+        "准备 claim 已换手：旧完成不得提交 Prepared 证据",
+      );
+    }
+  }
   const [lease] = await tx
     .select()
     .from(environmentLeaseTable)
@@ -449,6 +505,14 @@ export async function activateEnvironmentLeaseInTransaction(
 export async function beginEnvironmentLeaseReprepare(input: {
   tenantId: string;
   leaseId: string;
+  /** A05：Lease 所属 Attempt——锁序上位于 Lease **之前**，守卫必须先锁它。 */
+  attemptId: string;
+  /** A05：这次准备为哪个稳定来源意图服务（用户恢复=已持久命令身份；续接=已持久 continuation 身份）。 */
+  preparationIntentKey: string;
+  /** A05：该来源意图的语义摘要；同来源换摘要必须被拒，而不是采用最新输入。 */
+  preparationRequestDigest: string;
+  /** A05：本次准备的领取 nonce。迟到的旧工作按它判定自己是否仍是当前准备者。 */
+  preparationClaimId: string;
   /** 本次 Resume 的恢复水位摘要；`null` 表示本次执行不从 Checkpoint/恢复水位承接。 */
   recoveryAnchorDigest?: string | null;
   now?: Date;
@@ -461,12 +525,100 @@ export async function beginEnvironmentLeaseReprepareInTransaction(
   input: {
     tenantId: string;
     leaseId: string;
-    /** 本次 Resume 的恢复水位摘要；`null` 表示本次执行不从 Checkpoint/恢复水位承接。 */
+    attemptId: string;
+    preparationIntentKey: string;
+    preparationRequestDigest: string;
+    preparationClaimId: string;
     recoveryAnchorDigest?: string | null;
     now?: Date;
   },
 ): Promise<EnvironmentLease> {
   const now = input.now ?? new Date();
+  // ── A05：准备意图守卫（必须在动 Lease **之前**求值）────────────────────────────
+  //
+  // 旧实现无条件把 Lease 推回 `preparing` 并清 `activationOwnershipId`，于是
+  // "同一次 Resume 的第二次投递"（ACK/started 丢失重试）会把上一次已经建立好的
+  // ready/激活事实当场抹掉 —— 那正是 A05 的固定问题。
+  //
+  // 判据不是"readiness 是不是 ready"（那是宽松捷径：不核对本意图、本 O），而是
+  // Attempt 上的**准备槽**：同一个（intentKey, digest）已经登记过什么。
+  const [attempt] = await tx
+    .select()
+    .from(invocationAttemptTable)
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, input.tenantId),
+        eq(invocationAttemptTable.id, input.attemptId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!attempt) throw new EnvironmentComplianceError("InvocationAttempt 不存在");
+  if (INVOCATION_ATTEMPT_TERMINAL_STATES.includes(attempt.attemptState)) {
+    throw new EnvironmentComplianceError(`Attempt 已终态（${attempt.attemptState}），不能重新准备`);
+  }
+  if (
+    attempt.preparationIntentKey !== null &&
+    attempt.preparationIntentKey === input.preparationIntentKey &&
+    attempt.preparationRequestDigest !== input.preparationRequestDigest
+  ) {
+    // 同来源换语义输入：绝不采用"最新输入"覆盖原锚点。
+    throw new EnvironmentComplianceError("ResumeIntentConflict：同来源意图的语义摘要不一致");
+  }
+  if (
+    attempt.preparationState === "prepared" &&
+    attempt.preparationIntentKey === input.preparationIntentKey &&
+    attempt.preparationRequestDigest === input.preparationRequestDigest
+  ) {
+    // 同来源、同摘要、证据已在 —— 这是**重投**，不是新恢复。原样返回当前 Lease：
+    // readiness 与 activationOwnershipId 一律不动，由调用方按原意图回到原回执。
+    const [current] = await tx
+      .select()
+      .from(environmentLeaseTable)
+      .where(
+        and(
+          eq(environmentLeaseTable.tenantId, input.tenantId),
+          eq(environmentLeaseTable.id, input.leaseId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!current) throw new EnvironmentLeaseConflictError(input.leaseId);
+    return current;
+  }
+  if (
+    attempt.preparationState === "preparing" &&
+    attempt.preparationClaimId !== null &&
+    attempt.preparationClaimId !== input.preparationClaimId &&
+    (attempt.preparationLeaseExpiresAt?.getTime() ?? 0) > now.getTime()
+  ) {
+    // 另一个准备者正按**同一**意图工作且租约仍健康：不造并发的第二个准备者。
+    throw new EnvironmentLeaseConflictError("另一准备者正在按同一意图准备环境");
+  }
+  // 登记/接管准备槽：来源意图 + 本次 claim + 期限。三个字段共同回答"这一轮准备是谁、在什么
+  // 时候、为哪个意图做的"——崩溃后由它接续同一稳定 operation，旧工作回来由它判定自己已无权
+  // 提交结论。
+  //
+  // `preparationCount` **不在这里自增**：它的既成语义是"这个 Attempt 已完成几次资源准备"，
+  // 唯一写入点是准备**完成**之后的 `markAttemptPreparedInTransaction`。登记只表示"开始做"，
+  // 若在这里也计一次，同一轮准备会被计两次，而且**进行中**的一轮会被记成已完成事实 ——
+  // 那恰好抹掉了本项要求的"进度必须能与结论区分开"。
+  await tx
+    .update(invocationAttemptTable)
+    .set({
+      preparationState: "preparing",
+      preparationIntentKey: input.preparationIntentKey,
+      preparationRequestDigest: input.preparationRequestDigest,
+      preparationClaimId: input.preparationClaimId,
+      preparationLeaseExpiresAt: new Date(now.getTime() + ENVIRONMENT_PREPARATION_LEASE_MS),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, input.tenantId),
+        eq(invocationAttemptTable.id, input.attemptId),
+      ),
+    );
   const [lease] = await tx
     .select()
     .from(environmentLeaseTable)

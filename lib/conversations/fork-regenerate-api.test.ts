@@ -564,7 +564,9 @@ describe("POST /api/turns/{turn_id}/interrupt", () => {
     expect(body.turn_id).toBe(turnId);
     expect(body.turn_state).toBe("running"); // Turn 状态未变
     expect(body.interrupt_state).toBe("requested");
-    expect(body.command.command_state).toBe("queued");
+    // A09：内联调度不再有「无领取身份」旁路，网关在请求内真实领取刚写入的 `queued` 行
+    // （`allowImmediateQueued`），命令随即推进为 `dispatched`；响应取持久事实，不报派发前快照。
+    expect(body.command.command_state).toBe("dispatched");
     expect(body.already_completed_effects_preserved).toBe(true);
     expect(body.event_id).toEqual(expect.any(String));
 
@@ -576,7 +578,8 @@ describe("POST /api/turns/{turn_id}/interrupt", () => {
     const commands = await getTurnCommands(turnId);
     expect(commands).toHaveLength(1);
     expect(commands[0]?.commandType).toBe("cancel");
-    expect(commands[0]?.commandState).toBe("queued");
+    // A09：领取事务产生 `dispatched`，库内事实与响应一致。
+    expect(commands[0]?.commandState).toBe("dispatched");
 
     // 验证 DB：turn.interrupt_requested 事件已写
     const events = await getTurnEvents(turnId);
@@ -741,7 +744,8 @@ describe("POST /api/turns/{turn_id}/steer", () => {
     expect(body.turn_state).toBe("running"); // Turn 状态未变
     expect(body.steer_state).toBe("queued");
     expect(body.guidance_item_id).toEqual(expect.any(String));
-    expect(body.command.command_state).toBe("queued");
+    // A09：内联调度在请求内真实领取，命令推进为 `dispatched`（steer_state 仍为入队语义）。
+    expect(body.command.command_state).toBe("dispatched");
     expect(body.event_id).toEqual(expect.any(String));
 
     // 验证 DB：Turn 状态未变（仍为 running）
@@ -758,7 +762,8 @@ describe("POST /api/turns/{turn_id}/steer", () => {
     const commands = await getTurnCommands(turnId);
     expect(commands).toHaveLength(1);
     expect(commands[0]?.commandType).toBe("steer");
-    expect(commands[0]?.commandState).toBe("queued");
+    // A09：领取事务产生 `dispatched`，库内事实与响应一致。
+    expect(commands[0]?.commandState).toBe("dispatched");
 
     // 验证 DB：turn.steer_queued 事件已写
     const events = await getTurnEvents(turnId);

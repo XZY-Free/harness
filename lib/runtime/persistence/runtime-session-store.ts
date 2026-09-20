@@ -103,6 +103,26 @@ export interface CreateRuntimeSessionBindingInput {
   leaseEpoch: number;
   intentType: RuntimeSessionIntentType;
   startIntentKey: string;
+  /**
+   * A05：**来源操作键** —— 稳定、重投不变，回答"哪一个外部请求要求这次执行/恢复"。
+   *
+   * - 用户恢复：已持久 `InvocationCommand.id`；
+   * - 子调用续接：已持久 continuation 的原始身份；
+   * - 首次 Start：Invocation 自身身份。
+   *
+   * 绝不用当前时间、随机数或调用序号：只有稳定，ACK/`execution.started` 丢失后的第二次
+   * 投递才会被认出来是"同一意图重投"，从而沿用已建好的 ready/激活事实。
+   * 它与 `startIntentKey` 分工不同：后者是 O 生成**之后**的 Runtime 传输键（`start:<ownershipId>`），
+   * 而来源意图必须在 O 存在**之前**就能比对。两者不是重复账本。
+   */
+  sourceOperationKey: string;
+  /**
+   * A05：该来源意图的**语义摘要**（tenant/Invocation/Attempt/intentType/锚点/Binding/Revision）。
+   *
+   * 同来源换摘要 = 另一份语义请求 → 必须拒绝，绝不采用"最新输入"覆盖原锚点。
+   * 凭据轮换、trace、重试次数**不进入**摘要。
+   */
+  sourceRequestDigest: string;
   semanticRequestJson?: unknown;
   semanticRequestDigest?: string | null;
   runtimeCapabilitiesJson?: unknown;
@@ -178,6 +198,9 @@ export async function createRuntimeSessionBindingInTransaction(
   if (input.startIntentKey !== `start:${input.ownershipId}`) {
     throw new Error("StartIntentConflict");
   }
+  if (!input.sourceOperationKey || !input.sourceRequestDigest) {
+    throw new Error("StartIntentConflict");
+  }
   if (
     (input.semanticRequestJson === undefined) !==
     (input.semanticRequestDigest === undefined || input.semanticRequestDigest === null)
@@ -197,6 +220,8 @@ export async function createRuntimeSessionBindingInTransaction(
     bindingState: "prepared",
     intentType: input.intentType,
     startIntentKey: input.startIntentKey,
+    sourceOperationKey: input.sourceOperationKey,
+    sourceRequestDigest: input.sourceRequestDigest,
     semanticRequestJson: input.semanticRequestJson ?? null,
     semanticRequestDigest: input.semanticRequestDigest ?? null,
     intentFrozenAt,
@@ -249,6 +274,41 @@ export async function getRuntimeSessionBindingByStartIntent(
         eq(runtimeSessionBindingTable.startIntentKey, startIntentKey),
       ),
     )
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * A05：按**来源意图**回读 Session（唯一索引 `tenant+invocation+attempt+intentType+sourceOperationKey`）。
+ *
+ * 这是决策表第 1/2/3 行的入口：来源意图先于 O 生成就存在，因此"同一请求的第二次投递"
+ * 可以在这里被认出来，而不必去猜"最新 Attempt"。
+ *
+ * 注意它**不**用于历史行（`sourceOperationKey` 允许为 NULL：MySQL 唯一索引对 NULL 不冲突）。
+ */
+export async function getRuntimeSessionBindingBySourceIntent(
+  tenantId: string,
+  input: {
+    invocationId: string;
+    attemptId: string;
+    intentType: RuntimeSessionIntentType;
+    sourceOperationKey: string;
+  },
+  executor: DbOrTx = db,
+): Promise<RuntimeSessionBinding | null> {
+  const [row] = await executor
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, tenantId),
+        eq(runtimeSessionBindingTable.invocationId, input.invocationId),
+        eq(runtimeSessionBindingTable.attemptId, input.attemptId),
+        eq(runtimeSessionBindingTable.intentType, input.intentType),
+        eq(runtimeSessionBindingTable.sourceOperationKey, input.sourceOperationKey),
+      ),
+    )
+    .for("update")
     .limit(1);
   return row ?? null;
 }

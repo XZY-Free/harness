@@ -32,6 +32,21 @@ export class EnvironmentLeaseStateError extends Error {
 }
 
 /**
+ * A05：迟到的准备完成发现准备槽已经换手。
+ *
+ * 语义边界：这不是"环境不合规"，而是本次完成**已经无权提交结论**。旧工作必须丢弃
+ * 自己的 Prepared 证据，并且**不得**登记针对该 Lease 的清理义务 —— 实例按稳定
+ * `operationId` 复用，它的生命周期属于当前准备者/当前代际；旧完成只是过期观察者，
+ * 若在这里登记清理，就会把继任者刚刚建立好的实例真实释放掉。
+ */
+export class EnvironmentPreparationClaimSupersededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EnvironmentPreparationClaimSupersededError";
+  }
+}
+
+/**
  * 真实 Backend 操作（创建/回读/释放）失败。
  *
  * 与 Compliance 的区别：Compliance 表示"实际配置不满足声明策略"（不可重试，

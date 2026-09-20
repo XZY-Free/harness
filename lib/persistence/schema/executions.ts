@@ -336,7 +336,14 @@ export const invocationAttemptTable = mysqlTable(
     preparationEvidence: json("preparationEvidence"),
     preparationDigest: ascii("preparationDigest", 71),
     preparedAt: timestamp("preparedAt"),
-    preparationLeaseOwner: ascii("preparationLeaseOwner", 128),
+    // A05：准备槽必须是**持久的事实边界**，不是内存标志。
+    // - `preparationIntentKey`/`preparationRequestDigest`：这一次准备为哪个稳定来源意图
+    //   服务；崩溃后由它认领同一逻辑 operation，而不是重新创建一个无主资源。
+    // - `preparationClaimId`：本次准备的领取 nonce（UUID）。与 A03 的 Supervisor claim
+    //   同规则——旧工作回来时按它判定"我是否还是当前准备者"，而不是按可被清空的租约字符串。
+    preparationIntentKey: ascii("preparationIntentKey", 128),
+    preparationRequestDigest: ascii("preparationRequestDigest", 71),
+    preparationClaimId: ascii("preparationClaimId", 36),
     preparationLeaseExpiresAt: timestamp("preparationLeaseExpiresAt"),
     nextPreparationAt: timestamp("nextPreparationAt"),
     preparationCount: int("preparationCount", { unsigned: true }).notNull().default(0),
@@ -378,6 +385,16 @@ export const invocationAttemptTable = mysqlTable(
       sql`\`preparationState\` IN ('pending', 'preparing', 'prepared', 'failed')`,
     ),
     attemptNoPositive: check("InvocationAttempt_attempt_no_positive", sql`\`attemptNo\` >= 1`),
+    // A05：`preparing` 不是一个可以裸奔的状态——"正在准备"只有配上"哪一次领取、租到何时"
+    // 才是可判定的事实。少了它，迟到的旧 IO 结果无法被区分于当前工作。
+    preparingClaimShape: check(
+      "InvocationAttempt_preparing_claim_shape",
+      sql`\`preparationState\` <> 'preparing' OR (\`preparationClaimId\` IS NOT NULL AND \`preparationLeaseExpiresAt\` IS NOT NULL)`,
+    ),
+    preparationIntentShape: check(
+      "InvocationAttempt_preparation_intent_shape",
+      sql`(\`preparationIntentKey\` IS NULL AND \`preparationRequestDigest\` IS NULL) OR (\`preparationIntentKey\` IS NOT NULL AND \`preparationRequestDigest\` IS NOT NULL)`,
+    ),
     preparationEvidenceShape: check(
       "InvocationAttempt_preparation_evidence_shape",
       sql`(\`preparationState\` = 'prepared' AND \`preparationEvidence\` IS NOT NULL AND \`preparationDigest\` IS NOT NULL AND \`preparedAt\` IS NOT NULL) OR \`preparationState\` <> 'prepared'`,
@@ -542,6 +559,14 @@ export const runtimeSessionBindingTable = mysqlTable(
       .default("prepared"),
     intentType: ascii("intentType", 32).$type<RuntimeSessionIntentType>().notNull(),
     startIntentKey: ascii("startIntentKey", 128).notNull(),
+    // A05：**来源意图**——稳定、重投不变，描述"哪一个外部请求要求这次恢复"。
+    // 与 `startIntentKey` 分工不同，不是重复账本：后者是 O 生成之后的 Runtime 传输键
+    // （`start:<ownershipId>`），而来源意图必须在 O 存在**之前**就能比对，否则
+    // "同一请求的第二次投递"只能靠猜最新 Attempt，重投就会无条件重做准备。
+    // 用户恢复取自已持久 `InvocationCommand.id`；子调用续接取自已持久 continuation 的
+    // 原始身份；首次 Start 取 Invocation 自身身份。凭据轮换/trace/重试次数不进入摘要。
+    sourceOperationKey: ascii("sourceOperationKey", 128),
+    sourceRequestDigest: ascii("sourceRequestDigest", 71),
     semanticRequestJson: json("semanticRequestJson"),
     semanticRequestDigest: ascii("semanticRequestDigest", 71),
     intentFrozenAt: timestamp("intentFrozenAt"),
@@ -584,6 +609,15 @@ export const runtimeSessionBindingTable = mysqlTable(
     intentUq: uniqueIndex("RuntimeSessionBinding_tenant_start_intent_uq").on(
       t.tenantId,
       t.startIntentKey,
+    ),
+    // A05：同一（Invocation, Attempt, intentType）下，**一个来源意图最多一个 Session**。
+    // MySQL 唯一索引允许 NULL 多行，所以"没有来源意图"的历史行不冲突。
+    sourceIntentUq: uniqueIndex("RuntimeSessionBinding_tenant_source_intent_uq").on(
+      t.tenantId,
+      t.invocationId,
+      t.attemptId,
+      t.intentType,
+      t.sourceOperationKey,
     ),
     dispatchIdx: index("RuntimeSessionBinding_state_dispatch_idx").on(
       t.bindingState,
@@ -642,6 +676,12 @@ export const runtimeSessionBindingTable = mysqlTable(
     supervisorClaimShape: check(
       "RuntimeSessionBinding_supervisor_claim_shape",
       sql`(\`supervisorClaimId\` IS NULL AND \`supervisorInstanceId\` IS NULL AND \`supervisorLeaseExpiresAt\` IS NULL AND \`supervisorReleasedAt\` IS NULL) OR (\`supervisorClaimId\` IS NOT NULL AND \`supervisorInstanceId\` IS NOT NULL AND \`supervisorLeaseExpiresAt\` IS NOT NULL)`,
+    ),
+    // A05：来源意图两列要么都没有（历史行/平台内部行），要么都完整。
+    // 只有"有键没摘要"这种半成品才是真正危险的——它能让重投误判成"同来源"。
+    sourceIntentShape: check(
+      "RuntimeSessionBinding_source_intent_shape",
+      sql`(\`sourceOperationKey\` IS NULL AND \`sourceRequestDigest\` IS NULL) OR (\`sourceOperationKey\` IS NOT NULL AND \`sourceRequestDigest\` IS NOT NULL)`,
     ),
     dispatchFreezeShape: check(
       "RuntimeSessionBinding_dispatch_freeze_shape",

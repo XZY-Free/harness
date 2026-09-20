@@ -427,6 +427,9 @@ async function dispatchCommand(params: {
         environmentProvisioner: endpoint.environmentProvisioner,
         anchor,
         anchorDigest: attempt.resumeAnchorDigest ?? protocolDigest(anchor),
+        // A05：用户恢复的来源意图 = **已持久命令身份**。用 `params.commandId` 而不是
+        // 时间/序号：同一次 Resume 的重投必须拿到同一个键，重投才会命中原 Session。
+        sourceOperationKey: `command:${params.commandId}`,
       });
     } else if (params.expectedType === "checkpoint") {
       response = await dispatchFilesystemCheckpoint({

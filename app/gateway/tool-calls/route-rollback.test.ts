@@ -38,6 +38,7 @@ import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import {
   applyRuntimeSessionDispatchForTest,
   createRuntimeSessionBindingForTest,
+  sourceIntentForFixture,
 } from "@/lib/runtime/test-support/session-write-fixtures";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
@@ -352,6 +353,12 @@ async function seedBinding(
     leaseEpoch: acquired.ownership.leaseEpoch,
     intentType: "start",
     startIntentKey: `start:${acquired.ownership.id}`,
+    ...sourceIntentForFixture({
+      tenantId: TENANT,
+      invocationId,
+      attemptId: attempt.id,
+      intentType: "start",
+    }),
   });
   // bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
   await applyRuntimeSessionDispatchForTest(TENANT, session.id, {

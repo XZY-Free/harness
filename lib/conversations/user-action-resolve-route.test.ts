@@ -51,6 +51,7 @@ import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import {
   applyRuntimeSessionDispatchForTest,
   createRuntimeSessionBindingForTest,
+  sourceIntentForFixture,
 } from "@/lib/runtime/test-support/session-write-fixtures";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
@@ -237,6 +238,12 @@ async function attachA2ABinding(params: {
     leaseEpoch: ownership.ownership.leaseEpoch,
     intentType: "resume",
     startIntentKey: `start:${ownership.ownership.id}`,
+    ...sourceIntentForFixture({
+      tenantId: params.tenantId,
+      invocationId: params.invocationId,
+      attemptId: attempt.id,
+      intentType: "resume",
+    }),
     runtimeCapabilitiesJson: defaultRuntimeCapabilities(),
   });
   await db

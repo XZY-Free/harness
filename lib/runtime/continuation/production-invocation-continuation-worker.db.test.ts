@@ -27,7 +27,11 @@ import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-qu
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import { turnTable } from "@/lib/persistence/schema/conversation";
-import { invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  executionBindingTable,
+  invocationAttemptTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
@@ -35,7 +39,11 @@ import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resol
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
-import { RuntimeStartRequestSchema, protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  type RuntimeStartRequest,
+  RuntimeStartRequestSchema,
+  protocolDigest,
+} from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
@@ -48,7 +56,7 @@ const originalAuthMode = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 interface ExternalRuntimeFixture {
   server: Server;
   endpoint: string;
-  requests: Array<{ invocationId: string; idempotencyKey: string; body: unknown }>;
+  requests: Array<{ invocationId: string; idempotencyKey: string; body: RuntimeStartRequest }>;
 }
 
 /**
@@ -67,7 +75,11 @@ async function startExternalRuntime(
   runtimeRevisionId: string,
   runtimeCapabilities: unknown,
 ): Promise<ExternalRuntimeFixture> {
-  const requests: Array<{ invocationId: string; idempotencyKey: string; body: unknown }> = [];
+  const requests: Array<{
+    invocationId: string;
+    idempotencyKey: string;
+    body: RuntimeStartRequest;
+  }> = [];
   const capabilitiesDigest = computeCapabilityManifestDigest({
     runtimeRevisionId,
     runtimeCapabilities,
@@ -456,6 +468,52 @@ describe("生产 continuation worker durable topology", () => {
       expect(finalInvocation?.executionState).toBe("completed");
       expect(finalTurn?.turnState).toBe("completed");
       expect(runtime.requests).toHaveLength(1);
+
+      // A05-T08：真实对端**只**收到一个恢复意图，而且这个意图的身份/水位/环境全部取自
+      // 持久冻结事实（ExecutionBinding + Attempt 的恢复锚点），不是调用方自拼资源。
+      const remoteResume = runtime.requests[0];
+      expect(remoteResume).toBeTruthy();
+      const resumeBody = remoteResume?.body;
+      if (!resumeBody) {
+        throw new Error("恢复意图必须送达外部 Runtime");
+      }
+      expect(resumeBody.intentType).toBe("resume");
+      // 传输键是 Session 冻结的稳定启动意图（`start:<ownershipId>`），不是临时/时间派生键。
+      expect(remoteResume?.idempotencyKey.startsWith("start:")).toBe(true);
+      const [frozenBinding] = await db
+        .select()
+        .from(executionBindingTable)
+        .where(eq(executionBindingTable.invocationId, scenario.parentInvocationId));
+      expect(frozenBinding).toBeTruthy();
+      // 环境模式取自持久冻结的 ExecutionBinding，而不是调用方自拼。
+      expect(resumeBody.environment.mode).toBe(frozenBinding?.environmentMode);
+      const [parentAttempt] = await db
+        .select()
+        .from(invocationAttemptTable)
+        .where(eq(invocationAttemptTable.invocationId, scenario.parentInvocationId))
+        .orderBy(desc(invocationAttemptTable.createdAt))
+        .limit(1);
+      expect(resumeBody.recovery.kind).toBe("resume");
+      if (resumeBody.recovery.kind !== "resume") {
+        throw new Error("恢复请求必须携带 resume 恢复锚点，而不是 initial");
+      }
+      // 恢复 Anchor 必须来自持久事实（Invocation/Attempt），不是调用方自拼的临时值。
+      //
+      // 先把**本场景的事实**说清楚：父 Attempt 没有走真实 `execution.suspended`
+      // （durable topology 夹具直接构造 waiting_user），所以它上面没有持久恢复锚点摘要。
+      // 与其把断言写成"有就比较、没有就跳过"的软断言，这里把这条事实显式钉住，再断言
+      // 请求里的 anchor 确实是持久事实派生出来的那个：
+      //   - 有持久检查点 → `checkpoint:<attempt.filesystemCheckpointId>`；
+      //   - 否则 → `invocation:<invocationId>:recovery:<持久 recoveryVersion>`。
+      // `recoveryVersion` 会在恢复采纳子结果后前进，所以只比对**持久前缀**，不给序号造假；
+      // 摘要则必须恰好是 anchor 的函数（生产在无持久锚点时按既有规则派生）。
+      // 真实挂起 → 恢复的锚点严格一致性由 A05-T01/A05-T02 与 A06-T01 用真实 suspended 覆盖。
+      expect(parentAttempt?.resumeAnchorDigest).toBeNull();
+      const persistedAnchorPrefix = parentAttempt?.filesystemCheckpointId
+        ? `checkpoint:${parentAttempt.filesystemCheckpointId}`
+        : `invocation:${scenario.parentInvocationId}:recovery:`;
+      expect(resumeBody.recovery.anchor.startsWith(persistedAnchorPrefix)).toBe(true);
+      expect(resumeBody.recovery.anchorDigest).toBe(protocolDigest(resumeBody.recovery.anchor));
 
       // 复制同一 continuation payload 作为重复 Delivery；调用已推进版本，生产 handler 必须 no-op。
       const duplicateEventId = randomUUID();

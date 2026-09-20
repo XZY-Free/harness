@@ -256,6 +256,7 @@ async function startFixture(
   return startRuntimeInvocation({
     tenantId: fixture.tenantId,
     invocation: fixture.invocation,
+    sourceOperationKey: `invocation:${fixture.invocation.id}`,
     binding: fixture.binding,
     attempt: fixture.attempt,
     runtimeClient: createHttpRuntimeClient(),
@@ -431,6 +432,7 @@ describe("Runtime Start / Resume durable recovery", () => {
       startRuntimeInvocation({
         tenantId: fixture.tenantId,
         invocation: fixture.invocation,
+        sourceOperationKey: `invocation:${fixture.invocation.id}`,
         binding: fixture.binding,
         attempt: fixture.attempt,
         runtimeClient: unavailable,
@@ -541,6 +543,7 @@ describe("Runtime Start / Resume durable recovery", () => {
       resumeRuntimeInvocation({
         tenantId: fixture.tenantId,
         invocation: fixture.invocation,
+        sourceOperationKey: `invocation:${fixture.invocation.id}`,
         binding: fixture.binding,
         attempt: fixture.attempt,
         runtimeClient: createHttpRuntimeClient(),
@@ -554,6 +557,7 @@ describe("Runtime Start / Resume durable recovery", () => {
     const resumed = await resumeRuntimeInvocation({
       tenantId: fixture.tenantId,
       invocation: fixture.invocation,
+      sourceOperationKey: `invocation:${fixture.invocation.id}`,
       binding: fixture.binding,
       attempt: fixture.attempt,
       runtimeClient: createHttpRuntimeClient(),
@@ -589,6 +593,7 @@ describe("Runtime Start / Resume durable recovery", () => {
     await expect(
       startRuntimeInvocation({
         tenantId: fixture.tenantId,
+        sourceOperationKey: `invocation:${fixture.invocation.id}`,
         invocation: (
           await db
             .select()

@@ -752,6 +752,7 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
       startRuntimeInvocation({
         tenantId: fixture.tenantId,
         invocation: fixture.invocation,
+        sourceOperationKey: `invocation:${fixture.invocation.id}`,
         attempt: fixture.attempt,
         binding: fixture.binding,
         environmentLeaseId: lease.id,

@@ -40,6 +40,7 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { filesystemCheckpointTable } from "@/lib/persistence/schema/filesystem-checkpoint";
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
+import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import {
@@ -79,6 +80,7 @@ import {
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
 } from "@/lib/workspace/workspace-writer";
+import { runWorkspaceWriterRelease } from "@/lib/workspace/workspace-writer-release";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -1165,6 +1167,30 @@ describe("FilesystemCheckpoint integration", () => {
         runtimeRevisionId: ctx.runtimeRevisionId,
         runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
       });
+
+      // A07 决策四：旧代际的物理 Writer 还占着 `active` 行。直接激活新代际时，预留只会
+      // **登记释放义务**并返回 `release_pending` —— 它绝不在同一行上覆盖（那会让原本待停止的
+      // 写者失去定位）。真实序列是"先由释放 lane 真实撤销旧代际、取得可核验停止回执、把行推到
+      // `released`，下一代才开始分配"。生产里 `startRuntimeInvocation` 会自动兑现这一轮；
+      // 本用例直接调原语，因此必须自己走这一步。
+      const [staleLock] = await db
+        .select({ id: workspaceWriteLock.id })
+        .from(workspaceWriteLock)
+        .where(
+          and(
+            eq(workspaceWriteLock.tenantId, TENANT_ID),
+            eq(workspaceWriteLock.holderOwnershipId, ctx.ownershipId),
+          ),
+        )
+        .limit(1);
+      expect(staleLock).toBeTruthy();
+      const staleRelease = await runWorkspaceWriterRelease({
+        tenantId: TENANT_ID,
+        lockId: staleLock!.id,
+        leaseOwner: "checkpoint-12-release",
+        deps: { resolveHost: async () => ctx.backend.host },
+      });
+      expect(staleRelease.outcome).toBe("released");
 
       // (c) 用真正匹配的 Checkpoint 在**新运行目录**恢复。
       const newRoot = path.join(ctx.managedRoot, "restored-run");

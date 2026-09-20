@@ -628,6 +628,7 @@ describe("Thread-independent Job runtime integration", () => {
       startRuntimeInvocation({
         tenantId: TENANT_ID,
         invocation: fixture.invocation,
+        sourceOperationKey: `invocation:${fixture.invocation.id}`,
         attempt,
         binding: fixture.binding,
         runtimeClient: {} as RuntimeHttpClient,
@@ -698,6 +699,8 @@ describe("Thread-independent Job runtime integration", () => {
     };
     const startInput = {
       tenantId: TENANT_ID,
+      // A05：投递重试仍是**同一个**来源意图。
+      sourceOperationKey: `invocation:${fixture.invocation.id}`,
       invocation: fixture.invocation,
       attempt,
       binding: fixture.binding,
@@ -1363,6 +1366,7 @@ describe("Thread-independent Job runtime integration", () => {
     await expect(
       startRuntimeInvocation({
         tenantId: TENANT_ID,
+        sourceOperationKey: `invocation:${invocation.id}`,
         invocation,
         attempt,
         binding,

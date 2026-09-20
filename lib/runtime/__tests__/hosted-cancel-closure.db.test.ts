@@ -44,6 +44,7 @@ import {
   getRuntimeSessionBindingByOwnership,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { sourceIntentForFixture } from "@/lib/runtime/test-support/session-write-fixtures";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -303,6 +304,12 @@ describe("A02：Hosted Cancel 的终态收口与代际一致", () => {
         leaseEpoch: takeover.ownership.leaseEpoch,
         intentType: "start",
         startIntentKey: `start:${takeover.ownership.id}`,
+        ...sourceIntentForFixture({
+          tenantId,
+          invocationId: invocation.id,
+          attemptId: attempt2Id,
+          intentType: "start",
+        }),
       });
       takeoverDone.resolve();
       await commitHolder.promise;

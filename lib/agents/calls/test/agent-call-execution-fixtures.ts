@@ -70,6 +70,7 @@ import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import {
   applyRuntimeSessionDispatchForTest,
   createRuntimeSessionBindingForTest,
+  sourceIntentForFixture,
 } from "@/lib/runtime/test-support/session-write-fixtures";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
@@ -669,6 +670,12 @@ export async function acquireExecutionAuthorityForInvocation(input: {
     leaseEpoch: acquired.ownership.leaseEpoch,
     intentType: "start",
     startIntentKey: `start:${acquired.ownership.id}`,
+    ...sourceIntentForFixture({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      attemptId: attempt.id,
+      intentType: "start",
+    }),
   });
   // canonical 约束：bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
   await applyRuntimeSessionDispatchForTest(input.tenantId, session.id, {

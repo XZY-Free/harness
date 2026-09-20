@@ -837,22 +837,33 @@ async function mapEvent(
 /**
  * §3 恢复版本推进判定——**唯一来源**。
  *
- * 推进（这些"已应用事实"改变了可恢复边界，旧 Checkpoint 因此可能陈旧）：
+ * 推进（**已采用的可恢复执行内容**发生变化，旧 Checkpoint 因此可能陈旧）：
  * - 新模型/Action 结果被应用：`response.completed`、`action`
  * - Agent/Tool/Effect 结果被 Loop 正式采用：`harness.action.completed` / `.failed`
  * - Job step 完成被应用：`job.step.completed` / `.failed`
- * - 已解决 UserAction 进入继续执行：`execution.started` 从 `waiting_user` 恢复
- * - 用户/服务输入被正式接纳为待解决事实：`user-action`
- * - 正式暂停与终态：`execution.suspended`、`execution.completed|failed|cancelled`
+ * - 终态：`execution.completed|failed|cancelled`（此后已不存在可恢复内容）
  *
- * 不推进：`progress`（无语义变化的展示）、`harness.action.proposed|started` 与
- * `job.step.accepted`（只是进行中/已接纳，尚无已应用结果）、首次 `execution.started`。
+ * 不推进（**纯生命周期控制**：只回答"什么时候、由谁"，不改变执行内容）：
+ * - `execution.suspended`：暂停只决定"停在哪一刻"。它若自增，刚提交的 Checkpoint(r)
+ *   会被自己的暂停推成 r+1，恢复立刻要求严格相等而失败 —— 这正是 A06 修的自相矛盾。
+ * - `execution.started`（含 `waiting_user` → `running`）：重新进入执行同样是生命周期
+ *   事实；水位由恢复后**被采用**的输入/结果推进（见上一组）。
+ * - `user-action`：用户输入被正式接纳为**待消费**事实，尚未应用于模型/文件世界。
+ *   它必须在恢复后被真实消费（`response.completed` / `action` 等）才推进水位，
+ *   否则"提交回复"本身就制造了一次伪采用。
+ * - `progress`（无语义变化的展示）、`harness.action.proposed|started` 与
+ *   `job.step.accepted`（只是进行中/已接纳，尚无已应用结果）。
+ *
  * 纯 Replay 根本不进入本判定（`findExisting` 命中 exact 后直接返回）。
  */
 export function advancesRecoveryVersion(
   event: RuntimeEvent,
   previousState: Invocation["executionState"],
 ): boolean {
+  // `previousState` 仍留在签名里：本判定描述的是"这次接纳改变了可恢复内容吗"，
+  // 而事件语义与**接纳时的执行状态**共同决定它。当前的分类不按状态分支，
+  // 保留参数以免调用方按位置传参的契约发生隐式漂移。
+  void previousState;
   switch (event.type) {
     case "response.completed":
     case "action":
@@ -860,15 +871,10 @@ export function advancesRecoveryVersion(
     case "harness.action.failed":
     case "job.step.completed":
     case "job.step.failed":
-    case "user-action":
-    case "execution.suspended":
     case "execution.completed":
     case "execution.failed":
     case "execution.cancelled":
       return true;
-    case "execution.started":
-      // 暂停后的正式恢复就是"已解决 UserAction 进入继续执行"；首次启动不改变恢复边界。
-      return previousState === "waiting_user";
     default:
       return false;
   }

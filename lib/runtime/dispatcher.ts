@@ -324,6 +324,8 @@ export async function dispatchInvocationForTurn(params: {
         callbackEndpoints: endpoint.callbackEndpoints,
         environmentLeaseId: environmentLease?.id ?? null,
         workspace: workspaceResources,
+        // A05：首次 Start 的来源意图就是 Invocation 自身身份 —— 已持久、重投不变。
+        sourceOperationKey: `invocation:${invocation.id}`,
       });
       runtimeDispatch = {
         response: started.response,
