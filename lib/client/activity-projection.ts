@@ -1,7 +1,15 @@
-import type { ClientEvent } from "@/lib/client/types";
+import type { ClientAgentCallSummary, ClientEvent } from "@/lib/client/types";
 
 /** 过程透明日志流的动作语义图标类别（合同 v2.2：类型独立图标）。 */
-export type ActivityKind = "think" | "search" | "read" | "write" | "exec" | "wait" | "fail";
+export type ActivityKind =
+  | "think"
+  | "search"
+  | "read"
+  | "write"
+  | "exec"
+  | "agent"
+  | "wait"
+  | "fail";
 
 export type ActivityPhase =
   | "think"
@@ -24,6 +32,83 @@ export interface ActivityEntry {
   readonly risk: boolean;
   readonly actionId: string | null;
   readonly occurredAt: string;
+}
+
+function agentResponseEntry(call: ClientAgentCallSummary, name: string): ActivityEntry {
+  const base = {
+    key: `agent-response-${call.call_id}`,
+    turnId: null,
+    kind: "agent" as const,
+    risk: false,
+    actionId: null,
+    occurredAt: call.finished_at ?? call.waiting_at ?? call.started_at ?? call.created_at,
+  };
+  switch (call.state) {
+    case "queued":
+      return { ...base, phase: "proposed", label: `${name}等待开始处理`, block: null };
+    case "running":
+      return { ...base, phase: "started", label: `${name}正在处理`, block: null };
+    case "waiting_user":
+      return { ...base, kind: "wait", phase: "waiting", label: `${name}需要你的操作`, block: null };
+    case "completed": {
+      const duration =
+        call.duration_ms === null
+          ? ""
+          : ` · ${Math.max(1, Math.round(call.duration_ms / 1000))} 秒`;
+      return {
+        ...base,
+        phase: "completed",
+        label: `已收到${name}返回结果${duration}`,
+        block: "智能体返回的结果已由平台整理为下方答复。",
+      };
+    }
+    case "failed":
+      return {
+        ...base,
+        kind: "fail",
+        phase: "failed",
+        label: `${name}未能完成本次请求`,
+        block: null,
+      };
+    case "cancelled":
+      return { ...base, phase: "cancelled", label: `已取消${name}请求`, block: null };
+    case "lost":
+      return {
+        ...base,
+        kind: "fail",
+        phase: "failed",
+        label: `与${name}的连接已中断`,
+        block: null,
+      };
+    default:
+      return { ...base, phase: "started", label: `${name}状态已更新`, block: null };
+  }
+}
+
+/**
+ * 将员工端安全的 AgentCall 摘要投影进同一执行记录。
+ * 请求正文只取用户自己的触发消息；原始出站参数、身份上下文和 Agent 原始结果不进入页面。
+ */
+export function projectAgentCallActivity(
+  calls: readonly ClientAgentCallSummary[],
+  requestText?: string | null,
+): ActivityEntry[] {
+  const normalizedRequest = requestText?.trim() || null;
+  return calls.flatMap((call) => {
+    const name = call.display_name?.trim() || "智能体";
+    const request: ActivityEntry = {
+      key: `agent-request-${call.call_id}`,
+      turnId: null,
+      kind: "agent",
+      phase: call.state === "queued" ? "proposed" : "completed",
+      label: call.state === "queued" ? `准备请求${name}` : `已向${name}发送请求`,
+      block: normalizedRequest ? `你的请求：${normalizedRequest}` : null,
+      risk: false,
+      actionId: null,
+      occurredAt: call.started_at ?? call.created_at,
+    };
+    return [request, agentResponseEntry(call, name)];
+  });
 }
 
 const RISK_PATTERN = /create|write|update|delete|send|revoke|approve/i;

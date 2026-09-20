@@ -7,9 +7,11 @@ import {
   type ActivityKind,
   mergeActionEntries,
   mergeThinkEntries,
+  projectAgentCallActivity,
 } from "@/lib/client/activity-projection";
 import type { ClientTurn } from "@/lib/client/types";
 import {
+  Bot,
   Check,
   ChevronRight,
   Files,
@@ -28,6 +30,7 @@ const ACTIVITY_ICONS = {
   read: Files,
   write: Pencil,
   exec: SquareTerminal,
+  agent: Bot,
   wait: TriangleAlert,
   fail: X,
 } as const;
@@ -79,7 +82,11 @@ function ActivityLine({ entry, live }: { readonly entry: ActivityEntry; readonly
         <ChevronRight aria-hidden="true" className="ha-chevron" strokeWidth={1.4} />
       </summary>
       <div className="ha-output">
-        <CodeBlock plain>{entry.block}</CodeBlock>
+        {entry.kind === "agent" ? (
+          <p className="ha-agent-copy">{entry.block}</p>
+        ) : (
+          <CodeBlock plain>{entry.block}</CodeBlock>
+        )}
         <div className="ha-output-status">
           {entry.phase === "completed" ? (
             <>
@@ -142,6 +149,7 @@ export function ActivitySummary({
   onRetry,
   onToggle,
   open,
+  turnActive = false,
 }: {
   readonly entries: readonly ActivityEntry[] | null;
   readonly elapsedMs: number | null;
@@ -152,15 +160,22 @@ export function ActivitySummary({
   readonly onRetry?: () => void;
   readonly onToggle?: ComponentProps<"details">["onToggle"];
   readonly open?: boolean;
+  readonly turnActive?: boolean;
 }) {
   const label =
     status === "cancelled"
       ? "已停止"
       : status === "interrupted"
         ? "执行中断"
-        : failed
-          ? "执行失败"
-          : formatElapsed(elapsedMs);
+        : status === "waiting_user"
+          ? "等待你的操作"
+          : status === "accepted" || status === "queued"
+            ? "正在准备"
+            : status === "running" || status === "regenerating"
+              ? "正在处理"
+              : failed
+                ? "执行失败"
+                : formatElapsed(elapsedMs);
   return (
     <details
       className="ha-proc"
@@ -187,7 +202,7 @@ export function ActivitySummary({
             </button>
           </div>
         ) : null}
-        {entries ? <HarnessActivityFeed entries={entries} turnActive={false} /> : null}
+        {entries ? <HarnessActivityFeed entries={entries} turnActive={turnActive} /> : null}
         {entries?.length === 0 && !loading && !error ? (
           <div className="ha-line">没有工具操作记录</div>
         ) : null}
@@ -201,10 +216,12 @@ export function TurnActivitySummary({
   threadId,
   turn,
   liveEntries = [],
+  requestText = null,
 }: {
   readonly threadId: string;
   readonly turn: ClientTurn;
   readonly liveEntries?: readonly ActivityEntry[];
+  readonly requestText?: string | null;
 }) {
   const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(turn.turn_state);
   const [entries, setEntries] = useState<readonly ActivityEntry[] | null>(null);
@@ -238,26 +255,34 @@ export function TurnActivitySummary({
       });
     return () => controller.abort();
   }, [threadId, turn.id, terminal, request, expanded]);
-  if (!terminal) {
-    const combined = [...(entries ?? []), ...liveEntries].sort((a, b) =>
-      a.occurredAt.localeCompare(b.occurredAt),
-    );
-    return (
-      <HarnessActivityFeed entries={combined} turnActive={turn.turn_state !== "waiting_user"} />
-    );
-  }
+  const agentEntries = projectAgentCallActivity(
+    turn.actual_agent_calls?.calls ?? [],
+    requestText,
+  ).map((entry) => ({ ...entry, turnId: turn.id }));
+  const agentActionIds = new Set(
+    (turn.actual_agent_calls?.calls ?? []).flatMap((call) =>
+      call.action_id ? [call.action_id] : [],
+    ),
+  );
+  const baseEntries = (
+    terminal ? (entries ?? liveEntries) : [...(entries ?? []), ...liveEntries]
+  ).filter((entry) => !entry.actionId || !agentActionIds.has(entry.actionId));
+  const combined = [...baseEntries, ...agentEntries].sort((a, b) =>
+    a.occurredAt.localeCompare(b.occurredAt),
+  );
   const since = turn.accepted_at ?? turn.started_at;
   const elapsedMs =
     since && turn.finished_at ? Date.parse(turn.finished_at) - Date.parse(since) : null;
   return (
     <ActivitySummary
-      entries={entries ?? liveEntries}
+      entries={combined}
       open={expanded}
       elapsedMs={elapsedMs}
       failed={turn.turn_state === "failed"}
       status={turn.turn_state}
       loading={loading}
       error={error}
+      turnActive={!terminal && turn.turn_state !== "waiting_user"}
       onRetry={() => {
         loadedKey.current = null;
         setRequest((n) => n + 1);

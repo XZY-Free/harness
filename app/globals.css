@@ -1055,6 +1055,15 @@ body {
   opacity: 1;
   color: var(--muted-foreground);
 }
+.ha-agent-copy {
+  margin: 0;
+  padding: 10px 12px 4px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 21px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .ha-output-status {
   display: flex;
   justify-content: flex-end;

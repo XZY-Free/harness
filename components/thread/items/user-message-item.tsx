@@ -8,15 +8,14 @@
  */
 "use client";
 
-import type { ClientAgentUse, ClientItem } from "@/lib/client/types";
+import type { ClientItem } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
 
 interface UserMessageItemProps {
   readonly item: ClientItem;
-  readonly agentUse?: ClientAgentUse | null;
 }
 
-export function UserMessageItem({ item, agentUse = null }: UserMessageItemProps) {
+export function UserMessageItem({ item }: UserMessageItemProps) {
   const content = item.content as { text?: string; attachments?: unknown[] };
   const isGuidance = item.item_type === "user_guidance";
   const isPending = item.item_state === "pending";
@@ -27,11 +26,6 @@ export function UserMessageItem({ item, agentUse = null }: UserMessageItemProps)
     <div className="message-row mb-3 flex justify-end" data-testid="user-message">
       <div className={cn("conversation-user-bubble", "bg-muted", isPending && "opacity-60")}>
         <div className="prose-markdown text-foreground">{displayText}</div>
-        {agentUse && (
-          <div className="mt-1.5 text-2xs text-muted-foreground">
-            助手：{agentUse.display_name ?? agentUse.agent_id}
-          </div>
-        )}
         {isGuidance && (
           <div className="mt-1 text-2xs text-muted-foreground">
             {isPending ? "引导待确认" : "引导"}

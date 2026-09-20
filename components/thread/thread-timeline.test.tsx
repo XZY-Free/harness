@@ -208,7 +208,7 @@ describe("ThreadTimeline Agent 使用事实", () => {
     created_at: "2026-08-31T01:00:00.000Z",
   };
 
-  it("偏好标签与真实 AgentCall 时间线分开显示", () => {
+  it("用户气泡不显示所选智能体，真实请求与返回收进过程折叠", () => {
     const turn = {
       id: "turn-1",
       agent_use: { mode: "preferred", agent_id: "hr-agent", display_name: "人力助手" },
@@ -239,11 +239,57 @@ describe("ThreadTimeline Agent 使用事实", () => {
 
     render(<ThreadTimeline items={[userItem]} turns={[turn]} streamStatus="open" />);
 
-    expect(screen.getByText("助手：人力助手")).toBeTruthy();
-    expect(screen.getByText("已收到人力助手结果")).toBeTruthy();
+    expect(screen.queryByText("助手：人力助手")).toBeNull();
+    const request = screen.getByText("已向人力助手发送请求");
+    const response = screen.getByText("已收到人力助手返回结果 · 1 秒");
+    const process = screen.getByTestId("harness-activity-summary");
+    expect(process.contains(request)).toBe(true);
+    expect(process.contains(response)).toBe(true);
+    fireEvent.click(request);
+    expect(screen.getByText("你的请求：查询我的年假余额")).toBeTruthy();
   });
 
-  it("selected but unused 只显示偏好，不伪造已咨询", () => {
+  it("运行中的智能体状态只出现在过程折叠，不在时间线底部重复展示", () => {
+    const turn = {
+      id: "turn-1",
+      turn_state: "running",
+      accepted_at: new Date().toISOString(),
+      agent_use: { mode: "preferred", agent_id: "hr-agent", display_name: "人力助手" },
+      actual_agent_calls: {
+        count: 1,
+        active_call_id: "call-1",
+        last_state: "running",
+        selected_agent_called: true,
+        selected_but_unused: false,
+        calls: [
+          {
+            call_id: "call-1",
+            parent_invocation_id: "inv-1",
+            agent_id: "hr-agent",
+            display_name: "人力助手",
+            action_id: "action-1",
+            state: "running",
+            created_at: "2026-08-31T01:00:01.000Z",
+            started_at: "2026-08-31T01:00:01.000Z",
+            waiting_at: null,
+            finished_at: null,
+            duration_ms: null,
+            error_code: null,
+          },
+        ],
+      },
+    } as unknown as ClientTurn;
+
+    render(
+      <ThreadTimeline items={[userItem]} turns={[turn]} activeTurn={turn} streamStatus="open" />,
+    );
+
+    expect(screen.getByText("正在处理", { selector: "summary span" })).toBeTruthy();
+    expect(screen.getByText("人力助手正在处理")).toBeTruthy();
+    expect(screen.queryByTestId("turn-running-indicator")).toBeNull();
+  });
+
+  it("selected but unused 不污染消息，也不伪造已咨询", () => {
     const turn = {
       id: "turn-1",
       agent_use: { mode: "preferred", agent_id: "hr-agent", display_name: "人力助手" },
@@ -259,7 +305,7 @@ describe("ThreadTimeline Agent 使用事实", () => {
 
     render(<ThreadTimeline items={[userItem]} turns={[turn]} streamStatus="open" />);
 
-    expect(screen.getByText("助手：人力助手")).toBeTruthy();
-    expect(screen.queryByText(/正在咨询|已收到.*结果/)).toBeNull();
+    expect(screen.queryByText(/助手：人力助手/)).toBeNull();
+    expect(screen.queryByText(/发送请求|正在处理|已收到.*结果/)).toBeNull();
   });
 });

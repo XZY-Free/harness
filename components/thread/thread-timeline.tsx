@@ -8,8 +8,7 @@
  * - docs/solutions/desktop-ui-redesign/04-light-theme-and-conversation.md §4（W3-3 分层原则）
  *
  * W3-3 信息架构（视觉基准：03 原型）：
- * - 过程层：同一 Turn 内连续的 tool_call 聚合进 ProcessFold（"已处理"折叠条），
- *   运行中默认展开实时呈现、完成后自动收纳；
+ * - 过程层：同一 Turn 的平台执行与 AgentCall 统一收进“用时”折叠区；
  * - 结论层：assistant_message 全宽正文；
  * - 行动项层：user_action / artifact 重卡片，独立渲染不进折叠；
  * - 用户消息：右对齐浅灰气泡。
@@ -28,7 +27,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { ActivitySummary, HarnessActivityFeed, TurnActivitySummary } from "./harness-activity-feed";
-import { AgentCallTimelineItem } from "./items/agent-call-timeline-item";
 import { ArtifactItem } from "./items/artifact-item";
 import { AssistantMessageItem } from "./items/assistant-message-item";
 import { ChildThreadItem } from "./items/child-thread-item";
@@ -101,19 +99,12 @@ function hasTextContent(item: ClientItem): boolean {
 }
 
 /** 单个 Item 渲染分发；外层包裹 data-item-id 供定位轴测量。 */
-function renderItem(item: ClientItem, threadId: string, turn?: ClientTurn): React.ReactNode {
+function renderItem(item: ClientItem, threadId: string): React.ReactNode {
   const inner = (() => {
     switch (item.item_type) {
       case "user_message":
       case "user_guidance":
-        return (
-          <>
-            <UserMessageItem item={item} agentUse={turn?.agent_use} />
-            {turn?.actual_agent_calls.calls.map((call) => (
-              <AgentCallTimelineItem key={call.call_id} call={call} />
-            ))}
-          </>
-        );
+        return <UserMessageItem item={item} />;
       case "assistant_message":
         return <AssistantMessageItem item={item} />;
       case "tool_call":
@@ -144,13 +135,9 @@ function renderItem(item: ClientItem, threadId: string, turn?: ClientTurn): Reac
 }
 
 /** 段渲染：过程段包 ProcessFold，普通段直出。 */
-function renderSegment(
-  segment: TimelineSegment,
-  threadId: string,
-  turnsById: ReadonlyMap<string, ClientTurn>,
-): React.ReactNode {
+function renderSegment(segment: TimelineSegment, threadId: string): React.ReactNode {
   if (segment.kind === "item") {
-    return renderItem(segment.item, threadId, turnsById.get(segment.item.turn_id));
+    return renderItem(segment.item, threadId);
   }
   const running = segment.items.some((i) => i.item_state === "pending");
   const first = segment.items[0];
@@ -162,7 +149,7 @@ function renderSegment(
       startedAt={first?.created_at}
       endedAt={running ? undefined : last?.created_at}
     >
-      {segment.items.map((i) => renderItem(i, threadId, turnsById.get(i.turn_id)))}
+      {segment.items.map((i) => renderItem(i, threadId))}
     </ProcessFold>
   );
 }
@@ -198,6 +185,17 @@ export function ThreadTimeline({
   }, [items, showSuperseded]);
   const segments = useMemo(() => buildSegments(visibleItems), [visibleItems]);
   const turnsById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
+  const requestTextByTurn = useMemo(() => {
+    const result = new Map<string, string>();
+    for (const item of items) {
+      if (!item.turn_id || item.item_type !== "user_message") continue;
+      const text = (item.content as { text?: unknown } | null)?.text;
+      if (typeof text === "string" && text.trim() && !result.has(item.turn_id)) {
+        result.set(item.turn_id, text.trim());
+      }
+    }
+    return result;
+  }, [items]);
 
   // 过程透明：活跃回合 live 条目 = live ring + progress Item（思考行），按时间排序
   const liveEntries = useMemo(() => {
@@ -255,6 +253,10 @@ export function ThreadTimeline({
     });
     return nodes;
   }, [segments, turnsById, activeTurn]);
+  const hasActiveTurnSummary = Boolean(
+    activeTurn &&
+      renderNodes.some((node) => node.kind === "summary" && node.turnId === activeTurn.id),
+  );
 
   const shouldVirtualize = renderNodes.length > VIRTUALIZATION_THRESHOLD;
   const virtualizer = useVirtualizer({
@@ -445,12 +447,13 @@ export function ThreadTimeline({
                     className="pb-2"
                   >
                     {node.kind === "segment" ? (
-                      renderSegment(node.segment, threadId, turnsById)
+                      renderSegment(node.segment, threadId)
                     ) : (
                       <TurnActivitySummary
                         threadId={threadId}
                         turn={(turnsById.get(node.turnId) ?? activeTurn) as ClientTurn}
                         liveEntries={node.turnId === activeTurn?.id ? liveEntries : undefined}
+                        requestText={requestTextByTurn.get(node.turnId)}
                       />
                     )}
                   </div>
@@ -461,12 +464,13 @@ export function ThreadTimeline({
             renderNodes.map((node) => (
               <div key={node.key} className="flex flex-col">
                 {node.kind === "segment" ? (
-                  renderSegment(node.segment, threadId, turnsById)
+                  renderSegment(node.segment, threadId)
                 ) : (
                   <TurnActivitySummary
                     threadId={threadId}
                     turn={(turnsById.get(node.turnId) ?? activeTurn) as ClientTurn}
                     liveEntries={node.turnId === activeTurn?.id ? liveEntries : undefined}
+                    requestText={requestTextByTurn.get(node.turnId)}
                   />
                 )}
               </div>
@@ -475,7 +479,9 @@ export function ThreadTimeline({
 
           {/* 真实运行状态反馈：当前 Turn 非终态时的时间线底部指示
             （纯执行状态 UI，不创建 ThreadItem、不进入会话历史）。 */}
-          {liveEntries.length === 0 && <TurnRunningIndicator turn={activeTurn} items={items} />}
+          {!hasActiveTurnSummary && liveEntries.length === 0 && (
+            <TurnRunningIndicator turn={activeTurn} items={items} />
+          )}
 
           {/* 连接异常提示（W4-1）。
             正常连接（open）不提示——健康状态无需占用视线；

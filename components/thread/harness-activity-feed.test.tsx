@@ -122,7 +122,7 @@ it("实时过程完成后保持可见，耗时从接纳开始而不是最后恢�
     accepted_at: "2026-09-12T00:00:00Z",
     started_at: "2026-09-12T00:01:59Z",
     finished_at: "2026-09-12T00:02:00Z",
-  } as ClientTurn;
+  } as unknown as ClientTurn;
   const view = render(<TurnActivitySummary threadId="thread" turn={turn} liveEntries={entries} />);
   await screen.findByText("需要先查看项目文档。");
   view.rerender(
@@ -134,4 +134,63 @@ it("实时过程完成后保持可见，耗时从接纳开始而不是最后恢�
   );
   expect((screen.getByTestId("harness-activity-summary") as HTMLDetailsElement).open).toBe(true);
   expect(screen.getByText("用时 2 分钟 0 秒")).toBeTruthy();
+});
+
+it("智能体请求与返回展示在同一个过程折叠中", () => {
+  const duplicateTechnicalEntry: ActivityEntry = {
+    key: "agent-action-1",
+    turnId: "turn-agent",
+    kind: "exec",
+    phase: "completed",
+    label: "已执行 · 调用智能体",
+    block: '{"agentId":"hr-agent","contextRefs":[]}',
+    risk: false,
+    actionId: "action-1",
+    occurredAt: "2026-09-12T00:00:01Z",
+  };
+  const turn = {
+    id: "turn-agent",
+    turn_state: "completed",
+    accepted_at: "2026-09-12T00:00:00Z",
+    finished_at: "2026-09-12T00:00:16Z",
+    actual_agent_calls: {
+      calls: [
+        {
+          call_id: "call-1",
+          parent_invocation_id: "inv-1",
+          agent_id: "hr-agent",
+          display_name: "企业人力智能助手",
+          action_id: "action-1",
+          state: "completed",
+          created_at: "2026-09-12T00:00:01Z",
+          started_at: "2026-09-12T00:00:02Z",
+          waiting_at: null,
+          finished_at: "2026-09-12T00:00:16Z",
+          duration_ms: 14_000,
+          error_code: null,
+        },
+      ],
+    },
+  } as unknown as ClientTurn;
+
+  render(
+    <TurnActivitySummary
+      threadId="thread"
+      turn={turn}
+      requestText="查询我本人的医疗期"
+      liveEntries={[duplicateTechnicalEntry]}
+    />,
+  );
+
+  const process = screen.getByTestId("harness-activity-summary");
+  const request = screen.getByText("已向企业人力智能助手发送请求");
+  const response = screen.getByText("已收到企业人力智能助手返回结果 · 14 秒");
+  expect(process.contains(request)).toBe(true);
+  expect(process.contains(response)).toBe(true);
+  expect(screen.queryByText("已执行 · 调用智能体")).toBeNull();
+  expect(screen.queryByText(/contextRefs/)).toBeNull();
+  fireEvent.click(request);
+  const requestCopy = screen.getByText("你的请求：查询我本人的医疗期");
+  expect(requestCopy.classList.contains("ha-agent-copy")).toBe(true);
+  expect(requestCopy.closest(".ha-output")?.querySelector('[aria-label="复制代码"]')).toBeNull();
 });
