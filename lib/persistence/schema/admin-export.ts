@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 /**
  * Admin Export schema：AdminExport（S11-W08）。
  *
@@ -14,7 +15,7 @@
  * 与 OpenAPI 契约一致：列名严格使用 snake_case。
  */
 import { sql } from "drizzle-orm";
-import { datetime, index, int, json, mysqlTable, varchar } from "drizzle-orm/mysql-core";
+import { datetime, index, int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { tenant } from "./identity";
 
 // ─── Export Kind ──────────────────────────────────────────

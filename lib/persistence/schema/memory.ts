@@ -21,13 +21,13 @@
  */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
+import { json } from "@/lib/persistence/schema/json-column";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
   check,
   datetime,
   index,
-  json,
   mysqlEnum,
   mysqlTable,
   text,

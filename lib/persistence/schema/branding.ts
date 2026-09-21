@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 /**
  * 品牌 schema：平台品牌配置文档与变更审计。
  *
@@ -11,7 +12,7 @@
  * 事实源：docs/architecture/persistence.md。
  */
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-import { bigint, datetime, index, int, json, mysqlTable, varchar } from "drizzle-orm/mysql-core";
+import { bigint, datetime, index, int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 
 export const brandSettings = mysqlTable("BrandSettings", {
   /** 单行文档表：固定 1。 */

@@ -25,13 +25,13 @@
 import { randomUUID } from "node:crypto";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
+import { json } from "@/lib/persistence/schema/json-column";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   bigint,
   datetime,
   index,
   int,
-  json,
   mysqlEnum,
   mysqlTable,
   text,

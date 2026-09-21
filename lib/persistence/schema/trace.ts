@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 /**
  * Observability schema：Trace / Span / Observation（S11-W05）。
  *
@@ -16,7 +17,7 @@
  * 与 OpenAPI 契约一致：列名严格使用 snake_case。
  */
 import { sql } from "drizzle-orm";
-import { datetime, index, json, mysqlTable, varchar } from "drizzle-orm/mysql-core";
+import { datetime, index, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { tenant } from "./identity";
 
 // ─── Trace Root Type ───────────────────────────────────────

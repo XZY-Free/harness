@@ -1,3 +1,5 @@
+import { json } from "@/lib/persistence/schema/json-column";
+import { mysqlTable } from "drizzle-orm/mysql-core";
 import { describe, expect, it } from "vitest";
 import {
   contextSnapshotChecksumsSchema,
@@ -13,11 +15,35 @@ import {
   validateJsonColumn,
 } from "./json-columns";
 
+const compatibilityTable = mysqlTable("JsonCompatibilityProbe", {
+  payload: json("payload").$type<{ state: string; values: number[] }>().notNull(),
+});
+
 /**
  * S1（08-P2-3）：json 列 zod 校验 schema 单测。
  *
  * 覆盖每个 schema 的合法 / 非法用例，确保 fail-closed（脏数据抛错不落库）。
  */
+
+describe("JSON column driver compatibility", () => {
+  it("原生 JSON 对象、LONGTEXT 字符串和 Buffer 都还原为同一业务对象", () => {
+    const expected = { state: "ready", values: [1, 2, 3] };
+
+    expect(compatibilityTable.payload.mapFromDriverValue(expected)).toEqual(expected);
+    expect(compatibilityTable.payload.mapFromDriverValue(JSON.stringify(expected))).toEqual(
+      expected,
+    );
+    expect(
+      compatibilityTable.payload.mapFromDriverValue(Buffer.from(JSON.stringify(expected))),
+    ).toEqual(expected);
+  });
+
+  it("写入数据库前序列化为 JSON 文本", () => {
+    expect(compatibilityTable.payload.mapToDriverValue({ state: "ready", values: [1, 2, 3] })).toBe(
+      '{"state":"ready","values":[1,2,3]}',
+    );
+  });
+});
 
 describe("toolRunInputSchema / toolRunOutputSchema", () => {
   it("合法：对象 → 通过", () => {

@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 /**
  * RouteEligibilityProjection — 路由资格投影表。
  *
@@ -19,7 +20,6 @@ import {
   datetime,
   index,
   int,
-  json,
   mysqlEnum,
   mysqlTable,
   uniqueIndex,

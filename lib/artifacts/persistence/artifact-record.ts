@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { json } from "@/lib/persistence/schema/json-column";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   bigint,
   datetime,
   foreignKey,
   index,
-  json,
   mysqlEnum,
   mysqlTable,
   text,

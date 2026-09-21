@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 /**
  * ControlPlaneOutboxEvent — 不可变事件事实表。
  *
@@ -7,15 +8,7 @@
  */
 
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-import {
-  datetime,
-  index,
-  int,
-  json,
-  mysqlTable,
-  uniqueIndex,
-  varchar,
-} from "drizzle-orm/mysql-core";
+import { datetime, index, int, mysqlTable, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const controlPlaneOutboxEvent = mysqlTable(
   "ControlPlaneOutboxEvent",

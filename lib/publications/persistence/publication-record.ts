@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 import {
   PUBLICATION_ACTOR_TYPES,
   PUBLICATION_SUBJECT_TYPES,
@@ -7,7 +8,6 @@ import {
   bigint,
   datetime,
   index,
-  json,
   mysqlEnum,
   mysqlTable,
   text,

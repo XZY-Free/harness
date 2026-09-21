@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 /**
  * HostedProvisioningRequest 的 Drizzle 表定义。
  *
@@ -15,7 +16,6 @@ import {
   datetime,
   index,
   int,
-  json,
   mysqlEnum,
   mysqlTable,
   uniqueIndex,

@@ -11,16 +11,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
+import { json } from "@/lib/persistence/schema/json-column";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-import {
-  datetime,
-  index,
-  json,
-  mysqlEnum,
-  mysqlTable,
-  text,
-  varchar,
-} from "drizzle-orm/mysql-core";
+import { datetime, index, mysqlEnum, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
 
 /** 审计执行者类型（谁执行了被审计的操作）。 */
 export const AUDIT_ACTOR_TYPES = ["user", "service", "workload", "system"] as const;

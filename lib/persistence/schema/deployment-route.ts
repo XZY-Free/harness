@@ -19,6 +19,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
+import { json } from "@/lib/persistence/schema/json-column";
 import { type InferInsertModel, type InferSelectModel, sql } from "drizzle-orm";
 import {
   bigint,
@@ -26,7 +27,6 @@ import {
   datetime,
   index,
   int,
-  json,
   mysqlEnum,
   mysqlTable,
   uniqueIndex,

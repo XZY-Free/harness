@@ -1,3 +1,4 @@
+import { json } from "@/lib/persistence/schema/json-column";
 /**
  * Evaluation schema：EvaluationRun / EvaluationCase / EvaluationResult（S11-W06）。
  *
@@ -15,15 +16,7 @@
  * 与 OpenAPI 契约一致：列名严格使用 snake_case。
  */
 import { sql } from "drizzle-orm";
-import {
-  boolean,
-  datetime,
-  decimal,
-  index,
-  json,
-  mysqlTable,
-  varchar,
-} from "drizzle-orm/mysql-core";
+import { boolean, datetime, decimal, index, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import { tenant } from "./identity";
 import { jobTable } from "./job";
 

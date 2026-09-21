@@ -10,6 +10,7 @@
  * `UserIdentity` 是唯一用户身份事实源；旧 `User` 表已删除。
  */
 import { randomUUID } from "node:crypto";
+import { json } from "@/lib/persistence/schema/json-column";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
@@ -19,7 +20,6 @@ import {
   decimal,
   index,
   int,
-  json,
   mysqlEnum,
   mysqlTable,
   text,
