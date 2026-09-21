@@ -49,8 +49,11 @@ import {
 } from "@/lib/environment/test-support/seed-prepared-environment-lease";
 import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
 import {
+  claimAttemptPreparation,
+  getAttemptById,
   getLatestAttempt,
   markAttemptPreparedInTransaction,
+  updateAttemptState,
 } from "@/lib/executions/persistence/attempt-store";
 import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
@@ -93,10 +96,12 @@ import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
+  getRuntimeSessionBindingById,
   getRuntimeSessionBindingByOwnership,
   getRuntimeSessionBindingBySourceIntent,
   getRuntimeSessionBindingsByInvocation,
 } from "@/lib/runtime/persistence/runtime-session-store";
+import { failAttemptAndInvokeRecoveryAuthority } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import { createHttpRuntimeClient, defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import {
   PROTOCOL_VERSION,
@@ -636,7 +641,7 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     await ensureDefaultTenant();
   });
 
-  it("A05-01/A05-T09: 用户暂停 → 用户确认 → 默认命令网关 → Resume → 同 Attempt 合法新代际再次执行（用户输入被采用、环境 Revision 不漂移、终态保持 A02/A04 行为）", async () => {
+  it("A05-01/A05-T09 / N04-T2/N07-T2: 两轮正式暂停恢复来源独立，正常暂停保留同一受管 Lease", async () => {
     const ctx = await seedManagedResumeContext("a05one");
     const { service, decisionViews } = pauseThenRespondService();
     setCommandGatewayHostedApplicationServiceForTest(service);
@@ -1409,7 +1414,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     await ensureDefaultTenant();
   });
 
-  it("A05-T01：丢 ACK 且 started 未到 —— 同意图重投不另造 O/S、不重置 ready/激活，原代际 started 仍可接纳", async () => {
+  it("A05-T01 / N03-T2/N04-T3：ACK 与 started 均未到，同意图重投不另造 O/S、不重置 ready/激活", async () => {
     const fixture = await seedIntentFixture();
     const { tenantId, invocation, binding, attempt } = fixture;
     const stub = await startIntentRuntimeStub({
@@ -1599,7 +1604,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     expect(slotAfter.preparationCount).toBe(slotBefore.preparationCount);
   });
 
-  it("A05-T02：started 已到但 ACK 丢失 —— 同 source/digest 重投返回原回执，不新增 Session、不重复执行", async () => {
+  it("A05-T02 / N03-T3：started 已到但 ACK 丢失，同源重投只返回原回执且不复活执行", async () => {
     const fixture = await seedIntentFixture();
     const { tenantId, invocation, binding, attempt } = fixture;
     const stub = await startIntentRuntimeStub({
@@ -1683,7 +1688,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     expect(await countIngressEvents(invocation.id, "execution.started")).toBe(2);
   });
 
-  it("A05-T03：同一恢复请求并发 —— 只形成一个逻辑 O/S；另一个准备者被明确拒绝而非静默成功", async () => {
+  it("A05-T03 / N05-T4：同源并发只形成一个逻辑 O/S，落败者不清成功方 Lease/Owner", async () => {
     const fixture = await seedIntentFixture();
     const { tenantId, invocation, binding, attempt } = fixture;
     const stub = await startIntentRuntimeStub({
@@ -1830,7 +1835,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     );
   });
 
-  it("A05-T04：同来源键不同恢复锚点 —— 拒绝且无 O/S/Lease 改动，绝不采用最新锚点凑通过", async () => {
+  it("A05-T04 / N03-T4/N04-T2：同来源键换摘要零变更拒绝，不改 O/S/Lease", async () => {
     const fixture = await seedIntentFixture();
     const { tenantId, invocation, binding, attempt } = fixture;
     const stub = await startIntentRuntimeStub({
@@ -2045,7 +2050,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     expect(completedSlot.preparationCount).toBe(2);
   });
 
-  it("A05-T06：旧准备完成在新 claim 之后到达 —— 结算被拒，不清继任者激活、不覆盖证据", async () => {
+  it("A05-T06 / N05-T3：旧 IO 成功但证据提交时 claim 已变化，拒绝且不清继任实例", async () => {
     const managed = await seedIntentFixture({ withEnvironment: true });
     const envRevisionId = managed.binding.environmentDefinitionRevisionId;
     if (!envRevisionId) throw new Error("MANAGED 夹具必须冻结 EnvironmentDefinitionRevision");
@@ -2153,7 +2158,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     expect(slot.preparationCount).toBe(2);
   });
 
-  it("A05-T07：健康且属于另一来源意图的 Owner —— 拒绝改写，不无条件释放当前执行权", async () => {
+  it("A05-T07 / N04-T1：旧来源跨轮晚到，在环境/目录变化前拒绝且不改当前执行权", async () => {
     const fixture = await seedIntentFixture();
     const { tenantId, invocation, binding, attempt } = fixture;
     const stub = await startIntentRuntimeStub({
@@ -2236,5 +2241,124 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     expect(ownerAfter?.ownershipState).toBe("active");
     expect(await countIngressEvents(invocation.id, "execution.started")).toBe(startedBefore);
     expect(stub.executions.size).toBe(2);
+  });
+});
+
+describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
+  beforeEach(async () => {
+    await resetDatabase(db);
+    await ensureDefaultTenant();
+  });
+
+  async function seedClaimFixture() {
+    const fixture = await seedIntentFixture();
+    await db
+      .update(invocationAttemptTable)
+      .set({
+        preparationState: "pending",
+        preparationEvidence: null,
+        preparationDigest: null,
+        preparedAt: null,
+        preparationIntentKey: null,
+        preparationRequestDigest: null,
+        preparationClaimId: null,
+        preparationLeaseExpiresAt: null,
+        preparationCount: 0,
+      })
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+    return fixture;
+  }
+
+  function preparationInput(
+    fixture: Awaited<ReturnType<typeof seedClaimFixture>>,
+    claimId: string,
+  ) {
+    const intentKey = `invocation:${fixture.invocation.id}`;
+    return {
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      intentKey,
+      requestDigest: protocolDigest({ scope: "topic02-preparation", intentKey }),
+      claimId,
+    };
+  }
+
+  it("N02-T2: 准备进程崩溃后只接管同一候选，不靠无限租约或新建 Attempt", async () => {
+    const fixture = await seedClaimFixture();
+    const first = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    expect(first.disposition).toBe("claimed");
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+    const second = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    expect(second.disposition).toBe("claimed");
+    expect(second.attempt.id).toBe(fixture.attempt.id);
+    expect(second.attempt.preparationCount).toBe(0);
+  });
+
+  it("N02-T1/N02-T3/N02-T4: 旧 claim 的普通失败和成功迟到均不能污染已运行继任代际", async () => {
+    const fixture = await seedClaimFixture();
+    const first = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    if (!first.claim) throw new Error("W1 未取得准备 claim");
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+    const second = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    if (!second.claim) throw new Error("W2 未接管准备 claim");
+    const evidence = { kind: "topic02-successor", attemptId: fixture.attempt.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: fixture.attempt.id,
+        evidence,
+        digest: protocolDigest(evidence),
+        preparationClaim: second.claim!,
+      }),
+    );
+    const generation = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      activationEvidence: { kind: "topic02-successor-active" },
+    });
+    await db.transaction((tx) => updateAttemptState(tx, fixture.attempt.id, "running"));
+
+    await expect(
+      db.transaction((tx) =>
+        markAttemptPreparedInTransaction(tx, {
+          attemptId: fixture.attempt.id,
+          evidence: { kind: "late-w1-success" },
+          digest: protocolDigest({ kind: "late-w1-success" }),
+          preparationClaim: first.claim!,
+        }),
+      ),
+    ).rejects.toThrow("PreparationClaimSuperseded");
+    await expect(
+      failAttemptAndInvokeRecoveryAuthority({
+        tenantId: fixture.tenantId,
+        attempt: fixture.attempt,
+        invocation: fixture.invocation,
+        errorCode: "LatePlainIoError",
+        errorSummary: "W1 returned after W2 was running",
+        now: new Date(),
+        preparationClaim: first.claim,
+      }),
+    ).rejects.toThrow("PreparationClaimSuperseded");
+
+    expect((await getAttemptById(fixture.attempt.id))?.attemptState).toBe("running");
+    expect(
+      (
+        await getActiveExecutionOwnership({
+          tenantId: fixture.tenantId,
+          invocationId: fixture.invocation.id,
+        })
+      )?.id,
+    ).toBe(generation.ownership.id);
+    expect(
+      (await getRuntimeSessionBindingById(fixture.tenantId, generation.session.id))?.bindingState,
+    ).toBe("prepared");
   });
 });

@@ -73,6 +73,7 @@ import {
   notInArray,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 
 /** accepted Turn 的调度领取候选（只回 ID + 领取所见版本，扫描不做结论）。 */
 export interface UndispatchedTurnCandidate {
@@ -119,25 +120,27 @@ export interface UndispatchedIntentDependencies {
 export async function scanSupervisorHandoffs(params: {
   limit: number;
 }): Promise<SupervisorHandoffCandidate[]> {
+  const sourceOwner = alias(executionOwnershipTable, "handoff_source");
+  const successorOwner = alias(executionOwnershipTable, "handoff_successor");
   return db
     .select({
       tenantId: invocationTable.tenantId,
       invocationId: invocationTable.id,
-      sourceOwnershipId: executionOwnershipTable.id,
-      sourceAttemptId: executionOwnershipTable.attemptId,
+      sourceOwnershipId: sourceOwner.id,
+      sourceAttemptId: sourceOwner.attemptId,
     })
-    .from(executionOwnershipTable)
+    .from(sourceOwner)
     .innerJoin(
       invocationTable,
       and(
-        eq(invocationTable.id, executionOwnershipTable.invocationId),
-        eq(invocationTable.tenantId, executionOwnershipTable.tenantId),
+        eq(invocationTable.id, sourceOwner.invocationId),
+        eq(invocationTable.tenantId, sourceOwner.tenantId),
       ),
     )
     .where(
       and(
-        eq(executionOwnershipTable.ownershipState, "released"),
-        eq(executionOwnershipTable.reasonCode, "supervisor_handoff"),
+        eq(sourceOwner.ownershipState, "released"),
+        eq(sourceOwner.reasonCode, "supervisor_handoff"),
         notInArray(invocationTable.executionState, [...INVOCATION_TERMINAL_STATES]),
         notExists(
           db
@@ -151,9 +154,23 @@ export async function scanSupervisorHandoffs(params: {
               ),
             ),
         ),
+        // 在 LIMIT 之前排除已被任何后续代际消费/替代的历史 handoff。历史墓碑保持不变，
+        // 但它不再反复占据有限批次、遮住真正待处理的旧候选。
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(successorOwner)
+            .where(
+              and(
+                eq(successorOwner.tenantId, sourceOwner.tenantId),
+                eq(successorOwner.invocationId, sourceOwner.invocationId),
+                sql`${successorOwner.leaseEpoch} > ${sourceOwner.leaseEpoch}`,
+              ),
+            ),
+        ),
       ),
     )
-    .orderBy(desc(executionOwnershipTable.releasedAt))
+    .orderBy(asc(sourceOwner.releasedAt))
     .limit(params.limit);
 }
 
@@ -282,9 +299,15 @@ export async function runDueUndispatchedIntentRecoveries(
   const handoffs = await scanSupervisorHandoffs({ limit: batchSize });
   summary.handoffs.scanned = handoffs.length;
   for (const candidate of handoffs) {
-    const recovered = await recoverSupervisorHandoff(candidate, now, params.dependencies);
-    if (recovered) summary.handoffs.recovered += 1;
-    else summary.handoffs.skipped += 1;
+    try {
+      const recovered = await recoverSupervisorHandoff(candidate, now, params.dependencies);
+      if (recovered) summary.handoffs.recovered += 1;
+      else summary.handoffs.skipped += 1;
+    } catch {
+      // 单个交接的暂态失败保留其持久候选；本轮继续处理其余有限批次，避免头部对象
+      // 让整个 lane 永久无进展。
+      summary.handoffs.skipped += 1;
+    }
   }
 
   const invocations = await scanUndispatchedInvocations({ now, limit: batchSize });

@@ -1,7 +1,7 @@
 /** Durable InvocationCommand delivery to the current Runtime authority. */
 import { db } from "@/lib/db/client";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
-import { getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
+import { getAttemptById, getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
@@ -20,6 +20,7 @@ import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import {
   getRuntimeSessionBindingById,
   getRuntimeSessionBindingByOwnership,
+  getRuntimeSessionBindingBySourceOperation,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import {
   scheduleCommandTransientRetry,
@@ -47,6 +48,7 @@ import {
   confirmCheckpointRuntimeRelease,
   recordCheckpointReleaseFailure,
 } from "@/lib/workspace/checkpoint-release";
+import { getFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
 import { type RecoveryAnchor, computeRecoveryAnchorDigest } from "@/lib/workspace/recovery-anchor";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { and, eq, sql } from "drizzle-orm";
@@ -402,15 +404,30 @@ async function dispatchCommand(params: {
   try {
     let response: unknown;
     if (params.expectedType === "resume") {
-      // Resume 前置状态：waiting_user，或 UserAction resolve 事务已先落 Authority 的
-      // post-authority running（resume_source=user_action_resolution + request_id +
-      // resume_payload 凭证）。其余状态一律拒绝。
-      if (context.invocation.executionState !== "waiting_user" && !isPostAuthorityResume(context)) {
-        throw new ResumeInvocationNotWaitingError(context.invocation.id);
+      const sourceOperationKey = `command:${params.commandId}`;
+      // 先按持久命令来源反查原 Attempt/Session。只有查不到历史来源时，才把本次命令
+      // 当作首次恢复并执行 waiting_user + suspended 的严格前置校验。
+      const historicalSession = await getRuntimeSessionBindingBySourceOperation(params.tenantId, {
+        invocationId: context.invocation.id,
+        intentType: "resume",
+        sourceOperationKey,
+      });
+      const attempt = historicalSession
+        ? await getAttemptById(historicalSession.attemptId)
+        : await getLatestAttempt(context.invocation.id);
+      if (!historicalSession) {
+        if (
+          context.invocation.executionState !== "waiting_user" &&
+          !isPostAuthorityResume(context)
+        ) {
+          throw new ResumeInvocationNotWaitingError(context.invocation.id);
+        }
+        if (!attempt || attempt.attemptState !== "suspended") {
+          throw new CommandInvocationNotFoundError(`suspended-attempt:${context.invocation.id}`);
+        }
+      } else if (!attempt) {
+        throw new CommandInvocationNotFoundError(`source-attempt:${historicalSession.attemptId}`);
       }
-      const attempt = await getLatestAttempt(context.invocation.id);
-      if (!attempt || attempt.attemptState !== "suspended")
-        throw new CommandInvocationNotFoundError(`suspended-attempt:${context.invocation.id}`);
       const anchor = attempt.filesystemCheckpointId
         ? `checkpoint:${attempt.filesystemCheckpointId}`
         : `invocation:${context.invocation.id}:recovery:${context.invocation.recoveryVersion}`;
@@ -429,7 +446,7 @@ async function dispatchCommand(params: {
         anchorDigest: attempt.resumeAnchorDigest ?? protocolDigest(anchor),
         // A05：用户恢复的来源意图 = **已持久命令身份**。用 `params.commandId` 而不是
         // 时间/序号：同一次 Resume 的重投必须拿到同一个键，重投才会命中原 Session。
-        sourceOperationKey: `command:${params.commandId}`,
+        sourceOperationKey,
       });
     } else if (params.expectedType === "checkpoint") {
       response = await dispatchFilesystemCheckpoint({
@@ -715,6 +732,49 @@ async function dispatchFilesystemCheckpoint(input: {
     leaseEpoch: String(owner.leaseEpoch),
     sessionBindingId: session.id,
   } as const;
+  const freshInvocation = await getInvocationById(input.tenantId, input.context.invocation.id);
+  const preparedEvidence = freshInvocation?.checkpointPreparedEvidence as {
+    checkpointId?: unknown;
+    release?: unknown;
+  } | null;
+  if (
+    freshInvocation?.checkpointIntentId === payload.checkpointIntentId &&
+    typeof preparedEvidence?.checkpointId === "string"
+  ) {
+    const existing = await getFilesystemCheckpoint(input.tenantId, preparedEvidence.checkpointId);
+    if (!existing || existing.checkpointIntentId !== payload.checkpointIntentId) {
+      throw new Error("CheckpointStale");
+    }
+    // 已提交对象的命令重投只补做原 release，不再请求新安全点、重建 Snapshot 或调用 abandon。
+    try {
+      await input.runtimeClient.releaseSafePoint({
+        runtimeEndpoint: input.endpoint.runtimeEndpoint,
+        auth: input.endpoint.auth,
+        invocationId: input.context.invocation.id,
+        checkpointIntentId: payload.checkpointIntentId,
+        idempotencyKey: `checkpoint-release:${payload.checkpointIntentId}`,
+        request: {
+          protocolVersion: 3,
+          targetAuthority: authority,
+          checkpointIntentId: payload.checkpointIntentId,
+        },
+      });
+      const release = await confirmCheckpointRuntimeRelease({
+        tenantId: input.tenantId,
+        invocationId: input.context.invocation.id,
+        checkpointIntentId: payload.checkpointIntentId,
+      });
+      return { checkpoint: existing, release, replayed: true };
+    } catch (error) {
+      await recordCheckpointReleaseFailure({
+        tenantId: input.tenantId,
+        invocationId: input.context.invocation.id,
+        checkpointIntentId: payload.checkpointIntentId,
+        reasonCode: error instanceof Error ? error.message : "RuntimeReleaseFailed",
+      });
+      return { checkpoint: existing, releasePending: true, replayed: true };
+    }
+  }
   const request: SafePointRequest = {
     protocolVersion: 3,
     targetAuthority: authority,

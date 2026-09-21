@@ -19,6 +19,8 @@
  * "Supervisor 过期但 Owner 被另一路续活"的窗口。
  */
 import { randomUUID } from "node:crypto";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -38,6 +40,7 @@ import {
 import {
   type RuntimeSessionBinding,
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationTable,
   runtimeEventIngressTable,
   runtimeSessionBindingTable,
@@ -58,7 +61,11 @@ import {
   markRuntimeSessionLostInTransaction,
   releaseRuntimeSessionSupervisorInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
-import { runDueUndispatchedIntentRecoveries } from "@/lib/runtime/retry/undispatched-intent-lane";
+import { dispatchQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
+import {
+  runDueUndispatchedIntentRecoveries,
+  scanSupervisorHandoffs,
+} from "@/lib/runtime/retry/undispatched-intent-lane";
 import { type AuthorityIdentity, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import {
@@ -67,7 +74,10 @@ import {
   spawnSupervisorProcess,
 } from "@/lib/runtime/test-support/supervisor-process";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
-import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
+import {
+  type DispatchableTurnContext,
+  seedDispatchableTurn,
+} from "@/lib/test-support/seed-dispatchable-turn";
 import { workerInstanceId } from "@/lib/workers/worker-instance-identity";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -118,9 +128,33 @@ async function markPrepared(invocationId: string, attemptId: string) {
  */
 async function seedActiveGenerationWithInFlightChild(options?: {
   phase?: "dispatching" | "executing";
+  baseContext?: DispatchableTurnContext;
 }) {
   const phase = options?.phase ?? "executing";
-  const ctx = await seedDispatchableTurn();
+  let ctx = options?.baseContext;
+  if (ctx) {
+    const { thread } = await createThread({
+      tenantId: ctx.tenantId,
+      ownerUserId: ctx.ownerId,
+      actorId: ctx.ownerId,
+    });
+    const { turn } = await acceptUserMessageTurn({
+      tenantId: ctx.tenantId,
+      threadId: thread.id,
+      ownerUserId: ctx.ownerId,
+      content: { text: `N01 candidate ${randomUUID()}` },
+      actorId: ctx.ownerId,
+    });
+    if (!turn.triggerItemId) throw new Error("N01 复用上下文的新 Turn 缺少 triggerItemId");
+    ctx = {
+      ...ctx,
+      threadId: thread.id,
+      turnId: turn.id,
+      triggerItemId: turn.triggerItemId,
+    };
+  } else {
+    ctx = await seedDispatchableTurn();
+  }
   const dispatch = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
@@ -1078,9 +1112,63 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
     expect(result.completed).toBe(false);
   }, 40_000);
 
-  it("A03-T07: 主动交接有持久消费者——不存在无人推进却仍在 healthy 的代际", async () => {
+  it("A03-T07 / N01-T2: 主动交接由唯一持久消费者继任并登记旧资源退役", async () => {
     const { ctx, invocation, attempt, gen } = await seedActiveGenerationWithInFlightChild();
     const tenantId = ctx.tenantId;
+
+    const closeForHandoff = async (
+      fixture: Awaited<ReturnType<typeof seedActiveGenerationWithInFlightChild>>,
+    ) => {
+      await db.transaction((tx) =>
+        closeExecutionOwnershipInTransaction(tx, {
+          tenantId: fixture.ctx.tenantId,
+          invocationId: fixture.invocation.id,
+          ownershipId: fixture.gen.ownership.id,
+          attemptId: fixture.gen.ownership.attemptId,
+          leaseEpoch: fixture.gen.ownership.leaseEpoch,
+          state: "released",
+          reasonCode: "supervisor_handoff",
+        }),
+      );
+    };
+
+    // 混入三类不可领取对象与一个会在单项派发时报错的对象。扫描与领取不能把它们当成
+    // 当前合法交接，更不能让错误对象阻塞本用例的真实待办。
+    const activeFixture = await seedActiveGenerationWithInFlightChild({ baseContext: ctx });
+    await closeForHandoff(activeFixture);
+    const activeSuccessor = await createPreparedTakeoverAttempt({
+      tenantId: activeFixture.ctx.tenantId,
+      invocationId: activeFixture.invocation.id,
+      retryReasonCode: "supervisor_handoff",
+    });
+    await acquireTestRuntimeAuthority({
+      tenantId: activeFixture.ctx.tenantId,
+      invocationId: activeFixture.invocation.id,
+      attemptId: activeSuccessor.id,
+      runtimeRevisionId: activeFixture.binding.runtimeRevisionId,
+      phase: "dispatching",
+      runtimeCapabilitiesJson: activeFixture.ctx.runtimeRevision.runtimeCapabilitiesJson,
+      activationEvidence: { fixture: "n01-active-successor" },
+      activationDigest: protocolDigest({ fixture: "n01-active-successor" }),
+    });
+
+    const terminalFixture = await seedActiveGenerationWithInFlightChild({ baseContext: ctx });
+    await closeForHandoff(terminalFixture);
+    await db
+      .update(invocationTable)
+      .set({ executionState: "completed", finishedAt: new Date(), updatedAt: new Date() })
+      .where(eq(invocationTable.id, terminalFixture.invocation.id));
+
+    const notDueFixture = await seedActiveGenerationWithInFlightChild({ baseContext: ctx });
+    await closeForHandoff(notDueFixture);
+    await createPreparedTakeoverAttempt({
+      tenantId: notDueFixture.ctx.tenantId,
+      invocationId: notDueFixture.invocation.id,
+      retryReasonCode: "supervisor_handoff",
+    });
+
+    const failingFixture = await seedActiveGenerationWithInFlightChild({ baseContext: ctx });
+    await closeForHandoff(failingFixture);
 
     // Supervisor 触达已定义的退出边界（等待有界），子工作尚未完成。
     const supervisor = await spawnSupervisorProcess(
@@ -1108,6 +1196,14 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
     expect(stateAfterHandoff).not.toBe("lost");
     expect(stateAfterHandoff).not.toBe("failed");
 
+    const scanned = await scanSupervisorHandoffs({ limit: 20 });
+    const scannedInvocations = new Set(scanned.map((candidate) => candidate.invocationId));
+    expect(scannedInvocations.has(activeFixture.invocation.id)).toBe(false);
+    expect(scannedInvocations.has(terminalFixture.invocation.id)).toBe(false);
+    expect(scannedInvocations.has(notDueFixture.invocation.id)).toBe(true);
+    expect(scannedInvocations.has(failingFixture.invocation.id)).toBe(true);
+    expect(scannedInvocations.has(invocation.id)).toBe(true);
+
     // 正式恢复车道运行一轮：已正式退休的代际不得被当成"租约过期的活跃 Owner"再处理一遍。
     const recovery = await runDueExpiredOwnerRecoveries({ limit: 50 });
     expect(recovery.recovered).toBe(0);
@@ -1116,18 +1212,33 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
     // 只运行生产 Worker 实际装配的持久消费者。测试不得手工创建 Attempt 或手工调用 Start；
     // released/supervisor_handoff 是消费者可在崩溃后回读的义务身份。
     const counters = { decisions: 0, actions: 0 };
-    const handoffRecovery = await runDueUndispatchedIntentRecoveries({
-      now: new Date(),
-      dependencies: {
-        hostedApplicationService: hostedService({
-          leaseMs: 2_000,
-          pendingWaitLimitMs: 400,
-          loopWindowMs: 30_000,
-          counters,
-        }),
-      },
+    const handoffService = hostedService({
+      leaseMs: 2_000,
+      pendingWaitLimitMs: 400,
+      loopWindowMs: 30_000,
+      counters,
     });
-    expect(handoffRecovery.handoffs.recovered).toBe(1);
+    const dispatchAttempt: typeof dispatchQueuedInvocationAttempt = async (input) => {
+      const [candidateAttempt] = await db
+        .select({ invocationId: invocationAttemptTable.invocationId })
+        .from(invocationAttemptTable)
+        .where(eq(invocationAttemptTable.id, input.attemptId))
+        .limit(1);
+      if (candidateAttempt?.invocationId === failingFixture.invocation.id) {
+        throw new Error("n01-single-candidate-failure");
+      }
+      return dispatchQueuedInvocationAttempt(input);
+    };
+    const handoffRecoveries = await Promise.all(
+      ["worker-a", "worker-b"].map(() =>
+        runDueUndispatchedIntentRecoveries({
+          now: new Date(),
+          batchSize: 20,
+          dependencies: { hostedApplicationService: handoffService, dispatchAttempt },
+        }),
+      ),
+    );
+    expect(handoffRecoveries.reduce((sum, report) => sum + report.handoffs.recovered, 0)).toBe(1);
 
     const newOwner = await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id });
     expect(newOwner?.id).not.toBe(gen.ownership.id);
@@ -1148,6 +1259,53 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
         "harness.action.started",
       ),
     ).toBe(1);
+  }, 120_000);
+
+  it("N01-T1: 超过扫描批次的已消费 handoff 历史不会遮住当前真实待办", async () => {
+    const { ctx, invocation, binding, gen } = await seedActiveGenerationWithInFlightChild();
+    let current = gen;
+    for (let index = 0; index < 10; index += 1) {
+      await db.transaction(async (tx) => {
+        await closeExecutionOwnershipInTransaction(tx, {
+          tenantId: ctx.tenantId,
+          invocationId: invocation.id,
+          ownershipId: current.ownership.id,
+          attemptId: current.ownership.attemptId,
+          leaseEpoch: current.ownership.leaseEpoch,
+          state: "released",
+          reasonCode: "supervisor_handoff",
+        });
+      });
+      if (index < 9) {
+        const nextAttempt = await createPreparedTakeoverAttempt({
+          tenantId: ctx.tenantId,
+          invocationId: invocation.id,
+          retryReasonCode: "supervisor_handoff",
+        });
+        current = await acquireTestRuntimeAuthority({
+          tenantId: ctx.tenantId,
+          invocationId: invocation.id,
+          attemptId: nextAttempt.id,
+          runtimeRevisionId: binding.runtimeRevisionId,
+          phase: "dispatching",
+          runtimeCapabilitiesJson: ctx.runtimeRevision.runtimeCapabilitiesJson,
+          activationEvidence: { fixture: `handoff-history-${index}` },
+          activationDigest: protocolDigest({ fixture: `handoff-history-${index}` }),
+        });
+      }
+    }
+    const candidates = await scanSupervisorHandoffs({ limit: 1 });
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        invocationId: invocation.id,
+        sourceOwnershipId: current.ownership.id,
+      }),
+    ]);
+    const historical = await db
+      .select({ reasonCode: executionOwnershipTable.reasonCode })
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.invocationId, invocation.id));
+    expect(historical.filter((row) => row.reasonCode === "supervisor_handoff")).toHaveLength(10);
   }, 120_000);
 
   it("A03-T08: 执行期限由领取时冻结，不随重新进入 Loop 重置", async () => {

@@ -12,7 +12,23 @@ import {
   InvocationAttemptNotFoundError,
   InvocationAttemptStateConflictError,
 } from "@/lib/runtime/errors";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+
+export const ATTEMPT_PREPARATION_LEASE_MS = 120_000 as const;
+
+export interface AttemptPreparationClaim {
+  tenantId: string;
+  invocationId: string;
+  attemptId: string;
+  intentKey: string;
+  requestDigest: string;
+  claimId: string;
+}
+
+export type AttemptPreparationClaimOutcome =
+  | { disposition: "claimed"; attempt: InvocationAttempt; claim: AttemptPreparationClaim }
+  | { disposition: "replay"; attempt: InvocationAttempt; claim: null }
+  | { disposition: "busy"; attempt: InvocationAttempt; claim: null };
 
 export type AttemptTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -106,17 +122,172 @@ export function createAttemptInternal(
   return createAttemptIn(tx, params);
 }
 
+/**
+ * 领取 Attempt 的唯一准备槽。
+ *
+ * 领取事务固定锁序为 Invocation → Attempt。外部 IO 完成后的所有提交者必须把这里返回的
+ * claim 原样带回；仅凭 attemptId、进程 id 或“当前还没有 Owner”都不构成写权限。
+ */
+export async function claimAttemptPreparation(input: AttemptPreparationClaim & { now?: Date }) {
+  return db.transaction(async (tx): Promise<AttemptPreparationClaimOutcome> => {
+    const now = input.now ?? new Date();
+    const [invocation] = await tx
+      .select({ id: invocationTable.id })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, input.tenantId),
+          eq(invocationTable.id, input.invocationId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!invocation) throw new InvocationAttemptNotFoundError(input.attemptId);
+    const [attempt] = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, input.attemptId),
+          eq(invocationAttemptTable.invocationId, input.invocationId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!attempt) throw new InvocationAttemptNotFoundError(input.attemptId);
+    if (
+      attempt.preparationIntentKey === input.intentKey &&
+      attempt.preparationRequestDigest !== null &&
+      attempt.preparationRequestDigest !== input.requestDigest
+    ) {
+      throw new InvocationAttemptStateConflictError(
+        attempt.id,
+        attempt.attemptState,
+        "PreparationIntentConflict",
+      );
+    }
+    if (
+      attempt.preparationState === "prepared" &&
+      attempt.preparationIntentKey === input.intentKey &&
+      attempt.preparationRequestDigest === input.requestDigest
+    ) {
+      return { disposition: "replay", attempt, claim: null };
+    }
+    if (
+      attempt.preparationState === "preparing" &&
+      attempt.preparationClaimId !== input.claimId &&
+      (attempt.preparationLeaseExpiresAt?.getTime() ?? 0) > now.getTime()
+    ) {
+      return { disposition: "busy", attempt, claim: null };
+    }
+    if (
+      attempt.preparationIntentKey !== null &&
+      attempt.preparationIntentKey !== input.intentKey &&
+      attempt.preparationState !== "pending"
+    ) {
+      throw new InvocationAttemptStateConflictError(
+        attempt.id,
+        attempt.attemptState,
+        "PreparationSourceSuperseded",
+      );
+    }
+    await tx
+      .update(invocationAttemptTable)
+      .set({
+        preparationState: "preparing",
+        preparationIntentKey: input.intentKey,
+        preparationRequestDigest: input.requestDigest,
+        preparationClaimId: input.claimId,
+        preparationLeaseExpiresAt: new Date(now.getTime() + ATTEMPT_PREPARATION_LEASE_MS),
+        nextPreparationAt: null,
+        updatedAt: now,
+        versionNo: attempt.versionNo + 1,
+      })
+      .where(eq(invocationAttemptTable.id, attempt.id));
+    const [updated] = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attempt.id))
+      .limit(1);
+    if (!updated) throw new InvocationAttemptNotFoundError(attempt.id);
+    return {
+      disposition: "claimed",
+      attempt: updated,
+      claim: {
+        tenantId: input.tenantId,
+        invocationId: input.invocationId,
+        attemptId: input.attemptId,
+        intentKey: input.intentKey,
+        requestDigest: input.requestDigest,
+        claimId: input.claimId,
+      },
+    };
+  });
+}
+
+export async function assertAttemptPreparationClaimHeldInTransaction(
+  tx: AttemptTx,
+  claim: AttemptPreparationClaim,
+): Promise<InvocationAttempt> {
+  const [attempt] = await tx
+    .select()
+    .from(invocationAttemptTable)
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, claim.tenantId),
+        eq(invocationAttemptTable.id, claim.attemptId),
+        eq(invocationAttemptTable.invocationId, claim.invocationId),
+        gt(invocationAttemptTable.preparationLeaseExpiresAt, sql`CURRENT_TIMESTAMP(3)`),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (
+    !attempt ||
+    attempt.preparationState !== "preparing" ||
+    attempt.preparationIntentKey !== claim.intentKey ||
+    attempt.preparationRequestDigest !== claim.requestDigest ||
+    attempt.preparationClaimId !== claim.claimId
+  ) {
+    throw new InvocationAttemptStateConflictError(
+      claim.attemptId,
+      attempt?.attemptState ?? "lost",
+      "PreparationClaimSuperseded",
+    );
+  }
+  return attempt;
+}
+
 /** Persists candidate preparation evidence before Ownership can be acquired. */
 export async function markAttemptPreparedInTransaction(
   tx: AttemptTx,
-  input: { attemptId: string; evidence: unknown; digest: string; now?: Date },
+  input: {
+    attemptId: string;
+    evidence: unknown;
+    digest: string;
+    now?: Date;
+    preparationClaim?: AttemptPreparationClaim;
+  },
 ): Promise<InvocationAttempt> {
-  const [current] = await tx
-    .select()
-    .from(invocationAttemptTable)
-    .where(eq(invocationAttemptTable.id, input.attemptId))
-    .for("update")
-    .limit(1);
+  // 生产链禁止无领取凭据提交 Prepared。现存无凭据调用只属于 test-support/测试夹具；
+  // 把边界放在持久层，避免新增生产调用方误走旧式 attemptId-only 旁路。
+  if (!input.preparationClaim && process.env.NODE_ENV !== "test") {
+    throw new InvocationAttemptStateConflictError(
+      input.attemptId,
+      "queued",
+      "PreparationClaimRequired",
+    );
+  }
+  const current = input.preparationClaim
+    ? await assertAttemptPreparationClaimHeldInTransaction(tx, input.preparationClaim)
+    : await tx
+        .select()
+        .from(invocationAttemptTable)
+        .where(eq(invocationAttemptTable.id, input.attemptId))
+        .for("update")
+        .limit(1)
+        .then(([row]) => row);
   if (!current) throw new InvocationAttemptNotFoundError(input.attemptId);
   if (current.preparationState === "prepared") return current;
   if (current.preparationState === "failed")

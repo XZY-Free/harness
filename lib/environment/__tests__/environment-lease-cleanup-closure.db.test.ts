@@ -36,14 +36,18 @@ import {
   getEnvironmentLeaseById,
   recordEnvironmentLeaseCleanupFailure,
   scheduleEnvironmentLeaseCleanup,
+  scheduleEnvironmentLeaseCleanupForPreparationClaim,
 } from "@/lib/environment/environment-lease-store";
 import {
   createEnvironmentProvisioner,
+  environmentProvisionRequestDigest,
   runDueEnvironmentLeaseCleanups,
   runEnvironmentLeaseCleanup,
 } from "@/lib/environment/environment-provisioner";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import {
+  ATTEMPT_PREPARATION_LEASE_MS,
+  claimAttemptPreparation,
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
@@ -54,9 +58,15 @@ import {
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
-import { executionOwnershipTable } from "@/lib/persistence/schema/executions";
+import {
+  executionOwnershipTable,
+  invocationAttemptTable,
+} from "@/lib/persistence/schema/executions";
 import { markInvocationLost, readObservedOwner } from "@/lib/runtime/application/runtime-recovery";
-import { hostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
+import {
+  handOffSupervisorGeneration,
+  hostedRuntimeApplicationService,
+} from "@/lib/runtime/application/runtime-resume";
 import {
   dockerInfo,
   inspectContainer,
@@ -64,6 +74,7 @@ import {
   listContainersByLabel,
   removeContainer,
 } from "@/lib/runtime/container/docker-cli";
+import { claimRuntimeSessionSupervisorInTransaction } from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -212,6 +223,16 @@ async function makeFixture(): Promise<ManagedFixture> {
       const seeded = await seedPreparedRuntimeAttempt({
         environmentDefinitionRevisionId: revision.id,
       });
+      const preparationClaimId = randomUUID();
+      const preparationIntentKey = `invocation:${seeded.invocation.id}`;
+      const preparationRequestDigest = environmentProvisionRequestDigest({
+        tenantId: TENANT_ID,
+        invocationId: seeded.invocation.id,
+        attemptId: seeded.attempt.id,
+        revisionId: revision.id,
+        workspaceBindingId: seeded.workspace.id,
+        recoveryAnchorDigest: null,
+      });
       const lease = await provisioner.provision({
         tenantId: TENANT_ID,
         invocationId: seeded.invocation.id,
@@ -220,7 +241,30 @@ async function makeFixture(): Promise<ManagedFixture> {
         revision,
         workspaceBindingId: seeded.workspace.id,
         workspaceRoot,
+        preparationClaimId,
+        preparationIntentKey,
+        preparationRequestDigest,
       });
+      if (!lease.preparedEvidence || !lease.preparedDigest) {
+        throw new Error("EnvironmentLease 缺少 Prepared 证据");
+      }
+      const preparedEvidence = lease.preparedEvidence;
+      const preparedDigest = lease.preparedDigest;
+      await db.transaction((tx) =>
+        markAttemptPreparedInTransaction(tx, {
+          attemptId: seeded.attempt.id,
+          evidence: preparedEvidence,
+          digest: preparedDigest,
+          preparationClaim: {
+            tenantId: TENANT_ID,
+            invocationId: seeded.invocation.id,
+            attemptId: seeded.attempt.id,
+            intentKey: preparationIntentKey,
+            requestDigest: preparationRequestDigest,
+            claimId: preparationClaimId,
+          },
+        }),
+      );
       const authority = await acquireTestRuntimeAuthority({
         tenantId: TENANT_ID,
         invocationId: seeded.invocation.id,
@@ -319,6 +363,170 @@ describe("A08 环境资源终态清理与回收闭环", () => {
     const released = await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId);
     expect(released?.leaseState).toBe("released");
     expect(released?.releasedAt).not.toBeNull();
+    expect(await inspectContainer(seeded.containerName)).toBeNull();
+  }, 60_000);
+
+  it("N07-T1/N07-T3: MANAGED 主动交接登记旧 Lease，释放失败及进程退出后由原 Worker 真实重试", async () => {
+    const fixture = await makeFixture();
+    const seeded = await fixture.seedManagedAuthority();
+    const claimId = randomUUID();
+    const now = new Date();
+    const claim = await db.transaction((tx) =>
+      claimRuntimeSessionSupervisorInTransaction(tx, {
+        tenantId: TENANT_ID,
+        id: seeded.sessionBindingId,
+        claimId,
+        instanceId: `worker-instance:${randomUUID()}`,
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+        now,
+      }),
+    );
+    expect(claim.claimed).toBe(true);
+    await handOffSupervisorGeneration({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocationId,
+      ownershipId: seeded.ownershipId,
+      attemptId: seeded.attemptId,
+      leaseEpoch: Number(seeded.authority.leaseEpoch),
+      sessionBindingId: seeded.sessionBindingId,
+      claimId,
+    });
+    const retiring = await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId);
+    expect(retiring?.leaseState).toBe("releasing");
+    expect(retiring?.releasedAt).toBeNull();
+    expect(await inspectContainer(seeded.containerName)).not.toBeNull();
+
+    let releaseCalls = 0;
+    const failOnceBackend: EnvironmentInstanceBackend = {
+      ...fixture.backend,
+      async release(input) {
+        releaseCalls += 1;
+        if (releaseCalls === 1) throw new Error("simulated backend release interruption");
+        return fixture.backend.release(input);
+      },
+    };
+    const first = await runEnvironmentLeaseCleanup({
+      tenantId: TENANT_ID,
+      leaseId: seeded.leaseId,
+      backend: failOnceBackend,
+      owner: "cleanup-worker:n07:first-process",
+    });
+    expect(first.state).toBe("pending_retry");
+    const pending = await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId);
+    expect(pending?.leaseState).toBe("releasing");
+    expect(await inspectContainer(seeded.containerName)).not.toBeNull();
+
+    const second = await runEnvironmentLeaseCleanup({
+      tenantId: TENANT_ID,
+      leaseId: seeded.leaseId,
+      backend: failOnceBackend,
+      owner: "cleanup-worker:n07:replacement-process",
+      now: new Date((pending?.nextCleanupAt?.getTime() ?? Date.now()) + 1),
+    });
+    expect(second.state).toBe("released");
+    expect(releaseCalls).toBe(2);
+    expect((await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId))?.leaseState).toBe("released");
+    expect(await inspectContainer(seeded.containerName)).toBeNull();
+  }, 60_000);
+
+  it("N05-T1/N05-T2: 旧 create 错误不清继任者，当前准备者失败则持久重试到真实 released", async () => {
+    const fixture = await makeFixture();
+    const seeded = await fixture.seedManagedAuthority();
+    await db
+      .update(invocationAttemptTable)
+      .set({
+        preparationState: "pending",
+        preparationIntentKey: null,
+        preparationRequestDigest: null,
+        preparationClaimId: null,
+        preparationLeaseExpiresAt: null,
+      })
+      .where(eq(invocationAttemptTable.id, seeded.attemptId));
+    const intentKey = `n05-create:${seeded.attemptId}`;
+    const requestDigest = protocolDigest({ intentKey });
+    const t0 = new Date();
+    const first = await claimAttemptPreparation({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocationId,
+      attemptId: seeded.attemptId,
+      intentKey,
+      requestDigest,
+      claimId: "n05-worker-1",
+      now: t0,
+    });
+    if (!first.claim) throw new Error("W1 未取得准备领取");
+    const second = await claimAttemptPreparation({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocationId,
+      attemptId: seeded.attemptId,
+      intentKey,
+      requestDigest,
+      claimId: "n05-worker-2",
+      now: new Date(t0.getTime() + ATTEMPT_PREPARATION_LEASE_MS + 1),
+    });
+    expect(second.disposition).toBe("claimed");
+
+    const cleanup = await scheduleEnvironmentLeaseCleanupForPreparationClaim({
+      claim: first.claim,
+      leaseId: seeded.leaseId,
+      errorCode: "OrdinaryCreateError",
+    });
+    expect(cleanup.outcome).toBe("not_claimed");
+    expect((await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId))?.leaseState).toBe("active");
+
+    let releaseCalls = 0;
+    const countingBackend: EnvironmentInstanceBackend = {
+      ...fixture.backend,
+      async release(input) {
+        releaseCalls += 1;
+        return fixture.backend.release(input);
+      },
+    };
+    const sweep = await runDueEnvironmentLeaseCleanups({
+      backend: countingBackend,
+      owner: "cleanup-worker:n05-stale",
+    });
+    expect(sweep.scanned).toBe(0);
+    expect(releaseCalls).toBe(0);
+    expect(await inspectContainer(seeded.containerName)).not.toBeNull();
+
+    if (!second.claim) throw new Error("W2 未取得准备领取");
+    const scheduled = await scheduleEnvironmentLeaseCleanupForPreparationClaim({
+      claim: second.claim,
+      leaseId: seeded.leaseId,
+      errorCode: "CurrentCreateError",
+    });
+    expect(scheduled.outcome).toBe("scheduled");
+    let failCurrentOnce = true;
+    const failOnceBackend: EnvironmentInstanceBackend = {
+      ...fixture.backend,
+      async release(input) {
+        releaseCalls += 1;
+        if (failCurrentOnce) {
+          failCurrentOnce = false;
+          throw new Error("simulated current cleanup interruption");
+        }
+        return fixture.backend.release(input);
+      },
+    };
+    const failed = await runEnvironmentLeaseCleanup({
+      tenantId: TENANT_ID,
+      leaseId: seeded.leaseId,
+      backend: failOnceBackend,
+      owner: "cleanup-worker:n05:first",
+    });
+    expect(failed.state).toBe("pending_retry");
+    const pending = await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId);
+    expect(pending?.leaseState).toBe("releasing");
+    const retried = await runEnvironmentLeaseCleanup({
+      tenantId: TENANT_ID,
+      leaseId: seeded.leaseId,
+      backend: failOnceBackend,
+      owner: "cleanup-worker:n05:retry",
+      now: new Date((pending?.nextCleanupAt?.getTime() ?? Date.now()) + 1),
+    });
+    expect(retried.state).toBe("released");
+    expect((await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId))?.leaseState).toBe("released");
     expect(await inspectContainer(seeded.containerName)).toBeNull();
   }, 60_000);
 

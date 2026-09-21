@@ -4,7 +4,10 @@ import { aiConfig } from "@/lib/config";
 import { allocateEventSequences } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
-import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
+import {
+  type EnvironmentProvisioner,
+  environmentProvisionRequestDigest,
+} from "@/lib/environment/environment-provisioner";
 import { recordEnvironmentSelectionFirstApplied } from "@/lib/environment/environment-selection";
 import {
   type CreateExecutionBindingCommand,
@@ -287,6 +290,18 @@ export async function dispatchInvocationForTurn(params: {
   // 不会退化成一个"引用真实 Workspace 却没有 Writer"的 Binding。
   const workspaceResources: WorkspaceExecutionResources | undefined = resources.workspace;
   const attempt = await createAttempt({ invocationId: invocation.id, tenantId: params.tenantId });
+  const preparationClaimId = randomUUID();
+  const preparationIntentKey = `invocation:${invocation.id}`;
+  const preparationRequestDigest = environmentRevision
+    ? environmentProvisionRequestDigest({
+        tenantId: params.tenantId,
+        invocationId: invocation.id,
+        attemptId: attempt.id,
+        revisionId: environmentRevision.id,
+        workspaceBindingId,
+        recoveryAnchorDigest: null,
+      })
+    : null;
   const environmentLease =
     environmentRevision && resolvedEnvironmentProvisioner
       ? await resolvedEnvironmentProvisioner.provision({
@@ -299,6 +314,9 @@ export async function dispatchInvocationForTurn(params: {
           workspaceBindingId,
           workspaceRoot: workspaceResources?.root ?? null,
           recoveryAnchorDigest: null,
+          preparationClaimId,
+          preparationIntentKey,
+          preparationRequestDigest: preparationRequestDigest as string,
         })
       : null;
   const transition = await transitionTurnToQueued({
@@ -325,7 +343,19 @@ export async function dispatchInvocationForTurn(params: {
         environmentLeaseId: environmentLease?.id ?? null,
         workspace: workspaceResources,
         // A05：首次 Start 的来源意图就是 Invocation 自身身份 —— 已持久、重投不变。
-        sourceOperationKey: `invocation:${invocation.id}`,
+        sourceOperationKey: preparationIntentKey,
+        ...(preparationRequestDigest
+          ? {
+              preparationClaim: {
+                tenantId: params.tenantId,
+                invocationId: invocation.id,
+                attemptId: attempt.id,
+                intentKey: preparationIntentKey,
+                requestDigest: preparationRequestDigest,
+                claimId: preparationClaimId,
+              },
+            }
+          : {}),
       });
       runtimeDispatch = {
         response: started.response,

@@ -9,6 +9,7 @@ import { getEnvironmentRevisionById } from "@/lib/environment/environment-defini
 import {
   getEnvironmentLeaseByAttempt,
   isPreparedReadinessState,
+  registerEnvironmentLeaseCleanupForAttemptInTransaction,
 } from "@/lib/environment/environment-lease-store";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { closeInvocationTerminalInTransaction } from "@/lib/executions/application/close-invocation-terminal";
@@ -55,7 +56,10 @@ import type {
 } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
-import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import {
+  decideRuntimeStartSource,
+  startRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-start";
 import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import {
@@ -149,6 +153,7 @@ export async function resumeRuntimeInvocation(input: {
   // 三者由 `EnvironmentProvisioner.reprepare` 一次完成：清掉旧激活 → 推进恢复水位 →
   // 真实回读实例（必要时按稳定 operationId 幂等重建）→ 重写 Prepared 证据。
   let environmentLease: EnvironmentLease | null = null;
+  let environmentRevision: Awaited<ReturnType<typeof getEnvironmentRevisionById>> = null;
   if (input.binding.environmentMode === "MANAGED") {
     if (!input.binding.environmentDefinitionRevisionId || !input.environmentProvisioner) {
       throw new Error("EnvironmentRevisionMismatch");
@@ -158,12 +163,33 @@ export async function resumeRuntimeInvocation(input: {
       input.binding.environmentDefinitionRevisionId,
     );
     if (!revision) throw new Error("EnvironmentRevisionMismatch");
+    environmentRevision = revision;
     const current = await getEnvironmentLeaseByAttempt(input.tenantId, invocation.id, attempt.id);
     if (
       !current ||
       current.environmentDefinitionRevisionId !== revision.id ||
       current.leaseState !== "active"
     ) {
+      throw new Error("EnvironmentRevisionMismatch");
+    }
+    environmentLease = current;
+  }
+  const checkpointId = input.checkpointId ?? attempt.filesystemCheckpointId ?? undefined;
+  const sourceDecision = await decideRuntimeStartSource({
+    tenantId: input.tenantId,
+    invocationId: invocation.id,
+    attemptId: attempt.id,
+    intentType: "resume",
+    sourceOperationKey: input.sourceOperationKey,
+    runtimeRevisionId: input.binding.runtimeRevisionId,
+    workspaceBindingId: input.binding.workspaceBindingId ?? null,
+    environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId ?? null,
+    anchorDigest: input.anchorDigest,
+    checkpointId: checkpointId ?? null,
+  });
+  let preparationClaimId: string | null = null;
+  if (input.binding.environmentMode === "MANAGED" && sourceDecision.disposition === "new") {
+    if (!environmentLease || !environmentRevision || !input.environmentProvisioner) {
       throw new Error("EnvironmentRevisionMismatch");
     }
     // A05：把"这次恢复是哪一个意图"变成持久事实，再动环境。
@@ -182,21 +208,22 @@ export async function resumeRuntimeInvocation(input: {
       attemptId: attempt.id,
       runtimeRevisionId: input.binding.runtimeRevisionId,
       workspaceBindingId: input.binding.workspaceBindingId,
-      environmentDefinitionRevisionId: revision.id,
+      environmentDefinitionRevisionId: environmentRevision.id,
       anchorDigest: input.anchorDigest ?? null,
-      checkpointId: input.checkpointId ?? attempt.filesystemCheckpointId ?? null,
+      checkpointId: checkpointId ?? null,
     });
+    preparationClaimId = newSupervisorClaimId();
     environmentLease = await input.environmentProvisioner.reprepare({
       tenantId: input.tenantId,
-      lease: current,
-      revisionId: revision.id,
-      revision,
+      lease: environmentLease,
+      revisionId: environmentRevision.id,
+      revision: environmentRevision,
       workspaceBindingId: input.binding.workspaceBindingId,
       workspaceRoot: input.workspace?.root ?? null,
       recoveryAnchorDigest: input.anchorDigest ?? null,
       preparationIntentKey,
       preparationRequestDigest,
-      preparationClaimId: newSupervisorClaimId(),
+      preparationClaimId,
     });
     if (
       !isPreparedReadinessState(environmentLease.readinessState) ||
@@ -205,7 +232,6 @@ export async function resumeRuntimeInvocation(input: {
       throw new Error("EnvironmentComplianceFailed");
     }
   }
-  const checkpointId = input.checkpointId ?? attempt.filesystemCheckpointId ?? undefined;
   const started = await startRuntimeInvocation({
     tenantId: input.tenantId,
     invocation,
@@ -220,6 +246,28 @@ export async function resumeRuntimeInvocation(input: {
     workspace: input.workspace,
     intentType: "resume",
     sourceOperationKey: input.sourceOperationKey,
+    ...(preparationClaimId
+      ? {
+          preparationClaim: {
+            tenantId: input.tenantId,
+            invocationId: invocation.id,
+            attemptId: attempt.id,
+            intentKey: input.sourceOperationKey,
+            requestDigest: protocolDigest({
+              scope: "environment-reprepare",
+              tenantId: input.tenantId,
+              invocationId: invocation.id,
+              attemptId: attempt.id,
+              runtimeRevisionId: input.binding.runtimeRevisionId,
+              workspaceBindingId: input.binding.workspaceBindingId,
+              environmentDefinitionRevisionId: environmentRevision?.id ?? null,
+              anchorDigest: input.anchorDigest ?? null,
+              checkpointId: checkpointId ?? null,
+            }),
+            claimId: preparationClaimId,
+          },
+        }
+      : {}),
     recovery: {
       kind: "resume",
       anchor: input.anchor,
@@ -526,7 +574,7 @@ async function claimSupervisorLease(input: {
  *
  * 幂等：代际已被终态收口（正常完成 / 暂停 / 取消）时两个关闭函数都原样返回。
  */
-async function handOffSupervisorGeneration(input: {
+export async function handOffSupervisorGeneration(input: {
   tenantId: string;
   invocationId: string;
   ownershipId: string;
@@ -579,6 +627,15 @@ async function handOffSupervisorGeneration(input: {
           versionNo: attempt.versionNo + 1,
         })
         .where(eq(invocationAttemptTable.id, attempt.id));
+      // 主动交接与正常用户暂停不同：旧 Attempt 已永久结束，其受管实例必须在同一事务
+      // 登记退役义务。物理释放仍由现有 cleanup Worker 领取并确认，不能在这里假 released。
+      await registerEnvironmentLeaseCleanupForAttemptInTransaction(tx, {
+        tenantId: input.tenantId,
+        invocationId: input.invocationId,
+        attemptId: input.attemptId,
+        errorCode: "supervisor_handoff",
+        now,
+      });
     }
     await markRuntimeSessionLostInTransaction(tx, {
       tenantId: input.tenantId,

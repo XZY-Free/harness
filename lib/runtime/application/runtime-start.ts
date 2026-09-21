@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
   activateEnvironmentLeaseInTransaction,
   getEnvironmentLeaseById,
   scheduleEnvironmentLeaseCleanup,
+  scheduleEnvironmentLeaseCleanupInTransaction,
 } from "@/lib/environment/environment-lease-store";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import {
@@ -11,6 +13,8 @@ import {
   sameAuthority,
 } from "@/lib/executions/domain/execution-authority";
 import {
+  type AttemptPreparationClaim,
+  claimAttemptPreparation,
   getAttemptById,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
@@ -32,7 +36,7 @@ import {
   executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
-  runtimeSessionBindingTable,
+  type runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import { buildRuntimeStartRequestForInvocation } from "@/lib/runtime/application/build-runtime-start-request";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
@@ -109,6 +113,8 @@ export interface RuntimeStartInput {
    * 唯一能省事的做法就只剩"按最新 Attempt 猜"——那正是 A05 要消灭的东西。
    */
   sourceOperationKey: string;
+  /** 外部 IO 前取得的 Attempt 准备领取；生产调用链必须把同一凭据带到最终提交。 */
+  preparationClaim?: AttemptPreparationClaim | null;
   now?: Date;
   /**
    * Job-backed Invocation 的输入冻结校验：调用方（领域解析器）解析出的输入摘要。
@@ -121,6 +127,142 @@ export interface RuntimeStartResult {
   authority: AuthorityIdentity;
   response: RuntimeStartResponse;
   sessionBindingId: string;
+}
+
+export function runtimeStartSourceRequestDigest(input: {
+  tenantId: string;
+  invocationId: string;
+  attemptId: string;
+  intentType: "start" | "resume";
+  runtimeRevisionId: string;
+  workspaceBindingId: string | null;
+  environmentDefinitionRevisionId: string | null;
+  anchorDigest: string | null;
+  checkpointId: string | null;
+}): string {
+  return protocolDigest({
+    scope: "runtime-start-source-intent",
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+    attemptId: input.attemptId,
+    intentType: input.intentType,
+    runtimeRevisionId: input.runtimeRevisionId,
+    workspaceBindingId: input.workspaceBindingId,
+    environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
+    anchorDigest: input.anchorDigest,
+    checkpointId: input.checkpointId,
+  });
+}
+
+export type RuntimeStartSourceDecision =
+  | { disposition: "new"; sourceRequestDigest: string }
+  | {
+      disposition: "replay";
+      sourceRequestDigest: string;
+      session: typeof runtimeSessionBindingTable.$inferSelect;
+      ownership: ExecutionOwnership;
+      historicalResponse: RuntimeStartResponse | null;
+    };
+
+/** 在任何 Environment/Workspace 变更之前裁决来源。 */
+export async function decideRuntimeStartSource(input: {
+  tenantId: string;
+  invocationId: string;
+  attemptId: string;
+  intentType: "start" | "resume";
+  sourceOperationKey: string;
+  runtimeRevisionId: string;
+  workspaceBindingId: string | null;
+  environmentDefinitionRevisionId: string | null;
+  anchorDigest: string | null;
+  checkpointId: string | null;
+}): Promise<RuntimeStartSourceDecision> {
+  const sourceRequestDigest = runtimeStartSourceRequestDigest(input);
+  return db.transaction(async (tx): Promise<RuntimeStartSourceDecision> => {
+    const invocation = await lockInvocationRootIfExists(tx, input.tenantId, input.invocationId);
+    if (!invocation || INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
+      throw new ExecutionAuthorityError("NotCurrentExecutor", "Invocation 已终态或不存在");
+    }
+    const [attempt] = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, input.attemptId),
+          eq(invocationAttemptTable.invocationId, input.invocationId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!attempt) throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于 Invocation");
+    const session = await getRuntimeSessionBindingBySourceIntent(
+      input.tenantId,
+      {
+        invocationId: input.invocationId,
+        attemptId: input.attemptId,
+        intentType: input.intentType,
+        sourceOperationKey: input.sourceOperationKey,
+      },
+      tx,
+    );
+    if (session) {
+      const [ownership] = await tx
+        .select()
+        .from(executionOwnershipTable)
+        .where(
+          and(
+            eq(executionOwnershipTable.tenantId, input.tenantId),
+            eq(executionOwnershipTable.id, session.ownershipId),
+            eq(executionOwnershipTable.invocationId, input.invocationId),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!ownership) throw new Error("RuntimeSessionMismatch");
+      if (
+        session.intentType === "start" &&
+        ownership.leaseExpiresAt <= (await getAuthorityDatabaseTime(tx))
+      ) {
+        throw new ExecutionAuthorityError(
+          "AttemptMismatch",
+          "原 Start 代际已过期；接管必须使用新的 Attempt",
+        );
+      }
+      if (session.sourceRequestDigest !== sourceRequestDigest)
+        throw new Error("StartIntentConflict");
+      const historicalResponse = session.transportAcknowledgement as RuntimeStartResponse | null;
+      if (
+        ["closed", "lost"].includes(session.bindingState) ||
+        ownership.ownershipState !== "active"
+      ) {
+        if (!historicalResponse) {
+          throw new ExecutionAuthorityError(
+            "NotCurrentExecutor",
+            `来源意图已收口（${session.bindingState}），且没有可证明的 Transport 回执`,
+          );
+        }
+      }
+      return {
+        disposition: "replay",
+        sourceRequestDigest,
+        session,
+        ownership,
+        historicalResponse,
+      };
+    }
+    if (
+      attempt.preparationIntentKey !== null &&
+      attempt.preparationIntentKey !== input.sourceOperationKey &&
+      attempt.preparationState !== "pending"
+    ) {
+      throw new ExecutionAuthorityError(
+        "NotCurrentExecutor",
+        "Attempt 已由另一恢复来源推进，本来源不得修改其环境或目录",
+      );
+    }
+    return { disposition: "new", sourceRequestDigest };
+  });
 }
 
 export function buildExecutionCredentials(
@@ -246,6 +388,65 @@ export async function startRuntimeInvocation(
     runtimeRevisionId: runtimeRevision.id,
     runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
   });
+  const intentType = input.intentType ?? "start";
+  const recoveryAnchorDigest =
+    input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
+  const checkpointId =
+    input.recovery?.kind === "resume" ? (input.recovery.checkpointId ?? null) : null;
+  const sourceDecision = await decideRuntimeStartSource({
+    tenantId: input.tenantId,
+    invocationId: input.invocation.id,
+    attemptId: input.attempt.id,
+    intentType,
+    sourceOperationKey: input.sourceOperationKey,
+    runtimeRevisionId: input.binding.runtimeRevisionId,
+    workspaceBindingId: input.binding.workspaceBindingId ?? null,
+    environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId ?? null,
+    anchorDigest: recoveryAnchorDigest,
+    checkpointId,
+  });
+  if (sourceDecision.disposition === "replay") {
+    const authority = authorityIdentity({
+      invocationId: input.invocation.id,
+      runtimeRevisionId: input.binding.runtimeRevisionId,
+      attemptId: sourceDecision.session.attemptId,
+      ownershipId: sourceDecision.ownership.id,
+      leaseEpoch: sourceDecision.ownership.leaseEpoch,
+      sessionBindingId: sourceDecision.session.id,
+    });
+    if (sourceDecision.historicalResponse) {
+      return {
+        authority,
+        response: sourceDecision.historicalResponse,
+        sessionBindingId: sourceDecision.session.id,
+      };
+    }
+    return dispatchRuntimeStartTransport({
+      input,
+      attempt: declaredAttempt,
+      ownership: sourceDecision.ownership,
+      session: sourceDecision.session,
+      publishedCapabilityManifestDigest,
+      now,
+    });
+  }
+  const preparationOutcome = input.preparationClaim
+    ? null
+    : await claimAttemptPreparation({
+        tenantId: input.tenantId,
+        invocationId: input.invocation.id,
+        attemptId: input.attempt.id,
+        intentKey: input.sourceOperationKey,
+        requestDigest: sourceDecision.sourceRequestDigest,
+        claimId: randomUUID(),
+        now,
+      });
+  const preparationClaim = input.preparationClaim ?? preparationOutcome?.claim ?? null;
+  const preparedReplay =
+    preparationOutcome?.disposition === "replay" ? preparationOutcome.attempt : null;
+  if (!preparationClaim && !preparedReplay) {
+    throw new Error("AttemptPreparationBusy");
+  }
   const needsWorkspaceWriter = workspaceBinding.continuityMode !== "NO_PLATFORM_WORKSPACE";
   // 无受管 WorkspaceBackend 时按 Binding 冻结事实启动（桌面绑定冻结语义）；
   // Workspace Writer/准备证据由 capability action 执行期按需取得。
@@ -256,7 +457,11 @@ export async function startRuntimeInvocation(
           binding: workspaceBinding,
           backend: input.workspace.backend,
           root: input.workspace.root,
-          operationId: `workspace:${input.attempt.id}`,
+          operationId: `workspace-${protocolDigest({
+            sourceOperationKey: input.sourceOperationKey,
+            checkpointId,
+            sourceRequestDigest: sourceDecision.sourceRequestDigest,
+          }).slice(7, 39)}`,
           runtimeRevisionId: input.binding.runtimeRevisionId,
         })
       : null;
@@ -318,54 +523,40 @@ export async function startRuntimeInvocation(
       throw error;
     }
   }
-  const preparedAttempt = await db.transaction(async (tx) => {
-    // A01：每个真实事务都先锁 Invocation 根（固定锁图 Invocation → Attempt → Ownership → …）。
-    // 本事务会写 InvocationAttempt，不能只对 Attempt 行取锁后离开。
-    if (!(await lockInvocationRootIfExists(tx, input.tenantId, input.invocation.id))) {
-      throw new ExecutionAuthorityError("NotCurrentExecutor", "Invocation 不存在或不可见");
-    }
-    const evidence = {
-      kind: "candidate-prepared",
-      invocationId: input.invocation.id,
-      attemptId: input.attempt.id,
-      runtimeRevisionId: input.binding.runtimeRevisionId,
-      workspace: workspaceCandidate
-        ? {
-            resourceId: workspaceCandidate.preparation.resourceId,
-            operationId: workspaceCandidate.operationId,
-            bindingId: workspaceBinding.id,
-            restoration,
-          }
-        : { mode: "NO_PLATFORM_WORKSPACE" },
-    };
-    return markAttemptPreparedInTransaction(tx, {
-      attemptId: input.attempt.id,
-      evidence,
-      digest: protocolDigest(evidence),
-      now,
-    });
-  });
+  const preparedAttempt =
+    preparedReplay ??
+    (await db.transaction(async (tx) => {
+      // A01：每个真实事务都先锁 Invocation 根（固定锁图 Invocation → Attempt → Ownership → …）。
+      // 本事务会写 InvocationAttempt，不能只对 Attempt 行取锁后离开。
+      if (!(await lockInvocationRootIfExists(tx, input.tenantId, input.invocation.id))) {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "Invocation 不存在或不可见");
+      }
+      const evidence = {
+        kind: "candidate-prepared",
+        invocationId: input.invocation.id,
+        attemptId: input.attempt.id,
+        runtimeRevisionId: input.binding.runtimeRevisionId,
+        workspace: workspaceCandidate
+          ? {
+              resourceId: workspaceCandidate.preparation.resourceId,
+              operationId: workspaceCandidate.operationId,
+              bindingId: workspaceBinding.id,
+              restoration,
+            }
+          : { mode: "NO_PLATFORM_WORKSPACE" },
+      };
+      return markAttemptPreparedInTransaction(tx, {
+        attemptId: input.attempt.id,
+        evidence,
+        digest: protocolDigest(evidence),
+        preparationClaim: preparationClaim ?? undefined,
+        now,
+      });
+    }));
   // A05：本次取得执行权所依据的恢复水位。必须在 **Acquire 之前**确定：`prepareChecks`
   // 会用它与 Lease 上的 Prepared 证据比对，写死 `null` 会让正式 Resume 被判成
   // "恢复 Anchor 已变化"（同一份事实两套判据）。
-  const recoveryAnchorDigest =
-    input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
-  // A05：来源意图的**语义摘要**只在这里定义一次 —— 让每个调用方各算一份必然漂移，
-  // 而漂移的后果是"同一个请求被判成两个意图"（重复准备）或"两个请求被判成同一个"（吞掉冲突）。
-  // 摘要覆盖 tenant/Invocation/Attempt/intentType/冻结资源/锚点；凭据、trace、重试次数不进入。
-  const intentType = input.intentType ?? "start";
-  const sourceRequestDigest = protocolDigest({
-    scope: "runtime-start-source-intent",
-    tenantId: input.tenantId,
-    invocationId: input.invocation.id,
-    attemptId: input.attempt.id,
-    intentType,
-    runtimeRevisionId: input.binding.runtimeRevisionId,
-    workspaceBindingId: input.binding.workspaceBindingId ?? null,
-    environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId ?? null,
-    anchorDigest: recoveryAnchorDigest,
-    checkpointId: input.recovery?.kind === "resume" ? (input.recovery.checkpointId ?? null) : null,
-  });
+  const sourceRequestDigest = sourceDecision.sourceRequestDigest;
   const result = await db.transaction(async (tx) => {
     // A01 §1：本事务此前先 `SELECT ExecutionOwnership … FOR UPDATE` 再经
     // `acquireExecutionOwnershipInTransaction` 去锁 Invocation，与「先锁 I 再锁 O」的
@@ -685,11 +876,15 @@ export async function startRuntimeInvocation(
         .catch(() => undefined);
     }
   } catch (error) {
-    await closeRuntimeSessionAfterActivationFailure(
-      input.tenantId,
-      input.invocation.id,
+    const mayCompensate = await claimActivationFailureCompensation(
+      input,
+      ownership,
       session.id,
-    ).catch(() => undefined);
+    ).catch(() => false);
+    // 同源并发的另一投递可能已经把同一 O/S/Lease 成功推进到 dispatching。
+    // 失败者只有在同一事务内把仍处于 activating 的代际收口后，才有权撤销物理资源；
+    // 若状态已推进，它只返回自己的错误，不触碰成功方共享的目录、Writer 或 Lease。
+    if (!mayCompensate) throw error;
     if (activatedWorkspace) {
       // R04 §3：失败补偿也只写**持久**释放请求，不在这里直接写控制面 released。
       // 物理 stop/drain 由正式 Worker 的释放 lane 按 W→I 顺序完成；这里顺带跑一轮
@@ -709,7 +904,6 @@ export async function startRuntimeInvocation(
           : undefined,
       }).catch(() => undefined);
     }
-    await closeOwnershipAfterActivationFailure(input, ownership.id).catch(() => undefined);
     if (input.environmentLeaseId) {
       // 真实资源清理优先：控制面 released 必须对应真实释放回执。
       // 第一次失败 → 保持 releasing + 退避重试（清理 Worker 继续），不吞掉 Backend 错误。
@@ -728,10 +922,31 @@ export async function startRuntimeInvocation(
         .catch(() => undefined);
     throw error;
   }
+  return dispatchRuntimeStartTransport({
+    input,
+    attempt: preparedAttempt,
+    ownership,
+    session,
+    publishedCapabilityManifestDigest,
+    now,
+  });
+}
+
+/** 同源重投与首次派发共用的唯一 Transport 尾部；调用前不得再做资源准备。 */
+async function dispatchRuntimeStartTransport(inputParams: {
+  input: RuntimeStartInput;
+  attempt: InvocationAttempt;
+  ownership: ExecutionOwnership;
+  session: typeof runtimeSessionBindingTable.$inferSelect;
+  publishedCapabilityManifestDigest: string;
+  now: Date;
+}): Promise<RuntimeStartResult> {
+  const { input, attempt, ownership, session, publishedCapabilityManifestDigest, now } =
+    inputParams;
   const authority = authorityIdentity({
     invocationId: input.invocation.id,
     runtimeRevisionId: input.binding.runtimeRevisionId,
-    attemptId: preparedAttempt.id,
+    attemptId: attempt.id,
     ownershipId: ownership.id,
     leaseEpoch: ownership.leaseEpoch,
     sessionBindingId: session.id,
@@ -787,7 +1002,7 @@ export async function startRuntimeInvocation(
       {
         tenantId: input.tenantId,
         sessionBindingId: session.id,
-        attemptId: preparedAttempt.id,
+        attemptId: attempt.id,
         ownershipId: ownership.id,
         leaseEpoch: ownership.leaseEpoch,
         claimToken: dispatchClaim?.claimToken ?? null,
@@ -898,11 +1113,12 @@ async function cleanupEnvironmentAfterActivationFailure(
     .catch(() => undefined);
 }
 
-async function closeOwnershipAfterActivationFailure(
+async function claimActivationFailureCompensation(
   input: RuntimeStartInput,
-  ownershipId: string,
-): Promise<void> {
-  await db.transaction(async (tx) => {
+  ownership: ExecutionOwnership,
+  sessionBindingId: string,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
     const [invocation] = await tx
       .select({ id: invocationTable.id })
       .from(invocationTable)
@@ -914,43 +1130,53 @@ async function closeOwnershipAfterActivationFailure(
       )
       .for("update")
       .limit(1);
-    if (!invocation) return;
+    if (!invocation) return false;
     const [current] = await tx
       .select()
       .from(executionOwnershipTable)
       .where(
         and(
           eq(executionOwnershipTable.tenantId, input.tenantId),
-          eq(executionOwnershipTable.id, ownershipId),
+          eq(executionOwnershipTable.id, ownership.id),
           eq(executionOwnershipTable.invocationId, input.invocation.id),
         ),
       )
       .for("update")
       .limit(1);
-    if (!current || current.ownershipState !== "active") return;
+    if (
+      !current ||
+      current.ownershipState !== "active" ||
+      current.executionPhase !== "activating" ||
+      current.attemptId !== ownership.attemptId ||
+      current.leaseEpoch !== ownership.leaseEpoch ||
+      current.environmentLeaseId !== (input.environmentLeaseId ?? null)
+    )
+      return false;
+    await markRuntimeSessionLostInTransaction(tx, {
+      tenantId: input.tenantId,
+      id: sessionBindingId,
+    });
+    const now = await getAuthorityDatabaseTime(tx);
     await tx
       .update(executionOwnershipTable)
       .set({
         ownershipState: "lost",
-        releasedAt: new Date(),
+        releasedAt: now,
         reasonCode: "WorkspaceNotReady",
         executionPhase: "activating",
         versionNo: current.versionNo + 1,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(executionOwnershipTable.id, current.id));
-  });
-}
-
-async function closeRuntimeSessionAfterActivationFailure(
-  tenantId: string,
-  invocationId: string,
-  sessionBindingId: string,
-): Promise<void> {
-  // R02 §8：Session 状态写入只经仓储方法（真实事务 + 行锁 + 单向转换表）。
-  // A01：Session 写入同样必须先持 Invocation 根锁（I → S），不能只锁 Session 自身。
-  await db.transaction(async (tx) => {
-    if (!(await lockInvocationRootIfExists(tx, tenantId, invocationId))) return;
-    await markRuntimeSessionLostInTransaction(tx, { tenantId, id: sessionBindingId });
+    if (input.environmentLeaseId) {
+      await scheduleEnvironmentLeaseCleanupInTransaction(tx, {
+        tenantId: input.tenantId,
+        leaseId: input.environmentLeaseId,
+        errorCode: "activation_failed",
+        immediate: true,
+        now,
+      });
+    }
+    return true;
   });
 }

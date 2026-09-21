@@ -21,6 +21,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -41,6 +42,7 @@ import {
   tryAcquireScopeLock,
   withScopeLock,
 } from "@/lib/workspace/scope-lock";
+import { FileSnapshotStorage, type SnapshotRequirements } from "@/lib/workspace/snapshot-storage";
 import {
   activitySize,
   detachedWriterArgs,
@@ -65,6 +67,26 @@ const INTENT_ID = "00000000-0000-4000-8000-0000000000f1";
 /** 原生 provider 的位置：子进程脚本按同一路径加载（与生产走同一个二进制）。 */
 const NATIVE_MODULE_DIR = path.join(process.cwd(), "native", "workspace-lock");
 const ANCHOR_DIGEST = `sha256:${"a".repeat(64)}`;
+const SNAPSHOT_REQUIREMENTS: SnapshotRequirements = {
+  checkpointPolicy: {
+    safePointTimeoutSeconds: 120,
+    chunkBytes: 4_194_304,
+    maxTotalBytes: "10485760",
+    maxEntries: 200,
+    trigger: "before_suspend_and_explicit",
+    retention: "retain_while_referenced",
+  },
+  filesystemSemantics: {
+    kind: "portable",
+    caseSensitive: true,
+    symlinks: true,
+    permissions: true,
+    hardlinks: false,
+    specialFiles: false,
+    xattrsAcl: false,
+    mtime: "preserved",
+  },
+};
 
 function authority(overrides: Partial<AuthorityIdentity> = {}): AuthorityIdentity {
   return {
@@ -1145,7 +1167,7 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
    * 这一条针对的正是 `authorizeWrite` 单独无法覆盖的窗口：调用方已经拿到可写根，冻结随后
    * 才落盘。负向对照是"授权通过 = 之后随便写"的实现 —— 那样本用例里交错的受管写会成功。
    */
-  it("A07-T13 冻结与受管写入并发：锁内复核生效，解冻后恢复，旧 release 不解新 intent", async () => {
+  it("A07-T13 / N06-T2/N06-T8 冻结与受管写入并发：解冻幂等，旧 release 不解新 intent", async () => {
     const fixture = await setup();
     const grant = await activate(fixture);
     const identity = revocationIdentity(grant);
@@ -1343,6 +1365,124 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     expect(removed.kind).toBe("delete");
     expect(await pathExists(afterRelease.path)).toBe(false);
   }, 40_000);
+
+  it("N06-T1: 匹配 freeze 的物理删除失败经真实 Host 接口返回，屏障不会假释放", async () => {
+    const fixture = await setup();
+    const grant = await activate(fixture);
+    const receipt = await fixture.broker.freeze({
+      grant,
+      checkpointIntentId: INTENT_ID,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    const freezePath = path.join(fixture.grantsRoot, "freeze.json");
+    await chmod(fixture.grantsRoot, 0o555);
+    try {
+      await expect(fixture.broker.releaseFreeze(receipt)).rejects.toThrow();
+      expect(await pathExists(freezePath)).toBe(true);
+    } finally {
+      await chmod(fixture.grantsRoot, 0o755);
+    }
+    await expect(fixture.broker.releaseFreeze(receipt)).resolves.toBeUndefined();
+    expect(await pathExists(freezePath)).toBe(false);
+  });
+
+  it("N08-T6: 同源与不同源恢复在 publish 屏障并发时隔离 staging，且只发布已核验目录", async () => {
+    const base = await mkdtemp(path.join(tmpdir(), "n08-restore-race-"));
+    roots.push(base);
+    const hostRoot = path.join(base, "host");
+    const managedRoot = path.join(base, "managed");
+    const storageRoot = path.join(base, "storage");
+    const sourceOne = path.join(base, "source-one");
+    const sourceTwo = path.join(base, "source-two");
+    await Promise.all(
+      [hostRoot, managedRoot, storageRoot, sourceOne, sourceTwo].map((directory) =>
+        mkdir(directory, { recursive: true }),
+      ),
+    );
+    await writeFile(path.join(sourceOne, "state.txt"), "snapshot-one", "utf8");
+    await writeFile(path.join(sourceTwo, "state.txt"), "snapshot-two", "utf8");
+
+    let publishEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      publishEntered = resolve;
+    });
+    let releasePublish!: () => void;
+    const publishBarrier = new Promise<void>((resolve) => {
+      releasePublish = resolve;
+    });
+    let pauseFirstPublish = true;
+    const storage = new FileSnapshotStorage(storageRoot, {
+      beforeRestorePublish: async ({ operationId }) => {
+        if (operationId !== "restore-one" || !pauseFirstPublish) return;
+        pauseFirstPublish = false;
+        publishEntered();
+        await publishBarrier;
+      },
+    });
+    const firstSnapshot = await storage.writeSnapshot(
+      sourceOne,
+      "snapshot-one",
+      SNAPSHOT_REQUIREMENTS,
+    );
+    const secondSnapshot = await storage.writeSnapshot(
+      sourceTwo,
+      "snapshot-two",
+      SNAPSHOT_REQUIREMENTS,
+    );
+    const broker = createWorkspaceHostBroker({
+      root: hostRoot,
+      managedRoot,
+      snapshotStorage: storage,
+    });
+    const attemptRoot = path.join(managedRoot, ".snow-runs", authority().attemptId);
+    const destinationOne = path.join(attemptRoot, "restore-one");
+    const destinationTwo = path.join(attemptRoot, "restore-two");
+    await mkdir(attemptRoot, { recursive: true });
+
+    const restore = (snapshot: typeof firstSnapshot, destination: string, operationId: string) =>
+      broker.restore({
+        manifestRef: snapshot.receipt.manifestRef,
+        manifestDigest: snapshot.receipt.manifestDigest,
+        destination,
+        operationId,
+        requirements: SNAPSHOT_REQUIREMENTS,
+      });
+
+    // 第一个同源恢复在 staging 已完整核验、尚未 publish 的真实窗口停住。
+    const first = restore(firstSnapshot, destinationOne, "restore-one");
+    await entered;
+    let duplicateFinished = false;
+    let otherSourceFinished = false;
+    const duplicate = restore(firstSnapshot, destinationOne, "restore-one").then(() => {
+      duplicateFinished = true;
+    });
+    const otherSource = restore(secondSnapshot, destinationTwo, "restore-two").then(() => {
+      otherSourceFinished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 两个竞争者都在稳定 scope 锁外等待，不能 rm 第一个合法 staging 或抢先假 ready。
+    expect(duplicateFinished).toBe(false);
+    expect(otherSourceFinished).toBe(false);
+    expect(await readFile(path.join(`${destinationOne}.staging`, "state.txt"), "utf8")).toBe(
+      "snapshot-one",
+    );
+    expect(await pathExists(destinationOne)).toBe(false);
+
+    releasePublish();
+    await Promise.all([first, duplicate, otherSource]);
+    expect(await readFile(path.join(destinationOne, "state.txt"), "utf8")).toBe("snapshot-one");
+    expect(await readFile(path.join(destinationTwo, "state.txt"), "utf8")).toBe("snapshot-two");
+    expect(await pathExists(`${destinationOne}.staging`)).toBe(false);
+    expect(await pathExists(`${destinationTwo}.staging`)).toBe(false);
+    const firstState = JSON.parse(
+      await readFile(`${destinationOne}.restore-state.json`, "utf8"),
+    ) as { phase: string; operationId: string };
+    const secondState = JSON.parse(
+      await readFile(`${destinationTwo}.restore-state.json`, "utf8"),
+    ) as { phase: string; operationId: string };
+    expect(firstState).toMatchObject({ phase: "ready", operationId: "restore-one" });
+    expect(secondState).toMatchObject({ phase: "ready", operationId: "restore-two" });
+  });
 });
 
 /**

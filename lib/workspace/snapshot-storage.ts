@@ -127,14 +127,24 @@ export class SnapshotStorageUnavailableError extends Error {
 interface RestoreState {
   operationId: string;
   manifestDigest: string;
-  phase: "staging" | "ready";
+  phase: "staging" | "publishing" | "ready";
 }
 
 export class FileSnapshotStorage implements SnapshotStorage {
   private readonly root: string;
+  private readonly testHooks: {
+    beforeRestorePublish?: (input: { target: string; operationId: string }) => Promise<void>;
+  } | null;
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    /** 仅供真实文件系统并发测试控制 publish 交错；生产装配不得传入。 */
+    testHooks?: {
+      beforeRestorePublish?: (input: { target: string; operationId: string }) => Promise<void>;
+    },
+  ) {
     this.root = path.resolve(root);
+    this.testHooks = testHooks ?? null;
   }
 
   async writeSnapshot(root: string, operationId: string, requirements: SnapshotRequirements) {
@@ -304,8 +314,7 @@ export class FileSnapshotStorage implements SnapshotStorage {
     const staging = `${target}.staging`;
     // 归属/就绪状态放在**树外**：恢复出来的目录树必须与 manifest 逐项相等，不能多出控制文件。
     const stateFile = `${target}.restore-state.json`;
-    await this.assertRestoreTarget(target, stateFile, manifest.manifestDigest);
-    if (await this.isAlreadyRestored(target, stateFile, manifest.manifestDigest)) return;
+    if (await this.reconcilePublishedTarget(target, stateFile, operation, manifest)) return;
     await this.resetStaging(staging, stateFile, operation, manifest.manifestDigest);
     await mkdir(staging, { recursive: true });
     const directories: SnapshotEntry[] = [];
@@ -327,6 +336,7 @@ export class FileSnapshotStorage implements SnapshotStorage {
     for (const entry of directories) await applyMetadata(resolveInside(staging, entry.path), entry);
     await this.verifyRestoredTree(staging, manifest);
     await this.syncDirectory(staging);
+    await this.testHooks?.beforeRestorePublish?.({ target, operationId: operation });
     await this.commitStaging(staging, target, stateFile, {
       operationId: operation,
       manifestDigest: manifest.manifestDigest,
@@ -334,33 +344,54 @@ export class FileSnapshotStorage implements SnapshotStorage {
     });
   }
 
-  /** 目标若已存在，必须是我们恢复出来的（有 ready 状态标记）或空目录；否则拒绝。 */
-  private async assertRestoreTarget(
+  /**
+   * 复核已发布目标。
+   *
+   * marker 只证明“哪个 operation 声称发布过”，不能证明目录仍是那份内容；因此 ready
+   * 重投也必须逐字节核验目标树。`staging/publishing + 已存在目标` 是 rename 成功后进程在
+   * ready marker 落盘前崩溃的合法窗口：只有归属与实际树同时匹配时才补交 ready。
+   */
+  private async reconcilePublishedTarget(
     target: string,
     stateFile: string,
-    manifestDigest: string,
-  ): Promise<void> {
+    operationId: string,
+    manifest: SnapshotManifest,
+  ): Promise<boolean> {
     const info = await lstat(target).catch(() => null);
-    if (!info) return;
+    if (!info) return false;
     if (info.isSymbolicLink())
       throw new Error("CheckpointIntegrityFailed: 恢复目标不能是 symlink（防跟随链接）");
     if (!info.isDirectory()) throw new Error("CheckpointIntegrityFailed: 恢复目标不是目录");
     const state = await readRestoreState(stateFile);
-    const children = await readdir(target);
-    if (children.length === 0) return;
-    if (state?.phase === "ready" && state.manifestDigest === manifestDigest) return;
-    throw new Error("CheckpointIntegrityFailed: 恢复目标已被占用且不属于本次恢复");
-  }
-
-  private async isAlreadyRestored(
-    target: string,
-    stateFile: string,
-    manifestDigest: string,
-  ): Promise<boolean> {
-    const state = await readRestoreState(stateFile);
-    if (!state || state.phase !== "ready" || state.manifestDigest !== manifestDigest) return false;
-    const info = await lstat(target).catch(() => null);
-    return info?.isDirectory() ?? false;
+    // 调用方预建的空目录且没有任何恢复状态，仍可作为首次目标；一旦存在本 operation 的
+    // 状态（尤其 ready），即使目录被删空也必须按实际树校验失败，不能静默重建来掩盖损坏。
+    if (!state && (await readdir(target)).length === 0) return false;
+    if (
+      !state ||
+      state.operationId !== operationId ||
+      state.manifestDigest !== manifest.manifestDigest
+    ) {
+      throw new Error("CheckpointIntegrityFailed: 恢复目标已被占用且不属于本次恢复");
+    }
+    try {
+      await this.verifyRestoredTree(target, manifest);
+    } catch (error) {
+      throw new Error(
+        `CheckpointIntegrityFailed: 目标实际内容与 manifest 不一致：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (state.phase !== "ready") {
+      await writeFile(
+        stateFile,
+        JSON.stringify({
+          operationId,
+          manifestDigest: manifest.manifestDigest,
+          phase: "ready",
+        } satisfies RestoreState),
+      );
+      await this.syncDirectory(path.dirname(target));
+    }
+    return true;
   }
 
   /**
@@ -433,15 +464,24 @@ export class FileSnapshotStorage implements SnapshotStorage {
       }
       if (!info.isFile() || info.size !== entry.sizeBytes)
         throw new Error("CheckpointIntegrityFailed: 文件长度与 manifest 不一致");
-      for (const chunk of entry.chunks ?? []) {
-        const bytes = await readFile(path.join(this.root, "chunks", chunk.digest.slice(7)));
-        if (bytes.length !== chunk.sizeBytes || hashSnapshotBytes(bytes) !== chunk.digest)
-          throw new Error("CheckpointIntegrityFailed: 内容块校验失败");
+      const handle = await open(target, "r");
+      try {
+        let offset = 0;
+        for (const chunk of entry.chunks ?? []) {
+          const bytes = Buffer.allocUnsafe(chunk.sizeBytes);
+          const result = await handle.read(bytes, 0, chunk.sizeBytes, offset);
+          if (result.bytesRead !== chunk.sizeBytes || hashSnapshotBytes(bytes) !== chunk.digest) {
+            throw new Error(`CheckpointIntegrityFailed: 目标文件内容摘要不一致: ${entry.path}`);
+          }
+          offset += result.bytesRead;
+        }
+      } finally {
+        await handle.close();
       }
     }
   }
 
-  /** 只有 ready 的 generation 才被 rename 到目标；标记写入在 rename 之后并已 fsync。 */
+  /** 发布前先持久写 publishing；rename 后再写 ready，Crash 后可按归属与实际树补交。 */
   private async commitStaging(
     staging: string,
     target: string,
@@ -450,6 +490,8 @@ export class FileSnapshotStorage implements SnapshotStorage {
   ): Promise<void> {
     const existing = await lstat(target).catch(() => null);
     if (existing) await rm(target, { recursive: true, force: true });
+    await writeFile(stateFile, JSON.stringify({ ...state, phase: "publishing" }));
+    await this.syncDirectory(path.dirname(target));
     await rename(staging, target);
     await writeFile(stateFile, JSON.stringify(state));
     await this.syncDirectory(path.dirname(target));

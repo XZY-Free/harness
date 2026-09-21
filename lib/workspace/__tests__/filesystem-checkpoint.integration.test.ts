@@ -27,6 +27,7 @@ import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
+import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -552,6 +553,7 @@ function buildTestManifest(
 async function readGate(invocationId: string): Promise<{
   checkpointGate: string;
   checkpointIntentId: string | null;
+  checkpointOwnerId: string | null;
   checkpointPreparedEvidence: unknown;
   /** 库侧行的写入时刻；维护 lane 的扫描窗口以它为界（`updatedAt < now - graceMs`）。 */
   updatedAt: Date;
@@ -564,6 +566,7 @@ async function readGate(invocationId: string): Promise<{
     ? {
         checkpointGate: invocation.checkpointGate,
         checkpointIntentId: invocation.checkpointIntentId,
+        checkpointOwnerId: invocation.checkpointOwnerId,
         checkpointPreparedEvidence: invocation.checkpointPreparedEvidence,
         updatedAt: invocation.updatedAt,
       }
@@ -771,7 +774,7 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it("CHECKPOINT-05: Snapshot 已提交但远端 release 丢失，Worker 重启按 intentId 续做；无永久冻结或假 open", async () => {
+  it("CHECKPOINT-05 / N06-T4: Snapshot 已提交但远端 release 丢失，Worker 重启向原代际重发并收口", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "release matters", "utf8");
@@ -786,34 +789,34 @@ describe("FilesystemCheckpoint integration", () => {
         createWorkspaceHostBroker({ root: ctx.hostRoot, managedRoot: ctx.managedRoot }),
       );
       const now = new Date(stalled!.updatedAt.getTime() + 1);
+      let runtimeReleaseCalls = 0;
       const first = await runCheckpointMaintenanceLane({
         now,
         graceMs: 0,
         resolveBackend: async () => restarted,
+        releaseRuntime: async ({ checkpointIntentId }) => {
+          expect(checkpointIntentId).toBe(produced.checkpointIntentId);
+          runtimeReleaseCalls += 1;
+        },
       });
       expect(first.releases.failures).toEqual([]);
       expect(first.releases.backendReleased).toBe(1);
-      // Runtime 仍活着 → 不得伪造"已解冻"，Gate 保持 fail-closed。
-      expect(first.releases.awaitingRuntime).toBe(1);
-      expect(first.releases.gateOpened).toBe(0);
-      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
+      expect(runtimeReleaseCalls).toBe(1);
+      expect(first.releases.awaitingRuntime).toBe(0);
+      expect(first.releases.gateOpened).toBe(1);
+      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
 
-      // 再跑一个 tick：解冻是幂等持久工作，重复执行既不报错也不放开 Gate。
+      // 再跑一个 tick：已确认的两条腿不会再次发送或回退。
       const second = await runCheckpointMaintenanceLane({
         now,
         graceMs: 0,
         resolveBackend: async () => restarted,
+        releaseRuntime: async () => {
+          runtimeReleaseCalls += 1;
+        },
       });
       expect(second.releases.failures).toEqual([]);
-      expect(second.releases.awaitingRuntime).toBe(1);
-      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
-
-      // 迟到但合法的 Runtime 解冻确认到达后，Gate 才放行；Checkpoint 仍可用于恢复。
-      await confirmCheckpointRuntimeRelease({
-        tenantId: TENANT_ID,
-        invocationId: ctx.invocationId,
-        checkpointIntentId: produced.checkpointIntentId,
-      });
+      expect(runtimeReleaseCalls).toBe(1);
       expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
       const destination = path.join(temporaryRoot, "restore-after-restart");
       await restoreFilesystemCheckpoint({
@@ -1338,6 +1341,133 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
+  it("N06-T5: 物理 freeze 成功但回执落库前崩溃，维护 lane 从持久意图真实解冻", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      const requested = await requestFilesystemCheckpoint({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        ownershipId: ctx.ownershipId,
+        declarations: {},
+        requestedByType: "service",
+        requestedById: "test-service",
+      });
+      const [lock] = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.holderInvocationId, ctx.invocationId))
+        .limit(1);
+      if (!lock) throw new Error("WorkspaceWriteLock 缺失");
+      const grant = await ctx.backend.host.getWriter(
+        ctx.workspaceBinding.storageScopeDigest as string,
+        lock.writerGeneration,
+      );
+      if (!grant) throw new Error("Writer grant 缺失");
+      const freezeIntent = {
+        checkpointIntentId: requested.checkpointIntentId,
+        scopeDigest: ctx.workspaceBinding.storageScopeDigest as string,
+        writerGeneration: lock.writerGeneration,
+        anchorDigest: requested.anchorDigest,
+        registeredAt: new Date().toISOString(),
+      };
+      await db
+        .update(invocationTable)
+        .set({ checkpointPreparedEvidence: { freezeIntent } })
+        .where(eq(invocationTable.id, ctx.invocationId));
+      await ctx.backend.host.freeze({
+        grant,
+        checkpointIntentId: requested.checkpointIntentId,
+        anchorDigest: requested.anchorDigest,
+      });
+      const freezeFile = path.join(
+        ctx.hostRoot,
+        ".snow",
+        "grants",
+        (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
+        "freeze.json",
+      );
+      await expect(stat(freezeFile)).resolves.toBeTruthy();
+
+      // 原进程消失，只有新的维护进程与持久 freezeIntent 可用。
+      const restartedBackend = createWorkspaceBackend(
+        createWorkspaceHostBroker({ root: ctx.hostRoot, managedRoot: ctx.managedRoot }),
+      );
+      const maintenance = await runCheckpointMaintenanceLane({
+        now: new Date(Date.now() + 300_000),
+        graceMs: 0,
+        resolveBackend: async () => restartedBackend,
+        releaseRuntime: async () => undefined,
+      });
+      expect(maintenance.stuckGates.abandoned).toBe(1);
+      expect(maintenance.releases.gateOpened).toBe(1);
+      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+      await expect(stat(freezeFile)).rejects.toThrow();
+      await expect(restartedBackend.host.assertWriter(grant)).resolves.toBeUndefined();
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("N06-T6: Owner 接管保留旧 checkpoint release tuple，并由维护 lane 收口而非直接清空", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      await writeFile(path.join(ctx.writerRoot, "state.txt"), "takeover release", "utf8");
+      const checkpoint = await ctx.commitWithoutRuntimeRelease();
+      const before = await readGate(ctx.invocationId);
+      expect(before?.checkpointGate).toBe("releasing");
+      expect(before?.checkpointIntentId).toBe(checkpoint.checkpointIntentId);
+
+      await db
+        .update(executionOwnershipTable)
+        .set({
+          leaseExpiresAt: new Date(ctx.ownership.acquiredAt.getTime() + 1),
+          lastHeartbeatAt: ctx.ownership.acquiredAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(executionOwnershipTable.id, ctx.ownershipId));
+      const replacementAttempt = await createAttempt({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        retryReasonCode: "checkpoint_owner_takeover",
+      });
+      const evidence = { kind: "n06-t6", attemptId: replacementAttempt.id };
+      await db.transaction((tx) =>
+        markAttemptPreparedInTransaction(tx, {
+          attemptId: replacementAttempt.id,
+          evidence,
+          digest: protocolDigest(evidence),
+        }),
+      );
+      await acquireExecutionOwnership({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        attemptId: replacementAttempt.id,
+        runtimeRevisionId: ctx.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "n06-t6-takeover",
+      });
+      const afterTakeover = await readGate(ctx.invocationId);
+      expect(afterTakeover?.checkpointGate).toBe("releasing");
+      expect(afterTakeover?.checkpointIntentId).toBe(checkpoint.checkpointIntentId);
+      expect(afterTakeover?.checkpointOwnerId).toBe(ctx.ownershipId);
+      expect(afterTakeover?.checkpointPreparedEvidence).toMatchObject({
+        checkpointId: checkpoint.checkpointId,
+        release: { backend: "confirmed", runtime: "pending" },
+      });
+
+      const maintenance = await runCheckpointMaintenanceLane({
+        resolveBackend: async () => ctx.backend,
+        graceMs: 0,
+        now: new Date(afterTakeover!.updatedAt.getTime() + 1),
+      });
+      expect(maintenance.releases.runtimeClosed).toBe(1);
+      expect(maintenance.releases.gateOpened).toBe(1);
+      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it("CHECKPOINT-REG-03: restores multi-file trees with permissions, mtime and root-relative symlinks intact", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
@@ -1806,7 +1936,7 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it("CHECKPOINT-REG-13: release 丢失后维护 lane 续做 Backend 解冻；Runtime 仍活着时 Gate 保持 fail-closed（R09 §2 步骤 8）", async () => {
+  it("CHECKPOINT-REG-13 / N06-T3/N06-T4: 维护 lane 持久确认 Backend 并向原 Runtime 重发 release", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "release matters", "utf8");
@@ -1817,27 +1947,26 @@ describe("FilesystemCheckpoint integration", () => {
       expect(stalled?.checkpointGate).toBe("releasing");
       // Checkpoint 本身是已提交事实：即使 release 未完成也必须可被列出。
       expect(await countCheckpoints(ctx.invocationId)).toBe(1);
-      // 维护 lane 续做：Backend 腿幂等重放，Runtime 腿仍活着 → 不得伪造"已解冻"。
+      // 维护 lane 续做：Backend 腿幂等确认，并向精确原代际重发 Runtime release。
       // 扫描窗口是 `updatedAt < now - graceMs`，两侧时间都取自毫秒精度的库时钟：`graceMs: 0`
       // 时若恢复调用与提交落在同一毫秒，这一行会被判"还不够旧"而漏扫。这里显式把 now 推到
       // 该行之后，使用例只考察**收口判定**本身，不依赖毫秒级墙钟竞争。
+      let runtimeReleaseCalls = 0;
       const report = await recoverPendingCheckpointReleases({
         now: new Date(stalled!.updatedAt.getTime() + 1),
         graceMs: 0,
         resolveBackend: async () => ctx.backend,
+        releaseRuntime: async ({ owner, checkpointIntentId }) => {
+          expect(owner.id).toBe(ctx.ownershipId);
+          expect(checkpointIntentId).toBe(produced.checkpointIntentId);
+          runtimeReleaseCalls += 1;
+        },
       });
       expect(report.examined).toBeGreaterThanOrEqual(1);
-      expect(report.awaitingRuntime).toBe(1);
-      expect(report.gateOpened).toBe(0);
+      expect(runtimeReleaseCalls).toBe(1);
+      expect(report.awaitingRuntime).toBe(0);
+      expect(report.gateOpened).toBe(1);
       expect(report.failures).toEqual([]);
-      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
-      // 迟到但合法的 Runtime 确认到达后，Gate 才放行。
-      const legs = await confirmCheckpointRuntimeRelease({
-        tenantId: TENANT_ID,
-        invocationId: ctx.invocationId,
-        checkpointIntentId: produced.checkpointIntentId,
-      });
-      expect(legs).toEqual({ runtime: "confirmed", backend: "confirmed" });
       expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

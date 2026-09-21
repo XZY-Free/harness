@@ -18,6 +18,7 @@ import {
   executionBindingTable,
   executionOwnershipTable,
   invocationTable,
+  runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import { resolveManagedWorkspaceResources } from "@/lib/workspace/managed-workspace-host";
@@ -57,11 +58,25 @@ function readReleaseRecord(value: unknown): CheckpointReleaseRecord | null {
 
 function readFreezeFromEvidence(value: unknown): SafePointReceipt | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const freeze = (value as { freeze?: unknown }).freeze;
+  const container = value as { freeze?: unknown; freezeIntent?: unknown };
+  const freeze = container.freeze ?? container.freezeIntent;
   if (!freeze || typeof freeze !== "object" || Array.isArray(freeze)) return null;
   const candidate = freeze as Partial<SafePointReceipt>;
-  if (typeof candidate.checkpointIntentId !== "string") return null;
-  return candidate as SafePointReceipt;
+  if (
+    typeof candidate.checkpointIntentId !== "string" ||
+    typeof candidate.scopeDigest !== "string" ||
+    typeof candidate.writerGeneration !== "number" ||
+    typeof candidate.anchorDigest !== "string"
+  )
+    return null;
+  return {
+    checkpointIntentId: candidate.checkpointIntentId,
+    scopeDigest: candidate.scopeDigest,
+    writerGeneration: candidate.writerGeneration,
+    anchorDigest: candidate.anchorDigest,
+    frozenAt:
+      typeof candidate.frozenAt === "string" ? candidate.frozenAt : new Date(0).toISOString(),
+  };
 }
 
 /** 登记 Runtime 腿待确认。必须在真正解冻之前落库，否则 Crash 后无从得知要解冻什么。 */
@@ -147,16 +162,21 @@ export async function confirmCheckpointBackendRelease(input: {
   freeze: SafePointReceipt | null;
   backend: WorkspaceBackend;
 }): Promise<CheckpointReleaseLegs> {
+  if (!input.freeze) {
+    return updateReleaseLegs(
+      input,
+      (legs) => ({ ...legs, backend: "pending" }),
+      "CheckpointFreezeEvidenceMissing",
+    );
+  }
   let failureCode: string | null = null;
-  if (input.freeze) {
-    try {
-      await releaseBackendFreeze(input.backend.host, input.freeze);
-    } catch (error) {
-      failureCode = error instanceof Error ? error.message : "BackendReleaseFailed";
-      console.error(
-        `Checkpoint Backend 解冻失败（intent ${input.checkpointIntentId}），Gate 保持 releasing 等待维护 lane：${failureCode}`,
-      );
-    }
+  try {
+    await releaseBackendFreeze(input.backend.host, input.freeze);
+  } catch (error) {
+    failureCode = error instanceof Error ? error.message : "BackendReleaseFailed";
+    console.error(
+      `Checkpoint Backend 解冻失败（intent ${input.checkpointIntentId}），Gate 保持 releasing 等待维护 lane：${failureCode}`,
+    );
   }
   if (failureCode) {
     return updateReleaseLegs(input, (legs) => ({ ...legs, backend: "pending" }), failureCode);
@@ -238,6 +258,15 @@ export interface CheckpointReleaseRecoveryReport {
   failures: Array<{ invocationId: string; reasonCode: string }>;
 }
 
+export type CheckpointRuntimeReleaseExecutor = (input: {
+  tenantId: string;
+  invocationId: string;
+  checkpointIntentId: string;
+  binding: typeof executionBindingTable.$inferSelect;
+  owner: typeof executionOwnershipTable.$inferSelect;
+  session: typeof runtimeSessionBindingTable.$inferSelect;
+}) => Promise<void>;
+
 /**
  * 维护 lane：续做被 Crash/失败打断的解冻。
  *
@@ -253,6 +282,8 @@ export async function recoverPendingCheckpointReleases(
     now?: Date;
     /** 测试/受管部署可注入 Backend 解析；默认走受管 Host 生产解析。 */
     resolveBackend?: (binding: WorkspaceBinding) => Promise<WorkspaceBackend>;
+    /** 测试可替换末端传输；生产默认按冻结 Binding 重建原 Runtime 目标。 */
+    releaseRuntime?: CheckpointRuntimeReleaseExecutor;
   } = {},
 ): Promise<CheckpointReleaseRecoveryReport> {
   const limit = input.limit ?? 50;
@@ -283,37 +314,44 @@ export async function recoverPendingCheckpointReleases(
       });
       continue;
     }
-    const [activeOwner] = await db
-      .select({ id: executionOwnershipTable.id })
-      .from(executionOwnershipTable)
-      .where(
-        and(
-          eq(executionOwnershipTable.tenantId, invocation.tenantId),
-          eq(executionOwnershipTable.invocationId, invocation.id),
-          eq(executionOwnershipTable.ownershipState, "active"),
-        ),
-      )
-      .limit(1);
+    const [checkpointOwner] = invocation.checkpointOwnerId
+      ? await db
+          .select()
+          .from(executionOwnershipTable)
+          .where(
+            and(
+              eq(executionOwnershipTable.tenantId, invocation.tenantId),
+              eq(executionOwnershipTable.invocationId, invocation.id),
+              eq(executionOwnershipTable.id, invocation.checkpointOwnerId),
+            ),
+          )
+          .limit(1)
+      : [];
     const runtimeGone =
-      !activeOwner ||
+      !checkpointOwner ||
+      checkpointOwner.ownershipState !== "active" ||
       invocation.executionState === "completed" ||
       invocation.executionState === "failed" ||
       invocation.executionState === "cancelled" ||
       invocation.executionState === "lost";
     const freeze = readFreezeFromEvidence(invocation.checkpointPreparedEvidence);
     try {
-      if (freeze) {
-        const [binding] = await db
-          .select()
-          .from(executionBindingTable)
-          .where(
-            and(
-              eq(executionBindingTable.tenantId, invocation.tenantId),
-              eq(executionBindingTable.invocationId, invocation.id),
-            ),
-          )
-          .limit(1);
-        if (!binding) throw new Error("WorkspaceNotReady");
+      const [binding] = await db
+        .select()
+        .from(executionBindingTable)
+        .where(
+          and(
+            eq(executionBindingTable.tenantId, invocation.tenantId),
+            eq(executionBindingTable.invocationId, invocation.id),
+          ),
+        )
+        .limit(1);
+      if (!binding) throw new Error("WorkspaceNotReady");
+      let legs = readReleaseRecord(invocation.checkpointPreparedEvidence) ?? {
+        runtime: "pending" as const,
+        backend: "pending" as const,
+      };
+      if (legs.backend === "pending") {
         const workspaceBinding = await getWorkspaceBindingById(
           invocation.tenantId,
           binding.workspaceBindingId,
@@ -322,32 +360,91 @@ export async function recoverPendingCheckpointReleases(
         const backend = input.resolveBackend
           ? await input.resolveBackend(workspaceBinding)
           : createWorkspaceBackend((await resolveManagedWorkspaceResources(workspaceBinding)).host);
-        await releaseBackendFreeze(backend.host, freeze);
+        legs = await confirmCheckpointBackendRelease({
+          tenantId: invocation.tenantId,
+          invocationId: invocation.id,
+          checkpointIntentId,
+          freeze,
+          backend,
+        });
       }
-      report.backendReleased += 1;
-      if (runtimeGone) {
-        await db
-          .update(invocationTable)
-          .set({
-            checkpointGate: "open",
-            checkpointIntentId: null,
-            checkpointOwnerId: null,
-            checkpointDeadline: null,
-            updatedAt: await getAuthorityDatabaseTime(db),
-            versionNo: invocation.versionNo + 1,
-          })
+      if (legs.backend === "confirmed") report.backendReleased += 1;
+      if (legs.runtime === "pending" && runtimeGone) {
+        legs = await confirmCheckpointRuntimeRelease({
+          tenantId: invocation.tenantId,
+          invocationId: invocation.id,
+          checkpointIntentId,
+        });
+        report.runtimeClosed += 1;
+      } else if (legs.runtime === "pending" && checkpointOwner) {
+        const [session] = await db
+          .select()
+          .from(runtimeSessionBindingTable)
           .where(
             and(
-              eq(invocationTable.tenantId, invocation.tenantId),
-              eq(invocationTable.id, invocation.id),
-              eq(invocationTable.checkpointIntentId, checkpointIntentId),
+              eq(runtimeSessionBindingTable.tenantId, invocation.tenantId),
+              eq(runtimeSessionBindingTable.ownershipId, checkpointOwner.id),
+              eq(runtimeSessionBindingTable.attemptId, checkpointOwner.attemptId),
+              eq(runtimeSessionBindingTable.leaseEpoch, checkpointOwner.leaseEpoch),
             ),
+          )
+          .limit(1);
+        if (!session) throw new Error("RuntimeSessionMismatch");
+        if (input.releaseRuntime) {
+          await input.releaseRuntime({
+            tenantId: invocation.tenantId,
+            invocationId: invocation.id,
+            checkpointIntentId,
+            binding,
+            owner: checkpointOwner,
+            session,
+          });
+        } else {
+          const { resolveRuntimeTransportFromBinding } = await import(
+            "@/lib/runtime/retry/runtime-transport-from-binding"
           );
-        report.runtimeClosed += 1;
-        report.gateOpened += 1;
-      } else {
-        report.awaitingRuntime += 1;
+          const transport = await resolveRuntimeTransportFromBinding({
+            tenantId: invocation.tenantId,
+            binding,
+          });
+          await transport.runtimeClient.releaseSafePoint({
+            runtimeEndpoint: transport.runtimeEndpoint,
+            auth: transport.auth,
+            invocationId: invocation.id,
+            checkpointIntentId,
+            idempotencyKey: `checkpoint-release:${checkpointIntentId}`,
+            request: {
+              protocolVersion: 3,
+              targetAuthority: {
+                invocationId: invocation.id,
+                runtimeRevisionId: binding.runtimeRevisionId,
+                attemptId: checkpointOwner.attemptId,
+                ownershipId: checkpointOwner.id,
+                leaseEpoch: String(checkpointOwner.leaseEpoch),
+                sessionBindingId: session.id,
+              },
+              checkpointIntentId,
+            },
+          });
+        }
+        legs = await confirmCheckpointRuntimeRelease({
+          tenantId: invocation.tenantId,
+          invocationId: invocation.id,
+          checkpointIntentId,
+        });
       }
+      const [fresh] = await db
+        .select({ checkpointGate: invocationTable.checkpointGate })
+        .from(invocationTable)
+        .where(
+          and(
+            eq(invocationTable.tenantId, invocation.tenantId),
+            eq(invocationTable.id, invocation.id),
+          ),
+        )
+        .limit(1);
+      if (fresh?.checkpointGate === "open") report.gateOpened += 1;
+      else if (legs.runtime === "pending") report.awaitingRuntime += 1;
     } catch (error) {
       report.failures.push({
         invocationId: invocation.id,
@@ -452,6 +549,7 @@ export async function runCheckpointMaintenanceLane(
     graceMs?: number;
     now?: Date;
     resolveBackend?: (binding: WorkspaceBinding) => Promise<WorkspaceBackend>;
+    releaseRuntime?: CheckpointRuntimeReleaseExecutor;
   } = {},
 ): Promise<{
   stuckGates: StuckCheckpointGateReport;

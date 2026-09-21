@@ -1646,7 +1646,9 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         freeze.writerGeneration === receipt.writerGeneration &&
         freeze.anchorDigest === receipt.anchorDigest
       ) {
-        await rm(await this.freezePath(probe.scopeDigest), { force: true }).catch(() => undefined);
+        // 匹配当前屏障时，物理删除失败就是 release 失败，必须沿 RPC 返回给持久维护 lane。
+        // 只有文件本来不存在（`force:true`）或当前屏障属于更新 tuple 时才是幂等成功。
+        await rm(await this.freezePath(probe.scopeDigest), { force: true });
       }
       // A06：解冻登记是追加式持久事实，且与屏障判定处于同一临界区。
       const file = path.join(
@@ -1697,17 +1699,15 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     operationId?: string;
     requirements?: SnapshotRequirements;
   }): Promise<void> {
+    const probe = await this.observeIdentity();
     const storage = resolveSnapshotStorage(input.storage, this.storage);
     const manifest = await storage.readManifest(
       input.manifestRef,
       input.manifestDigest,
       input.requirements,
     );
-    await storage.restoreSnapshot(
-      manifest,
-      input.destination,
-      input.operationId,
-      input.requirements,
+    await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, () =>
+      storage.restoreSnapshot(manifest, input.destination, input.operationId, input.requirements),
     );
   }
 
@@ -1715,47 +1715,53 @@ export class WorkspaceHostBroker implements WorkspaceHost {
 
   async cleanup(preparation: WorkspacePreparation): Promise<void> {
     const probe = await this.observeIdentity();
-    const canonicalRoot = probe.canonicalRoot;
-    const controlRoot = await this.controlRoot();
-    const expectedRoot = await resolveReal(
-      path.join(canonicalRoot, RUNS_DIR, preparation.candidateAttemptId, preparation.operationId),
-    );
-    const target = await resolveReal(preparation.candidateRoot);
-    // 绝不递归删除共享受管根或控制面目录。
-    if (target === canonicalRoot || isInside(target, canonicalRoot)) {
-      throw new WorkspaceCleanupRejectedError("拒绝清理受管 Workspace 共享根");
-    }
-    if (target === controlRoot || isInside(target, controlRoot)) {
-      throw new WorkspaceCleanupRejectedError("拒绝清理控制面目录");
-    }
-    if (target !== expectedRoot) {
-      throw new WorkspaceCleanupRejectedError("清理目标与 Candidate 注册归属不一致");
-    }
-    // 归属必须可回读：没有稳定 operation 登记的资源不允许被清理。
-    const claim = await readJson<CandidateClaimRecord>(
-      await this.candidateClaimPath(preparation.operationId),
-    );
-    const registered =
-      claim !== null &&
-      (await resolveReal(claim.candidateRoot)) === target &&
-      claim.candidateAttemptId === preparation.candidateAttemptId;
-    if (!registered) {
-      // 目录已不存在 → 清理已完成，重复调用幂等成功；
-      // 目录仍在而登记缺失 → 说明这不是本 Candidate 的注册资源，拒绝。
-      if (await pathExists(target)) {
-        throw new WorkspaceCleanupRejectedError("Candidate operation 归属不可回读");
+    await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      const canonicalRoot = probe.canonicalRoot;
+      const controlRoot = await this.controlRoot();
+      const expectedRoot = await resolveReal(
+        path.join(canonicalRoot, RUNS_DIR, preparation.candidateAttemptId, preparation.operationId),
+      );
+      const target = await resolveReal(preparation.candidateRoot);
+      // 绝不递归删除共享受管根或控制面目录。
+      if (target === canonicalRoot || isInside(target, canonicalRoot)) {
+        throw new WorkspaceCleanupRejectedError("拒绝清理受管 Workspace 共享根");
       }
-      return;
-    }
-    // 不触碰当前 Owner 的实际写根。
-    const grantFiles = await readJson<WorkspaceWriterGrant>(
-      path.join(await this.grantsRootFor(probe.scopeDigest), "current.json"),
-    );
-    // 只有当清理目标本身是当前 Owner 写根的祖先（删除它会毁掉在用的写根）才拒绝。
-    if (grantFiles && isInside(target, grantFiles.root)) {
-      throw new WorkspaceCleanupRejectedError("清理目标包含当前 Owner 的写根");
-    }
-    await rm(target, { recursive: true, force: true });
+      if (target === controlRoot || isInside(target, controlRoot)) {
+        throw new WorkspaceCleanupRejectedError("拒绝清理控制面目录");
+      }
+      if (target !== expectedRoot) {
+        throw new WorkspaceCleanupRejectedError("清理目标与 Candidate 注册归属不一致");
+      }
+      // 归属必须可回读：没有稳定 operation 登记的资源不允许被清理。
+      const claim = await readJson<CandidateClaimRecord>(
+        await this.candidateClaimPath(preparation.operationId),
+      );
+      const registered =
+        claim !== null &&
+        (await resolveReal(claim.candidateRoot)) === target &&
+        claim.candidateAttemptId === preparation.candidateAttemptId;
+      if (!registered) {
+        // 目录已不存在 → 清理已完成，重复调用幂等成功；
+        // 目录仍在而登记缺失 → 说明这不是本 Candidate 的注册资源，拒绝。
+        if (await pathExists(target)) {
+          throw new WorkspaceCleanupRejectedError("Candidate operation 归属不可回读");
+        }
+        return;
+      }
+      // 不触碰当前 Owner 的实际写根。
+      const grantFiles = await readJson<WorkspaceWriterGrant>(
+        path.join(await this.grantsRootFor(probe.scopeDigest), "current.json"),
+      );
+      // 只有当清理目标本身是当前 Owner 写根的祖先（删除它会毁掉在用的写根）才拒绝。
+      if (grantFiles && isInside(target, grantFiles.root)) {
+        throw new WorkspaceCleanupRejectedError("清理目标包含当前 Owner 的写根");
+      }
+      // Snapshot restore 的隔离候选与状态文件都由同一稳定 operation 派生；Candidate 被放弃时
+      // 必须一起清掉，不能只删正式 target 而把半恢复 staging 留给后续进程误判为可续做。
+      await rm(target, { recursive: true, force: true });
+      await rm(`${target}.staging`, { recursive: true, force: true });
+      await rm(`${target}.restore-state.json`, { force: true });
+    });
   }
 }
 

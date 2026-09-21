@@ -44,6 +44,7 @@ import {
 import type { SnapshotStorageReceipt, SnapshotStorageRef } from "@/lib/workspace/snapshot-storage";
 import type { WorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { validateWorkspaceContract } from "@/lib/workspace/workspace-contract";
+import type { SafePointReceipt } from "@/lib/workspace/workspace-host";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { and, eq } from "drizzle-orm";
 
@@ -266,6 +267,18 @@ export async function produceFilesystemCheckpoint(input: {
       db,
     );
     const digest = computeRecoveryAnchorDigest(frozenAnchor);
+    // 在物理 freeze 之前先持久登记完整 tuple。若 Broker 已冻结但进程在回执落库前退出，
+    // 维护 lane 可据此安全重放/释放同一屏障，而不是把 `freeze=null` 当成“从未冻结”。
+    await registerCheckpointFreezeIntent({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      ownershipId: input.ownershipId,
+      checkpointIntentId,
+      scopeDigest: contract.storageScopeDigest as string,
+      writerGeneration: binding.writerGeneration,
+      anchorDigest: digest,
+      safePointEvidence: input.safePointEvidence,
+    });
     freeze = await input.backend.host.freeze({ grant, checkpointIntentId, anchorDigest: digest });
     await freezeCheckpointGate({
       tenantId: input.tenantId,
@@ -276,6 +289,7 @@ export async function produceFilesystemCheckpoint(input: {
       frozenAnchor,
       anchorDigest: digest,
       safePointEvidence: input.safePointEvidence,
+      freeze,
     });
     receipt = await input.backend.host.snapshot({
       grant,
@@ -479,6 +493,7 @@ async function freezeCheckpointGate(input: {
   frozenAnchor: RecoveryAnchor;
   anchorDigest: string;
   safePointEvidence: CheckpointSafePointEvidence;
+  freeze: Awaited<ReturnType<WorkspaceBackend["host"]["freeze"]>>;
 }): Promise<void> {
   await db.transaction(async (tx) => {
     const [invocation] = await tx
@@ -527,8 +542,63 @@ async function freezeCheckpointGate(input: {
         checkpointProducerSequence: Number(input.frozenAnchor.producerSequence),
         checkpointRecoveryVersion: Number(input.frozenAnchor.recoveryVersion),
         checkpointPreparedEvidence: {
+          ...(invocation.checkpointPreparedEvidence as Record<string, unknown> | null),
           safePoint: input.safePointEvidence,
           anchorDigest: input.anchorDigest,
+          freeze: input.freeze,
+        },
+        versionNo: invocation.versionNo + 1,
+        updatedAt: now,
+      })
+      .where(eq(invocationTable.id, invocation.id));
+  });
+}
+
+async function registerCheckpointFreezeIntent(input: {
+  tenantId: string;
+  invocationId: string;
+  ownershipId: string;
+  checkpointIntentId: string;
+  scopeDigest: string;
+  writerGeneration: number;
+  anchorDigest: string;
+  safePointEvidence: CheckpointSafePointEvidence;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [invocation] = await tx
+      .select()
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, input.tenantId),
+          eq(invocationTable.id, input.invocationId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (
+      !invocation ||
+      invocation.checkpointGate !== "quiescing" ||
+      invocation.checkpointIntentId !== input.checkpointIntentId ||
+      invocation.checkpointOwnerId !== input.ownershipId
+    ) {
+      throw new Error("CheckpointStale");
+    }
+    const now = await getAuthorityDatabaseTime(tx);
+    await tx
+      .update(invocationTable)
+      .set({
+        checkpointPreparedEvidence: {
+          ...(invocation.checkpointPreparedEvidence as Record<string, unknown> | null),
+          safePoint: input.safePointEvidence,
+          anchorDigest: input.anchorDigest,
+          freezeIntent: {
+            checkpointIntentId: input.checkpointIntentId,
+            scopeDigest: input.scopeDigest,
+            writerGeneration: input.writerGeneration,
+            anchorDigest: input.anchorDigest,
+            registeredAt: now.toISOString(),
+          },
         },
         versionNo: invocation.versionNo + 1,
         updatedAt: now,
@@ -591,7 +661,6 @@ export async function abandonFilesystemCheckpoint(input: {
   reasonCode: string;
   freeze?: Awaited<ReturnType<WorkspaceBackend["host"]["freeze"]>>;
 }): Promise<void> {
-  const nextGate = input.freeze ? "releasing" : "open";
   await db.transaction(async (tx) => {
     const [invocation] = await tx
       .select()
@@ -610,25 +679,56 @@ export async function abandonFilesystemCheckpoint(input: {
       invocation.checkpointOwnerId !== input.ownershipId
     )
       return;
+    const evidence = (invocation.checkpointPreparedEvidence ?? {}) as Record<string, unknown>;
+    const persistedFreeze = readPersistedFreeze(evidence);
+    const freeze = input.freeze ?? persistedFreeze;
+    const committed = typeof evidence.checkpointId === "string";
+    const nextGate =
+      freeze || committed || invocation.checkpointGate === "releasing" ? "releasing" : "open";
+    const currentRelease =
+      evidence.release && typeof evidence.release === "object" ? evidence.release : null;
     await tx
       .update(invocationTable)
       .set({
         checkpointGate: nextGate,
-        checkpointIntentId: input.freeze ? input.checkpointIntentId : null,
-        checkpointOwnerId: input.freeze ? input.ownershipId : null,
+        checkpointIntentId: nextGate === "releasing" ? input.checkpointIntentId : null,
+        checkpointOwnerId: nextGate === "releasing" ? input.ownershipId : null,
         checkpointDeadline: null,
-        checkpointPreparedEvidence: input.freeze
-          ? {
-              failureCode: input.reasonCode,
-              freeze: input.freeze,
-              release: { runtime: "pending", backend: "pending" },
-            }
-          : { failureCode: input.reasonCode },
+        checkpointPreparedEvidence: {
+          ...evidence,
+          failureCode: input.reasonCode,
+          ...(freeze ? { freeze } : {}),
+          ...(nextGate === "releasing"
+            ? { release: currentRelease ?? { runtime: "pending", backend: "pending" } }
+            : {}),
+        },
         versionNo: invocation.versionNo + 1,
         updatedAt: await getAuthorityDatabaseTime(tx),
       })
       .where(eq(invocationTable.id, invocation.id));
   });
+}
+
+function readPersistedFreeze(evidence: Record<string, unknown>): SafePointReceipt | undefined {
+  const value = evidence.freeze ?? evidence.freezeIntent;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<SafePointReceipt>;
+  if (
+    typeof candidate.checkpointIntentId !== "string" ||
+    typeof candidate.scopeDigest !== "string" ||
+    typeof candidate.writerGeneration !== "number" ||
+    typeof candidate.anchorDigest !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    checkpointIntentId: candidate.checkpointIntentId,
+    scopeDigest: candidate.scopeDigest,
+    writerGeneration: candidate.writerGeneration,
+    anchorDigest: candidate.anchorDigest,
+    frozenAt:
+      typeof candidate.frozenAt === "string" ? candidate.frozenAt : new Date(0).toISOString(),
+  };
 }
 
 async function loadCheckpointFacts(tenantId: string, invocationId: string, ownershipId: string) {

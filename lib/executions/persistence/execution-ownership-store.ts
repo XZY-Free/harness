@@ -374,11 +374,20 @@ export async function acquireExecutionOwnershipInTransaction(
       lastOwnershipEpoch: leaseEpoch,
       ...(expiredCheckpointGate
         ? {
-            checkpointGate: "open",
-            checkpointIntentId: null,
-            checkpointOwnerId: null,
+            // Owner 失权不等于物理屏障已释放。保留原 intent/owner 与既有 freeze/Checkpoint
+            // 证据，转交 checkpoint maintenance lane 关闭两条 release 腿。
+            checkpointGate: "releasing",
             checkpointDeadline: null,
-            checkpointPreparedEvidence: { failureCode: "OwnershipExpired" },
+            checkpointPreparedEvidence: {
+              ...((invocation.checkpointPreparedEvidence as Record<string, unknown> | null) ?? {}),
+              failureCode: "OwnershipExpired",
+              release: {
+                runtime: "pending",
+                backend: "pending",
+                ...(((invocation.checkpointPreparedEvidence as { release?: object } | null)
+                  ?.release ?? {}) as object),
+              },
+            },
           }
         : {}),
       versionNo: invocation.versionNo + 1,

@@ -1,7 +1,14 @@
 /** Dispatches one durable InvocationAttempt using its frozen execution facts. */
+import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
-import { getAttemptById, updateAttemptState } from "@/lib/executions/persistence/attempt-store";
+import { environmentProvisionRequestDigest } from "@/lib/environment/environment-provisioner";
+import {
+  type AttemptPreparationClaim,
+  claimAttemptPreparation,
+  getAttemptById,
+  updateAttemptState,
+} from "@/lib/executions/persistence/attempt-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import type { ThreadEventActorType } from "@/lib/persistence/schema/conversation";
 import type {
@@ -12,7 +19,10 @@ import type {
   RuntimeSessionBinding,
 } from "@/lib/persistence/schema/executions";
 import { markInvocationLost, readObservedOwner } from "@/lib/runtime/application/runtime-recovery";
-import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import {
+  runtimeStartSourceRequestDigest,
+  startRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-start";
 import type { RuntimeEndpointResolution } from "@/lib/runtime/dispatcher";
 import {
   InvocationNotFoundError,
@@ -44,6 +54,7 @@ export interface DispatchQueuedAttemptParams {
    * 请求内联路径为 `null`（无 lease，只按 Session 自身冻结 tuple 复核）。
    */
   claim?: SessionDispatchIdentity | null;
+  preparationClaim?: AttemptPreparationClaim | null;
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
   actorType?: ThreadEventActorType;
@@ -93,8 +104,43 @@ export async function dispatchQueuedInvocationAttempt(
     (module) => module.getExecutionBindingByInvocation(params.tenantId, invocation.id),
   );
   if (!binding) throw new InvocationNotFoundError(invocation.id);
-  const endpoint = await params.runtimeEndpointResolver(binding);
+  const preparationIntentKey = `invocation:${invocation.id}`;
+  const preparationRequestDigest =
+    binding.environmentMode === "MANAGED" && binding.environmentDefinitionRevisionId
+      ? environmentProvisionRequestDigest({
+          tenantId: params.tenantId,
+          invocationId: invocation.id,
+          attemptId: attempt.id,
+          revisionId: binding.environmentDefinitionRevisionId,
+          workspaceBindingId: binding.workspaceBindingId,
+          recoveryAnchorDigest: null,
+        })
+      : runtimeStartSourceRequestDigest({
+          tenantId: params.tenantId,
+          invocationId: invocation.id,
+          attemptId: attempt.id,
+          intentType: "start",
+          runtimeRevisionId: binding.runtimeRevisionId,
+          workspaceBindingId: binding.workspaceBindingId,
+          environmentDefinitionRevisionId: null,
+          anchorDigest: null,
+          checkpointId: null,
+        });
+  const preparationOutcome = params.preparationClaim
+    ? null
+    : await claimAttemptPreparation({
+        tenantId: params.tenantId,
+        invocationId: invocation.id,
+        attemptId: attempt.id,
+        intentKey: preparationIntentKey,
+        requestDigest: preparationRequestDigest,
+        claimId: randomUUID(),
+        now: params.now,
+      });
+  if (preparationOutcome?.disposition === "busy") throw new Error("AttemptPreparationBusy");
+  const preparationClaim = params.preparationClaim ?? preparationOutcome?.claim ?? null;
   try {
+    const endpoint = await params.runtimeEndpointResolver(binding);
     const revision =
       binding.environmentMode === "MANAGED" && binding.environmentDefinitionRevisionId
         ? await getEnvironmentRevisionById(params.tenantId, binding.environmentDefinitionRevisionId)
@@ -117,6 +163,9 @@ export async function dispatchQueuedInvocationAttempt(
             workspaceBindingId: binding.workspaceBindingId,
             workspaceRoot: endpoint.workspace?.root ?? null,
             recoveryAnchorDigest: null,
+            preparationClaimId: preparationClaim?.claimId ?? randomUUID(),
+            preparationIntentKey,
+            preparationRequestDigest,
           })
         : null;
     const started = await startRuntimeInvocation({
@@ -134,6 +183,7 @@ export async function dispatchQueuedInvocationAttempt(
       // A05：投递重试仍是**同一个**来源意图（Invocation 身份），不是新请求。
       // 用时间戳或投递序号会让"ACK 丢失后的第二次投递"被判成新意图而重做准备。
       sourceOperationKey: `invocation:${invocation.id}`,
+      preparationClaim,
       now: params.now,
     });
     const session = await import("@/lib/runtime/persistence/runtime-session-store").then((module) =>
@@ -167,6 +217,7 @@ export async function dispatchQueuedInvocationAttempt(
         errorSummary: error instanceof Error ? error.message : String(error),
         now: params.now ?? new Date(),
         claim: params.claim ?? null,
+        preparationClaim,
       });
       return { status: "terminal_failed", attempt: failedAttempt, errorCode };
     }
@@ -238,17 +289,24 @@ export async function failAttemptAndInvokeRecoveryAuthority(params: {
   now: Date;
   /** 领取身份：给出时先复核 claim 仍被持有，否则拒绝写完成事实。 */
   claim?: SessionDispatchIdentity | null;
+  preparationClaim?: AttemptPreparationClaim | null;
 }): Promise<InvocationAttempt> {
   if (params.claim) await assertSessionDispatchClaimHeld(params.claim);
   const current = await getAttemptById(params.attempt.id);
   if (current?.attemptState === "queued" || current?.attemptState === "running") {
-    await db.transaction((tx) =>
-      updateAttemptState(tx, params.attempt.id, "failed", {
+    await db.transaction(async (tx) => {
+      if (params.preparationClaim) {
+        const { assertAttemptPreparationClaimHeldInTransaction } = await import(
+          "@/lib/executions/persistence/attempt-store"
+        );
+        await assertAttemptPreparationClaimHeldInTransaction(tx, params.preparationClaim);
+      }
+      await updateAttemptState(tx, params.attempt.id, "failed", {
         finishedAt: params.now,
         errorCode: params.errorCode,
         errorSummary: params.errorSummary,
-      }),
-    );
+      });
+    });
   }
   const recovered = await markInvocationLost({
     tenantId: params.tenantId,

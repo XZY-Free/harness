@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 /**
  * R07：EnvironmentProvisioner——Revision → 实际实例 → 符合性证据 → Lease → 清理。
  *
@@ -42,14 +43,20 @@ import {
   prepareEnvironmentLease,
   recordEnvironmentLeaseCleanupFailure,
   scheduleEnvironmentLeaseCleanup,
+  scheduleEnvironmentLeaseCleanupForPreparationClaim,
 } from "@/lib/environment/environment-lease-store";
 import {
   ENVIRONMENT_PREPARED_TTL_MS,
   buildEnvironmentPreparedEvidence,
   environmentPreparedEvidenceDigest,
 } from "@/lib/environment/environment-prepared-evidence";
+import {
+  type AttemptPreparationClaim,
+  claimAttemptPreparation,
+} from "@/lib/executions/persistence/attempt-store";
 import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 
 export interface EnvironmentProvisionInput {
   tenantId: string;
@@ -63,6 +70,10 @@ export interface EnvironmentProvisionInput {
   workspaceRoot?: string | null;
   /** 恢复水位（Prepared 证据 Anchor）。 */
   recoveryAnchorDigest?: string | null;
+  /** 生产调用方在任何真实 IO 前生成并贯穿到 Start/失败结论的单次领取 nonce。 */
+  preparationClaimId?: string;
+  preparationIntentKey?: string;
+  preparationRequestDigest?: string;
   now?: Date;
 }
 
@@ -135,6 +146,17 @@ export function environmentOperationId(input: {
   attemptId: string;
 }): string {
   return `env-instance:${input.attemptId}:${input.environmentDefinitionRevisionId}`;
+}
+
+export function environmentProvisionRequestDigest(input: {
+  tenantId: string;
+  invocationId: string;
+  attemptId: string;
+  revisionId: string;
+  workspaceBindingId: string;
+  recoveryAnchorDigest: string | null;
+}): string {
+  return protocolDigest({ scope: "environment-provision", ...input });
 }
 
 function workspaceBindingIdOf(lease: EnvironmentLease): string | null {
@@ -289,7 +311,7 @@ async function provisionWithBackend(input: {
   workspaceRoot: string | null;
   recoveryAnchorDigest: string | null;
   /** A05：仅 `reprepare` 提供；见 `PrepareEnvironmentLeaseInput.preparationClaim`。 */
-  preparationClaim?: { attemptId: string; preparationClaimId: string };
+  preparationClaim?: AttemptPreparationClaim;
   now: Date;
 }): Promise<EnvironmentLease> {
   // §1：同 Attempt 复用既有 Lease（不重复创建真实资源）。
@@ -344,31 +366,66 @@ async function provisionWithBackend(input: {
     // 刚建立好的实例真实释放掉。旧工作只丢弃自己的观察结果。
     if (error instanceof EnvironmentPreparationClaimSupersededError) throw error;
     // 真实资源可能已创建一部分：登记持久清理工作（归属 + 重试），不吞掉错误。
-    await scheduleEnvironmentLeaseCleanup({
-      tenantId: input.tenantId,
-      leaseId: lease.id,
-      errorCode:
-        error instanceof EnvironmentComplianceError
-          ? "EnvironmentComplianceFailed"
-          : error instanceof Error
-            ? error.name
-            : "EnvironmentInstanceFailed",
-      now: input.now,
-      immediate: true,
-      resourceManifestPatch: {
-        operationId,
-        workspaceBindingId: input.workspaceBindingId,
-        resources: [
-          {
-            kind: input.backend.kind === "container" ? "container" : "host_agent_artifact",
-            // 真实容器名由稳定 operationId 派生：创建可能失败在容器已存在之后。
-            ref:
-              input.backend.kind === "container" ? managedContainerName(operationId) : operationId,
-            identity: "unverified",
+    const cleanup = input.preparationClaim
+      ? await scheduleEnvironmentLeaseCleanupForPreparationClaim({
+          claim: input.preparationClaim,
+          leaseId: lease.id,
+          errorCode:
+            error instanceof EnvironmentComplianceError
+              ? "EnvironmentComplianceFailed"
+              : error instanceof Error
+                ? error.name
+                : "EnvironmentInstanceFailed",
+          now: input.now,
+          resourceManifestPatch: {
+            operationId,
+            workspaceBindingId: input.workspaceBindingId,
+            resources: [
+              {
+                kind: input.backend.kind === "container" ? "container" : "host_agent_artifact",
+                ref:
+                  input.backend.kind === "container"
+                    ? managedContainerName(operationId)
+                    : operationId,
+                identity: "unverified",
+              },
+            ],
           },
-        ],
-      },
-    });
+        })
+      : { outcome: "scheduled" as const };
+    if (cleanup.outcome === "not_claimed") {
+      throw new EnvironmentPreparationClaimSupersededError(
+        "准备 claim 已换手：旧 create 失败不得登记共享 Lease 清理",
+      );
+    }
+    if (!input.preparationClaim)
+      await scheduleEnvironmentLeaseCleanup({
+        tenantId: input.tenantId,
+        leaseId: lease.id,
+        errorCode:
+          error instanceof EnvironmentComplianceError
+            ? "EnvironmentComplianceFailed"
+            : error instanceof Error
+              ? error.name
+              : "EnvironmentInstanceFailed",
+        now: input.now,
+        immediate: true,
+        resourceManifestPatch: {
+          operationId,
+          workspaceBindingId: input.workspaceBindingId,
+          resources: [
+            {
+              kind: input.backend.kind === "container" ? "container" : "host_agent_artifact",
+              // 真实容器名由稳定 operationId 派生：创建可能失败在容器已存在之后。
+              ref:
+                input.backend.kind === "container"
+                  ? managedContainerName(operationId)
+                  : operationId,
+              identity: "unverified",
+            },
+          ],
+        },
+      });
     await runEnvironmentLeaseCleanup({
       tenantId: input.tenantId,
       leaseId: lease.id,
@@ -410,7 +467,12 @@ async function provisionWithBackend(input: {
       leaseId: lease.id,
       capabilitiesJson: facts.capabilities,
       evidence,
-      preparationClaim: input.preparationClaim,
+      preparationClaim: input.preparationClaim
+        ? {
+            attemptId: input.preparationClaim.attemptId,
+            preparationClaimId: input.preparationClaim.claimId,
+          }
+        : undefined,
       now: input.now,
     });
   } catch (error) {
@@ -419,23 +481,47 @@ async function provisionWithBackend(input: {
     if (error instanceof EnvironmentPreparationClaimSupersededError) throw error;
     // 真实资源已经建立，但控制面拒绝承认（能力不满足 / 证据自洽失败 / Lease 状态非法）：
     // 必须登记归属并尝试真实释放，不能留下无主容器。
-    await scheduleEnvironmentLeaseCleanup({
-      tenantId: input.tenantId,
-      leaseId: lease.id,
-      errorCode:
-        error instanceof EnvironmentComplianceError
-          ? "EnvironmentComplianceFailed"
-          : error instanceof Error
-            ? error.name
-            : "EnvironmentPrepareFailed",
-      now: input.now,
-      immediate: true,
-      resourceManifestPatch: {
-        operationId,
-        workspaceBindingId: input.workspaceBindingId,
-        resources: facts.resources,
-      },
-    });
+    const cleanup = input.preparationClaim
+      ? await scheduleEnvironmentLeaseCleanupForPreparationClaim({
+          claim: input.preparationClaim,
+          leaseId: lease.id,
+          errorCode:
+            error instanceof EnvironmentComplianceError
+              ? "EnvironmentComplianceFailed"
+              : error instanceof Error
+                ? error.name
+                : "EnvironmentPrepareFailed",
+          now: input.now,
+          resourceManifestPatch: {
+            operationId,
+            workspaceBindingId: input.workspaceBindingId,
+            resources: facts.resources,
+          },
+        })
+      : { outcome: "scheduled" as const };
+    if (cleanup.outcome === "not_claimed") {
+      throw new EnvironmentPreparationClaimSupersededError(
+        "准备 claim 已换手：旧 Prepared 失败不得登记共享 Lease 清理",
+      );
+    }
+    if (!input.preparationClaim)
+      await scheduleEnvironmentLeaseCleanup({
+        tenantId: input.tenantId,
+        leaseId: lease.id,
+        errorCode:
+          error instanceof EnvironmentComplianceError
+            ? "EnvironmentComplianceFailed"
+            : error instanceof Error
+              ? error.name
+              : "EnvironmentPrepareFailed",
+        now: input.now,
+        immediate: true,
+        resourceManifestPatch: {
+          operationId,
+          workspaceBindingId: input.workspaceBindingId,
+          resources: facts.resources,
+        },
+      });
     await runEnvironmentLeaseCleanup({
       tenantId: input.tenantId,
       leaseId: lease.id,
@@ -510,6 +596,27 @@ export function createEnvironmentProvisioner(dependencies: {
           `Revision 声明的 backendKind=${spec.backendKind} 与受管 Backend=${backend.kind} 不匹配`,
         );
       }
+      const preparation = await claimAttemptPreparation({
+        tenantId: input.tenantId,
+        invocationId: input.invocationId,
+        attemptId: input.attemptId,
+        intentKey: input.preparationIntentKey ?? `invocation:${input.invocationId}`,
+        requestDigest:
+          input.preparationRequestDigest ??
+          environmentProvisionRequestDigest({
+            tenantId: input.tenantId,
+            invocationId: input.invocationId,
+            attemptId: input.attemptId,
+            revisionId: input.revisionId,
+            workspaceBindingId: input.workspaceBindingId,
+            recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
+          }),
+        claimId: input.preparationClaimId ?? randomUUID(),
+        now,
+      });
+      if (preparation.disposition === "busy") {
+        throw new EnvironmentComplianceError("AttemptPreparationBusy");
+      }
       return provisionWithBackend({
         backend,
         tenantId: input.tenantId,
@@ -519,6 +626,11 @@ export function createEnvironmentProvisioner(dependencies: {
         workspaceBindingId: input.workspaceBindingId,
         workspaceRoot: input.workspaceRoot ?? null,
         recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
+        ...(preparation.claim
+          ? {
+              preparationClaim: preparation.claim,
+            }
+          : {}),
         now,
       });
     },
@@ -627,8 +739,12 @@ export function createEnvironmentProvisioner(dependencies: {
         // 旧完成会盖掉继任者的 Prepared 证据（`provisionWithBackend` 在它被拒时
         // 必须**不**登记清理义务 —— 实例按稳定 operationId 复用，归属属于继任者）。
         preparationClaim: {
+          tenantId: input.tenantId,
+          invocationId: current.invocationId,
           attemptId: current.attemptId,
-          preparationClaimId: input.preparationClaimId,
+          intentKey: input.preparationIntentKey,
+          requestDigest: input.preparationRequestDigest,
+          claimId: input.preparationClaimId,
         },
         now,
       });

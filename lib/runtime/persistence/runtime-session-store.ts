@@ -313,6 +313,38 @@ export async function getRuntimeSessionBindingBySourceIntent(
   return row ?? null;
 }
 
+/**
+ * 从外部来源身份反查它最初绑定的 Attempt/Session。
+ *
+ * Resume 命令重投不能先用 `getLatestAttempt` 猜对象：同一 Invocation 后续可能已经产生
+ * 新的暂停轮次。命令身份在这些轮次之间仍全局稳定，因此先按来源读取历史，再决定它是
+ * 首次恢复还是原请求重投。
+ */
+export async function getRuntimeSessionBindingBySourceOperation(
+  tenantId: string,
+  input: {
+    invocationId: string;
+    intentType: RuntimeSessionIntentType;
+    sourceOperationKey: string;
+  },
+  executor: DbOrTx = db,
+): Promise<RuntimeSessionBinding | null> {
+  const [row] = await executor
+    .select()
+    .from(runtimeSessionBindingTable)
+    .where(
+      and(
+        eq(runtimeSessionBindingTable.tenantId, tenantId),
+        eq(runtimeSessionBindingTable.invocationId, input.invocationId),
+        eq(runtimeSessionBindingTable.intentType, input.intentType),
+        eq(runtimeSessionBindingTable.sourceOperationKey, input.sourceOperationKey),
+      ),
+    )
+    .orderBy(desc(runtimeSessionBindingTable.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function getRuntimeSessionBindingByOwnership(
   tenantId: string,
   ownershipId: string,

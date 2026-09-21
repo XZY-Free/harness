@@ -25,7 +25,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -141,6 +141,7 @@ interface CheckpointRuntimeStub {
   readonly releaseRequests: Array<{ checkpointIntentId: string; path: string }>;
   readonly resumeRequests: RuntimeStartRequest[];
   setCapabilitiesDigest(value: string): void;
+  setReleaseFailure(value: boolean): void;
   /** 让**下一次** Resume 接纳完成后切断连接：Runtime 已接纳，但回执永远到不了平台。 */
   dropNextResumeResponse(): void;
   dispose(): Promise<void>;
@@ -152,6 +153,7 @@ async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
   const resumeRequests: RuntimeStartRequest[] = [];
   let capabilitiesDigest = "";
   let dropNextResume = false;
+  let releaseFailure = false;
   const server = createServer((request, response) => {
     void (async () => {
       const url = request.url ?? "";
@@ -184,6 +186,12 @@ async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
       }
       if (release) {
         releaseRequests.push({ checkpointIntentId: release[1]!, path: url });
+        if (releaseFailure) {
+          respondJson(response, 503, {
+            error: { code: "RUNTIME_RELEASE_UNAVAILABLE", message: "simulated release failure" },
+          });
+          return;
+        }
         respondJson(response, 200, { released: true });
         return;
       }
@@ -223,6 +231,9 @@ async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
     resumeRequests,
     setCapabilitiesDigest(value: string) {
       capabilitiesDigest = value;
+    },
+    setReleaseFailure(value: boolean) {
+      releaseFailure = value;
     },
     dropNextResumeResponse() {
       dropNextResume = true;
@@ -488,14 +499,26 @@ function containerRevisionInput(): EnvironmentRevisionInput {
 /**
  * 恢复运行根清单。
  *
- * 只统计 `workspace:*` 目录：同级的控制面候选目录（`<operationId>`）与恢复状态旁文件
+ * 只统计 `workspace-<digest>` 目录：同级的控制面候选目录（`<operationId>`）与恢复状态旁文件
  * （`*.restore-state.json`）都是生产既有的控制事实，不属于"第二份恢复目录"。
  * T07 要证的是**恢复只落一份运行根**，不是"目录里只能有一个文件"。
  */
 async function readRestoredRunRoots(runsDir: string): Promise<string[]> {
   return (await readdir(runsDir)).filter(
-    (name) => name.startsWith("workspace:") && !name.endsWith(".restore-state.json"),
+    (name) =>
+      name.startsWith("workspace-") &&
+      !name.endsWith(".staging") &&
+      !name.endsWith(".restore-state.json"),
   );
+}
+
+async function findRestoredRunRoot(writerRoot: string, attemptId: string): Promise<string> {
+  const runsDir = path.join(await realpath(writerRoot), ".snow-runs", attemptId);
+  const restored = await readRestoredRunRoots(runsDir);
+  if (restored.length !== 1) {
+    throw new Error(`期望唯一恢复运行根，实际为 ${restored.length} 个`);
+  }
+  return path.join(runsDir, restored[0]!);
 }
 
 describe("Checkpoint 默认端到端路径（A06）", () => {
@@ -874,6 +897,62 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     ).rejects.toThrow();
   });
 
+  it("N06-T7: Checkpoint 已提交但 release/命令 ACK 未收口时，正式重投返回原对象并续做原释放", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "checkpoint replay payload", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    ctx.stub.setReleaseFailure(true);
+    const first = await takeRecoverablePauseCheckpoint({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+      requestedById: "test-service",
+    });
+    expect(first).toMatchObject({ requested: true, dispatched: true });
+    const commandId = first.commandId!;
+    const intentId = first.checkpointIntentId!;
+    const afterFirst = await readGate(ctx.invocationId);
+    const evidence = afterFirst?.checkpointPreparedEvidence as {
+      checkpointId?: string;
+      release?: { runtime?: string; backend?: string };
+    } | null;
+    expect(evidence?.checkpointId).toBeTruthy();
+    expect(evidence?.release).toMatchObject({ runtime: "pending", backend: "confirmed" });
+    expect(afterFirst?.checkpointGate).toBe("releasing");
+    expect(ctx.stub.safePointRequests).toHaveLength(1);
+
+    // 模拟持久 Checkpoint/释放事实已经提交，而命令 ACK 尾部随进程退出丢失。
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "queued",
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+        nextDispatchAt: new Date(0),
+        completedAt: null,
+        receiptJson: null,
+        lastErrorCode: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(invocationCommandTable.id, commandId));
+    ctx.stub.setReleaseFailure(false);
+    const replay = await retryDispatchedCommandToRuntime({ tenantId: TENANT_ID, commandId });
+    expect(replay.dispatched).toBe(true);
+    if (!replay.dispatched) throw new Error("Checkpoint 重投未被正式网关接纳");
+    expect(replay.command.commandState).toBe("acknowledged");
+    expect(ctx.stub.safePointRequests).toHaveLength(1);
+    expect(ctx.stub.releaseRequests.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(ctx.stub.releaseRequests.map((request) => request.checkpointIntentId))).toEqual(
+      new Set([intentId]),
+    );
+    const rows = await db
+      .select({ id: filesystemCheckpointTable.id })
+      .from(filesystemCheckpointTable)
+      .where(eq(filesystemCheckpointTable.invocationId, ctx.invocationId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(evidence?.checkpointId);
+    expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+  });
+
   it("A06-02: runtime-start 用恢复目录激活 Writer —— 候选运行区在受管根内、内容真实恢复", async () => {
     const ctx = await setupDefaultPathContext();
     await writeFile(path.join(ctx.writerRoot, "state.txt"), "restore me", "utf8");
@@ -961,12 +1040,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(ctx.stub.resumeRequests[0]?.recovery).toMatchObject({ kind: "resume", anchorDigest });
 
     // ⑥：恢复目录 = `prepare()` 给出的候选运行目录，落在受管写根内、控制面外。
-    const canonicalExpected = path.join(
-      await realpath(ctx.writerRoot),
-      ".snow-runs",
-      nextAttempt.id,
-      `workspace:${nextAttempt.id}`,
-    );
+    const canonicalExpected = await findRestoredRunRoot(ctx.writerRoot, nextAttempt.id);
     expect(await readFile(path.join(canonicalExpected, "state.txt"), "utf8")).toBe("restore me");
     expect(canonicalExpected.startsWith(`${ctx.controlRoot}${path.sep}`)).toBe(false);
 
@@ -1174,18 +1248,13 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       workspaceBindingId: ctx.workspaceBindingId,
       recoveryAnchorDigest: anchorDigest,
     });
-    const candidateRoot = path.join(
-      await realpath(ctx.writerRoot),
-      ".snow-runs",
-      attempt.id,
-      `workspace:${attempt.id}`,
-    );
+    const candidateParent = path.join(await realpath(ctx.writerRoot), ".snow-runs", attempt.id);
     return {
       anchor,
       anchorDigest,
       attempt,
       lease,
-      candidateRoot,
+      candidateParent,
       async start() {
         const bindingRow = (
           await db
@@ -1642,12 +1711,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       ctx.scopeDigest,
       activationEvidence!.workspace!.writerGeneration!,
     );
-    const expectedRoot = path.join(
-      await realpath(ctx.writerRoot),
-      ".snow-runs",
-      ctx.attemptId,
-      `workspace:${ctx.attemptId}`,
-    );
+    const expectedRoot = await findRestoredRunRoot(ctx.writerRoot, ctx.attemptId);
     expect(await realpath(grant!.root)).toBe(expectedRoot);
     expect(expectedRoot.startsWith(`${ctx.controlRoot}${path.sep}`)).toBe(false);
     expect(await readFile(path.join(expectedRoot, "state.txt"), "utf8")).toBe(
@@ -1695,7 +1759,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
   // ─── 恢复侧共用夹具（T06–T08）────────────────────────────────
 
   /** Runtime 自报需要补充输入的正式事件载荷（形状与生产 Runtime 一致）。 */
-  function resumeInputPayload(): {
+  function resumeInputPayload(actionId = "a06-resume-input"): {
     type: RuntimeEventType;
     payload: Record<string, unknown>;
   } {
@@ -1703,7 +1767,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       type: "user-action",
       payload: {
         request_type: "input",
-        action_id: "a06-resume-input",
+        action_id: actionId,
         purpose: "missing_scope",
         prompt: "请补充处理范围",
         input_schema: {
@@ -1716,7 +1780,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     };
   }
 
-  async function requireUar(ctx: DefaultPathContext) {
+  async function requireUar(ctx: DefaultPathContext, actionId = "a06-resume-input") {
     const [uar] = await db
       .select()
       .from(userActionRequestTable)
@@ -1724,6 +1788,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
         and(
           eq(userActionRequestTable.tenantId, TENANT_ID),
           eq(userActionRequestTable.invocationId, ctx.invocationId),
+          eq(userActionRequestTable.harnessActionId, actionId),
         ),
       );
     if (!uar) throw new Error("user-action 未持久化 UserActionRequest");
@@ -1814,13 +1879,23 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
    * 走完 T01 的①–⑦并停在"恢复代际已真正运行"：用户补充输入 → 默认 Checkpoint →
    * 真实 suspended → 真实 UAR 解析 → 默认 Resume 网关 → 真实 restore/Writer 激活 → 新 started。
    */
-  async function runPauseResumeChain(ctx: DefaultPathContext) {
-    await ingestRuntimeBatch(ctx, [resumeInputPayload()]);
-    const uar = await requireUar(ctx);
+  async function runPauseResumeChain(
+    ctx: DefaultPathContext,
+    options: {
+      actionId?: string;
+      authority?: DefaultPathContext["authority"];
+    } = {},
+  ) {
+    const actionId = options.actionId ?? "a06-resume-input";
+    const currentAuthority = options.authority ?? ctx.authority;
+    await ingestRuntimeBatch(ctx, [resumeInputPayload(actionId)], { authority: currentAuthority });
+    const uar = await requireUar(ctx, actionId);
     const checkpoint = await runDefaultCheckpoint(ctx);
-    await ingestRuntimeBatch(ctx, [
-      suspendedEvent(checkpoint.checkpointId, checkpoint.checkpoint.recoveryAnchorDigest),
-    ]);
+    await ingestRuntimeBatch(
+      ctx,
+      [suspendedEvent(checkpoint.checkpointId, checkpoint.checkpoint.recoveryAnchorDigest)],
+      { authority: currentAuthority },
+    );
     const paused = await readInvocationFacts(ctx.invocationId);
     const resolved = await submitResolution(uar.id);
     const gateway = await dispatchResumeCommandToRuntime({
@@ -1859,12 +1934,16 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       tenantId: TENANT_ID,
       invocationId: ctx.invocationId,
     });
-    const expectedRoot = path.join(
-      await realpath(ctx.writerRoot),
-      ".snow-runs",
-      ctx.attemptId,
-      `workspace:${ctx.attemptId}`,
-    );
+    if (!owner) throw new Error("恢复后缺少 Current Ownership");
+    const activationEvidence = owner.activationEvidence as {
+      workspace?: { writerGeneration?: number };
+    } | null;
+    const writerGeneration = activationEvidence?.workspace?.writerGeneration;
+    if (!writerGeneration) throw new Error("恢复后缺少 Writer generation");
+    const remote = createRemoteWorkspaceHost(process.env.SNOWHARNESS_WORKSPACE_HOST_URL!);
+    const grant = await remote.getWriter(ctx.scopeDigest, writerGeneration);
+    if (!grant) throw new Error("恢复后的 Writer grant 不存在");
+    const expectedRoot = await realpath(grant.root);
     return {
       uar,
       checkpoint,
@@ -1879,6 +1958,54 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       expectedRoot,
     };
   }
+
+  it("N08-T1/N08-T2: 同 Attempt 两轮不同快照使用独立候选；同源复投不覆盖活跃文件", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "checkpoint-k1", "utf8");
+    await assertCheckpointGateFacts(ctx);
+
+    const first = await runPauseResumeChain(ctx, { actionId: "n08-round-1" });
+    expect(first.resumeRequest.authority.attemptId).toBe(ctx.attemptId);
+    expect(await readFile(path.join(first.expectedRoot, "state.txt"), "utf8")).toBe(
+      "checkpoint-k1",
+    );
+
+    // 第一轮已经运行并产生合法新文件；第二轮 Checkpoint 必须从当前 Writer root 取 K2，
+    // 不能再次使用 Attempt 固定的旧非空目录。
+    await writeFile(path.join(first.expectedRoot, "state.txt"), "checkpoint-k2", "utf8");
+    const second = await runPauseResumeChain(ctx, {
+      actionId: "n08-round-2",
+      authority: first.resumeRequest.authority,
+    });
+    expect(second.resumeRequest.authority.attemptId).toBe(ctx.attemptId);
+    expect(second.expectedRoot).not.toBe(first.expectedRoot);
+    expect(await readFile(path.join(second.expectedRoot, "state.txt"), "utf8")).toBe(
+      "checkpoint-k2",
+    );
+    const runsDir = path.join(await realpath(ctx.writerRoot), ".snow-runs", ctx.attemptId);
+    expect(await readRestoredRunRoots(runsDir)).toHaveLength(2);
+
+    // 同一 C2 已经交付并开始运行后发生合法写入；正式重投只能回读历史结论，不能重做 K2
+    // restore、删除当前 root 或换一代 Writer。
+    await writeFile(path.join(second.expectedRoot, "live.txt"), "live-after-resume", "utf8");
+    const ownerBeforeReplay = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    const replay = await retryDispatchedCommandToRuntime({
+      tenantId: TENANT_ID,
+      commandId: second.resolved.resumeCommand.id,
+    });
+    expect(replay.dispatched).toBe(false);
+    const ownerAfterReplay = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    expect(ownerAfterReplay?.id).toBe(ownerBeforeReplay?.id);
+    expect(await readFile(path.join(second.expectedRoot, "live.txt"), "utf8")).toBe(
+      "live-after-resume",
+    );
+  });
 
   it("A06-T06: 暂停后的新回复在恢复后**只被采用一次**，采用时内容水位真实前进", async () => {
     const ctx = await setupDefaultPathContext();
@@ -1957,12 +2084,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       invocationId: ctx.invocationId,
     });
     expect(firstOwner?.id).toBe(firstRequest.authority.ownershipId);
-    const expectedRoot = path.join(
-      await realpath(ctx.writerRoot),
-      ".snow-runs",
-      ctx.attemptId,
-      `workspace:${ctx.attemptId}`,
-    );
+    const expectedRoot = await findRestoredRunRoot(ctx.writerRoot, ctx.attemptId);
     // 恢复实际完成：文件真的在写根里（不是空目录）。
     expect(await readFile(path.join(expectedRoot, "state.txt"), "utf8")).toBe("restore-once");
     const runsDir = path.dirname(expectedRoot);
@@ -2074,7 +2196,11 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(after?.id).toBe(before?.id);
     expect(after?.attemptId).toBe(ctx.attemptId);
     // ③ 失败与清理证据：候选运行目录被生产实现显式清理，不残留半成品。
-    await expect(stat(generation.candidateRoot)).rejects.toThrow();
+    await expect(
+      readdir(generation.candidateParent)
+        .then((names) => names.filter((name) => name.startsWith("workspace-")))
+        .catch(() => []),
+    ).resolves.toEqual([]);
     // ④ 被篡改的快照没有被"修好"成新版本。
     const checkpointAfter = await getFilesystemCheckpoint(TENANT_ID, checkpoint.checkpointId);
     expect(checkpointAfter?.manifestDigest).toBe(checkpoint.checkpoint.manifestDigest);

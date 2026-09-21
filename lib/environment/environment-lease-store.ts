@@ -14,6 +14,10 @@ import {
   environmentPreparedEvidenceDigest,
 } from "@/lib/environment/environment-prepared-evidence";
 import {
+  type AttemptPreparationClaim,
+  assertAttemptPreparationClaimHeldInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import {
   ENVIRONMENT_LEASE_TERMINAL_STATES,
   type EnvironmentLease,
   type EnvironmentLeaseState,
@@ -24,6 +28,7 @@ import {
   INVOCATION_ATTEMPT_TERMINAL_STATES,
   invocationAttemptTable,
 } from "@/lib/persistence/schema/executions";
+import { InvocationAttemptStateConflictError } from "@/lib/runtime/errors";
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 export {
@@ -856,6 +861,46 @@ export async function scheduleEnvironmentLeaseCleanupInTransaction(
 }
 
 /**
+ * 资源准备失败的清理登记：准备 claim 核对与 Lease→releasing 写入在同一事务。
+ * 迟到工作只得到 not_claimed，不能仅凭共享 leaseId 清理继任者正在使用的实例。
+ */
+export async function scheduleEnvironmentLeaseCleanupForPreparationClaim(input: {
+  claim: AttemptPreparationClaim;
+  leaseId: string;
+  errorCode: string;
+  now?: Date;
+  resourceManifestPatch?: Record<string, unknown>;
+}): Promise<{ outcome: "scheduled" | "not_claimed"; lease: EnvironmentLease | null }> {
+  try {
+    return await db.transaction(async (tx) => {
+      await assertAttemptPreparationClaimHeldInTransaction(tx, input.claim);
+      const lease = await scheduleEnvironmentLeaseCleanupInTransaction(tx, {
+        tenantId: input.claim.tenantId,
+        leaseId: input.leaseId,
+        errorCode: input.errorCode,
+        immediate: true,
+        ...(input.now ? { now: input.now } : {}),
+        ...(input.resourceManifestPatch
+          ? { resourceManifestPatch: input.resourceManifestPatch }
+          : {}),
+      });
+      return { outcome: "scheduled" as const, lease };
+    });
+  } catch (error) {
+    if (
+      error instanceof InvocationAttemptStateConflictError &&
+      error.attemptedAction === "PreparationClaimSuperseded"
+    ) {
+      return {
+        outcome: "not_claimed",
+        lease: await getEnvironmentLeaseById(input.claim.tenantId, input.leaseId),
+      };
+    }
+    throw error;
+  }
+}
+
+/**
  * A08 8.1：**正式生命周期出口**登记真实清理工作。
  *
  * 出口（Invocation 终态、Owner 失权/接管）只决定"这个 Attempt 的实例不该继续存在"，
@@ -885,12 +930,18 @@ export async function registerEnvironmentLeaseCleanupForAttemptInTransaction(
   tx: LeaseTx,
   input: RegisterEnvironmentLeaseCleanupForAttemptInput,
 ): Promise<EnvironmentLease | null> {
-  const lease = await getEnvironmentLeaseByAttempt(
-    input.tenantId,
-    input.invocationId,
-    input.attemptId,
-    tx,
-  );
+  const [lease] = await tx
+    .select()
+    .from(environmentLeaseTable)
+    .where(
+      and(
+        eq(environmentLeaseTable.tenantId, input.tenantId),
+        eq(environmentLeaseTable.invocationId, input.invocationId),
+        eq(environmentLeaseTable.attemptId, input.attemptId),
+      ),
+    )
+    .for("update")
+    .limit(1);
   if (!lease) return null;
   return scheduleEnvironmentLeaseCleanupInTransaction(tx, {
     tenantId: input.tenantId,

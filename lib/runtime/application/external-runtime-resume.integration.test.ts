@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getLatestAttempt: vi.fn(),
   getRuntimeRevisionById: vi.fn(),
   getWorkspaceBindingById: vi.fn(),
+  decideRuntimeStartSource: vi.fn(),
   startRuntimeInvocation: vi.fn(),
   resolveOutboundRuntimeAuth: vi.fn(),
   createHttpHarnessRuntimeTransport: vi.fn(),
@@ -63,6 +64,7 @@ vi.mock("@/lib/runtime/transport/http-harness-runtime-transport", () => ({
   createHttpHarnessRuntimeTransport: mocks.createHttpHarnessRuntimeTransport,
 }));
 vi.mock("@/lib/runtime/application/runtime-start", () => ({
+  decideRuntimeStartSource: mocks.decideRuntimeStartSource,
   startRuntimeInvocation: mocks.startRuntimeInvocation,
   buildExecutionCredentials: vi.fn(),
 }));
@@ -136,6 +138,10 @@ describe("External Runtime continuation resume", () => {
       tenantId: "tenant-1",
       continuityMode: "NO_PLATFORM_WORKSPACE",
       contractDigest: `sha256:${"0".repeat(64)}`,
+    });
+    mocks.decideRuntimeStartSource.mockResolvedValue({
+      disposition: "new",
+      sourceRequestDigest: `sha256:${"1".repeat(64)}`,
     });
     mocks.startRuntimeInvocation.mockResolvedValue({
       authority: { ownershipId: "ownership-1" },

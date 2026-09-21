@@ -199,7 +199,7 @@ describe("Snapshot storage (R09 §5/§6/§7)", () => {
     expect(reused.toString("utf8")).toBe(payload);
   });
 
-  it("SNAPSHOT-07: 恢复先落到本 operation 的 staging，完成后才原子提交且树与 manifest 逐项相等", async () => {
+  it("SNAPSHOT-07 / N08-T5: 正常恢复先落 operation staging，发布树与 manifest 逐项相等", async () => {
     await writeFile(path.join(source, "a.txt"), "alpha", "utf8");
     await mkdir(path.join(source, "sub"), { recursive: true });
     await writeFile(path.join(source, "sub", "b.txt"), "beta", "utf8");
@@ -298,5 +298,63 @@ describe("Snapshot storage (R09 §5/§6/§7)", () => {
       ),
     };
     expect(() => validateSnapshotManifest(tampered)).toThrow(/contentRootDigest 不匹配/);
+  });
+
+  it("N08-T3: ready 标记不能替代目标树字节核验", async () => {
+    await writeFile(path.join(source, "a.txt"), "alpha", "utf8");
+    const storage = new FileSnapshotStorage(storageRoot);
+    const { manifest } = await storage.writeSnapshot(source, "restore-source", requirements());
+    const cases = [
+      {
+        name: "same-length-tamper",
+        mutate: (destination: string) =>
+          writeFile(path.join(destination, "a.txt"), "ALPHA", "utf8"),
+      },
+      {
+        name: "missing-entry",
+        mutate: (destination: string) => rm(path.join(destination, "a.txt")),
+      },
+      {
+        name: "extra-entry",
+        mutate: (destination: string) =>
+          writeFile(path.join(destination, "extra.txt"), "extra", "utf8"),
+      },
+    ];
+    for (const candidate of cases) {
+      const destination = path.join(root, candidate.name);
+      await storage.restoreSnapshot(manifest, destination, candidate.name, requirements());
+      // 源 chunk 与 ready 标记保持正确，仅篡改实际目标树。若实现只核源存储或 marker，
+      // 同长度改写、缺项、多项都会被错误地当作已完成。
+      await candidate.mutate(destination);
+      await expect(
+        storage.restoreSnapshot(manifest, destination, candidate.name, requirements()),
+      ).rejects.toThrow(/目标.*manifest|实际内容|内容摘要/);
+    }
+  });
+
+  it("N08-T4: rename 已发布但 ready 尚未提交时，同一恢复意图可据实际内容收口", async () => {
+    await writeFile(path.join(source, "a.txt"), "alpha", "utf8");
+    const storage = new FileSnapshotStorage(storageRoot);
+    const { manifest } = await storage.writeSnapshot(source, "restore-crash", requirements());
+    const destination = path.join(root, "candidate");
+
+    // 先得到一棵真实、经过验证的发布树，再把 marker 回退到 rename 前的持久阶段，模拟
+    // 进程在 rename 成功、ready marker 落盘之前被杀。重试不能永久报 occupied。
+    await storage.restoreSnapshot(manifest, destination, "restore-crash", requirements());
+    await writeFile(
+      `${destination}.restore-state.json`,
+      JSON.stringify({
+        operationId: "restore-crash",
+        manifestDigest: manifest.manifestDigest,
+        phase: "publishing",
+      }),
+    );
+    await storage.restoreSnapshot(manifest, destination, "restore-crash", requirements());
+    const state = JSON.parse(await readFile(`${destination}.restore-state.json`, "utf8")) as {
+      operationId: string;
+      phase: string;
+    };
+    expect(state).toMatchObject({ operationId: "restore-crash", phase: "ready" });
+    expect(await readFile(path.join(destination, "a.txt"), "utf8")).toBe("alpha");
   });
 });

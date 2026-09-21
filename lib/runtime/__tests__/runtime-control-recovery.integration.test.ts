@@ -48,6 +48,7 @@ import { issueWorkloadToken } from "@/lib/identity/workload-token";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import {
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationCommandTable,
   invocationTable,
   runtimeEventIngressTable,
@@ -513,7 +514,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     expect((await readInvocation(tenantId, invocationId))?.executionState).toBe("cancelled");
   });
 
-  it("CONTROL-02: Resume HTTP ACK 返回而 execution.started 尚未到达时，Invocation/Turn 不因 ACK 先 running", async () => {
+  it("CONTROL-02 / N03-T1/N03-T3: started 先落而命令 ACK 尾部丢失时，正式重试按历史来源收口", async () => {
     const fixture = await seedInvocationWithPublishedRevision();
     const tenantId = fixture.tenantId;
     const invocationId = fixture.invocation.id;
@@ -691,6 +692,40 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       .where(eq(runtimeSessionBindingTable.id, newSession.id))
       .limit(1);
     expect(activatedSession?.bindingState).toBe("active");
+
+    // 模拟 Command ACK 尾部提交后进程崩溃：Session 的 ACK/started 已是持久事实，命令仍
+    // 需由正式领取者重投。此时 Invocation 已 running，不能再要求它倒退到 suspended。
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "queued",
+        receiptJson: null,
+        completedAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+      })
+      .where(eq(invocationCommandTable.id, resumeCommandId));
+    const retry = await dispatchResumeCommand({
+      tenantId,
+      commandId: resumeCommandId,
+      claimToken: await claimCommandForDelivery(resumeCommandId, `retry-${randomUUID()}`),
+      runtimeClient: ackOnlyRuntime,
+      runtimeEndpointResolver: async () => ({
+        runtimeEndpoint: "https://ack-only.invalid",
+        auth: { mode: "none" },
+        callbackEndpoints: {
+          events: "https://ack-only.invalid/runtime/events",
+          heartbeat: "https://ack-only.invalid/runtime/heartbeat",
+          context: "https://ack-only.invalid/runtime/context",
+          capabilityActions: "https://ack-only.invalid/gateway/capability-actions",
+          toolCalls: "https://ack-only.invalid/gateway/tool-calls",
+          userActions: "https://ack-only.invalid/gateway/user-actions",
+        },
+      }),
+    });
+    expect(retry.commandState).toBe("acknowledged");
+    expect(ackOnlyRuntime.calls.resumeInvocation).toHaveLength(1);
+    expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocationId)).toHaveLength(2);
   });
 
   it("CONTROL-03: request_user_input 真实 Loop → 用户输入 → Resume：只使用正式 Event 类型、持久暂停、新 generation、正确继续", async () => {
@@ -1333,13 +1368,17 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       .update(invocationTable)
       .set({ executionState: "running", startedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)));
+    await db
+      .update(invocationAttemptTable)
+      .set({ attemptState: "suspended", preparationState: "pending", updatedAt: new Date() })
+      .where(eq(invocationAttemptTable.id, attempt.id));
 
     const resumeOnce = async () => {
       const current = await getInvocationById(tenantId, invocationId);
       if (!current) throw new Error("Invocation 回读失败");
       return resumeRuntimeInvocation({
         tenantId,
-        sourceOperationKey: `invocation:${current.id}`,
+        sourceOperationKey: "command:control-06-resume-1",
         invocation: current,
         binding,
         attempt,
