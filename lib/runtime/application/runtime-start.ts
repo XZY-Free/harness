@@ -254,7 +254,7 @@ export async function decideRuntimeStartSource(input: {
     if (
       attempt.preparationIntentKey !== null &&
       attempt.preparationIntentKey !== input.sourceOperationKey &&
-      attempt.preparationState !== "pending"
+      attempt.preparationState === "preparing"
     ) {
       throw new ExecutionAuthorityError(
         "NotCurrentExecutor",
@@ -414,7 +414,11 @@ export async function startRuntimeInvocation(
       leaseEpoch: sourceDecision.ownership.leaseEpoch,
       sessionBindingId: sourceDecision.session.id,
     });
-    if (sourceDecision.historicalResponse) {
+    if (
+      sourceDecision.historicalResponse &&
+      (sourceDecision.session.bindingState !== "dispatching" ||
+        sourceDecision.ownership.ownershipState !== "active")
+    ) {
       return {
         authority,
         response: sourceDecision.historicalResponse,

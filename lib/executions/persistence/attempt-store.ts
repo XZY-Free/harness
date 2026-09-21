@@ -14,7 +14,8 @@ import {
 } from "@/lib/runtime/errors";
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 
-export const ATTEMPT_PREPARATION_LEASE_MS = 120_000 as const;
+/** 与正式 undispatched recovery lane 的安全窗口一致；到期后同一候选可被下一进程接管。 */
+export const ATTEMPT_PREPARATION_LEASE_MS = 30_000 as const;
 
 export interface AttemptPreparationClaim {
   tenantId: string;
@@ -128,7 +129,11 @@ export function createAttemptInternal(
  * 领取事务固定锁序为 Invocation → Attempt。外部 IO 完成后的所有提交者必须把这里返回的
  * claim 原样带回；仅凭 attemptId、进程 id 或“当前还没有 Owner”都不构成写权限。
  */
-export async function claimAttemptPreparation(input: AttemptPreparationClaim & { now?: Date }) {
+export async function claimAttemptPreparation(
+  input: AttemptPreparationClaim & {
+    now?: Date;
+  },
+) {
   return db.transaction(async (tx): Promise<AttemptPreparationClaimOutcome> => {
     const now = input.now ?? new Date();
     const [invocation] = await tx
@@ -159,7 +164,8 @@ export async function claimAttemptPreparation(input: AttemptPreparationClaim & {
     if (
       attempt.preparationIntentKey === input.intentKey &&
       attempt.preparationRequestDigest !== null &&
-      attempt.preparationRequestDigest !== input.requestDigest
+      attempt.preparationRequestDigest !== input.requestDigest &&
+      attempt.preparationState !== "pending"
     ) {
       throw new InvocationAttemptStateConflictError(
         attempt.id,
@@ -184,7 +190,7 @@ export async function claimAttemptPreparation(input: AttemptPreparationClaim & {
     if (
       attempt.preparationIntentKey !== null &&
       attempt.preparationIntentKey !== input.intentKey &&
-      attempt.preparationState !== "pending"
+      !["pending", "prepared"].includes(attempt.preparationState)
     ) {
       throw new InvocationAttemptStateConflictError(
         attempt.id,

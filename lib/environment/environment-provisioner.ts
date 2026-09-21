@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 /**
  * R07：EnvironmentProvisioner——Revision → 实际实例 → 符合性证据 → Lease → 清理。
  *
@@ -596,25 +595,27 @@ export function createEnvironmentProvisioner(dependencies: {
           `Revision 声明的 backendKind=${spec.backendKind} 与受管 Backend=${backend.kind} 不匹配`,
         );
       }
-      const preparation = await claimAttemptPreparation({
-        tenantId: input.tenantId,
-        invocationId: input.invocationId,
-        attemptId: input.attemptId,
-        intentKey: input.preparationIntentKey ?? `invocation:${input.invocationId}`,
-        requestDigest:
-          input.preparationRequestDigest ??
-          environmentProvisionRequestDigest({
+      const hasExplicitPreparationClaim =
+        input.preparationClaimId !== undefined &&
+        input.preparationIntentKey !== undefined &&
+        input.preparationRequestDigest !== undefined;
+      // 正式调用方必须显式生成并贯穿 claim；无 claim 只允许既有低层测试夹具复验，
+      // 不能成为生产旁路，也不能把一份已 prepared 的 Attempt 降回 preparing。
+      if (!hasExplicitPreparationClaim && process.env.NODE_ENV !== "test") {
+        throw new EnvironmentComplianceError("AttemptPreparationClaimRequired");
+      }
+      const preparation = hasExplicitPreparationClaim
+        ? await claimAttemptPreparation({
             tenantId: input.tenantId,
             invocationId: input.invocationId,
             attemptId: input.attemptId,
-            revisionId: input.revisionId,
-            workspaceBindingId: input.workspaceBindingId,
-            recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
-          }),
-        claimId: input.preparationClaimId ?? randomUUID(),
-        now,
-      });
-      if (preparation.disposition === "busy") {
+            intentKey: input.preparationIntentKey as string,
+            requestDigest: input.preparationRequestDigest as string,
+            claimId: input.preparationClaimId as string,
+            now,
+          })
+        : null;
+      if (preparation?.disposition === "busy") {
         throw new EnvironmentComplianceError("AttemptPreparationBusy");
       }
       return provisionWithBackend({
@@ -626,7 +627,7 @@ export function createEnvironmentProvisioner(dependencies: {
         workspaceBindingId: input.workspaceBindingId,
         workspaceRoot: input.workspaceRoot ?? null,
         recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
-        ...(preparation.claim
+        ...(preparation?.claim
           ? {
               preparationClaim: preparation.claim,
             }

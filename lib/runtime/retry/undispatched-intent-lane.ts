@@ -632,6 +632,7 @@ async function recoverUndispatchedInvocation(
       ...resources,
     }),
     correlationId: `preparation-lane:${invocation.id}`,
+    now,
   });
   return true;
 }

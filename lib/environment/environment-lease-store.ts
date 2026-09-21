@@ -50,7 +50,7 @@ export const ENVIRONMENT_CLEANUP_LEASE_MS = 60_000 as const;
  * 而不是内存标志：只有这样才能在准备进程崩溃后由正式消费者接续同一逻辑 operation，
  * 也才能在旧准备者迟到回来时判定"它的证据已经不属于当前意图"。
  */
-export const ENVIRONMENT_PREPARATION_LEASE_MS = 120_000 as const;
+export const ENVIRONMENT_PREPARATION_LEASE_MS = 30_000 as const;
 
 /**
  * A01-03：本模块所有**多语句**操作的强制事务类型。
