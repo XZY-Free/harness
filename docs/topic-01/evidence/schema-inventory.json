@@ -5158,11 +5158,13 @@
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/application/runtime-resume.ts",
+        "lib/runtime/application/runtime-start.ts",
         "lib/runtime/persistence/runtime-session-store.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
-        "lib/workspace/checkpoint-producer.ts"
+        "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "binding",
@@ -5213,11 +5215,13 @@
         "lib/runtime/application/ingress-runtime-events.ts",
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/application/runtime-resume.ts",
+        "lib/runtime/application/runtime-start.ts",
         "lib/runtime/persistence/runtime-session-store.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
+        "lib/workspace/checkpoint-release.ts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
