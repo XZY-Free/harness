@@ -10,7 +10,7 @@ import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
  * - docs/architecture/security.md S12-W03
  *
  * 职责：
- * - 按 scope 检查真实组件状态（DB 迁移、事件投影、网关保护、Job 调度、删除）。
+ * - 按 scope 检查真实组件状态（DB 连通性、事件投影、网关保护、Job 调度、删除）。
  * - 返回结构化 readiness 结果（overall_state + components[]），不返回 Secret/内部拓扑/敏感 payload。
  * - 用于发布门禁和运维诊断，不作为业务状态事实源。
  *
@@ -64,41 +64,32 @@ export interface ReadinessResult {
   components: ReadinessComponent[];
 }
 
-/** Drizzle migrations 表行（内部查询用）。 */
-interface DrizzleMigrationRow {
-  id: number;
-  hash: string;
-  created_at: string;
-}
-
 /**
- * 检查数据库迁移状态。
+ * 检查数据库连通性。
  *
- * 查询 `__drizzle_migrations` 表是否存在且可读。
- * 失败 → unavailable（MIGRATION_TABLE_INACCESSIBLE）。
+ * 只执行无表依赖、无副作用的常量查询，不要求运行账号具备 DDL 权限，
+ * 也不依赖框架迁移日志表。失败 → unavailable（DATABASE_UNREACHABLE）。
  */
-async function checkDatabaseMigration(): Promise<ReadinessComponent> {
+async function checkDatabaseConnection(): Promise<ReadinessComponent> {
   try {
-    const [rows] = (await db.execute(
-      sql`SELECT id, hash, created_at FROM __drizzle_migrations ORDER BY id DESC LIMIT 1`,
-    )) as unknown as [DrizzleMigrationRow[]];
-    const count = Array.isArray(rows) ? rows.length : 0;
-    const latest = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    const [rows] = (await db.execute(sql`SELECT 1 AS alive`)) as unknown as [
+      Array<{ alive: number }>,
+    ];
+    const reachable = Number(rows?.[0]?.alive) === 1;
     return {
-      name: "database_migration",
-      state: count > 0 ? "ready" : "unavailable",
-      reason_codes: count > 0 ? [] : ["MIGRATION_TABLE_EMPTY"],
+      name: "database_connection",
+      state: reachable ? "ready" : "unavailable",
+      reason_codes: reachable ? [] : ["DATABASE_PROBE_INVALID"],
       metrics: {
-        applied_migration_count: count,
-        latest_migration_id: latest?.id ?? null,
+        reachable,
       },
     };
   } catch {
     return {
-      name: "database_migration",
+      name: "database_connection",
       state: "unavailable",
-      reason_codes: ["MIGRATION_TABLE_INACCESSIBLE"],
-      metrics: {},
+      reason_codes: ["DATABASE_UNREACHABLE"],
+      metrics: { reachable: false },
     };
   }
 }
@@ -184,19 +175,19 @@ function checkGateway(): ReadinessComponent {
 }
 
 /**
- * 检查 Employee API 状态（数据库迁移 + 基本连通性）。
+ * 检查 Employee API 状态（数据库基本连通性）。
  *
- * Employee API 依赖数据库可用。迁移状态不 ready → degraded。
+ * Employee API 依赖数据库可用。数据库不可用 → degraded。
  */
 async function checkEmployeeApi(): Promise<ReadinessComponent> {
-  const migration = await checkDatabaseMigration();
-  const state: ComponentState = migration.state === "ready" ? "ready" : "degraded";
+  const database = await checkDatabaseConnection();
+  const state: ComponentState = database.state === "ready" ? "ready" : "degraded";
   return {
     name: "employee_api",
     state,
-    reason_codes: migration.reason_codes.length > 0 ? migration.reason_codes : [],
+    reason_codes: database.reason_codes.length > 0 ? database.reason_codes : [],
     metrics: {
-      migration_state: migration.state,
+      database_state: database.state,
     },
   };
 }
@@ -207,16 +198,16 @@ async function checkEmployeeApi(): Promise<ReadinessComponent> {
  * Runtime 调度依赖数据库 + 网关。任一 degraded → degraded。
  */
 async function checkRuntimeDispatch(): Promise<ReadinessComponent> {
-  const migration = await checkDatabaseMigration();
+  const database = await checkDatabaseConnection();
   const gateway = checkGateway();
 
   let state: ComponentState = "ready";
   const reasonCodes: string[] = [];
 
-  if (migration.state === "unavailable" || gateway.state === "unavailable") {
+  if (database.state === "unavailable" || gateway.state === "unavailable") {
     state = "unavailable";
     reasonCodes.push("RUNTIME_DISPATCH_BLOCKED");
-  } else if (migration.state === "degraded" || gateway.state === "degraded") {
+  } else if (database.state === "degraded" || gateway.state === "degraded") {
     state = "degraded";
     if (gateway.reason_codes.length > 0) {
       reasonCodes.push(...gateway.reason_codes);
@@ -228,7 +219,7 @@ async function checkRuntimeDispatch(): Promise<ReadinessComponent> {
     state,
     reason_codes: reasonCodes,
     metrics: {
-      migration_state: migration.state,
+      database_state: database.state,
       gateway_state: gateway.state,
     },
   };
@@ -240,13 +231,13 @@ async function checkRuntimeDispatch(): Promise<ReadinessComponent> {
  * 目前依赖数据库可用。后续可扩展为检查队列积压、调度器心跳。
  */
 async function checkJobScheduler(): Promise<ReadinessComponent> {
-  const migration = await checkDatabaseMigration();
+  const database = await checkDatabaseConnection();
   return {
     name: "job_scheduler",
-    state: migration.state === "ready" ? "ready" : "degraded",
-    reason_codes: migration.state !== "ready" ? migration.reason_codes : [],
+    state: database.state === "ready" ? "ready" : "degraded",
+    reason_codes: database.state !== "ready" ? database.reason_codes : [],
     metrics: {
-      migration_state: migration.state,
+      database_state: database.state,
     },
   };
 }

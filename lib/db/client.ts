@@ -6,10 +6,11 @@ import mysql from "mysql2/promise";
 /**
  * 外部 MySQL + Drizzle（mysql2 驱动）。
  *
- * 数据库结构只由 drizzle-kit migration 管理（db:migrate）。
+ * 数据库结构由审批后的建库/变更 SQL 管理。
  *
  * - 应用启动不执行动态建表。
- * - 连接池与 migration 生命周期由 drizzle-kit + 应用启动时 db:migrate 脚本负责
+ * - 运行进程只建立连接池并执行读写，不创建、修改或检查迁移日志表。
+ * - Drizzle migration 仅供隔离的本地开发和自动化测试数据库使用。
  *
  * 用 globalThis 缓存连接池，避免 Next.js 开发模式热重载反复建池。
  */

@@ -13,8 +13,8 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // P2-1:next build 的 collect-page-data 阶段也会调 register(),跳过运行时副作用
-    // (assertRuntimeConfig/runMigrations/清扫定时器等启动副作用),避免 build 期
-    // 依赖运行时 secret + 连 DB 跑迁移。原注释「next build 不会调用 register()」有误。
+    // (配置校验/清扫定时器等启动副作用),避免 build 期依赖运行时 secret。
+    // 原注释「next build 不会调用 register()」有误。
     if (process.env.NEXT_PHASE === "phase-production-build") return;
     const { APP_ENV, appConfig, assertRuntimeConfig } = await import("./lib/config");
     const { loadAppEnvFiles } = await import("./lib/env-loader");
@@ -31,10 +31,6 @@ export async function register() {
 
     const { assertFileStorageReady } = await import("./lib/files/storage-bootstrap");
     await assertFileStorageReady();
-
-    // 启动时应用 db 迁移（替代已退役的 ensureSchema 裸 DDL），确保表结构就绪
-    const { runMigrations } = await import("./lib/db/migrate");
-    await runMigrations();
 
     // Desktop Control Plane：品牌失效信号经控制事件总线 → bridge 广播到 Desktop 会话。
     const { startBrandControlBridge } = await import("./lib/branding/brand-control-bridge");
