@@ -1,3 +1,4 @@
+import { migrateMysql } from "@/lib/db/mysql-migrator";
 import * as schema from "@/lib/persistence/schema";
 /**
  * S1（08 同构）：真实 MySQL 测试基础设施。
@@ -18,7 +19,6 @@ import * as schema from "@/lib/persistence/schema";
  * 开关拼成一条 SQL 一次往返执行；与 lib/db/client.ts 的生产池完全隔离，不影响生产安全。
  */
 import { drizzle } from "drizzle-orm/mysql2";
-import { migrate } from "drizzle-orm/mysql2/migrator";
 import mysql from "mysql2/promise";
 
 /** 用全局 container 的连接串建一个 drizzle 实例（供 setup/migrate/重置用）。 */
@@ -53,7 +53,7 @@ export async function startTestMysql(): Promise<{
   const connectionString = container.getConnectionUri();
   const { db, pool } = buildDrizzle(connectionString);
   try {
-    await migrate(db, { migrationsFolder: "./drizzle" });
+    await migrateMysql(db);
   } finally {
     await pool.end();
   }

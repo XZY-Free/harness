@@ -28,6 +28,24 @@ describe("Fresh MySQL Schema", () => {
     expect(actual).toEqual(manifest.tables);
   });
 
+  it("迁移日志主键使用企业 MySQL 兼容的自增定义", async () => {
+    const [rows] = (await db.execute(sql`
+      SELECT DATA_TYPE, COLUMN_TYPE, EXTRA
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = '__drizzle_migrations'
+        AND COLUMN_NAME = 'id'
+    `)) as unknown as [Array<{ DATA_TYPE: string; COLUMN_TYPE: string; EXTRA: string }>];
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        DATA_TYPE: "bigint",
+        COLUMN_TYPE: "bigint unsigned",
+        EXTRA: "auto_increment",
+      }),
+    ]);
+  });
+
   it("seed 从空库创建身份与权限，不创建默认 Agent", async () => {
     const identity = await seedDefaultIdentity();
     await seedDefaultGrants(identity.tenantId, identity.principalBindingId);

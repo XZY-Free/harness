@@ -1,8 +1,8 @@
 import { migrateLegacyPermissions } from "@/lib/identity/migrate-legacy-permissions";
 import { logger } from "@/lib/logger";
 import { sql } from "drizzle-orm";
-import { migrate } from "drizzle-orm/mysql2/migrator";
 import { db } from "./client";
+import { migrateMysql } from "./mysql-migrator";
 
 /**
  * 应用 drizzle 迁移（幂等）。由 instrumentation 在启动时调用，确保表结构就绪。
@@ -31,7 +31,7 @@ export async function runMigrations(): Promise<void> {
     throw new Error("[migrate] 获迁移锁超时(120s),表结构可能未就绪——fail-closed");
   }
   try {
-    await migrate(db, { migrationsFolder: "./drizzle" });
+    await migrateMysql(db);
     const permissions = await migrateLegacyPermissions();
     logger.info("db migrations applied", { convertedPermissions: permissions.converted });
   } finally {
