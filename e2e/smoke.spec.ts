@@ -2,7 +2,7 @@
  * Web 冒烟测试。
  *
  * 职责：
- * - 验证 Next.js dev server 在真实 MySQL + drizzle migration 环境下能正常启动。
+ * - 验证 Next.js server 在加载完整 Schema SQL 的真实 MySQL 环境下能正常启动。
  * - 验证核心路由可被浏览器访问且无 5xx。
  *
  * 边界说明：

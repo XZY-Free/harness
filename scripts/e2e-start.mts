@@ -2,7 +2,7 @@
  * e2e 启动编排脚本（playwright webServer）。
  *
  * 职责：
- * - 启动真实 MySQL 8 容器（testcontainers）+ 跑 drizzle migration。
+ * - 启动真实 MySQL 8 空库（testcontainers）并加载完整 Schema SQL。
  * - 启动 e2e 确定性模型服务（OpenAI 兼容端点），使 Agent Loop 能真正产出回复。
  * - 引导正式执行链（published RuntimeRevision → 无 Agent 约束的基础 Route → Projection），
  *   使客户端首条消息能走通 Route Resolver → ExecutionBinding → Runtime。
@@ -25,9 +25,8 @@
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { drizzle } from "drizzle-orm/mysql2";
-import { migrate } from "drizzle-orm/mysql2/migrator";
 import mysql from "mysql2/promise";
+import { loadFreshMysqlSchema } from "../lib/db/fresh-schema-loader";
 import { startE2eModelServer } from "./e2e-model-server.mts";
 
 /** e2e 构建产物目录：与开发者的 .next 隔离。 */
@@ -120,18 +119,14 @@ async function main(): Promise<void> {
   const connectionString = container.getConnectionUri();
   console.log(`[e2e] MySQL 就绪：${connectionString}`);
 
-  // 跑 drizzle migration（与生产同构，确保 schema 完整）。
-  console.log("[e2e] 正在执行 drizzle migration...");
-  const migratePool = mysql.createPool(connectionString);
-  const migrateDb = drizzle(migratePool, { mode: "default" });
+  console.log("[e2e] 正在加载完整 Schema SQL...");
+  const schemaPool = mysql.createPool(connectionString);
   try {
-    await migrate(migrateDb, {
-      migrationsFolder: resolve(process.cwd(), "drizzle"),
-    });
+    await loadFreshMysqlSchema(schemaPool);
   } finally {
-    await migratePool.end();
+    await schemaPool.end();
   }
-  console.log("[e2e] Migration 完成。");
+  console.log("[e2e] Schema 加载完成。");
 
   // 启动确定性模型服务（OpenAI 兼容端点）。
   const modelServer = await startE2eModelServer();

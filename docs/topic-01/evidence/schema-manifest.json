@@ -146,12 +146,7 @@
     "trace",
     "usage_record"
   ],
-  "frameworkMetadataExclusions": [
-    {
-      "physicalTableName": "__drizzle_migrations",
-      "reason": "Drizzle migration runner 元数据，不属于应用 Canonical Schema"
-    }
-  ],
+  "frameworkMetadataExclusions": [],
   "deletedFromBaseline": [
     {
       "physicalTableName": "MemoryIndex",

@@ -24,7 +24,6 @@
     "topic01:tests:audit": "node scripts/topic-01-test-collection-audit.mjs",
     "topic01:acceptance": "node scripts/topic-01-acceptance.mjs",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx lib/db/seed.ts",
     "auth:bootstrap-admin": "tsx scripts/bootstrap-local-admin.ts",
     "db:verify-fresh": "tsx scripts/verify-fresh-db.mts",

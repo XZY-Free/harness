@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import mysql from "mysql2/promise";
+import { loadFreshMysqlSchema } from "../lib/db/fresh-schema-loader";
 
 const ROOT = process.cwd();
 const EXPECTED_TABLES = JSON.parse(
@@ -119,7 +120,12 @@ async function main(): Promise<void> {
       SNOW_DIST_DIR: distDir,
     };
 
-    await run("migrate", ["db:migrate"], env);
+    const schemaConnection = await mysql.createConnection(connectionString);
+    try {
+      await loadFreshMysqlSchema(schemaConnection);
+    } finally {
+      await schemaConnection.end();
+    }
     await run("seed", ["db:seed"], env);
 
     const connection = await mysql.createConnection(connectionString);

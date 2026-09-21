@@ -1,7 +1,7 @@
 /**
  * S1（08 同构）：vitest globalSetup。
  *
- * 启动真实 MySQL 8 容器 + 跑 drizzle migration，把连接串写入 process.env.DATABASE_URL。
+ * 启动真实 MySQL 8 空库并加载完整 Schema SQL，把连接串写入 process.env.DATABASE_URL。
  * db client（lib/db/client.ts）在 worker 进程 import 时读 env 建池，连同一 container。
  * 测试结束（teardown）时停止容器。
  *

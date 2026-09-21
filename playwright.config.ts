@@ -19,7 +19,7 @@
  * 注意：
  * - e2e 测试需要 Docker（testcontainers 启动 MySQL）。
  * - 首次运行会拉取 mysql:8.0 镜像，耗时较长。
- * - webServer.timeout=180s 容纳 MySQL 启动 + migration + Next.js 首次编译。
+ * - webServer.timeout=180s 容纳 MySQL 启动 + Schema 加载 + Next.js 首次编译。
  */
 import { defineConfig, devices } from "@playwright/test";
 import { E2E_AUTH_STATE } from "./lib/test-support/e2e-credentials";
@@ -74,7 +74,7 @@ export default defineConfig({
     // 引导与确定性模型服务的日志需要可见：CI 与人工都靠它判断回复是否正常。
     stdout: "pipe",
     stderr: "pipe",
-    // 容纳 MySQL 容器启动 + migration + 正式链引导 + next build。
+    // 容纳 MySQL 容器启动 + Schema 加载 + 正式链引导 + next build。
     timeout: 900_000,
   },
 });

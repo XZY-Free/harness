@@ -10,7 +10,7 @@ import mysql from "mysql2/promise";
  *
  * - 应用启动不执行动态建表。
  * - 运行进程只建立连接池并执行读写，不创建、修改或检查迁移日志表。
- * - Drizzle migration 仅供隔离的本地开发和自动化测试数据库使用。
+ * - 自动化测试只向一次性空库加载完整 Schema SQL，不维护迁移状态。
  *
  * 用 globalThis 缓存连接池，避免 Next.js 开发模式热重载反复建池。
  */

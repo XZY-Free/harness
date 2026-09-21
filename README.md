@@ -72,7 +72,7 @@ pnpm dev          # = APP_ENV=development，加载 .env.development(.local)
 - `member`：受限（只看自己的 analytics / thread）。
 - dev/test：默认用户自动获 admin（`SNOW_STUDIO_OPEN=true`），本地与既有测试零回归；生产强制 false，无角色 → `/studio` 403。
 
-初始化：`pnpm db:migrate && pnpm db:seed`（灌示例 skill + admin/member 角色 + 默认 policy 配置行）。
+数据库结构通过已审批的建库/变更 SQL 初始化，应用不会自动建表或迁移。完成建库后可执行 `pnpm db:seed` 灌入本地示例数据。
 Policies 页为只读展示（policy 已 DB 化，经解释器编译为运行时配置；编辑能力留后续切片）。
 
 ## 目录结构

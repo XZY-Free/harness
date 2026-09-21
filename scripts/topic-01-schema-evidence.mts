@@ -80,7 +80,7 @@ const INVENTORY_SCHEMA = {
       },
       additionalProperties: false,
     },
-    frameworkMetadataExclusions: { type: "array", minItems: 1 },
+    frameworkMetadataExclusions: { type: "array" },
     baselineChanges: { type: "array" },
     tables: {
       type: "array",
@@ -289,12 +289,7 @@ function build() {
       status: "planned-for-batch-07",
       reason: "批次06只验证生成器；空库迁移、运行时加载与数据库 introspection 在批次07执行",
     },
-    frameworkMetadataExclusions: [
-      {
-        physicalTableName: "__drizzle_migrations",
-        reason: "Drizzle migration runner 元数据，不属于应用 Canonical Schema",
-      },
-    ],
+    frameworkMetadataExclusions: [],
     baselineChanges: REMOVED_EMPTY_TABLES.map((physicalTableName) => ({
       physicalTableName,
       decision: "delete",

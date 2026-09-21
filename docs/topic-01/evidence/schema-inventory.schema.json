@@ -64,8 +64,7 @@
       "additionalProperties": false
     },
     "frameworkMetadataExclusions": {
-      "type": "array",
-      "minItems": 1
+      "type": "array"
     },
     "baselineChanges": {
       "type": "array"

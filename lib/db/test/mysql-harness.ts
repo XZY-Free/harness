@@ -1,12 +1,12 @@
-import { migrateMysql } from "@/lib/db/mysql-migrator";
+import { loadFreshMysqlSchema } from "@/lib/db/fresh-schema-loader";
 import * as schema from "@/lib/persistence/schema";
 /**
  * S1（08 同构）：真实 MySQL 测试基础设施。
  *
  * 生产是 MySQL（mysql2 + drizzle），测试必须生产同构——禁止 fake-db mock 替代真实 DB 做事实源。
- * 本模块用 testcontainers 起真实 MySQL 8 容器，跑 drizzle migration，提供 per-test 隔离 helper。
+ * 本模块用 testcontainers 起真实 MySQL 8 空库，加载完整 Schema SQL，提供 per-test 隔离 helper。
  *
- * - globalSetup（vitest）启动时起 container + migrate，URL 写入 process.env.DATABASE_URL，
+ * - globalSetup（vitest）启动时起 container + 加载空库结构，URL 写入 process.env.DATABASE_URL，
  * db client 在 worker 进程 import 时读 env 建池。
  * - 每个 DB 测试 beforeEach 调 resetDatabase() 清空所有表（外键关闭后 TRUNCATE），
  * 保证测试间隔离。
@@ -21,13 +21,13 @@ import * as schema from "@/lib/persistence/schema";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 
-/** 用全局 container 的连接串建一个 drizzle 实例（供 setup/migrate/重置用）。 */
+/** 用全局 container 的连接串建一个 drizzle 实例（供 setup/重置用）。 */
 export function buildDrizzle(connectionString: string) {
   const pool = mysql.createPool(connectionString);
   return { db: drizzle(pool, { schema, mode: "default" }), pool };
 }
 
-/** 起真实 MySQL 8 container 并跑 migration。返回连接串与停止函数。 */
+/** 起真实 MySQL 8 container 并加载完整空库结构。返回连接串与停止函数。 */
 export async function startTestMysql(): Promise<{
   connectionString: string;
   stop: () => Promise<void>;
@@ -51,9 +51,9 @@ export async function startTestMysql(): Promise<{
     ])
     .start();
   const connectionString = container.getConnectionUri();
-  const { db, pool } = buildDrizzle(connectionString);
+  const { pool } = buildDrizzle(connectionString);
   try {
-    await migrateMysql(db);
+    await loadFreshMysqlSchema(pool);
   } finally {
     await pool.end();
   }
