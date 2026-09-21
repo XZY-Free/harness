@@ -14,6 +14,14 @@ import { randomUUID } from "node:crypto";
 import type { DbOrTx } from "@/lib/db/client";
 import { db } from "@/lib/db/client";
 import {
+  assertExecutionSourceSnapshot,
+  executionSourceDigest,
+} from "@/lib/executions/domain/preparation-source";
+import {
+  type AttemptPreparationClaim,
+  assertAttemptPreparationClaimHeldInTransaction,
+} from "@/lib/executions/persistence/attempt-store";
+import {
   type RuntimeSessionBinding,
   type RuntimeSessionBindingState,
   type RuntimeSessionIntentType,
@@ -103,26 +111,8 @@ export interface CreateRuntimeSessionBindingInput {
   leaseEpoch: number;
   intentType: RuntimeSessionIntentType;
   startIntentKey: string;
-  /**
-   * A05：**来源操作键** —— 稳定、重投不变，回答"哪一个外部请求要求这次执行/恢复"。
-   *
-   * - 用户恢复：已持久 `InvocationCommand.id`；
-   * - 子调用续接：已持久 continuation 的原始身份；
-   * - 首次 Start：Invocation 自身身份。
-   *
-   * 绝不用当前时间、随机数或调用序号：只有稳定，ACK/`execution.started` 丢失后的第二次
-   * 投递才会被认出来是"同一意图重投"，从而沿用已建好的 ready/激活事实。
-   * 它与 `startIntentKey` 分工不同：后者是 O 生成**之后**的 Runtime 传输键（`start:<ownershipId>`），
-   * 而来源意图必须在 O 存在**之前**就能比对。两者不是重复账本。
-   */
-  sourceOperationKey: string;
-  /**
-   * A05：该来源意图的**语义摘要**（tenant/Invocation/Attempt/intentType/锚点/Binding/Revision）。
-   *
-   * 同来源换摘要 = 另一份语义请求 → 必须拒绝，绝不采用"最新输入"覆盖原锚点。
-   * 凭据轮换、trace、重试次数**不进入**摘要。
-   */
-  sourceRequestDigest: string;
+  /** Session 来源只能从同一事务内已复核的准备槽复制。 */
+  preparationClaim: AttemptPreparationClaim;
   semanticRequestJson?: unknown;
   semanticRequestDigest?: string | null;
   runtimeCapabilitiesJson?: unknown;
@@ -198,7 +188,20 @@ export async function createRuntimeSessionBindingInTransaction(
   if (input.startIntentKey !== `start:${input.ownershipId}`) {
     throw new Error("StartIntentConflict");
   }
-  if (!input.sourceOperationKey || !input.sourceRequestDigest) {
+  const claimedAttempt = await assertAttemptPreparationClaimHeldInTransaction(
+    tx,
+    input.preparationClaim,
+  );
+  const source = assertExecutionSourceSnapshot(claimedAttempt.preparationSourceJson);
+  const sourceRequestDigest = executionSourceDigest(source);
+  if (
+    sourceRequestDigest !== claimedAttempt.preparationRequestDigest ||
+    source.tenantId !== input.tenantId ||
+    source.invocationId !== input.invocationId ||
+    source.attemptId !== input.attemptId ||
+    source.runtimeRevisionId !== input.runtimeRevisionId ||
+    input.preparationClaim.requestDigest !== sourceRequestDigest
+  ) {
     throw new Error("StartIntentConflict");
   }
   if (
@@ -220,8 +223,9 @@ export async function createRuntimeSessionBindingInTransaction(
     bindingState: "prepared",
     intentType: input.intentType,
     startIntentKey: input.startIntentKey,
-    sourceOperationKey: input.sourceOperationKey,
-    sourceRequestDigest: input.sourceRequestDigest,
+    sourceOperationKey: source.sourceOperationKey,
+    sourceRequestDigest,
+    sourceRequestJson: source,
     semanticRequestJson: input.semanticRequestJson ?? null,
     semanticRequestDigest: input.semanticRequestDigest ?? null,
     intentFrozenAt,

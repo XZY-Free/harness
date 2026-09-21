@@ -46,6 +46,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { registerDevice } from "@/lib/identity/device-queries";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { issueTestExecutionToken } from "@/lib/identity/test-support/execution-token";
@@ -437,7 +438,7 @@ async function seedBinding(
   const attempt = await createAttempt({ tenantId: TENANT, invocationId });
   const evidence = { kind: "test-candidate", invocationId, attemptId: attempt.id };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: protocolDigest(evidence),

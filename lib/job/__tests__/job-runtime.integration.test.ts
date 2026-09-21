@@ -17,6 +17,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedJobRuntimeAttempt,
@@ -647,7 +648,9 @@ describe("Thread-independent Job runtime integration", () => {
   });
 
   it("JOB-REG-05: a transport retry of the same start intent keeps Invocation, Attempt, Ownership and StartKey identical", async () => {
-    const { startRuntimeInvocation } = await import("@/lib/runtime/application/runtime-start");
+    const { RuntimeStartTransportError, startRuntimeInvocation } = await import(
+      "@/lib/runtime/application/runtime-start"
+    );
     const runtimeAuthority = await seedJobRuntimeAuthority();
     const fixture = await seedJobFixture({ runtime: runtimeAuthority });
     const attempt = await createAttempt({
@@ -709,8 +712,22 @@ describe("Thread-independent Job runtime integration", () => {
       auth: { mode: "none" } as const,
       callbackEndpoints,
     };
-    await expect(startRuntimeInvocation(startInput)).rejects.toBeInstanceOf(RuntimeHttpClientError);
-    const retry = await startRuntimeInvocation(startInput);
+    let firstFailure: InstanceType<typeof RuntimeStartTransportError> | null = null;
+    try {
+      await startRuntimeInvocation(startInput);
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "RuntimeStartTransportError",
+        originalError: expect.any(RuntimeHttpClientError),
+        dispatchIdentity: expect.objectContaining({ attemptId: attempt.id }),
+      } satisfies Partial<InstanceType<typeof RuntimeStartTransportError>>);
+      firstFailure = error as InstanceType<typeof RuntimeStartTransportError>;
+    }
+    if (!firstFailure) throw new Error("预期首轮 Transport 回执丢失");
+    const retry = await startRuntimeInvocation({
+      ...startInput,
+      sessionDispatchClaim: firstFailure.dispatchIdentity,
+    });
     expect(retry.sessionBindingId).toBeTruthy();
     // 同一 Invocation 只有一个 Attempt、一个 active Ownership、一个 StartKey。
     const invocations = await db
@@ -1685,7 +1702,7 @@ describe("Thread-independent Job runtime integration", () => {
       attemptId: attempt.id,
     };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt.id,
         evidence: candidateEvidence,
         digest: protocolDigest(candidateEvidence),

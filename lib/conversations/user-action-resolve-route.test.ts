@@ -31,6 +31,7 @@ import {
 } from "@/lib/executions/persistence/attempt-store";
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationCommandTable } from "@/lib/persistence/schema/executions";
@@ -215,7 +216,7 @@ async function attachA2ABinding(params: {
   });
   const attemptEvidence = { kind: "a2a-resume-route-test", attemptId: attempt.id };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence: attemptEvidence,
       digest: protocolDigest(attemptEvidence),

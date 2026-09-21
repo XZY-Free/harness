@@ -19,6 +19,7 @@ import {
   acquireExecutionOwnership,
   getAuthorityDatabaseTime,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -135,7 +136,7 @@ async function replaceCurrentOwner(input: Awaited<ReturnType<typeof createActive
   });
   const evidence = { kind: "test-replacement", attemptId: attempt.id };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: protocolDigest(evidence),

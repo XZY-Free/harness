@@ -237,6 +237,7 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
 
   async function setup(testHooks?: {
     beforeFreezeScopeLock?: () => Promise<void>;
+    afterReleaseBarrierRemoved?: () => Promise<void>;
   }): Promise<Fixture> {
     const base = await mkdtemp(path.join(tmpdir(), "a07-writer-"));
     roots.push(base);
@@ -1160,6 +1161,146 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     await fixture.broker.releaseFreeze(currentReceipt);
   }, 40_000);
 
+  it("R5-a release 先于同意图 freeze：迟到 freeze 被物理终态拒绝且不重建屏障", async () => {
+    let signalEntered!: () => void;
+    let resumeDelayedFreeze!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      resumeDelayedFreeze = resolve;
+    });
+    let pauseFirstFreeze = true;
+    const fixture = await setup({
+      async beforeFreezeScopeLock() {
+        if (!pauseFirstFreeze) return;
+        pauseFirstFreeze = false;
+        signalEntered();
+        await resume;
+      },
+    });
+    const grant = await activate(fixture);
+    const intentId = "00000000-0000-4000-8000-0000000000f5";
+    const delayedFreeze = fixture.broker.freeze({
+      grant,
+      checkpointIntentId: intentId,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    await entered;
+
+    await fixture.broker.releaseFreeze({
+      checkpointIntentId: intentId,
+      scopeDigest: grant.scopeDigest,
+      writerGeneration: grant.writerGeneration,
+      anchorDigest: ANCHOR_DIGEST,
+      frozenAt: new Date(0).toISOString(),
+    });
+    resumeDelayedFreeze();
+
+    await expect(delayedFreeze).rejects.toThrow("CheckpointIntentRetired");
+    const freezePath = path.join(fixture.grantsRoot, "freeze.json");
+    expect(await pathExists(freezePath)).toBe(false);
+    const intentRecord = JSON.parse(
+      await readFile(
+        path.join(
+          fixture.controlRoot,
+          "safe-point-intents",
+          scopeComponent(grant.scopeDigest),
+          `${intentId}.json`,
+        ),
+        "utf8",
+      ),
+    ) as { state: string; checkpointIntentId: string };
+    expect(intentRecord).toMatchObject({ state: "released", checkpointIntentId: intentId });
+  }, 40_000);
+
+  it("R5-b 跨 Broker 重启仍保持 released 墓碑：同意图迟到 freeze 不得复活", async () => {
+    const fixture = await setup();
+    const grant = await activate(fixture);
+    const intentId = "00000000-0000-4000-8000-0000000000f6";
+    const receipt = await fixture.broker.freeze({
+      grant,
+      checkpointIntentId: intentId,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    await fixture.broker.releaseFreeze(receipt);
+
+    const restarted = createWorkspaceHostBroker({
+      root: fixture.hostRoot,
+      managedRoot: fixture.writerRoot,
+    });
+    await expect(
+      restarted.freeze({ grant, checkpointIntentId: intentId, anchorDigest: ANCHOR_DIGEST }),
+    ).rejects.toThrow("CheckpointIntentRetired");
+    expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
+  });
+
+  it("R5-d 删屏障后回执前崩溃：releasing 可由重启 Broker 收敛为 released", async () => {
+    let failOnce = true;
+    const fixture = await setup({
+      async afterReleaseBarrierRemoved() {
+        if (!failOnce) return;
+        failOnce = false;
+        throw new Error("simulated-process-exit-after-unlink");
+      },
+    });
+    const grant = await activate(fixture);
+    const intentId = "00000000-0000-4000-8000-0000000000f7";
+    const receipt = await fixture.broker.freeze({
+      grant,
+      checkpointIntentId: intentId,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    await expect(fixture.broker.releaseFreeze(receipt)).rejects.toThrow(
+      "simulated-process-exit-after-unlink",
+    );
+    expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
+    const recordPath = path.join(
+      fixture.controlRoot,
+      "safe-point-intents",
+      scopeComponent(grant.scopeDigest),
+      `${intentId}.json`,
+    );
+    expect(JSON.parse(await readFile(recordPath, "utf8"))).toMatchObject({ state: "releasing" });
+
+    const restarted = createWorkspaceHostBroker({
+      root: fixture.hostRoot,
+      managedRoot: fixture.writerRoot,
+    });
+    await restarted.releaseFreeze(receipt);
+    expect(JSON.parse(await readFile(recordPath, "utf8"))).toMatchObject({ state: "released" });
+    await expect(
+      restarted.freeze({ grant, checkpointIntentId: intentId, anchorDigest: ANCHOR_DIGEST }),
+    ).rejects.toThrow("CheckpointIntentRetired");
+  });
+
+  it("R5-e/R5-f 同意图 tuple 冲突拒绝，重复释放幂等，不同新意图可正常冻结", async () => {
+    const fixture = await setup();
+    const grant = await activate(fixture);
+    const firstIntent = "00000000-0000-4000-8000-0000000000f8";
+    const first = await fixture.broker.freeze({
+      grant,
+      checkpointIntentId: firstIntent,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    await expect(
+      fixture.broker.releaseFreeze({ ...first, anchorDigest: `sha256:${"c".repeat(64)}` }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    await fixture.broker.releaseFreeze(first);
+    await expect(fixture.broker.releaseFreeze(first)).resolves.toBeUndefined();
+
+    const secondIntent = "00000000-0000-4000-8000-0000000000f9";
+    const second = await fixture.broker.freeze({
+      grant,
+      checkpointIntentId: secondIntent,
+      anchorDigest: `sha256:${"d".repeat(64)}`,
+    });
+    expect(second.checkpointIntentId).toBe(secondIntent);
+    expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(true);
+    await fixture.broker.releaseFreeze(second);
+    expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
+  });
+
   /**
    * A07-T13 / A07-07：冻结与新的受管写入并发 —— 屏障必须在**锁内**生效，文件 IO 不能
    * "先拿可写路径、稍后再写"。
@@ -1366,7 +1507,7 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     expect(await pathExists(afterRelease.path)).toBe(false);
   }, 40_000);
 
-  it("N06-T1: 匹配 freeze 的物理删除失败经真实 Host 接口返回，屏障不会假释放", async () => {
+  it("R5-c / N06-T1: 匹配 freeze 的物理删除失败保持 releasing，屏障不会假释放", async () => {
     const fixture = await setup();
     const grant = await activate(fixture);
     const receipt = await fixture.broker.freeze({
@@ -1379,6 +1520,18 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     try {
       await expect(fixture.broker.releaseFreeze(receipt)).rejects.toThrow();
       expect(await pathExists(freezePath)).toBe(true);
+      const intentRecord = JSON.parse(
+        await readFile(
+          path.join(
+            fixture.controlRoot,
+            "safe-point-intents",
+            scopeComponent(grant.scopeDigest),
+            `${receipt.checkpointIntentId}.json`,
+          ),
+          "utf8",
+        ),
+      ) as { state: string };
+      expect(intentRecord.state).toBe("releasing");
     } finally {
       await chmod(fixture.grantsRoot, 0o755);
     }

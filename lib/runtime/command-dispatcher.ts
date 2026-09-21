@@ -1,7 +1,11 @@
 /** Durable InvocationCommand delivery to the current Runtime authority. */
 import { db } from "@/lib/db/client";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
-import { getAttemptById, getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
+import {
+  type AttemptPreparationClaim,
+  getAttemptById,
+  getLatestAttempt,
+} from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
@@ -14,7 +18,11 @@ import {
   invocationCommandTable,
   invocationTable,
 } from "@/lib/persistence/schema/executions";
-import { resumeRuntimeInvocation } from "@/lib/runtime/application/runtime-resume";
+import {
+  acceptRuntimeResumePreparation,
+  resumeRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-resume";
+import { RuntimeStartTransportError } from "@/lib/runtime/application/runtime-start";
 import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import {
@@ -23,6 +31,7 @@ import {
   getRuntimeSessionBindingBySourceOperation,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import {
+  recordAttemptDispatchTransientFailure,
   scheduleCommandTransientRetry,
   settleSupersededInvocationCommand,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
@@ -172,6 +181,76 @@ async function loadCommand(tenantId: string, commandId: string): Promise<Command
         .limit(1)
     : [];
   return { command, invocation, binding, owner: resolvedOwner ?? null };
+}
+
+type ResumeCommandPreparation = {
+  attempt: Awaited<ReturnType<typeof getAttemptById>> & {};
+  anchor: string;
+  anchorDigest: string;
+  checkpointId?: string;
+  preparationClaim: AttemptPreparationClaim | null;
+};
+
+async function resolveResumeCommandPreparation(
+  context: CommandContext,
+  preparationClaimId?: string,
+): Promise<ResumeCommandPreparation> {
+  const sourceOperationKey = `command:${context.command.id}`;
+  const historicalSession = await getRuntimeSessionBindingBySourceOperation(
+    context.invocation.tenantId,
+    {
+      invocationId: context.invocation.id,
+      intentType: "resume",
+      sourceOperationKey,
+    },
+  );
+  const attempt = historicalSession
+    ? await getAttemptById(historicalSession.attemptId)
+    : await getLatestAttempt(context.invocation.id);
+  if (!historicalSession) {
+    if (context.invocation.executionState !== "waiting_user" && !isPostAuthorityResume(context)) {
+      throw new ResumeInvocationNotWaitingError(context.invocation.id);
+    }
+    if (!attempt || attempt.attemptState !== "suspended") {
+      throw new CommandInvocationNotFoundError(`suspended-attempt:${context.invocation.id}`);
+    }
+  } else if (!attempt) {
+    throw new CommandInvocationNotFoundError(`source-attempt:${historicalSession.attemptId}`);
+  }
+  if (!attempt) throw new CommandInvocationNotFoundError(context.invocation.id);
+  const anchor = attempt.filesystemCheckpointId
+    ? `checkpoint:${attempt.filesystemCheckpointId}`
+    : `invocation:${context.invocation.id}:recovery:${context.invocation.recoveryVersion}`;
+  const anchorDigest = attempt.resumeAnchorDigest ?? protocolDigest(anchor);
+  const accepted = await acceptRuntimeResumePreparation({
+    tenantId: context.invocation.tenantId,
+    invocation: context.invocation,
+    binding: context.binding,
+    attempt,
+    ...(attempt.filesystemCheckpointId ? { checkpointId: attempt.filesystemCheckpointId } : {}),
+    anchor,
+    anchorDigest,
+    sourceOperationKey,
+    ...(preparationClaimId ? { preparationClaimId } : {}),
+  });
+  if (accepted.decision.disposition === "busy") throw new Error("AttemptPreparationBusy");
+  return {
+    attempt,
+    anchor,
+    anchorDigest,
+    ...(attempt.filesystemCheckpointId ? { checkpointId: attempt.filesystemCheckpointId } : {}),
+    preparationClaim: accepted.decision.disposition === "claimed" ? accepted.decision.claim : null,
+  };
+}
+
+/** 命令网关在解析 Transport/Workspace/Environment 前的唯一 Resume 接纳入口。 */
+export async function acceptResumeCommandPreparation(input: {
+  tenantId: string;
+  commandId: string;
+}): Promise<AttemptPreparationClaim | null> {
+  const context = await loadCommand(input.tenantId, input.commandId);
+  if (context.command.commandType !== "resume") throw new CommandNotFoundError(input.commandId);
+  return (await resolveResumeCommandPreparation(context)).preparationClaim;
 }
 
 /**
@@ -382,6 +461,8 @@ async function dispatchCommand(params: {
   expectedType: "cancel" | "resume" | "steer" | "checkpoint";
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
+  /** 网关在资源解析前取得的准备领取；dispatcher 必须原样复核。 */
+  resumePreparationClaim?: AttemptPreparationClaim | null;
   /**
    * A09：本次真实投递的领取 nonce（必填）。
    *
@@ -399,136 +480,125 @@ async function dispatchCommand(params: {
     params.commandId,
     params.claimToken,
   );
-  const endpoint = await params.runtimeEndpointResolver(context.binding);
   let resumeAcknowledged = false;
   try {
     let response: unknown;
     if (params.expectedType === "resume") {
       const sourceOperationKey = `command:${params.commandId}`;
-      // 先按持久命令来源反查原 Attempt/Session。只有查不到历史来源时，才把本次命令
-      // 当作首次恢复并执行 waiting_user + suspended 的严格前置校验。
-      const historicalSession = await getRuntimeSessionBindingBySourceOperation(params.tenantId, {
-        invocationId: context.invocation.id,
-        intentType: "resume",
-        sourceOperationKey,
-      });
-      const attempt = historicalSession
-        ? await getAttemptById(historicalSession.attemptId)
-        : await getLatestAttempt(context.invocation.id);
-      if (!historicalSession) {
-        if (
-          context.invocation.executionState !== "waiting_user" &&
-          !isPostAuthorityResume(context)
-        ) {
-          throw new ResumeInvocationNotWaitingError(context.invocation.id);
-        }
-        if (!attempt || attempt.attemptState !== "suspended") {
-          throw new CommandInvocationNotFoundError(`suspended-attempt:${context.invocation.id}`);
-        }
-      } else if (!attempt) {
-        throw new CommandInvocationNotFoundError(`source-attempt:${historicalSession.attemptId}`);
-      }
-      const anchor = attempt.filesystemCheckpointId
-        ? `checkpoint:${attempt.filesystemCheckpointId}`
-        : `invocation:${context.invocation.id}:recovery:${context.invocation.recoveryVersion}`;
+      const prepared = await resolveResumeCommandPreparation(
+        context,
+        params.resumePreparationClaim?.claimId,
+      );
+      const endpoint = await params.runtimeEndpointResolver(context.binding);
       response = await resumeRuntimeInvocation({
         tenantId: params.tenantId,
         invocation: context.invocation,
         binding: context.binding,
-        attempt,
+        attempt: prepared.attempt,
         runtimeClient: params.runtimeClient,
         runtimeEndpoint: endpoint.runtimeEndpoint,
         auth: endpoint.auth,
         callbackEndpoints: endpoint.callbackEndpoints,
         workspace: endpoint.workspace,
         environmentProvisioner: endpoint.environmentProvisioner,
-        anchor,
-        anchorDigest: attempt.resumeAnchorDigest ?? protocolDigest(anchor),
+        anchor: prepared.anchor,
+        anchorDigest: prepared.anchorDigest,
+        ...(prepared.checkpointId ? { checkpointId: prepared.checkpointId } : {}),
+        ...(prepared.preparationClaim ? { preparationClaim: prepared.preparationClaim } : {}),
         // A05：用户恢复的来源意图 = **已持久命令身份**。用 `params.commandId` 而不是
         // 时间/序号：同一次 Resume 的重投必须拿到同一个键，重投才会命中原 Session。
         sourceOperationKey,
       });
-    } else if (params.expectedType === "checkpoint") {
-      response = await dispatchFilesystemCheckpoint({
-        tenantId: params.tenantId,
-        command,
-        context,
-        endpoint,
-        runtimeClient: params.runtimeClient,
-      });
     } else {
-      // R03 §6：目标代际在命令接受时冻结；此处只读这份事实，**不**回落到当前 Owner。
-      // 目标缺失/已关闭 → target superseded，不重定向、不发网络请求。
-      const owner = context.owner;
-      if (!owner || owner.ownershipState !== "active") {
-        throw new CommandTargetSupersededError(
-          `目标代际不可用（${owner ? owner.ownershipState : "missing"}）：${context.invocation.id}`,
-        );
-      }
-      // Session 与已冻结的 Authority 一一绑定（每 Ownership generation 唯一 Session）：
-      // targetSessionId 缺省时按 ownership 解析；两者不一致即目标已失效。
-      const session = command.targetSessionId
-        ? await getRuntimeSessionBindingById(params.tenantId, command.targetSessionId)
-        : await getRuntimeSessionBindingByOwnership(params.tenantId, owner.id);
-      if (!session || session.ownershipId !== owner.id || session.leaseEpoch !== owner.leaseEpoch) {
-        throw new CommandTargetSupersededError(`目标代际的 Session 不匹配：ownership=${owner.id}`);
-      }
-      const authority = {
-        invocationId: context.invocation.id,
-        runtimeRevisionId: context.binding.runtimeRevisionId,
-        attemptId: owner.attemptId,
-        ownershipId: owner.id,
-        leaseEpoch: String(owner.leaseEpoch),
-        sessionBindingId: session.id,
-      } as const;
-      if (params.expectedType === "cancel") {
-        const request: RuntimeCancelTransportRequest = {
-          runtimeEndpoint: endpoint.runtimeEndpoint,
-          auth: endpoint.auth,
+      const endpoint = await params.runtimeEndpointResolver(context.binding);
+      if (params.expectedType === "checkpoint") {
+        response = await dispatchFilesystemCheckpoint({
+          tenantId: params.tenantId,
+          command,
+          context,
+          endpoint,
+          runtimeClient: params.runtimeClient,
+        });
+      } else {
+        // R03 §6：目标代际在命令接受时冻结；此处只读这份事实，**不**回落到当前 Owner。
+        // 目标缺失/已关闭 → target superseded，不重定向、不发网络请求。
+        const owner = context.owner;
+        if (!owner || owner.ownershipState !== "active") {
+          throw new CommandTargetSupersededError(
+            `目标代际不可用（${owner ? owner.ownershipState : "missing"}）：${context.invocation.id}`,
+          );
+        }
+        // Session 与已冻结的 Authority 一一绑定（每 Ownership generation 唯一 Session）：
+        // targetSessionId 缺省时按 ownership 解析；两者不一致即目标已失效。
+        const session = command.targetSessionId
+          ? await getRuntimeSessionBindingById(params.tenantId, command.targetSessionId)
+          : await getRuntimeSessionBindingByOwnership(params.tenantId, owner.id);
+        if (
+          !session ||
+          session.ownershipId !== owner.id ||
+          session.leaseEpoch !== owner.leaseEpoch
+        ) {
+          throw new CommandTargetSupersededError(
+            `目标代际的 Session 不匹配：ownership=${owner.id}`,
+          );
+        }
+        const authority = {
           invocationId: context.invocation.id,
-          idempotencyKey: `command:${command.id}`,
-          request: {
+          runtimeRevisionId: context.binding.runtimeRevisionId,
+          attemptId: owner.attemptId,
+          ownershipId: owner.id,
+          leaseEpoch: String(owner.leaseEpoch),
+          sessionBindingId: session.id,
+        } as const;
+        if (params.expectedType === "cancel") {
+          const request: RuntimeCancelTransportRequest = {
+            runtimeEndpoint: endpoint.runtimeEndpoint,
+            auth: endpoint.auth,
+            invocationId: context.invocation.id,
+            idempotencyKey: `command:${command.id}`,
+            request: {
+              protocolVersion: 3,
+              commandId: command.id,
+              targetAuthority: authority,
+              reasonCode:
+                typeof (command.payloadJson as Record<string, unknown>).reasonCode === "string"
+                  ? String((command.payloadJson as Record<string, unknown>).reasonCode)
+                  : "cancel_requested",
+            },
+          };
+          response = await params.runtimeClient.cancelInvocation(request);
+        } else {
+          const payload =
+            command.payloadJson && typeof command.payloadJson === "object"
+              ? (command.payloadJson as Record<string, unknown>)
+              : {};
+          // R03 §6：Steer 的正式引用就是接受时持久化的正式输入（guidance ThreadItem）。
+          // 旧实现的 `<inputRef|invocation-command:{id}>` 与产品入口写入的 `guidance_item_id`
+          // 不同名，导致 Hosted Steer 退化为静默空操作。
+          const inputRef =
+            typeof payload.guidance_item_id === "string"
+              ? payload.guidance_item_id
+              : typeof payload.inputRef === "string"
+                ? payload.inputRef
+                : `invocation-command:${command.id}`;
+          // 稳定 payload digest = 命令正式接受时冻结的 payloadDigest（不在重试时重算）。
+          const inputDigest =
+            typeof payload.inputDigest === "string" ? payload.inputDigest : command.payloadDigest;
+          const request: SteerRequest = {
             protocolVersion: 3,
             commandId: command.id,
             targetAuthority: authority,
-            reasonCode:
-              typeof (command.payloadJson as Record<string, unknown>).reasonCode === "string"
-                ? String((command.payloadJson as Record<string, unknown>).reasonCode)
-                : "cancel_requested",
-          },
-        };
-        response = await params.runtimeClient.cancelInvocation(request);
-      } else {
-        const payload =
-          command.payloadJson && typeof command.payloadJson === "object"
-            ? (command.payloadJson as Record<string, unknown>)
-            : {};
-        // R03 §6：Steer 的正式引用就是接受时持久化的正式输入（guidance ThreadItem）。
-        // 旧实现的 `<inputRef|invocation-command:{id}>` 与产品入口写入的 `guidance_item_id`
-        // 不同名，导致 Hosted Steer 退化为静默空操作。
-        const inputRef =
-          typeof payload.guidance_item_id === "string"
-            ? payload.guidance_item_id
-            : typeof payload.inputRef === "string"
-              ? payload.inputRef
-              : `invocation-command:${command.id}`;
-        // 稳定 payload digest = 命令正式接受时冻结的 payloadDigest（不在重试时重算）。
-        const inputDigest =
-          typeof payload.inputDigest === "string" ? payload.inputDigest : command.payloadDigest;
-        const request: SteerRequest = {
-          protocolVersion: 3,
-          commandId: command.id,
-          targetAuthority: authority,
-          inputRef,
-          inputDigest,
-        };
-        response = await params.runtimeClient.steerInvocation({
-          runtimeEndpoint: endpoint.runtimeEndpoint,
-          auth: endpoint.auth,
-          invocationId: context.invocation.id,
-          idempotencyKey: `command:${command.id}`,
-          request,
-        });
+            inputRef,
+            inputDigest,
+          };
+          response = await params.runtimeClient.steerInvocation({
+            runtimeEndpoint: endpoint.runtimeEndpoint,
+            auth: endpoint.auth,
+            invocationId: context.invocation.id,
+            idempotencyKey: `command:${command.id}`,
+            request,
+          });
+        }
       }
     }
     if (params.expectedType === "resume") {
@@ -551,9 +621,18 @@ async function dispatchCommand(params: {
     // claim 校验并再次抛出）。这里的边界语义是"本次投递无资格写结论"，由调用方
     // （命令网关 / 维护 lane）决定如何对待，dispatcher 自己不产生任何持久事实。
     if (error instanceof CommandDispatchClaimSupersededError) throw error;
-    if (error instanceof RuntimeHttpClientError && error.retryable) {
+    const failure = error instanceof RuntimeStartTransportError ? error.originalError : error;
+    if (failure instanceof RuntimeHttpClientError && failure.retryable) {
       const errorCode =
-        error.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
+        failure.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
+      if (error instanceof RuntimeStartTransportError) {
+        await recordAttemptDispatchTransientFailure(error.dispatchIdentity, {
+          errorCode,
+          now: new Date(),
+          counted: true,
+          updateAttempt: false,
+        });
+      }
       const outcome = await scheduleCommandTransientRetry(
         {
           tenantId: params.tenantId,
@@ -573,16 +652,16 @@ async function dispatchCommand(params: {
               dispatchAttemptCount: outcome.dispatchCount,
             },
             events: [],
-            errorCode: error.stableCode,
-            errorMessage: error.message,
+            errorCode: failure.stableCode,
+            errorMessage: failure.message,
           }
         : {
             commandId: params.commandId,
             commandState: "failed",
             retryExhausted: true,
             events: [],
-            errorCode: error.stableCode,
-            errorMessage: error.message,
+            errorCode: failure.stableCode,
+            errorMessage: failure.message,
           };
     }
     if (params.expectedType === "checkpoint") {
@@ -607,15 +686,15 @@ async function dispatchCommand(params: {
         claimToken: params.claimToken,
       });
     } else {
-      await reject(params.tenantId, params.commandId, error, params.claimToken);
+      await reject(params.tenantId, params.commandId, failure, params.claimToken);
     }
     return {
       commandId: params.commandId,
       commandState: "failed",
       ...(superseded ? { targetSuperseded: true as const } : {}),
       events: [],
-      errorCode: error instanceof Error ? error.name : "RUNTIME_COMMAND_FAILED",
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorCode: failure instanceof Error ? failure.name : "RUNTIME_COMMAND_FAILED",
+      errorMessage: failure instanceof Error ? failure.message : String(failure),
     };
   }
 }

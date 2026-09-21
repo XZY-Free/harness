@@ -17,6 +17,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { closeExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -234,7 +235,7 @@ describe("Workspace host recovery integration", () => {
       });
       const attempt2Evidence = { kind: "workspace-recovery", attemptId: attempt2.id };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId: attempt2.id,
           evidence: attempt2Evidence,
           digest: protocolDigest(attempt2Evidence),
@@ -618,7 +619,7 @@ describe("Workspace host recovery integration", () => {
       });
       const attempt2Evidence = { kind: "workspace-supersede", attemptId: attempt2.id };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId: attempt2.id,
           evidence: attempt2Evidence,
           digest: protocolDigest(attempt2Evidence),

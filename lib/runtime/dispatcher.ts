@@ -4,10 +4,7 @@ import { aiConfig } from "@/lib/config";
 import { allocateEventSequences } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
-import {
-  type EnvironmentProvisioner,
-  environmentProvisionRequestDigest,
-} from "@/lib/environment/environment-provisioner";
+import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { recordEnvironmentSelectionFirstApplied } from "@/lib/environment/environment-selection";
 import {
   type CreateExecutionBindingCommand,
@@ -33,11 +30,16 @@ import type {
 } from "@/lib/persistence/schema/executions";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { RouteResolutionAttribute } from "@/lib/routes/domain/route-resolution-policy";
+import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import {
   canonicalRouteResolver,
   resolveExecutionResources,
 } from "@/lib/runtime/application/execution-resources";
-import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import {
+  RuntimeStartTransportError,
+  executionSourceRequestForStart,
+  startRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-start";
 import {
   assertDeclaredWorkspaceReady,
   resolveEnvironmentRevisionForInvocation,
@@ -50,10 +52,7 @@ import {
   type RuntimeRouteResolution,
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
-import {
-  recordAttemptDispatchTransientFailure,
-  sessionDispatchIdentityForAttempt,
-} from "@/lib/runtime/retry/dispatch-retry-queries";
+import { recordAttemptDispatchTransientFailure } from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { CallbackEndpoints, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
 import {
@@ -270,6 +269,18 @@ export async function dispatchInvocationForTurn(params: {
       invocationId: invocation.id,
     });
   }
+  const attempt = await createAttempt({ invocationId: invocation.id, tenantId: params.tenantId });
+  const preparationIntentKey = `invocation:${invocation.id}`;
+  const preparation = await acceptExecutionPreparation({
+    request: executionSourceRequestForStart({
+      tenantId: params.tenantId,
+      invocation,
+      binding,
+      attempt,
+      sourceOperationKey: preparationIntentKey,
+    }),
+  });
+  if (preparation.disposition !== "claimed") throw new Error("AttemptPreparationBusy");
   const endpoint =
     params.runtimeClient && params.runtimeEndpointResolver
       ? await params.runtimeEndpointResolver(binding)
@@ -289,19 +300,6 @@ export async function dispatchInvocationForTurn(params: {
   // BOUND 且服务端为 Writer 时组合层已解析出真实执行资源；解析不出即 WorkspaceNotReady，
   // 不会退化成一个"引用真实 Workspace 却没有 Writer"的 Binding。
   const workspaceResources: WorkspaceExecutionResources | undefined = resources.workspace;
-  const attempt = await createAttempt({ invocationId: invocation.id, tenantId: params.tenantId });
-  const preparationClaimId = randomUUID();
-  const preparationIntentKey = `invocation:${invocation.id}`;
-  const preparationRequestDigest = environmentRevision
-    ? environmentProvisionRequestDigest({
-        tenantId: params.tenantId,
-        invocationId: invocation.id,
-        attemptId: attempt.id,
-        revisionId: environmentRevision.id,
-        workspaceBindingId,
-        recoveryAnchorDigest: null,
-      })
-    : null;
   const environmentLease =
     environmentRevision && resolvedEnvironmentProvisioner
       ? await resolvedEnvironmentProvisioner.provision({
@@ -314,9 +312,7 @@ export async function dispatchInvocationForTurn(params: {
           workspaceBindingId,
           workspaceRoot: workspaceResources?.root ?? null,
           recoveryAnchorDigest: null,
-          preparationClaimId,
-          preparationIntentKey,
-          preparationRequestDigest: preparationRequestDigest as string,
+          preparationClaim: preparation.claim,
         })
       : null;
   const transition = await transitionTurnToQueued({
@@ -344,18 +340,7 @@ export async function dispatchInvocationForTurn(params: {
         workspace: workspaceResources,
         // A05：首次 Start 的来源意图就是 Invocation 自身身份 —— 已持久、重投不变。
         sourceOperationKey: preparationIntentKey,
-        ...(preparationRequestDigest
-          ? {
-              preparationClaim: {
-                tenantId: params.tenantId,
-                invocationId: invocation.id,
-                attemptId: attempt.id,
-                intentKey: preparationIntentKey,
-                requestDigest: preparationRequestDigest,
-                claimId: preparationClaimId,
-              },
-            }
-          : {}),
+        preparationClaim: preparation.claim,
       });
       runtimeDispatch = {
         response: started.response,
@@ -363,25 +348,20 @@ export async function dispatchInvocationForTurn(params: {
         sessionBindingCreated: true,
       };
     } catch (error) {
-      if (error instanceof RuntimeHttpClientError && error.retryable) {
+      const failure = error instanceof RuntimeStartTransportError ? error.originalError : error;
+      if (failure instanceof RuntimeHttpClientError && failure.retryable) {
         const skipReason =
-          error.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
+          failure.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
         // 暂态失败只排定 durable retry（SessionBinding 承载稳定启动意图的重试事实），
         // 绝不 fallback Hosted、绝不丢失 Attempt 重试状态。
         // R04 §5：完成身份是 Session（不是 Attempt ID）。
-        // 取不到 Session 时不写 retry timestamp —— Attempt 仍保持 queued，
-        // 维护 lane 的"无 retry timestamp 安全窗口"会继续推进它，不会永久不可见。
-        const dispatchIdentity = await sessionDispatchIdentityForAttempt({
-          tenantId: params.tenantId,
-          attemptId: attempt.id,
-        });
-        if (dispatchIdentity) {
-          await recordAttemptDispatchTransientFailure(dispatchIdentity, {
+        if (error instanceof RuntimeStartTransportError) {
+          await recordAttemptDispatchTransientFailure(error.dispatchIdentity, {
             errorCode: skipReason,
             now: new Date(),
             counted: true,
           });
-        }
+        } else throw error;
         runtimeDispatch = {
           sessionBindingCreated: true,
           skipped: true,

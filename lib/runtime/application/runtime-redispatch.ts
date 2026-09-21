@@ -1,14 +1,14 @@
-import { randomUUID } from "node:crypto";
 import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
-import {
-  type EnvironmentProvisioner,
-  environmentProvisionRequestDigest,
-} from "@/lib/environment/environment-provisioner";
+import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { createAttempt } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import type { Invocation, InvocationAttempt } from "@/lib/persistence/schema/executions";
-import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
+import {
+  executionSourceRequestForStart,
+  startRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-start";
 import { InvocationNotFoundError, RedispatchNotAllowedError } from "@/lib/runtime/errors";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { CallbackEndpoints } from "@/lib/runtime/runtime-protocol";
@@ -88,18 +88,17 @@ export async function redispatchRuntimeInvocation(
   if (input.workspace && input.workspace.binding.id !== binding.workspaceBindingId) {
     throw new Error("WorkspaceNotReady");
   }
-  const preparationClaimId = randomUUID();
   const preparationIntentKey = `invocation:${invocation.id}`;
-  const preparationRequestDigest = revision
-    ? environmentProvisionRequestDigest({
-        tenantId: input.tenantId,
-        invocationId: invocation.id,
-        attemptId: attempt.id,
-        revisionId: binding.environmentDefinitionRevisionId as string,
-        workspaceBindingId: binding.workspaceBindingId,
-        recoveryAnchorDigest: null,
-      })
-    : null;
+  const preparation = await acceptExecutionPreparation({
+    request: executionSourceRequestForStart({
+      tenantId: input.tenantId,
+      invocation,
+      binding,
+      attempt,
+      sourceOperationKey: preparationIntentKey,
+    }),
+  });
+  if (preparation.disposition !== "claimed") throw new Error("AttemptPreparationBusy");
   const environmentLease =
     revision && input.environmentProvisioner
       ? await input.environmentProvisioner.provision({
@@ -112,9 +111,7 @@ export async function redispatchRuntimeInvocation(
           workspaceBindingId: binding.workspaceBindingId,
           workspaceRoot: input.workspace?.root ?? null,
           recoveryAnchorDigest: null,
-          preparationClaimId,
-          preparationIntentKey,
-          preparationRequestDigest: preparationRequestDigest as string,
+          preparationClaim: preparation.claim,
         })
       : null;
   const started = await startRuntimeInvocation({
@@ -131,18 +128,7 @@ export async function redispatchRuntimeInvocation(
     workspace: input.workspace,
     // A05：redispatch 是同一 Invocation 的**重投**，来源意图与首次一致。
     sourceOperationKey: preparationIntentKey,
-    ...(preparationRequestDigest
-      ? {
-          preparationClaim: {
-            tenantId: input.tenantId,
-            invocationId: invocation.id,
-            attemptId: attempt.id,
-            intentKey: preparationIntentKey,
-            requestDigest: preparationRequestDigest,
-            claimId: preparationClaimId,
-          },
-        }
-      : {}),
+    preparationClaim: preparation.claim,
   });
   const current = await getInvocationById(input.tenantId, input.invocationId);
   return {

@@ -13,8 +13,15 @@ import {
   sameAuthority,
 } from "@/lib/executions/domain/execution-authority";
 import {
+  type ExecutionSourceRequest,
+  assertExecutionSourceSnapshot,
+  executionSourceDigest,
+  executionSourceRequestOf,
+  sameExecutionSourceRequest,
+} from "@/lib/executions/domain/preparation-source";
+import {
   type AttemptPreparationClaim,
-  claimAttemptPreparation,
+  assertAttemptPreparationClaimHeldInTransaction,
   getAttemptById,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
@@ -25,6 +32,7 @@ import {
   lockInvocationRootIfExists,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
+import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import type {
   ExecutionBinding,
   ExecutionOwnership,
@@ -39,11 +47,14 @@ import {
   type runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import { buildRuntimeStartRequestForInvocation } from "@/lib/runtime/application/build-runtime-start-request";
+import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
+  claimRuntimeSessionDispatchInTransaction,
   createRuntimeSessionBindingInTransaction,
+  getRuntimeSessionBindingById,
   getRuntimeSessionBindingByOwnership,
   getRuntimeSessionBindingBySourceIntent,
   markRuntimeSessionLostByOwnershipInTransaction,
@@ -52,8 +63,11 @@ import {
 } from "@/lib/runtime/persistence/runtime-session-store";
 import {
   type SessionDispatchClaim,
+  type SessionDispatchIdentity,
+  lockClaimedSessionInTransaction,
   recordSessionDispatchAttemptStartedInTransaction,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { RUNTIME_DISPATCH_RETRY_POLICY } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import type { RuntimeHttpClient, RuntimeStartTransportRequest } from "@/lib/runtime/runtime-client";
 import {
   type AuthorityIdentity,
@@ -93,7 +107,7 @@ export interface RuntimeStartInput {
    * 所有 dispatch 完成确认（计数、暂态失败排定）都按该 claim 身份复核；
    * 请求内联路径为 `null`（无 lease，只按 Session 自身冻结 tuple 复核）。
    */
-  sessionDispatchClaim?: SessionDispatchClaim | null;
+  sessionDispatchClaim?: SessionDispatchClaim | SessionDispatchIdentity | null;
   /**
    * 受管 EnvironmentProvisioner：用于真实释放该 Lease 已创建的资源。
    * 未提供时环境失败只登记控制面清理工作（不允许伪装成"资源已释放"）。
@@ -129,140 +143,66 @@ export interface RuntimeStartResult {
   sessionBindingId: string;
 }
 
-export function runtimeStartSourceRequestDigest(input: {
-  tenantId: string;
-  invocationId: string;
-  attemptId: string;
-  intentType: "start" | "resume";
-  runtimeRevisionId: string;
-  workspaceBindingId: string | null;
-  environmentDefinitionRevisionId: string | null;
-  anchorDigest: string | null;
-  checkpointId: string | null;
-}): string {
-  return protocolDigest({
-    scope: "runtime-start-source-intent",
-    tenantId: input.tenantId,
-    invocationId: input.invocationId,
-    attemptId: input.attemptId,
-    intentType: input.intentType,
-    runtimeRevisionId: input.runtimeRevisionId,
-    workspaceBindingId: input.workspaceBindingId,
-    environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
-    anchorDigest: input.anchorDigest,
-    checkpointId: input.checkpointId,
-  });
+/** Transport 已取得精确 Session claim 后的失败；外层只能用这里携带的出发身份收口。 */
+export class RuntimeStartTransportError extends Error {
+  readonly name = "RuntimeStartTransportError";
+
+  constructor(
+    readonly originalError: unknown,
+    readonly dispatchIdentity: SessionDispatchIdentity,
+  ) {
+    super(originalError instanceof Error ? originalError.message : String(originalError), {
+      cause: originalError,
+    });
+  }
 }
 
-export type RuntimeStartSourceDecision =
-  | { disposition: "new"; sourceRequestDigest: string }
-  | {
-      disposition: "replay";
-      sourceRequestDigest: string;
-      session: typeof runtimeSessionBindingTable.$inferSelect;
-      ownership: ExecutionOwnership;
-      historicalResponse: RuntimeStartResponse | null;
-    };
-
-/** 在任何 Environment/Workspace 变更之前裁决来源。 */
-export async function decideRuntimeStartSource(input: {
-  tenantId: string;
-  invocationId: string;
-  attemptId: string;
-  intentType: "start" | "resume";
-  sourceOperationKey: string;
-  runtimeRevisionId: string;
-  workspaceBindingId: string | null;
-  environmentDefinitionRevisionId: string | null;
-  anchorDigest: string | null;
-  checkpointId: string | null;
-}): Promise<RuntimeStartSourceDecision> {
-  const sourceRequestDigest = runtimeStartSourceRequestDigest(input);
-  return db.transaction(async (tx): Promise<RuntimeStartSourceDecision> => {
-    const invocation = await lockInvocationRootIfExists(tx, input.tenantId, input.invocationId);
-    if (!invocation || INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) {
-      throw new ExecutionAuthorityError("NotCurrentExecutor", "Invocation 已终态或不存在");
-    }
-    const [attempt] = await tx
-      .select()
-      .from(invocationAttemptTable)
-      .where(
-        and(
-          eq(invocationAttemptTable.tenantId, input.tenantId),
-          eq(invocationAttemptTable.id, input.attemptId),
-          eq(invocationAttemptTable.invocationId, input.invocationId),
-        ),
-      )
-      .for("update")
-      .limit(1);
-    if (!attempt) throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于 Invocation");
-    const session = await getRuntimeSessionBindingBySourceIntent(
-      input.tenantId,
-      {
-        invocationId: input.invocationId,
-        attemptId: input.attemptId,
-        intentType: input.intentType,
-        sourceOperationKey: input.sourceOperationKey,
-      },
-      tx,
-    );
-    if (session) {
-      const [ownership] = await tx
-        .select()
-        .from(executionOwnershipTable)
-        .where(
-          and(
-            eq(executionOwnershipTable.tenantId, input.tenantId),
-            eq(executionOwnershipTable.id, session.ownershipId),
-            eq(executionOwnershipTable.invocationId, input.invocationId),
-          ),
-        )
-        .for("update")
-        .limit(1);
-      if (!ownership) throw new Error("RuntimeSessionMismatch");
-      if (
-        session.intentType === "start" &&
-        ownership.leaseExpiresAt <= (await getAuthorityDatabaseTime(tx))
-      ) {
-        throw new ExecutionAuthorityError(
-          "AttemptMismatch",
-          "原 Start 代际已过期；接管必须使用新的 Attempt",
-        );
-      }
-      if (session.sourceRequestDigest !== sourceRequestDigest)
-        throw new Error("StartIntentConflict");
-      const historicalResponse = session.transportAcknowledgement as RuntimeStartResponse | null;
-      if (
-        ["closed", "lost"].includes(session.bindingState) ||
-        ownership.ownershipState !== "active"
-      ) {
-        if (!historicalResponse) {
-          throw new ExecutionAuthorityError(
-            "NotCurrentExecutor",
-            `来源意图已收口（${session.bindingState}），且没有可证明的 Transport 回执`,
-          );
-        }
-      }
-      return {
-        disposition: "replay",
-        sourceRequestDigest,
-        session,
-        ownership,
-        historicalResponse,
-      };
-    }
-    if (
-      attempt.preparationIntentKey !== null &&
-      attempt.preparationIntentKey !== input.sourceOperationKey &&
-      attempt.preparationState === "preparing"
-    ) {
-      throw new ExecutionAuthorityError(
-        "NotCurrentExecutor",
-        "Attempt 已由另一恢复来源推进，本来源不得修改其环境或目录",
-      );
-    }
-    return { disposition: "new", sourceRequestDigest };
-  });
+export function executionSourceRequestForStart(
+  input: Pick<
+    RuntimeStartInput,
+    | "tenantId"
+    | "invocation"
+    | "binding"
+    | "attempt"
+    | "sourceOperationKey"
+    | "intentType"
+    | "recovery"
+  >,
+): ExecutionSourceRequest {
+  const intentType = input.intentType ?? "start";
+  const sourceKind =
+    intentType === "resume"
+      ? input.sourceOperationKey.startsWith("agent-call:")
+        ? "continuation"
+        : "user_resume"
+      : input.attempt.retryReasonCode === "supervisor_handoff"
+        ? "handoff"
+        : input.attempt.retryReasonCode
+          ? "redispatch"
+          : "initial";
+  return {
+    tenantId: input.tenantId,
+    invocationId: input.invocation.id,
+    attemptId: input.attempt.id,
+    sourceOperationKey: input.sourceOperationKey,
+    intentType,
+    sourceKind,
+    sourceRef: input.sourceOperationKey,
+    runtimeRevisionId: input.binding.runtimeRevisionId,
+    workspaceBindingId: input.binding.workspaceBindingId,
+    environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId ?? null,
+    bindingConfigDigest: input.binding.configHash,
+    inputDigest: input.invocation.inputDigest,
+    recovery:
+      input.recovery?.kind === "resume"
+        ? {
+            kind: "resume",
+            anchor: input.recovery.anchor,
+            anchorDigest: input.recovery.anchorDigest,
+            checkpointId: input.recovery.checkpointId ?? null,
+          }
+        : { kind: "initial" },
+  };
 }
 
 export function buildExecutionCredentials(
@@ -337,20 +277,44 @@ export async function startRuntimeInvocation(
   input: RuntimeStartInput,
 ): Promise<RuntimeStartResult> {
   const now = input.now ?? new Date();
+  // 纯输入冻结检查可在领取前失败；不得在此前解析 Endpoint/Environment/Workspace。
+  if (
+    input.expectedInputDigest !== undefined &&
+    input.invocation.inputDigest !== input.expectedInputDigest
+  ) {
+    throw new Error("InputDigestMismatch");
+  }
+  const declaredAttempt = await getAttemptById(input.attempt.id);
+  if (!declaredAttempt || declaredAttempt.invocationId !== input.invocation.id) {
+    throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于该 Invocation");
+  }
+  assertAttemptAcceptsNewGeneration(declaredAttempt);
+  const sourceRequest = executionSourceRequestForStart(input);
+  if (
+    input.preparationClaim &&
+    !sameExecutionSourceRequest(
+      executionSourceRequestOf(input.preparationClaim.source),
+      sourceRequest,
+    )
+  ) {
+    throw new Error("StartIntentConflict");
+  }
+  const preparationDecision = await acceptExecutionPreparation({
+    request: sourceRequest,
+    ...(input.preparationClaim ? { claimId: input.preparationClaim.claimId } : {}),
+    now,
+  });
+  if (preparationDecision.disposition === "busy") throw new Error("AttemptPreparationBusy");
+  const preparationClaim =
+    preparationDecision.disposition === "claimed" ? preparationDecision.claim : null;
+  const acceptedSource = preparationDecision.source;
+  const sourceRequestDigest = executionSourceDigest(acceptedSource);
   const workspaceBinding =
     input.workspace?.binding ??
     (await getWorkspaceBindingById(input.tenantId, input.binding.workspaceBindingId));
   if (!workspaceBinding) throw new Error("WorkspaceNotReady");
   if (workspaceBinding.id !== input.binding.workspaceBindingId)
     throw new Error("WorkspaceNotReady");
-  // Job 输入持久冻结：解析内容摘要与冻结摘要不一致 → 禁止 Runtime 启动。
-  // （纯参数校验必须先于发布事实加载，失败语义以输入冻结优先。）
-  if (
-    input.expectedInputDigest !== undefined &&
-    (input.invocation.inputDigest ?? null) !== input.expectedInputDigest
-  ) {
-    throw new Error("InputDigestMismatch");
-  }
   if (input.binding.environmentMode === "MANAGED" && !input.environmentLeaseId)
     throw new Error("EnvironmentRevisionMismatch");
   if (input.binding.environmentMode === "NO_PLATFORM_ENVIRONMENT" && input.environmentLeaseId)
@@ -375,11 +339,6 @@ export async function startRuntimeInvocation(
   // 会先被写脏再被拒绝，还会留下没有清理义务的 Workspace 候选。生产各 Start 调用方一律先
   // `createAttempt`（`dispatcher` / `redispatchRuntimeInvocation` /
   // `dispatch-queued-invocation-attempt`），这里把该不变量显式化，不新增任何合法路径。
-  const declaredAttempt = await getAttemptById(input.attempt.id);
-  if (!declaredAttempt || declaredAttempt.invocationId !== input.invocation.id) {
-    throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于该 Invocation");
-  }
-  assertAttemptAcceptsNewGeneration(declaredAttempt);
   // 发布事实（RuntimeRevision capability manifest）是 External start 一致性的真值源。
   // 在输入冻结与环境校验之后加载——pure 校验失败语义优先。
   const runtimeRevision = await getRuntimeRevisionById(input.binding.runtimeRevisionId);
@@ -393,64 +352,75 @@ export async function startRuntimeInvocation(
     input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null;
   const checkpointId =
     input.recovery?.kind === "resume" ? (input.recovery.checkpointId ?? null) : null;
-  const sourceDecision = await decideRuntimeStartSource({
-    tenantId: input.tenantId,
-    invocationId: input.invocation.id,
-    attemptId: input.attempt.id,
-    intentType,
-    sourceOperationKey: input.sourceOperationKey,
-    runtimeRevisionId: input.binding.runtimeRevisionId,
-    workspaceBindingId: input.binding.workspaceBindingId ?? null,
-    environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId ?? null,
-    anchorDigest: recoveryAnchorDigest,
-    checkpointId,
-  });
-  if (sourceDecision.disposition === "replay") {
+  if (
+    preparationDecision.disposition === "receipt" ||
+    preparationDecision.disposition === "dispatch"
+  ) {
+    const session = await getRuntimeSessionBindingById(
+      input.tenantId,
+      preparationDecision.sessionBindingId,
+    );
+    const [ownership] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, input.tenantId),
+          eq(executionOwnershipTable.id, preparationDecision.ownershipId),
+        ),
+      )
+      .limit(1);
+    if (!session || !ownership) throw new Error("RuntimeSessionMismatch");
     const authority = authorityIdentity({
       invocationId: input.invocation.id,
       runtimeRevisionId: input.binding.runtimeRevisionId,
-      attemptId: sourceDecision.session.attemptId,
-      ownershipId: sourceDecision.ownership.id,
-      leaseEpoch: sourceDecision.ownership.leaseEpoch,
-      sessionBindingId: sourceDecision.session.id,
+      attemptId: session.attemptId,
+      ownershipId: ownership.id,
+      leaseEpoch: ownership.leaseEpoch,
+      sessionBindingId: session.id,
     });
-    if (
-      sourceDecision.historicalResponse &&
-      (sourceDecision.session.bindingState !== "dispatching" ||
-        sourceDecision.ownership.ownershipState !== "active")
-    ) {
+    const historicalResponse = session.transportAcknowledgement as RuntimeStartResponse | null;
+    if (preparationDecision.disposition === "receipt") {
+      const receipt =
+        historicalResponse ??
+        (session.bindingState === "active" &&
+        session.remoteSessionRef &&
+        session.remoteExecutionRef &&
+        session.semanticRequestDigest
+          ? {
+              protocolVersion: 3 as const,
+              authority,
+              semanticRequestDigest: session.semanticRequestDigest,
+              accepted: true as const,
+              remoteSessionRef: session.remoteSessionRef,
+              remoteExecutionRef: session.remoteExecutionRef,
+              capabilitiesDigest: publishedCapabilityManifestDigest,
+              acceptedAt: session.updatedAt.getTime(),
+            }
+          : null);
+      if (!receipt) {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "SourceClosedWithoutReceipt");
+      }
       return {
         authority,
-        response: sourceDecision.historicalResponse,
-        sessionBindingId: sourceDecision.session.id,
+        response: receipt,
+        sessionBindingId: session.id,
       };
     }
     return dispatchRuntimeStartTransport({
       input,
       attempt: declaredAttempt,
-      ownership: sourceDecision.ownership,
-      session: sourceDecision.session,
+      ownership,
+      session,
       publishedCapabilityManifestDigest,
       now,
     });
   }
-  const preparationOutcome = input.preparationClaim
-    ? null
-    : await claimAttemptPreparation({
-        tenantId: input.tenantId,
-        invocationId: input.invocation.id,
-        attemptId: input.attempt.id,
-        intentKey: input.sourceOperationKey,
-        requestDigest: sourceDecision.sourceRequestDigest,
-        claimId: randomUUID(),
-        now,
-      });
-  const preparationClaim = input.preparationClaim ?? preparationOutcome?.claim ?? null;
+  if (!preparationClaim) throw new Error("AttemptPreparationBusy");
   const preparedReplay =
-    preparationOutcome?.disposition === "replay" ? preparationOutcome.attempt : null;
-  if (!preparationClaim && !preparedReplay) {
-    throw new Error("AttemptPreparationBusy");
-  }
+    preparationDecision.stage === "register_execution" || preparationDecision.stage === "activate"
+      ? declaredAttempt
+      : null;
   const needsWorkspaceWriter = workspaceBinding.continuityMode !== "NO_PLATFORM_WORKSPACE";
   // 无受管 WorkspaceBackend 时按 Binding 冻结事实启动（桌面绑定冻结语义）；
   // Workspace Writer/准备证据由 capability action 执行期按需取得。
@@ -464,7 +434,7 @@ export async function startRuntimeInvocation(
           operationId: `workspace-${protocolDigest({
             sourceOperationKey: input.sourceOperationKey,
             checkpointId,
-            sourceRequestDigest: sourceDecision.sourceRequestDigest,
+            sourceRequestDigest,
           }).slice(7, 39)}`,
           runtimeRevisionId: input.binding.runtimeRevisionId,
         })
@@ -481,6 +451,7 @@ export async function startRuntimeInvocation(
     restoredRoot: string;
   } | null = null;
   if (
+    preparationDecision.stage === "prepare" &&
     input.recovery?.kind === "resume" &&
     workspaceBinding.continuityMode === "CHECKPOINT_RESTORABLE"
   ) {
@@ -553,14 +524,13 @@ export async function startRuntimeInvocation(
         attemptId: input.attempt.id,
         evidence,
         digest: protocolDigest(evidence),
-        preparationClaim: preparationClaim ?? undefined,
+        preparationClaim,
         now,
       });
     }));
   // A05：本次取得执行权所依据的恢复水位。必须在 **Acquire 之前**确定：`prepareChecks`
   // 会用它与 Lease 上的 Prepared 证据比对，写死 `null` 会让正式 Resume 被判成
   // "恢复 Anchor 已变化"（同一份事实两套判据）。
-  const sourceRequestDigest = sourceDecision.sourceRequestDigest;
   const result = await db.transaction(async (tx) => {
     // A01 §1：本事务此前先 `SELECT ExecutionOwnership … FOR UPDATE` 再经
     // `acquireExecutionOwnershipInTransaction` 去锁 Invocation，与「先锁 I 再锁 O」的
@@ -595,6 +565,7 @@ export async function startRuntimeInvocation(
     if (!lockedAttempt || lockedAttempt.id !== preparedAttempt.id) {
       throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于该 Invocation");
     }
+    await assertAttemptPreparationClaimHeldInTransaction(tx, preparationClaim);
     const nowAtAuthority = await getAuthorityDatabaseTime(tx);
     const [existingOwnership] = await tx
       .select()
@@ -730,8 +701,7 @@ export async function startRuntimeInvocation(
           leaseEpoch: ownership.leaseEpoch,
           intentType,
           startIntentKey: `start:${ownership.id}`,
-          sourceOperationKey: input.sourceOperationKey,
-          sourceRequestDigest,
+          preparationClaim,
           // External start capabilities 成为 RuntimeSessionBinding / effective capability 事实。
           runtimeCapabilitiesJson: runtimeRevision.runtimeCapabilitiesJson,
         });
@@ -790,6 +760,10 @@ export async function startRuntimeInvocation(
           .for("update")
           .limit(1);
         if (!invocation) throw new Error("Invocation 不存在");
+        const claimedAttempt = await assertAttemptPreparationClaimHeldInTransaction(
+          tx,
+          preparationClaim,
+        );
         const [current] = await tx
           .select()
           .from(executionOwnershipTable)
@@ -866,6 +840,15 @@ export async function startRuntimeInvocation(
             updatedAt: new Date(),
           })
           .where(eq(executionOwnershipTable.id, current.id));
+        await tx
+          .update(invocationAttemptTable)
+          .set({
+            preparationClaimId: null,
+            preparationLeaseExpiresAt: null,
+            versionNo: claimedAttempt.versionNo + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(invocationAttemptTable.id, preparedAttempt.id));
         const [updated] = await tx
           .select()
           .from(executionOwnershipTable)
@@ -947,6 +930,87 @@ async function dispatchRuntimeStartTransport(inputParams: {
 }): Promise<RuntimeStartResult> {
   const { input, attempt, ownership, session, publishedCapabilityManifestDigest, now } =
     inputParams;
+  // Transport 唯一准入事务：不接受 prepared/activating，也不依赖早先的锁外观察。
+  await db.transaction(async (tx) => {
+    const lockedInvocation = await lockInvocationRootIfExists(
+      tx,
+      input.tenantId,
+      input.invocation.id,
+    );
+    if (!lockedInvocation) throw new Error("NotCurrentExecutor");
+    const [lockedAttempt] = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, attempt.id),
+          eq(invocationAttemptTable.invocationId, input.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    const [lockedOwnership] = await tx
+      .select()
+      .from(executionOwnershipTable)
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, input.tenantId),
+          eq(executionOwnershipTable.id, ownership.id),
+          eq(executionOwnershipTable.invocationId, input.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    const lockedSession = await getRuntimeSessionBindingById(input.tenantId, session.id, tx);
+    const databaseNow = await getAuthorityDatabaseTime(tx);
+    if (
+      !lockedAttempt ||
+      !lockedOwnership ||
+      !lockedSession ||
+      lockedSession.ownershipId !== lockedOwnership.id ||
+      lockedSession.attemptId !== lockedAttempt.id ||
+      lockedOwnership.ownershipState !== "active" ||
+      lockedOwnership.leaseExpiresAt <= databaseNow ||
+      !["dispatching", "executing"].includes(lockedOwnership.executionPhase) ||
+      !["prepared", "dispatching", "active"].includes(lockedSession.bindingState)
+    ) {
+      throw new Error("NotCurrentExecutor");
+    }
+    const persistedSource = assertExecutionSourceSnapshot(lockedSession.sourceRequestJson);
+    if (
+      lockedSession.sourceRequestDigest !== executionSourceDigest(persistedSource) ||
+      !sameExecutionSourceRequest(
+        executionSourceRequestOf(persistedSource),
+        executionSourceRequestForStart(input),
+      )
+    ) {
+      throw new Error("StartIntentConflict");
+    }
+    if (input.environmentLeaseId) {
+      const [lease] = await tx
+        .select()
+        .from(environmentLeaseTable)
+        .where(
+          and(
+            eq(environmentLeaseTable.tenantId, input.tenantId),
+            eq(environmentLeaseTable.id, input.environmentLeaseId),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (
+        !lease ||
+        lease.attemptId !== lockedAttempt.id ||
+        lease.readinessState !== "ready" ||
+        lease.leaseState !== "active" ||
+        lease.activationOwnershipId !== lockedOwnership.id ||
+        lease.environmentDefinitionRevisionId !== input.binding.environmentDefinitionRevisionId
+      ) {
+        throw new Error("EnvironmentRevisionMismatch");
+      }
+    }
+  });
   const authority = authorityIdentity({
     invocationId: input.invocation.id,
     runtimeRevisionId: input.binding.runtimeRevisionId,
@@ -972,8 +1036,8 @@ async function dispatchRuntimeStartTransport(inputParams: {
     frozenSemanticRequest: session.semanticRequestJson,
     now,
   });
-  const dispatchClaim = input.sessionDispatchClaim ?? null;
-  if (dispatchClaim && dispatchClaim.sessionBindingId !== session.id) {
+  const requestedDispatchClaim = input.sessionDispatchClaim ?? null;
+  if (requestedDispatchClaim && requestedDispatchClaim.sessionBindingId !== session.id) {
     throw new Error("SessionDispatchClaimSuperseded");
   }
   // R02 §1：重试/重放会轮换短期凭据、ContextHandle 签名时间与 Trace —— 轮换后**必须**用
@@ -988,7 +1052,7 @@ async function dispatchRuntimeStartTransport(inputParams: {
   // R02 §1/§8：锁定 Invocation 根，把「派发尝试计数 + 语义请求一次冻结」写在同一事务里。
   // 语义请求冻结后，所有重试都读这份已持久事实（不再重新挑选 producerSequenceStart /
   // Context Subject / Model / Environment / Workspace / Resume Anchor）。
-  await db.transaction(async (tx) => {
+  const dispatchIdentity = await db.transaction(async (tx): Promise<SessionDispatchIdentity> => {
     const [lockedInvocation] = await tx
       .select({ id: invocationTable.id })
       .from(invocationTable)
@@ -1001,18 +1065,63 @@ async function dispatchRuntimeStartTransport(inputParams: {
       .for("update")
       .limit(1);
     if (!lockedInvocation) throw new Error("Invocation 不存在");
-    const recorded = await recordSessionDispatchAttemptStartedInTransaction(
-      tx,
-      {
+    const [lockedAttempt] = await tx
+      .select({ id: invocationAttemptTable.id })
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, attempt.id),
+          eq(invocationAttemptTable.invocationId, input.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!lockedAttempt) throw new Error("InvocationAttempt 不存在");
+    const [lockedOwnership] = await tx
+      .select({ id: executionOwnershipTable.id })
+      .from(executionOwnershipTable)
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, input.tenantId),
+          eq(executionOwnershipTable.id, ownership.id),
+          eq(executionOwnershipTable.attemptId, attempt.id),
+          eq(executionOwnershipTable.leaseEpoch, ownership.leaseEpoch),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!lockedOwnership) throw new Error("NotCurrentExecutor");
+    let identity: SessionDispatchIdentity = {
+      tenantId: input.tenantId,
+      sessionBindingId: session.id,
+      attemptId: attempt.id,
+      ownershipId: ownership.id,
+      leaseEpoch: ownership.leaseEpoch,
+      claimToken: requestedDispatchClaim?.claimToken ?? null,
+    };
+    let claimedSession = await lockClaimedSessionInTransaction(tx, identity);
+    if (requestedDispatchClaim) {
+      if (
+        claimedSession.dispatchLeaseExpiresAt === null ||
+        claimedSession.dispatchLeaseExpiresAt <= now
+      ) {
+        throw new Error("SessionDispatchClaimSuperseded");
+      }
+    } else {
+      if (claimedSession.dispatchLeaseExpiresAt && claimedSession.dispatchLeaseExpiresAt > now) {
+        throw new Error("SessionDispatchBusy");
+      }
+      identity = { ...identity, claimToken: randomUUID() };
+      claimedSession = await claimRuntimeSessionDispatchInTransaction(tx, {
         tenantId: input.tenantId,
-        sessionBindingId: session.id,
-        attemptId: attempt.id,
-        ownershipId: ownership.id,
-        leaseEpoch: ownership.leaseEpoch,
-        claimToken: dispatchClaim?.claimToken ?? null,
-      },
-      now,
-    );
+        id: session.id,
+        expectedVersionNo: claimedSession.versionNo,
+        leaseOwner: identity.claimToken as string,
+        leaseExpiresAt: new Date(now.getTime() + RUNTIME_DISPATCH_RETRY_POLICY.leaseDurationMs),
+      });
+    }
+    const recorded = await recordSessionDispatchAttemptStartedInTransaction(tx, identity, now);
     await updateRuntimeSessionDispatchInTransaction(tx, {
       tenantId: input.tenantId,
       id: session.id,
@@ -1023,6 +1132,7 @@ async function dispatchRuntimeStartTransport(inputParams: {
         lastErrorCode: null,
       },
     });
+    return identity;
   });
   const transportRequest = {
     runtimeEndpoint: input.runtimeEndpoint,
@@ -1032,60 +1142,103 @@ async function dispatchRuntimeStartTransport(inputParams: {
     idempotencyKey: `start:${ownership.id}`,
     request: request.request,
   };
-  const response =
-    input.intentType === "resume"
-      ? await input.runtimeClient.resumeInvocation(transportRequest)
-      : await input.runtimeClient.startInvocation(transportRequest);
-  if (
-    response.semanticRequestDigest !== request.request.semanticRequestDigest ||
-    !sameAuthority(response.authority, authority)
-  ) {
-    throw new Error("RuntimeSessionMismatch");
-  }
-  // R02 §3：Runtime 回执的 capabilitiesDigest 必须等于**发布证据**（RuntimeRevision
-  // 冻结 manifest）摘要，否则 fail-closed（dispatch 可能已开始）。不区分 in-process：
-  // Hosted 也必须由同一发布事实给出摘要，不存在免校验分支。
-  if (response.capabilitiesDigest !== publishedCapabilityManifestDigest) {
-    throw new RuntimeHttpClientError(
-      "protocol",
-      "RUNTIME_CAPABILITY_MISMATCH",
-      undefined,
-      undefined,
-      {
-        stableCode: "RUNTIME_CAPABILITY_MISMATCH",
-        retryable: false,
-        dispatchPossiblyStarted: true,
-      },
-    );
-  }
-  // R02 §8：ACK 写入同样走仓储方法并在 Invocation 根锁内完成（CAS 防迟到 ACK）。
-  const sessionAfterAck = await db.transaction(async (tx) => {
-    const [lockedInvocation] = await tx
-      .select({ id: invocationTable.id })
-      .from(invocationTable)
-      .where(
-        and(
-          eq(invocationTable.tenantId, input.tenantId),
-          eq(invocationTable.id, input.invocation.id),
-        ),
-      )
-      .for("update")
-      .limit(1);
-    if (!lockedInvocation) throw new Error("Invocation 不存在");
-    return updateRuntimeSessionDispatchInTransaction(tx, {
-      tenantId: input.tenantId,
-      id: session.id,
-      // 单调合并：`execution.started` 可能已先于本 ACK 到达（callback-before-ACK），
-      // 此时 Session 已 active 且版本前移——ACK 只补远端引用与 Transport 结果，不判迟到冲突。
-      patch: {
-        remoteSessionRef: response.remoteSessionRef,
-        remoteExecutionRef: response.remoteExecutionRef,
-        transportAcknowledgement: response,
-        acknowledgedAt: new Date(response.acceptedAt),
-      },
+  try {
+    const response =
+      input.intentType === "resume"
+        ? await input.runtimeClient.resumeInvocation(transportRequest)
+        : await input.runtimeClient.startInvocation(transportRequest);
+    if (
+      response.semanticRequestDigest !== request.request.semanticRequestDigest ||
+      !sameAuthority(response.authority, authority)
+    ) {
+      throw new Error("RuntimeSessionMismatch");
+    }
+    // R02 §3：Runtime 回执的 capabilitiesDigest 必须等于**发布证据**（RuntimeRevision
+    // 冻结 manifest）摘要，否则 fail-closed（dispatch 可能已开始）。不区分 in-process：
+    // Hosted 也必须由同一发布事实给出摘要，不存在免校验分支。
+    if (response.capabilitiesDigest !== publishedCapabilityManifestDigest) {
+      throw new RuntimeHttpClientError(
+        "protocol",
+        "RUNTIME_CAPABILITY_MISMATCH",
+        undefined,
+        undefined,
+        {
+          stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+          retryable: false,
+          dispatchPossiblyStarted: true,
+        },
+      );
+    }
+    // R02 §8：ACK 写入同样走仓储方法并在 Invocation 根锁内完成（CAS 防迟到 ACK）。
+    const sessionAfterAck = await db.transaction(async (tx) => {
+      const [lockedInvocation] = await tx
+        .select({ id: invocationTable.id })
+        .from(invocationTable)
+        .where(
+          and(
+            eq(invocationTable.tenantId, input.tenantId),
+            eq(invocationTable.id, input.invocation.id),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!lockedInvocation) throw new Error("Invocation 不存在");
+      const [lockedAttempt] = await tx
+        .select({ id: invocationAttemptTable.id })
+        .from(invocationAttemptTable)
+        .where(
+          and(
+            eq(invocationAttemptTable.tenantId, input.tenantId),
+            eq(invocationAttemptTable.id, dispatchIdentity.attemptId),
+            eq(invocationAttemptTable.invocationId, input.invocation.id),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      const [lockedOwnership] = await tx
+        .select()
+        .from(executionOwnershipTable)
+        .where(
+          and(
+            eq(executionOwnershipTable.tenantId, input.tenantId),
+            eq(executionOwnershipTable.id, dispatchIdentity.ownershipId),
+            eq(executionOwnershipTable.attemptId, dispatchIdentity.attemptId),
+            eq(executionOwnershipTable.leaseEpoch, dispatchIdentity.leaseEpoch),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      const databaseNow = await getAuthorityDatabaseTime(tx);
+      if (
+        !lockedAttempt ||
+        !lockedOwnership ||
+        lockedOwnership.ownershipState !== "active" ||
+        lockedOwnership.leaseExpiresAt <= databaseNow
+      ) {
+        throw new Error("NotCurrentExecutor");
+      }
+      const claimed = await lockClaimedSessionInTransaction(tx, dispatchIdentity);
+      return updateRuntimeSessionDispatchInTransaction(tx, {
+        tenantId: input.tenantId,
+        id: session.id,
+        expectedVersionNo: claimed.versionNo,
+        // 单调合并：`execution.started` 可能已先于本 ACK 到达（callback-before-ACK），
+        // 此时 Session 已 active 且版本前移——ACK 只补远端引用与 Transport 结果，不判迟到冲突。
+        patch: {
+          remoteSessionRef: response.remoteSessionRef,
+          remoteExecutionRef: response.remoteExecutionRef,
+          transportAcknowledgement: response,
+          acknowledgedAt: new Date(response.acceptedAt),
+          dispatchLeaseOwner: null,
+          dispatchLeaseExpiresAt: null,
+          nextDispatchAt: null,
+        },
+      });
     });
-  });
-  return { authority, response, sessionBindingId: sessionAfterAck.id };
+    return { authority, response, sessionBindingId: sessionAfterAck.id };
+  } catch (error) {
+    throw new RuntimeStartTransportError(error, dispatchIdentity);
+  }
 }
 
 /**
@@ -1135,6 +1288,19 @@ async function claimActivationFailureCompensation(
       .for("update")
       .limit(1);
     if (!invocation) return false;
+    const [attempt] = await tx
+      .select({ id: invocationAttemptTable.id })
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, ownership.attemptId),
+          eq(invocationAttemptTable.invocationId, input.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!attempt) return false;
     const [current] = await tx
       .select()
       .from(executionOwnershipTable)

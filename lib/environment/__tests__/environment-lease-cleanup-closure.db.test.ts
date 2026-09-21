@@ -40,7 +40,6 @@ import {
 } from "@/lib/environment/environment-lease-store";
 import {
   createEnvironmentProvisioner,
-  environmentProvisionRequestDigest,
   runDueEnvironmentLeaseCleanups,
   runEnvironmentLeaseCleanup,
 } from "@/lib/environment/environment-provisioner";
@@ -52,6 +51,11 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  attemptPreparationClaimForTest,
+  executionSourceForTest,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -223,16 +227,7 @@ async function makeFixture(): Promise<ManagedFixture> {
       const seeded = await seedPreparedRuntimeAttempt({
         environmentDefinitionRevisionId: revision.id,
       });
-      const preparationClaimId = randomUUID();
-      const preparationIntentKey = `invocation:${seeded.invocation.id}`;
-      const preparationRequestDigest = environmentProvisionRequestDigest({
-        tenantId: TENANT_ID,
-        invocationId: seeded.invocation.id,
-        attemptId: seeded.attempt.id,
-        revisionId: revision.id,
-        workspaceBindingId: seeded.workspace.id,
-        recoveryAnchorDigest: null,
-      });
+      const preparationClaim = await attemptPreparationClaimForTest(seeded.attempt.id);
       const lease = await provisioner.provision({
         tenantId: TENANT_ID,
         invocationId: seeded.invocation.id,
@@ -241,30 +236,11 @@ async function makeFixture(): Promise<ManagedFixture> {
         revision,
         workspaceBindingId: seeded.workspace.id,
         workspaceRoot,
-        preparationClaimId,
-        preparationIntentKey,
-        preparationRequestDigest,
+        preparationClaim,
       });
       if (!lease.preparedEvidence || !lease.preparedDigest) {
         throw new Error("EnvironmentLease 缺少 Prepared 证据");
       }
-      const preparedEvidence = lease.preparedEvidence;
-      const preparedDigest = lease.preparedDigest;
-      await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
-          attemptId: seeded.attempt.id,
-          evidence: preparedEvidence,
-          digest: preparedDigest,
-          preparationClaim: {
-            tenantId: TENANT_ID,
-            invocationId: seeded.invocation.id,
-            attemptId: seeded.attempt.id,
-            intentKey: preparationIntentKey,
-            requestDigest: preparationRequestDigest,
-            claimId: preparationClaimId,
-          },
-        }),
-      );
       const authority = await acquireTestRuntimeAuthority({
         tenantId: TENANT_ID,
         invocationId: seeded.invocation.id,
@@ -436,31 +412,32 @@ describe("A08 环境资源终态清理与回收闭环", () => {
       .update(invocationAttemptTable)
       .set({
         preparationState: "pending",
+        preparationEvidence: null,
+        preparationDigest: null,
+        preparedAt: null,
         preparationIntentKey: null,
         preparationRequestDigest: null,
+        preparationSourceJson: null,
         preparationClaimId: null,
         preparationLeaseExpiresAt: null,
       })
       .where(eq(invocationAttemptTable.id, seeded.attemptId));
     const intentKey = `n05-create:${seeded.attemptId}`;
-    const requestDigest = protocolDigest({ intentKey });
-    const t0 = new Date();
-    const first = await claimAttemptPreparation({
+    const source = executionSourceForTest({
       tenantId: TENANT_ID,
       invocationId: seeded.invocationId,
       attemptId: seeded.attemptId,
-      intentKey,
-      requestDigest,
+      sourceOperationKey: intentKey,
+    });
+    const t0 = new Date();
+    const first = await claimAttemptPreparation({
+      source,
       claimId: "n05-worker-1",
       now: t0,
     });
     if (!first.claim) throw new Error("W1 未取得准备领取");
     const second = await claimAttemptPreparation({
-      tenantId: TENANT_ID,
-      invocationId: seeded.invocationId,
-      attemptId: seeded.attemptId,
-      intentKey,
-      requestDigest,
+      source,
       claimId: "n05-worker-2",
       now: new Date(t0.getTime() + ATTEMPT_PREPARATION_LEASE_MS + 1),
     });
@@ -546,7 +523,7 @@ describe("A08 环境资源终态清理与回收闭环", () => {
       attemptId: attempt2.id,
     };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt2.id,
         evidence,
         digest: protocolDigest(evidence),

@@ -29,6 +29,7 @@ import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -230,7 +231,7 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
     });
     const evidence = { kind: "env-redispatch", attemptId: attempt2.id };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt2.id,
         evidence,
         digest: protocolDigest(evidence),
@@ -383,7 +384,7 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
       });
       const retryEvidence = { kind: "env-retry", attemptId: retryAttempt.id, round: i };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId: retryAttempt.id,
           evidence: retryEvidence,
           digest: protocolDigest(retryEvidence),

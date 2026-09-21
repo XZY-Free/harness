@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getRuntimeRevisionById: vi.fn(),
   getWorkspaceBindingById: vi.fn(),
   decideRuntimeStartSource: vi.fn(),
+  acceptExecutionPreparation: vi.fn(),
   startRuntimeInvocation: vi.fn(),
   resolveOutboundRuntimeAuth: vi.fn(),
   createHttpHarnessRuntimeTransport: vi.fn(),
@@ -63,10 +64,19 @@ vi.mock("@/lib/runtime/credentials/resolve-outbound-runtime-auth", () => ({
 vi.mock("@/lib/runtime/transport/http-harness-runtime-transport", () => ({
   createHttpHarnessRuntimeTransport: mocks.createHttpHarnessRuntimeTransport,
 }));
-vi.mock("@/lib/runtime/application/runtime-start", () => ({
-  decideRuntimeStartSource: mocks.decideRuntimeStartSource,
-  startRuntimeInvocation: mocks.startRuntimeInvocation,
-  buildExecutionCredentials: vi.fn(),
+vi.mock("@/lib/runtime/application/runtime-start", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/runtime/application/runtime-start")>();
+  return {
+    ...actual,
+    decideRuntimeStartSource: mocks.decideRuntimeStartSource,
+    startRuntimeInvocation: mocks.startRuntimeInvocation,
+    buildExecutionCredentials: vi.fn(),
+  };
+});
+// 本用例只验证 External continuation 是否把正式接纳结果贯穿到共享 Start 服务；
+// 来源裁决自身由 managed-resume-lifecycle / runtime-control-recovery 的真实 MySQL 用例覆盖。
+vi.mock("@/lib/runtime/application/execution-preparation", () => ({
+  acceptExecutionPreparation: mocks.acceptExecutionPreparation,
 }));
 vi.mock("@/lib/runtime/adapters/hosted-adapter", () => ({
   HostedHarnessLoop: class {
@@ -142,6 +152,23 @@ describe("External Runtime continuation resume", () => {
     mocks.decideRuntimeStartSource.mockResolvedValue({
       disposition: "new",
       sourceRequestDigest: `sha256:${"1".repeat(64)}`,
+    });
+    mocks.acceptExecutionPreparation.mockImplementation(async ({ request }) => {
+      const source = { ...request, predecessor: null };
+      return {
+        disposition: "claimed",
+        stage: "prepare",
+        source,
+        claim: {
+          tenantId: request.tenantId,
+          invocationId: request.invocationId,
+          attemptId: request.attemptId,
+          intentKey: request.sourceOperationKey,
+          requestDigest: `sha256:${"2".repeat(64)}`,
+          claimId: "claim-external-resume",
+          source,
+        },
+      };
     });
     mocks.startRuntimeInvocation.mockResolvedValue({
       authority: { ownershipId: "ownership-1" },

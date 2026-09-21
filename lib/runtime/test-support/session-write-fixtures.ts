@@ -6,6 +6,15 @@
  * 并把行版本显式传给 CAS，不引入任何测试专用写路径。
  */
 import { db } from "@/lib/db/client";
+import {
+  assertExecutionSourceSnapshot,
+  executionSourceDigest,
+} from "@/lib/executions/domain/preparation-source";
+import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  executionOwnershipTable,
+  invocationAttemptTable,
+} from "@/lib/persistence/schema/executions";
 import type {
   RuntimeSessionBinding,
   RuntimeSessionIntentType,
@@ -18,11 +27,79 @@ import {
   updateRuntimeSessionDispatchInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { and, eq } from "drizzle-orm";
+
+type CreateRuntimeSessionBindingFixtureInput = Omit<
+  CreateRuntimeSessionBindingInput,
+  "preparationClaim"
+> & {
+  sourceOperationKey?: string;
+  sourceRequestDigest?: string;
+};
 
 export async function createRuntimeSessionBindingForTest(
-  input: CreateRuntimeSessionBindingInput,
+  input: CreateRuntimeSessionBindingFixtureInput,
 ): Promise<RuntimeSessionBinding> {
-  return db.transaction((tx) => createRuntimeSessionBindingInTransaction(tx, input));
+  return db.transaction(async (tx) => {
+    if (!(await lockInvocationRootIfExists(tx, input.tenantId, input.invocationId))) {
+      throw new Error("测试 Session 的 Invocation 不存在");
+    }
+    const [attempt] = await tx
+      .select()
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.id, input.attemptId),
+          eq(invocationAttemptTable.invocationId, input.invocationId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (
+      !attempt ||
+      !attempt.preparationClaimId ||
+      !attempt.preparationIntentKey ||
+      !attempt.preparationRequestDigest ||
+      !attempt.preparationSourceJson
+    ) {
+      throw new Error("测试 Session 缺少合法准备领取");
+    }
+    const source = assertExecutionSourceSnapshot(attempt.preparationSourceJson);
+    if (executionSourceDigest(source) !== attempt.preparationRequestDigest) {
+      throw new Error("测试 Session 的准备来源损坏");
+    }
+    const [ownership] = await tx
+      .select({ id: executionOwnershipTable.id })
+      .from(executionOwnershipTable)
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, input.tenantId),
+          eq(executionOwnershipTable.id, input.ownershipId),
+          eq(executionOwnershipTable.attemptId, input.attemptId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!ownership) throw new Error("测试 Session 的 Ownership 不存在");
+    const {
+      sourceOperationKey: _sourceKey,
+      sourceRequestDigest: _sourceDigest,
+      ...sessionInput
+    } = input;
+    return createRuntimeSessionBindingInTransaction(tx, {
+      ...sessionInput,
+      preparationClaim: {
+        tenantId: input.tenantId,
+        invocationId: input.invocationId,
+        attemptId: input.attemptId,
+        intentKey: attempt.preparationIntentKey,
+        requestDigest: attempt.preparationRequestDigest,
+        claimId: attempt.preparationClaimId,
+        source,
+      },
+    });
+  });
 }
 
 /**

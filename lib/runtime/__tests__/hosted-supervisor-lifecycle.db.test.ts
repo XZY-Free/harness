@@ -25,6 +25,7 @@ import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
+import type { AttemptPreparationClaim } from "@/lib/executions/persistence/attempt-store";
 import {
   closeExecutionOwnershipInTransaction,
   getActiveExecutionOwnership,
@@ -33,6 +34,7 @@ import {
   renewHostedExecutionLease,
   renewHostedExecutionLeaseInTransaction,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   createPreparedTakeoverAttempt,
@@ -110,7 +112,7 @@ async function markPrepared(invocationId: string, attemptId: string) {
   );
   const evidence = { kind: "supervisor-lifecycle-candidate", invocationId, attemptId };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId,
       evidence,
       digest: protocolDigest(evidence),
@@ -404,6 +406,9 @@ function startInputFor(input: {
   attempt: Parameters<typeof startRuntimeInvocation>[0]["attempt"];
   applicationService: HostedRuntimeApplicationService;
 }) {
+  const preparationClaim = (
+    input.attempt as typeof input.attempt & { preparationClaim?: AttemptPreparationClaim }
+  ).preparationClaim;
   const client = createInProcessHostedRuntimeClient({
     tenantId: input.tenantId,
     publishedCapabilityEvidence: {
@@ -419,6 +424,7 @@ function startInputFor(input: {
     invocation: input.invocation,
     binding: input.binding,
     attempt: input.attempt,
+    ...(preparationClaim ? { preparationClaim } : {}),
     runtimeClient: client,
     runtimeEndpoint: "in-process://hosted",
     auth: { mode: "workload_token" as const, token: "a03-supervisor-token" },

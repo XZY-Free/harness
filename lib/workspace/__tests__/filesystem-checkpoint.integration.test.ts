@@ -28,6 +28,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -1157,7 +1158,7 @@ describe("FilesystemCheckpoint integration", () => {
       ).id;
       const evidence = { kind: "test-candidate", invocationId: ctx.invocationId, attemptId };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId,
           evidence,
           digest: protocolDigest(evidence),
@@ -1432,7 +1433,7 @@ describe("FilesystemCheckpoint integration", () => {
       });
       const evidence = { kind: "n06-t6", attemptId: replacementAttempt.id };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId: replacementAttempt.id,
           evidence,
           digest: protocolDigest(evidence),

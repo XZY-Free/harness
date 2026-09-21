@@ -22,6 +22,7 @@ import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -330,7 +331,7 @@ describe("生产 continuation worker durable topology", () => {
         attemptId: attempt.id,
       };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId: attempt.id,
           evidence: attemptEvidence,
           digest: protocolDigest(attemptEvidence),

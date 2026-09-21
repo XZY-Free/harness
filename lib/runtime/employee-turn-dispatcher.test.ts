@@ -49,6 +49,7 @@ import {
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
+import type { RuntimeStartTransportError } from "@/lib/runtime/application/runtime-start";
 import {
   dispatchInterruptCommandToRuntime,
   dispatchResumeCommandToRuntime,
@@ -918,11 +919,15 @@ describe("dispatchEmployeeTurn", () => {
         decisionPort: { decideNextAction: hostedDecision },
       }),
     ).rejects.toMatchObject({
-      name: "RuntimeHttpClientError",
-      stableCode: "RUNTIME_CAPABILITY_MISMATCH",
-      retryable: false,
-      dispatchPossiblyStarted: true,
-    });
+      name: "RuntimeStartTransportError",
+      originalError: {
+        name: "RuntimeHttpClientError",
+        stableCode: "RUNTIME_CAPABILITY_MISMATCH",
+        retryable: false,
+        dispatchPossiblyStarted: true,
+      },
+      dispatchIdentity: expect.objectContaining({ claimToken: expect.any(String) }),
+    } satisfies Partial<RuntimeStartTransportError>);
     expect(hostedDecision).not.toHaveBeenCalled();
     expect(fixture.server.requests.map((request) => request.url)).toEqual(["/runtime/invocations"]);
   });

@@ -45,6 +45,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -63,10 +64,14 @@ import {
 import { filesystemCheckpointTable } from "@/lib/persistence/schema/filesystem-checkpoint";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import { resolveExecutionResources } from "@/lib/runtime/application/execution-resources";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
-import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import {
+  executionSourceRequestForStart,
+  startRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-start";
 import {
   dispatchResumeCommandToRuntime,
   retryDispatchedCommandToRuntime,
@@ -980,14 +985,25 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       tenantId: TENANT_ID,
       invocationId: ctx.invocationId,
     });
-    const preparedEvidence = { kind: "a06-resume", attemptId: nextAttempt.id };
-    await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
-        attemptId: nextAttempt.id,
-        evidence: preparedEvidence,
-        digest: protocolDigest(preparedEvidence),
+    const bindingRow = (await db
+      .select()
+      .from(executionBindingTable)
+      .where(eq(executionBindingTable.invocationId, ctx.invocationId))
+      .limit(1))![0]!;
+    const invocation = (await readGate(ctx.invocationId))!;
+    const sourceOperationKey = `command:a06-resume:${checkpoint.checkpointId}`;
+    const accepted = await acceptExecutionPreparation({
+      request: executionSourceRequestForStart({
+        tenantId: TENANT_ID,
+        invocation,
+        binding: bindingRow,
+        attempt: nextAttempt,
+        sourceOperationKey,
+        intentType: "resume",
+        recovery: { kind: "resume", anchor, anchorDigest, checkpointId: checkpoint.checkpointId },
       }),
-    );
+    });
+    if (accepted.disposition !== "claimed") throw new Error("A06 Resume 准备领取失败");
     const nextLease = await seedPreparedEnvironmentLease({
       tenantId: TENANT_ID,
       invocationId: ctx.invocationId,
@@ -995,14 +1011,10 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       revision: (await getEnvironmentRevisionById(TENANT_ID, ctx.environmentRevisionId))!,
       workspaceBindingId: ctx.workspaceBindingId,
       recoveryAnchorDigest: anchorDigest,
+      preparationClaim: accepted.claim,
     });
 
     // 生产组合层解析执行资源（与请求内联调度同源，无测试覆盖）。
-    const bindingRow = (await db
-      .select()
-      .from(executionBindingTable)
-      .where(eq(executionBindingTable.invocationId, ctx.invocationId))
-      .limit(1))![0]!;
     const resources = await resolveExecutionResources({
       tenantId: TENANT_ID,
       binding: bindingRow,
@@ -1011,12 +1023,11 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(resources.workspace).toBeTruthy();
     expect(resources.workspace?.binding.id).toBe(ctx.workspaceBindingId);
 
-    const invocation = (await readGate(ctx.invocationId))!;
     const started = await startRuntimeInvocation({
       tenantId: TENANT_ID,
       // A05：本次恢复的来源意图（生产由命令网关按已持久命令身份给出；
       // 夹具直接调 Start，用 Invocation 自身身份，仍是稳定值）。
-      sourceOperationKey: `invocation:${invocation.id}`,
+      sourceOperationKey,
       invocation,
       binding: bindingRow,
       attempt: nextAttempt,
@@ -1034,6 +1045,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
         anchorDigest,
         checkpointId: checkpoint.checkpointId,
       },
+      preparationClaim: accepted.claim,
     });
     // 远端收到的就是本次恢复锚点（不是重新算的另一个）。
     expect(ctx.stub.resumeRequests).toHaveLength(1);
@@ -1230,14 +1242,28 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     const anchor = `checkpoint:${checkpoint.checkpointId}`;
     const anchorDigest = protocolDigest(anchor);
     const attempt = await createAttempt({ tenantId: TENANT_ID, invocationId: ctx.invocationId });
-    const preparedEvidence = { kind: "a06-resume", attemptId: attempt.id };
-    await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
-        attemptId: attempt.id,
-        evidence: preparedEvidence,
-        digest: protocolDigest(preparedEvidence),
+    const bindingRow = (
+      await db
+        .select()
+        .from(executionBindingTable)
+        .where(eq(executionBindingTable.invocationId, ctx.invocationId))
+        .limit(1)
+    )[0];
+    if (!bindingRow) throw new Error("ExecutionBinding 缺失");
+    const invocation = await readInvocationFacts(ctx.invocationId);
+    const sourceOperationKey = `command:a06-resume:${checkpoint.checkpointId}`;
+    const accepted = await acceptExecutionPreparation({
+      request: executionSourceRequestForStart({
+        tenantId: TENANT_ID,
+        invocation,
+        binding: bindingRow,
+        attempt,
+        sourceOperationKey,
+        intentType: "resume",
+        recovery: { kind: "resume", anchor, anchorDigest, checkpointId: checkpoint.checkpointId },
       }),
-    );
+    });
+    if (accepted.disposition !== "claimed") throw new Error("A06 Resume 准备领取失败");
     const revision = await getEnvironmentRevisionById(TENANT_ID, ctx.environmentRevisionId);
     if (!revision) throw new Error("EnvironmentRevision 缺失");
     const lease = await seedPreparedEnvironmentLease({
@@ -1247,6 +1273,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       revision,
       workspaceBindingId: ctx.workspaceBindingId,
       recoveryAnchorDigest: anchorDigest,
+      preparationClaim: accepted.claim,
     });
     const candidateParent = path.join(await realpath(ctx.writerRoot), ".snow-runs", attempt.id);
     return {
@@ -1256,24 +1283,15 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       lease,
       candidateParent,
       async start() {
-        const bindingRow = (
-          await db
-            .select()
-            .from(executionBindingTable)
-            .where(eq(executionBindingTable.invocationId, ctx.invocationId))
-            .limit(1)
-        )[0];
-        if (!bindingRow) throw new Error("ExecutionBinding 缺失");
         const resources = await resolveExecutionResources({
           tenantId: TENANT_ID,
           binding: bindingRow,
           purpose: "resume",
         });
         if (!resources.workspace) throw new Error("Workspace 执行资源缺失");
-        const invocation = await readInvocationFacts(ctx.invocationId);
         return startRuntimeInvocation({
           tenantId: TENANT_ID,
-          sourceOperationKey: `invocation:${ctx.invocationId}`,
+          sourceOperationKey,
           invocation,
           binding: bindingRow,
           attempt,
@@ -1289,6 +1307,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
           workspace: resources.workspace,
           intentType: "resume",
           recovery: { kind: "resume", anchor, anchorDigest, checkpointId: checkpoint.checkpointId },
+          preparationClaim: accepted.claim,
         });
       },
     };

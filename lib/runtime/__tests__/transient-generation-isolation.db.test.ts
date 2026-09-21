@@ -30,6 +30,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { closeExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
 import { IngressAuthorityMismatchError } from "@/lib/runtime/application/ingress-runtime-events";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
@@ -47,7 +48,7 @@ const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
 async function markPrepared(invocationId: string, attemptId: string) {
   const evidence = { kind: "transient-generation-candidate", invocationId, attemptId };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId,
       evidence,
       digest: protocolDigest(evidence),

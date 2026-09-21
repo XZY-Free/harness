@@ -28,6 +28,10 @@ import {
   closeExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
+import {
+  attemptPreparationClaimForTestInTransaction,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
 import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
 import { threadEventTable, turnTable } from "@/lib/persistence/schema/conversation";
 import {
@@ -66,7 +70,7 @@ async function sleep(ms: number): Promise<void> {
 async function markPrepared(invocationId: string, attemptId: string) {
   const evidence = { kind: "hosted-cancel-candidate", invocationId, attemptId };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId,
       evidence,
       digest: protocolDigest(evidence),
@@ -277,7 +281,7 @@ describe("A02：Hosted Cancel 的终态收口与代际一致", () => {
         versionNo: 1,
       });
       // 用**同一仓储方法**补 Prepared（CHECK 约束要求 evidence/digest 成对，手写 UPDATE 会被拒）。
-      await markAttemptPreparedInTransaction(tx, {
+      await markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt2Id,
         evidence: {
           kind: "hosted-cancel-takeover",
@@ -304,12 +308,7 @@ describe("A02：Hosted Cancel 的终态收口与代际一致", () => {
         leaseEpoch: takeover.ownership.leaseEpoch,
         intentType: "start",
         startIntentKey: `start:${takeover.ownership.id}`,
-        ...sourceIntentForFixture({
-          tenantId,
-          invocationId: invocation.id,
-          attemptId: attempt2Id,
-          intentType: "start",
-        }),
+        preparationClaim: await attemptPreparationClaimForTestInTransaction(tx, attempt2Id),
       });
       takeoverDone.resolve();
       await commitHolder.promise;

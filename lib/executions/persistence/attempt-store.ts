@@ -2,6 +2,12 @@
 import { randomUUID } from "node:crypto";
 import { type DbOrTx, db } from "@/lib/db/client";
 import {
+  type ExecutionSourceSnapshot,
+  assertExecutionSourceSnapshot,
+  executionSourceDigest,
+} from "@/lib/executions/domain/preparation-source";
+import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
+import {
   type InvocationAttempt,
   type InvocationAttemptState,
   type InvocationPreparationState,
@@ -24,6 +30,7 @@ export interface AttemptPreparationClaim {
   intentKey: string;
   requestDigest: string;
   claimId: string;
+  source: ExecutionSourceSnapshot;
 }
 
 export type AttemptPreparationClaimOutcome =
@@ -89,6 +96,7 @@ async function createAttemptIn(
     preparedAt: null,
     preparationIntentKey: null,
     preparationRequestDigest: null,
+    preparationSourceJson: null,
     preparationClaimId: null,
     preparationLeaseExpiresAt: null,
     nextPreparationAt: null,
@@ -129,107 +137,134 @@ export function createAttemptInternal(
  * 领取事务固定锁序为 Invocation → Attempt。外部 IO 完成后的所有提交者必须把这里返回的
  * claim 原样带回；仅凭 attemptId、进程 id 或“当前还没有 Owner”都不构成写权限。
  */
-export async function claimAttemptPreparation(
-  input: AttemptPreparationClaim & {
-    now?: Date;
-  },
-) {
+export interface ClaimAttemptPreparationInput {
+  source: ExecutionSourceSnapshot;
+  claimId: string;
+  now?: Date;
+}
+
+export async function claimAttemptPreparation(input: ClaimAttemptPreparationInput) {
   return db.transaction(async (tx): Promise<AttemptPreparationClaimOutcome> => {
-    const now = input.now ?? new Date();
+    const source = assertExecutionSourceSnapshot(input.source);
     const [invocation] = await tx
       .select({ id: invocationTable.id })
       .from(invocationTable)
       .where(
         and(
-          eq(invocationTable.tenantId, input.tenantId),
-          eq(invocationTable.id, input.invocationId),
+          eq(invocationTable.tenantId, source.tenantId),
+          eq(invocationTable.id, source.invocationId),
         ),
       )
       .for("update")
       .limit(1);
-    if (!invocation) throw new InvocationAttemptNotFoundError(input.attemptId);
-    const [attempt] = await tx
-      .select()
-      .from(invocationAttemptTable)
-      .where(
-        and(
-          eq(invocationAttemptTable.tenantId, input.tenantId),
-          eq(invocationAttemptTable.id, input.attemptId),
-          eq(invocationAttemptTable.invocationId, input.invocationId),
-        ),
-      )
-      .for("update")
-      .limit(1);
-    if (!attempt) throw new InvocationAttemptNotFoundError(input.attemptId);
-    if (
-      attempt.preparationIntentKey === input.intentKey &&
-      attempt.preparationRequestDigest !== null &&
-      attempt.preparationRequestDigest !== input.requestDigest &&
-      attempt.preparationState !== "pending"
-    ) {
-      throw new InvocationAttemptStateConflictError(
-        attempt.id,
-        attempt.attemptState,
-        "PreparationIntentConflict",
-      );
-    }
-    if (
-      attempt.preparationState === "prepared" &&
-      attempt.preparationIntentKey === input.intentKey &&
-      attempt.preparationRequestDigest === input.requestDigest
-    ) {
-      return { disposition: "replay", attempt, claim: null };
-    }
-    if (
-      attempt.preparationState === "preparing" &&
-      attempt.preparationClaimId !== input.claimId &&
-      (attempt.preparationLeaseExpiresAt?.getTime() ?? 0) > now.getTime()
-    ) {
-      return { disposition: "busy", attempt, claim: null };
-    }
-    if (
-      attempt.preparationIntentKey !== null &&
-      attempt.preparationIntentKey !== input.intentKey &&
-      !["pending", "prepared"].includes(attempt.preparationState)
-    ) {
-      throw new InvocationAttemptStateConflictError(
-        attempt.id,
-        attempt.attemptState,
-        "PreparationSourceSuperseded",
-      );
-    }
-    await tx
-      .update(invocationAttemptTable)
-      .set({
-        preparationState: "preparing",
-        preparationIntentKey: input.intentKey,
-        preparationRequestDigest: input.requestDigest,
-        preparationClaimId: input.claimId,
-        preparationLeaseExpiresAt: new Date(now.getTime() + ATTEMPT_PREPARATION_LEASE_MS),
-        nextPreparationAt: null,
-        updatedAt: now,
-        versionNo: attempt.versionNo + 1,
-      })
-      .where(eq(invocationAttemptTable.id, attempt.id));
-    const [updated] = await tx
-      .select()
-      .from(invocationAttemptTable)
-      .where(eq(invocationAttemptTable.id, attempt.id))
-      .limit(1);
-    if (!updated) throw new InvocationAttemptNotFoundError(attempt.id);
-    return {
-      disposition: "claimed",
-      attempt: updated,
-      claim: {
-        tenantId: input.tenantId,
-        invocationId: input.invocationId,
-        attemptId: input.attemptId,
-        intentKey: input.intentKey,
-        requestDigest: input.requestDigest,
-        claimId: input.claimId,
-      },
-    };
+    if (!invocation) throw new InvocationAttemptNotFoundError(source.attemptId);
+    return claimAttemptPreparationInTransaction(tx, input);
   });
+}
+
+/**
+ * TX-A 内部步骤。调用方必须已按 I → A 的偏序锁定 Invocation 根；
+ * 该函数不自开事务，使来源裁决、准备领取与 Lease 变更可以在同一真实事务完成。
+ */
+export async function claimAttemptPreparationInTransaction(
+  tx: AttemptTx,
+  input: ClaimAttemptPreparationInput,
+): Promise<AttemptPreparationClaimOutcome> {
+  const now = input.now ?? new Date();
+  const source = assertExecutionSourceSnapshot(input.source);
+  const requestDigest = executionSourceDigest(source);
+  const [attempt] = await tx
+    .select()
+    .from(invocationAttemptTable)
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, source.tenantId),
+        eq(invocationAttemptTable.id, source.attemptId),
+        eq(invocationAttemptTable.invocationId, source.invocationId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!attempt) throw new InvocationAttemptNotFoundError(source.attemptId);
+  if (
+    attempt.preparationIntentKey === source.sourceOperationKey &&
+    attempt.preparationRequestDigest !== null &&
+    attempt.preparationRequestDigest !== requestDigest
+  ) {
+    throw new InvocationAttemptStateConflictError(
+      attempt.id,
+      attempt.attemptState,
+      "PreparationIntentConflict",
+    );
+  }
+  if (
+    attempt.preparationState === "preparing" &&
+    attempt.preparationClaimId !== input.claimId &&
+    (attempt.preparationLeaseExpiresAt?.getTime() ?? 0) > now.getTime()
+  ) {
+    return { disposition: "busy", attempt, claim: null };
+  }
+  if (
+    attempt.preparationIntentKey !== null &&
+    attempt.preparationIntentKey !== source.sourceOperationKey &&
+    !["pending", "prepared"].includes(attempt.preparationState)
+  ) {
+    throw new InvocationAttemptStateConflictError(
+      attempt.id,
+      attempt.attemptState,
+      "PreparationSourceSuperseded",
+    );
+  }
+  const sameSource =
+    attempt.preparationIntentKey === source.sourceOperationKey &&
+    attempt.preparationRequestDigest === requestDigest;
+  if (sameSource && attempt.preparationSourceJson !== null) {
+    const persisted = assertExecutionSourceSnapshot(attempt.preparationSourceJson);
+    if (executionSourceDigest(persisted) !== requestDigest) {
+      throw new InvocationAttemptStateConflictError(
+        attempt.id,
+        attempt.attemptState,
+        "PreparationSourceCorrupt",
+      );
+    }
+  }
+  const preservePrepared = sameSource && attempt.preparationState === "prepared";
+  await tx
+    .update(invocationAttemptTable)
+    .set({
+      preparationState: preservePrepared ? "prepared" : "preparing",
+      preparationIntentKey: source.sourceOperationKey,
+      preparationRequestDigest: requestDigest,
+      preparationSourceJson: source,
+      preparationClaimId: input.claimId,
+      preparationLeaseExpiresAt: new Date(now.getTime() + ATTEMPT_PREPARATION_LEASE_MS),
+      nextPreparationAt: null,
+      ...(!sameSource
+        ? { preparationEvidence: null, preparationDigest: null, preparedAt: null }
+        : {}),
+      updatedAt: now,
+      versionNo: attempt.versionNo + 1,
+    })
+    .where(eq(invocationAttemptTable.id, attempt.id));
+  const [updated] = await tx
+    .select()
+    .from(invocationAttemptTable)
+    .where(eq(invocationAttemptTable.id, attempt.id))
+    .limit(1);
+  if (!updated) throw new InvocationAttemptNotFoundError(attempt.id);
+  return {
+    disposition: "claimed",
+    attempt: updated,
+    claim: {
+      tenantId: source.tenantId,
+      invocationId: source.invocationId,
+      attemptId: source.attemptId,
+      intentKey: source.sourceOperationKey,
+      requestDigest,
+      claimId: input.claimId,
+      source,
+    },
+  };
 }
 
 export async function assertAttemptPreparationClaimHeldInTransaction(
@@ -251,10 +286,11 @@ export async function assertAttemptPreparationClaimHeldInTransaction(
     .limit(1);
   if (
     !attempt ||
-    attempt.preparationState !== "preparing" ||
+    !["preparing", "prepared"].includes(attempt.preparationState) ||
     attempt.preparationIntentKey !== claim.intentKey ||
     attempt.preparationRequestDigest !== claim.requestDigest ||
-    attempt.preparationClaimId !== claim.claimId
+    attempt.preparationClaimId !== claim.claimId ||
+    attempt.preparationSourceJson === null
   ) {
     throw new InvocationAttemptStateConflictError(
       claim.attemptId,
@@ -262,7 +298,34 @@ export async function assertAttemptPreparationClaimHeldInTransaction(
       "PreparationClaimSuperseded",
     );
   }
+  const persistedSource = assertExecutionSourceSnapshot(attempt.preparationSourceJson);
+  if (
+    executionSourceDigest(persistedSource) !== claim.requestDigest ||
+    executionSourceDigest(claim.source) !== claim.requestDigest
+  ) {
+    throw new InvocationAttemptStateConflictError(
+      claim.attemptId,
+      attempt.attemptState,
+      "PreparationSourceCorrupt",
+    );
+  }
   return attempt;
+}
+
+/** 外部 IO 返回后的只读领取复核；固定以 Invocation 根开始事务。 */
+export async function assertAttemptPreparationClaimHeld(
+  claim: AttemptPreparationClaim,
+): Promise<InvocationAttempt> {
+  return db.transaction(async (tx) => {
+    if (!(await lockInvocationRootIfExists(tx, claim.tenantId, claim.invocationId))) {
+      throw new InvocationAttemptStateConflictError(
+        claim.attemptId,
+        "lost",
+        "PreparationClaimSuperseded",
+      );
+    }
+    return assertAttemptPreparationClaimHeldInTransaction(tx, claim);
+  });
 }
 
 /** Persists candidate preparation evidence before Ownership can be acquired. */
@@ -273,27 +336,10 @@ export async function markAttemptPreparedInTransaction(
     evidence: unknown;
     digest: string;
     now?: Date;
-    preparationClaim?: AttemptPreparationClaim;
+    preparationClaim: AttemptPreparationClaim;
   },
 ): Promise<InvocationAttempt> {
-  // 生产链禁止无领取凭据提交 Prepared。现存无凭据调用只属于 test-support/测试夹具；
-  // 把边界放在持久层，避免新增生产调用方误走旧式 attemptId-only 旁路。
-  if (!input.preparationClaim && process.env.NODE_ENV !== "test") {
-    throw new InvocationAttemptStateConflictError(
-      input.attemptId,
-      "queued",
-      "PreparationClaimRequired",
-    );
-  }
-  const current = input.preparationClaim
-    ? await assertAttemptPreparationClaimHeldInTransaction(tx, input.preparationClaim)
-    : await tx
-        .select()
-        .from(invocationAttemptTable)
-        .where(eq(invocationAttemptTable.id, input.attemptId))
-        .for("update")
-        .limit(1)
-        .then(([row]) => row);
+  const current = await assertAttemptPreparationClaimHeldInTransaction(tx, input.preparationClaim);
   if (!current) throw new InvocationAttemptNotFoundError(input.attemptId);
   if (current.preparationState === "prepared") return current;
   if (current.preparationState === "failed")

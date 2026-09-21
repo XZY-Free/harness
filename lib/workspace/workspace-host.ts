@@ -20,6 +20,7 @@ export type {
   WriterStopEvidence,
 } from "@/lib/workspace/workspace-host-server";
 export {
+  CheckpointIntentRetiredError,
   WorkspaceCleanupRejectedError,
   WorkspaceHostBroker as ManagedWorkspaceHost,
   WorkspaceIdentityMismatchError,

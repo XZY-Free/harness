@@ -61,6 +61,7 @@ import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   TEST_RUNTIME_REVISION_ID,
   acquireTestRuntimeAuthority,
@@ -1220,13 +1221,6 @@ describe("子取消 ack 集成（requestChildThreadCancellation + ingress execut
     // active Ownership + SessionBinding），与生产调度链一致。
     const attempt = await createAttempt({ tenantId, invocationId: childInvocation.id });
     const attemptEvidence = { kind: "test-child-cancel", attemptId: attempt.id };
-    await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
-        attemptId: attempt.id,
-        evidence: attemptEvidence,
-        digest: protocolDigest(attemptEvidence),
-      }),
-    );
     const workspace = await createNoPlatformWorkspaceBinding(tenantId, "test-service");
     await createExecutionBinding({
       tenantId,
@@ -1240,6 +1234,13 @@ describe("子取消 ack 集成（requestChildThreadCancellation + ingress execut
       projectionVersionNo: 1,
       executionSubject: { tenantId, subjectType: "user", subjectId: ownerId },
     });
+    await db.transaction((tx) =>
+      markAttemptPreparedForTestInTransaction(tx, {
+        attemptId: attempt.id,
+        evidence: attemptEvidence,
+        digest: protocolDigest(attemptEvidence),
+      }),
+    );
     const acquired = await acquireTestRuntimeAuthority({
       tenantId,
       invocationId: childInvocation.id,

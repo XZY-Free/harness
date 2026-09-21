@@ -40,6 +40,10 @@ import {
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import {
+  attemptPreparationClaimForTest,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
+import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
@@ -96,7 +100,7 @@ async function newPreparedAttempt(tenantId: string, invocationId: string) {
   const attempt = await createAttempt({ tenantId, invocationId });
   const evidence = { kind: "control-recovery-candidate", invocationId, attemptId: attempt.id };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: `sha256:${"c".repeat(64)}`,
@@ -820,6 +824,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       runtimeEndpoint: "in-process://hosted",
       auth: { mode: "workload_token", token: "hosted-control-token" },
       callbackEndpoints: endpointResolution().callbackEndpoints,
+      preparationClaim: await attemptPreparationClaimForTest(attempt.id),
     });
     await client.getLastLaunchPromise();
 
@@ -1032,6 +1037,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
         runtimeEndpoint: "in-process://hosted",
         auth: { mode: "workload_token", token: "hosted-control-token" },
         callbackEndpoints: endpointResolution().callbackEndpoints,
+        preparationClaim: await attemptPreparationClaimForTest(attempt.id),
       });
       await waitForCondition(() => subcallExecutions === 1, "Loop 进入 pending 子调用");
 
@@ -1125,7 +1131,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       attemptId: attempt.id,
     };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt.id,
         evidence: attempt1Evidence,
         digest: `sha256:${"d".repeat(64)}`,
@@ -1230,7 +1236,11 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     );
 
     // ── 有效恢复：替换执行实例 → 新 Attempt，经正式 Resume 进入同一 Start 服务 ──
-    const attempt2 = await newPreparedAttempt(tenantId, invocationId);
+    const attempt2 = await createAttempt({
+      tenantId,
+      invocationId,
+      retryReasonCode: "supervisor_handoff",
+    });
     const reRead = await getInvocationById(tenantId, invocationId);
     if (!reRead) throw new Error("Invocation 回读失败");
     const resumed = await resumeRuntimeInvocation({
@@ -1358,6 +1368,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       auth: { mode: "none" },
       callbackEndpoints: endpointResolution().callbackEndpoints,
       intentType: "start",
+      preparationClaim: await attemptPreparationClaimForTest(attempt.id),
     });
     const gen1 = await readCurrentAuthority(tenantId, invocationId, binding.runtimeRevisionId);
     expect(gen1.session.intentType).toBe("start");

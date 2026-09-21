@@ -23,6 +23,7 @@ import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
@@ -537,7 +538,7 @@ describe("GET /api/threads/{thread_id}/events — 新事件推送", () => {
       attemptId: attempt.id,
     };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt.id,
         evidence,
         digest: protocolDigest(evidence),

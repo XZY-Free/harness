@@ -31,10 +31,9 @@ import {
   normalizeEnvironmentInstanceSpec,
 } from "@/lib/environment/environment-instance-spec";
 import {
-  beginEnvironmentLeaseReprepare,
   claimEnvironmentLeaseCleanup,
   completeEnvironmentLeaseCleanup,
-  createEnvironmentLease,
+  createEnvironmentLeaseForPreparationClaim,
   findReusableEnvironmentLease,
   getEnvironmentLeaseById,
   isPreparedReadinessState,
@@ -51,11 +50,10 @@ import {
 } from "@/lib/environment/environment-prepared-evidence";
 import {
   type AttemptPreparationClaim,
-  claimAttemptPreparation,
+  assertAttemptPreparationClaimHeld,
 } from "@/lib/executions/persistence/attempt-store";
 import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 
 export interface EnvironmentProvisionInput {
   tenantId: string;
@@ -69,10 +67,8 @@ export interface EnvironmentProvisionInput {
   workspaceRoot?: string | null;
   /** 恢复水位（Prepared 证据 Anchor）。 */
   recoveryAnchorDigest?: string | null;
-  /** 生产调用方在任何真实 IO 前生成并贯穿到 Start/失败结论的单次领取 nonce。 */
-  preparationClaimId?: string;
-  preparationIntentKey?: string;
-  preparationRequestDigest?: string;
+  /** TX-A 在任何 Backend IO 前取得的完整准备领取。 */
+  preparationClaim: AttemptPreparationClaim;
   now?: Date;
 }
 
@@ -106,21 +102,7 @@ export interface EnvironmentRevalidateInput {
  * "恢复 Anchor 已变化，Prepared 证据失效"被拒 —— 两条都是真实缺陷。
  */
 export type EnvironmentReprepareInput = EnvironmentRevalidateInput & {
-  /**
-   * A05：这次准备为哪个**稳定来源意图**服务。
-   *
-   * 它必须来自已持久事实（用户恢复=已持久命令身份；续接=已持久 continuation 身份），
-   * 不能是当前时间或本次调用序号——否则"同一次 Resume 的第二次投递"会被判成新恢复，
-   * 于是无条件重做准备、把上一次建好的 ready/激活当场抹掉。
-   */
-  preparationIntentKey: string;
-  /**
-   * A05：该来源意图的**语义摘要**。同来源换语义（换锚点/换 Revision/换 Binding）必须被拒，
-   * 而不是"采用最新输入"。
-   */
-  preparationRequestDigest: string;
-  /** A05：本次准备的领取 nonce（UUID）。迟到的旧工作按它判定自己是否仍是当前准备者。 */
-  preparationClaimId: string;
+  preparationClaim: AttemptPreparationClaim;
 };
 
 export interface EnvironmentProvisioner {
@@ -145,17 +127,6 @@ export function environmentOperationId(input: {
   attemptId: string;
 }): string {
   return `env-instance:${input.attemptId}:${input.environmentDefinitionRevisionId}`;
-}
-
-export function environmentProvisionRequestDigest(input: {
-  tenantId: string;
-  invocationId: string;
-  attemptId: string;
-  revisionId: string;
-  workspaceBindingId: string;
-  recoveryAnchorDigest: string | null;
-}): string {
-  return protocolDigest({ scope: "environment-provision", ...input });
 }
 
 function workspaceBindingIdOf(lease: EnvironmentLease): string | null {
@@ -309,8 +280,7 @@ async function provisionWithBackend(input: {
   workspaceBindingId: string;
   workspaceRoot: string | null;
   recoveryAnchorDigest: string | null;
-  /** A05：仅 `reprepare` 提供；见 `PrepareEnvironmentLeaseInput.preparationClaim`。 */
-  preparationClaim?: AttemptPreparationClaim;
+  preparationClaim: AttemptPreparationClaim;
   now: Date;
 }): Promise<EnvironmentLease> {
   // §1：同 Attempt 复用既有 Lease（不重复创建真实资源）。
@@ -330,7 +300,7 @@ async function provisionWithBackend(input: {
     });
   const lease =
     existing ??
-    (await createEnvironmentLease({
+    (await createEnvironmentLeaseForPreparationClaim({
       tenantId: input.tenantId,
       invocationId: input.invocationId,
       attemptId: input.attemptId,
@@ -345,6 +315,7 @@ async function provisionWithBackend(input: {
         backendKind: input.backend.kind,
         resources: [],
       },
+      preparationClaim: input.preparationClaim,
     }));
   if (existing && isPreparedReadinessState(existing.readinessState)) {
     // 已备妥（`ready` = 同一份 Prepared 事实 + Writer 已激活）：Transport Retry 只需确认
@@ -352,6 +323,7 @@ async function provisionWithBackend(input: {
     // `prepareEnvironmentLease` 只接受 `unresolved` / `preparing`，重复写入会把一次
     // 合法的同 Attempt 重投变成终态失败，而且在失败之前已经真实创建出第二份实例。
     const facts = await input.backend.inspect(requestFor(input, lease, operationId, input.spec));
+    await assertAttemptPreparationClaimHeld(input.preparationClaim);
     assertPreparedInstanceMatches(lease, facts);
     return (await getEnvironmentLeaseById(input.tenantId, lease.id)) ?? lease;
   }
@@ -365,66 +337,34 @@ async function provisionWithBackend(input: {
     // 刚建立好的实例真实释放掉。旧工作只丢弃自己的观察结果。
     if (error instanceof EnvironmentPreparationClaimSupersededError) throw error;
     // 真实资源可能已创建一部分：登记持久清理工作（归属 + 重试），不吞掉错误。
-    const cleanup = input.preparationClaim
-      ? await scheduleEnvironmentLeaseCleanupForPreparationClaim({
-          claim: input.preparationClaim,
-          leaseId: lease.id,
-          errorCode:
-            error instanceof EnvironmentComplianceError
-              ? "EnvironmentComplianceFailed"
-              : error instanceof Error
-                ? error.name
-                : "EnvironmentInstanceFailed",
-          now: input.now,
-          resourceManifestPatch: {
-            operationId,
-            workspaceBindingId: input.workspaceBindingId,
-            resources: [
-              {
-                kind: input.backend.kind === "container" ? "container" : "host_agent_artifact",
-                ref:
-                  input.backend.kind === "container"
-                    ? managedContainerName(operationId)
-                    : operationId,
-                identity: "unverified",
-              },
-            ],
+    const cleanup = await scheduleEnvironmentLeaseCleanupForPreparationClaim({
+      claim: input.preparationClaim,
+      leaseId: lease.id,
+      errorCode:
+        error instanceof EnvironmentComplianceError
+          ? "EnvironmentComplianceFailed"
+          : error instanceof Error
+            ? error.name
+            : "EnvironmentInstanceFailed",
+      now: input.now,
+      resourceManifestPatch: {
+        operationId,
+        workspaceBindingId: input.workspaceBindingId,
+        resources: [
+          {
+            kind: input.backend.kind === "container" ? "container" : "host_agent_artifact",
+            ref:
+              input.backend.kind === "container" ? managedContainerName(operationId) : operationId,
+            identity: "unverified",
           },
-        })
-      : { outcome: "scheduled" as const };
+        ],
+      },
+    });
     if (cleanup.outcome === "not_claimed") {
       throw new EnvironmentPreparationClaimSupersededError(
         "准备 claim 已换手：旧 create 失败不得登记共享 Lease 清理",
       );
     }
-    if (!input.preparationClaim)
-      await scheduleEnvironmentLeaseCleanup({
-        tenantId: input.tenantId,
-        leaseId: lease.id,
-        errorCode:
-          error instanceof EnvironmentComplianceError
-            ? "EnvironmentComplianceFailed"
-            : error instanceof Error
-              ? error.name
-              : "EnvironmentInstanceFailed",
-        now: input.now,
-        immediate: true,
-        resourceManifestPatch: {
-          operationId,
-          workspaceBindingId: input.workspaceBindingId,
-          resources: [
-            {
-              kind: input.backend.kind === "container" ? "container" : "host_agent_artifact",
-              // 真实容器名由稳定 operationId 派生：创建可能失败在容器已存在之后。
-              ref:
-                input.backend.kind === "container"
-                  ? managedContainerName(operationId)
-                  : operationId,
-              identity: "unverified",
-            },
-          ],
-        },
-      });
     await runEnvironmentLeaseCleanup({
       tenantId: input.tenantId,
       leaseId: lease.id,
@@ -466,12 +406,7 @@ async function provisionWithBackend(input: {
       leaseId: lease.id,
       capabilitiesJson: facts.capabilities,
       evidence,
-      preparationClaim: input.preparationClaim
-        ? {
-            attemptId: input.preparationClaim.attemptId,
-            preparationClaimId: input.preparationClaim.claimId,
-          }
-        : undefined,
+      preparationClaim: input.preparationClaim,
       now: input.now,
     });
   } catch (error) {
@@ -480,47 +415,27 @@ async function provisionWithBackend(input: {
     if (error instanceof EnvironmentPreparationClaimSupersededError) throw error;
     // 真实资源已经建立，但控制面拒绝承认（能力不满足 / 证据自洽失败 / Lease 状态非法）：
     // 必须登记归属并尝试真实释放，不能留下无主容器。
-    const cleanup = input.preparationClaim
-      ? await scheduleEnvironmentLeaseCleanupForPreparationClaim({
-          claim: input.preparationClaim,
-          leaseId: lease.id,
-          errorCode:
-            error instanceof EnvironmentComplianceError
-              ? "EnvironmentComplianceFailed"
-              : error instanceof Error
-                ? error.name
-                : "EnvironmentPrepareFailed",
-          now: input.now,
-          resourceManifestPatch: {
-            operationId,
-            workspaceBindingId: input.workspaceBindingId,
-            resources: facts.resources,
-          },
-        })
-      : { outcome: "scheduled" as const };
+    const cleanup = await scheduleEnvironmentLeaseCleanupForPreparationClaim({
+      claim: input.preparationClaim,
+      leaseId: lease.id,
+      errorCode:
+        error instanceof EnvironmentComplianceError
+          ? "EnvironmentComplianceFailed"
+          : error instanceof Error
+            ? error.name
+            : "EnvironmentPrepareFailed",
+      now: input.now,
+      resourceManifestPatch: {
+        operationId,
+        workspaceBindingId: input.workspaceBindingId,
+        resources: facts.resources,
+      },
+    });
     if (cleanup.outcome === "not_claimed") {
       throw new EnvironmentPreparationClaimSupersededError(
         "准备 claim 已换手：旧 Prepared 失败不得登记共享 Lease 清理",
       );
     }
-    if (!input.preparationClaim)
-      await scheduleEnvironmentLeaseCleanup({
-        tenantId: input.tenantId,
-        leaseId: lease.id,
-        errorCode:
-          error instanceof EnvironmentComplianceError
-            ? "EnvironmentComplianceFailed"
-            : error instanceof Error
-              ? error.name
-              : "EnvironmentPrepareFailed",
-        now: input.now,
-        immediate: true,
-        resourceManifestPatch: {
-          operationId,
-          workspaceBindingId: input.workspaceBindingId,
-          resources: facts.resources,
-        },
-      });
     await runEnvironmentLeaseCleanup({
       tenantId: input.tenantId,
       leaseId: lease.id,
@@ -595,28 +510,12 @@ export function createEnvironmentProvisioner(dependencies: {
           `Revision 声明的 backendKind=${spec.backendKind} 与受管 Backend=${backend.kind} 不匹配`,
         );
       }
-      const hasExplicitPreparationClaim =
-        input.preparationClaimId !== undefined &&
-        input.preparationIntentKey !== undefined &&
-        input.preparationRequestDigest !== undefined;
-      // 正式调用方必须显式生成并贯穿 claim；无 claim 只允许既有低层测试夹具复验，
-      // 不能成为生产旁路，也不能把一份已 prepared 的 Attempt 降回 preparing。
-      if (!hasExplicitPreparationClaim && process.env.NODE_ENV !== "test") {
-        throw new EnvironmentComplianceError("AttemptPreparationClaimRequired");
-      }
-      const preparation = hasExplicitPreparationClaim
-        ? await claimAttemptPreparation({
-            tenantId: input.tenantId,
-            invocationId: input.invocationId,
-            attemptId: input.attemptId,
-            intentKey: input.preparationIntentKey as string,
-            requestDigest: input.preparationRequestDigest as string,
-            claimId: input.preparationClaimId as string,
-            now,
-          })
-        : null;
-      if (preparation?.disposition === "busy") {
-        throw new EnvironmentComplianceError("AttemptPreparationBusy");
+      if (
+        input.preparationClaim.tenantId !== input.tenantId ||
+        input.preparationClaim.invocationId !== input.invocationId ||
+        input.preparationClaim.attemptId !== input.attemptId
+      ) {
+        throw new EnvironmentComplianceError("AttemptPreparationClaimMismatch");
       }
       return provisionWithBackend({
         backend,
@@ -627,11 +526,7 @@ export function createEnvironmentProvisioner(dependencies: {
         workspaceBindingId: input.workspaceBindingId,
         workspaceRoot: input.workspaceRoot ?? null,
         recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
-        ...(preparation?.claim
-          ? {
-              preparationClaim: preparation.claim,
-            }
-          : {}),
+        preparationClaim: input.preparationClaim,
         now,
       });
     },
@@ -715,18 +610,7 @@ export function createEnvironmentProvisioner(dependencies: {
           `Revision 声明的 backendKind=${spec.backendKind} 与受管 Backend=${backend.kind} 不匹配`,
         );
       }
-      // ① 状态与恢复水位交接：清掉上一代际的 Writer 激活，并把水位推进到本次 Resume 的锚点。
-      await beginEnvironmentLeaseReprepare({
-        tenantId: input.tenantId,
-        leaseId: current.id,
-        attemptId: current.attemptId,
-        preparationIntentKey: input.preparationIntentKey,
-        preparationRequestDigest: input.preparationRequestDigest,
-        preparationClaimId: input.preparationClaimId,
-        recoveryAnchorDigest: input.recoveryAnchorDigest ?? null,
-        now,
-      });
-      // ② 真实回读 + 以新锚点重写 Prepared 证据（实例缺失时按稳定 operationId 幂等重建）。
+      // TX-A 已在同一裁决事务内推进恢复水位并清掉旧激活；这里只做锁外真实 IO。
       return provisionWithBackend({
         backend,
         tenantId: input.tenantId,
@@ -739,14 +623,7 @@ export function createEnvironmentProvisioner(dependencies: {
         // A05：IO 走完之后回来核对"我是不是仍然是当前准备者"。没有这一步，迟到的
         // 旧完成会盖掉继任者的 Prepared 证据（`provisionWithBackend` 在它被拒时
         // 必须**不**登记清理义务 —— 实例按稳定 operationId 复用，归属属于继任者）。
-        preparationClaim: {
-          tenantId: input.tenantId,
-          invocationId: current.invocationId,
-          attemptId: current.attemptId,
-          intentKey: input.preparationIntentKey,
-          requestDigest: input.preparationRequestDigest,
-          claimId: input.preparationClaimId,
-        },
+        preparationClaim: input.preparationClaim,
         now,
       });
     },

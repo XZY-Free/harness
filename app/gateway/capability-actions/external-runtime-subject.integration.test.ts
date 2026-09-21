@@ -10,6 +10,7 @@ import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { issueTestExecutionToken } from "@/lib/identity/test-support/execution-token";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
@@ -66,7 +67,7 @@ async function seedRuntimeAuthority(input: {
     attemptId: attempt.id,
   };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: protocolDigest(evidence),

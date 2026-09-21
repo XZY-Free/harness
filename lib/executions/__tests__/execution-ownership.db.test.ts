@@ -23,6 +23,7 @@ import {
   getAuthorityDatabaseTime,
   renewExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -138,7 +139,7 @@ describe("ExecutionOwnership database fencing", () => {
     });
     const evidence = { kind: "replacement", attemptId: replacementAttempt.id };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: replacementAttempt.id,
         evidence,
         digest: protocolDigest(evidence),
@@ -176,7 +177,7 @@ describe("ExecutionOwnership database fencing", () => {
     });
     const evidence = { kind: "candidate", acquiredById, attemptId: attempt.id };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt.id,
         evidence,
         digest: protocolDigest(evidence),

@@ -236,14 +236,22 @@ describe("WorkspaceHost 控制端口契约（A06）", () => {
     // 会被 F04 的 fail-closed 边界正确拒绝，不能再拿它证明 RPC 参数未包装。
     await remote.releaseFreeze(receipt);
 
-    const released = path.join(controlRoot, "safe-points", `${checkpointIntentId}.released`);
+    const released = path.join(
+      controlRoot,
+      "safe-point-intents",
+      receipt.scopeDigest.replace(/^sha256:/, ""),
+      `${checkpointIntentId}.json`,
+    );
     expect(await pathExists(released)).toBe(true);
     // 旧实现把 `{receipt}` 当 receipt 用：`receipt.checkpointIntentId` 是 undefined，
     // 于是写出名为 `undefined.released` 的文件却返回成功 —— 目标安全点从未被解冻。
     expect(await pathExists(path.join(controlRoot, "safe-points", "undefined.released"))).toBe(
       false,
     );
-    expect(JSON.parse(await readFile(released, "utf8"))).toMatchObject(receipt);
+    expect(JSON.parse(await readFile(released, "utf8"))).toMatchObject({
+      ...receipt,
+      state: "released",
+    });
   });
 
   it("候选运行目录与候选归属登记分离：目录在受管写根内，登记仍在控制面；cleanup 真实释放该目录", async () => {

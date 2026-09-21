@@ -343,6 +343,7 @@ export const invocationAttemptTable = mysqlTable(
     //   同规则——旧工作回来时按它判定"我是否还是当前准备者"，而不是按可被清空的租约字符串。
     preparationIntentKey: ascii("preparationIntentKey", 128),
     preparationRequestDigest: ascii("preparationRequestDigest", 71),
+    preparationSourceJson: json("preparationSourceJson"),
     preparationClaimId: ascii("preparationClaimId", 36),
     preparationLeaseExpiresAt: timestamp("preparationLeaseExpiresAt"),
     nextPreparationAt: timestamp("nextPreparationAt"),
@@ -393,7 +394,7 @@ export const invocationAttemptTable = mysqlTable(
     ),
     preparationIntentShape: check(
       "InvocationAttempt_preparation_intent_shape",
-      sql`(\`preparationIntentKey\` IS NULL AND \`preparationRequestDigest\` IS NULL) OR (\`preparationIntentKey\` IS NOT NULL AND \`preparationRequestDigest\` IS NOT NULL)`,
+      sql`(\`preparationIntentKey\` IS NULL AND \`preparationRequestDigest\` IS NULL AND \`preparationSourceJson\` IS NULL) OR (\`preparationIntentKey\` IS NOT NULL AND \`preparationRequestDigest\` IS NOT NULL AND \`preparationSourceJson\` IS NOT NULL)`,
     ),
     preparationEvidenceShape: check(
       "InvocationAttempt_preparation_evidence_shape",
@@ -565,8 +566,9 @@ export const runtimeSessionBindingTable = mysqlTable(
     // "同一请求的第二次投递"只能靠猜最新 Attempt，重投就会无条件重做准备。
     // 用户恢复取自已持久 `InvocationCommand.id`；子调用续接取自已持久 continuation 的
     // 原始身份；首次 Start 取 Invocation 自身身份。凭据轮换/trace/重试次数不进入摘要。
-    sourceOperationKey: ascii("sourceOperationKey", 128),
-    sourceRequestDigest: ascii("sourceRequestDigest", 71),
+    sourceOperationKey: ascii("sourceOperationKey", 128).notNull(),
+    sourceRequestDigest: ascii("sourceRequestDigest", 71).notNull(),
+    sourceRequestJson: json("sourceRequestJson").notNull(),
     semanticRequestJson: json("semanticRequestJson"),
     semanticRequestDigest: ascii("semanticRequestDigest", 71),
     intentFrozenAt: timestamp("intentFrozenAt"),
@@ -676,12 +678,6 @@ export const runtimeSessionBindingTable = mysqlTable(
     supervisorClaimShape: check(
       "RuntimeSessionBinding_supervisor_claim_shape",
       sql`(\`supervisorClaimId\` IS NULL AND \`supervisorInstanceId\` IS NULL AND \`supervisorLeaseExpiresAt\` IS NULL AND \`supervisorReleasedAt\` IS NULL) OR (\`supervisorClaimId\` IS NOT NULL AND \`supervisorInstanceId\` IS NOT NULL AND \`supervisorLeaseExpiresAt\` IS NOT NULL)`,
-    ),
-    // A05：来源意图两列要么都没有（历史行/平台内部行），要么都完整。
-    // 只有"有键没摘要"这种半成品才是真正危险的——它能让重投误判成"同来源"。
-    sourceIntentShape: check(
-      "RuntimeSessionBinding_source_intent_shape",
-      sql`(\`sourceOperationKey\` IS NULL AND \`sourceRequestDigest\` IS NULL) OR (\`sourceOperationKey\` IS NOT NULL AND \`sourceRequestDigest\` IS NOT NULL)`,
     ),
     dispatchFreezeShape: check(
       "RuntimeSessionBinding_dispatch_freeze_shape",

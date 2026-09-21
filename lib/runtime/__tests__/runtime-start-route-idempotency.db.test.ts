@@ -29,6 +29,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { closeExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -345,7 +346,7 @@ describe("A04：Runtime HTTP Start 幂等键与重放前置条件（真实 Route
     const attempt2 = await createAttempt({ tenantId, invocationId: fixture.invocation.id });
     const evidence = { kind: "runtime-start-route-takeover", attemptId: attempt2.id };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt2.id,
         evidence,
         digest: protocolDigest(evidence),

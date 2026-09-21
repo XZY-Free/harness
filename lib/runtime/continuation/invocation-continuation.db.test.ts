@@ -10,6 +10,7 @@ import {
   acquireExecutionOwnership,
   getAuthorityDatabaseTime,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { TEST_RUNTIME_REVISION_ID } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
@@ -176,7 +177,7 @@ describe("Invocation continuation execution ownership", () => {
     });
     const attemptEvidence = { kind: "invocation-continuation-lease-test" };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt.id,
         evidence: attemptEvidence,
         digest: protocolDigest(attemptEvidence),
@@ -214,7 +215,7 @@ describe("Invocation continuation execution ownership", () => {
     });
     const successorEvidence = { kind: "invocation-continuation-lease-successor" };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: successorAttempt.id,
         evidence: successorEvidence,
         digest: protocolDigest(successorEvidence),

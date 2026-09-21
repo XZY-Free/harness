@@ -57,13 +57,18 @@ import {
 } from "@/lib/environment/environment-provisioner";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import { createAttempt } from "@/lib/executions/persistence/attempt-store";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
+import { attemptPreparationClaimForTest } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   TEST_RUNTIME_REVISION_ID,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
+import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
+import { executionSourceRequestForStart } from "@/lib/runtime/application/runtime-start";
 import {
   dockerInfo,
   inspectContainer,
@@ -249,17 +254,32 @@ async function makeFixture(): Promise<EnvironmentFixture> {
     },
     async seedAttempt(tenantId, invocationId) {
       const attempt = await createAttempt({ tenantId, invocationId });
+      const invocation = await getInvocationById(tenantId, invocationId);
+      const binding = await getExecutionBindingByInvocation(tenantId, invocationId);
+      if (!invocation || !binding) throw new Error("Redispatch 测试缺少 Invocation/Binding");
+      const accepted = await acceptExecutionPreparation({
+        request: executionSourceRequestForStart({
+          tenantId,
+          invocation,
+          binding,
+          attempt,
+          sourceOperationKey: `invocation:${invocationId}`,
+        }),
+      });
+      if (accepted.disposition !== "claimed") throw new Error("Redispatch 测试准备领取失败");
       return attempt.id;
     },
-    provisionFor(input) {
+    async provisionFor(input) {
+      const attemptId = input.attemptId ?? input.candidate.attemptId;
       return provisioner.provision({
         tenantId: TENANT_ID,
         invocationId: input.invocationId ?? input.candidate.invocationId,
-        attemptId: input.attemptId ?? input.candidate.attemptId,
+        attemptId,
         revisionId: input.revisionId ?? input.revision.id,
         revision: input.revision,
         workspaceBindingId: input.workspaceBindingId ?? input.candidate.workspaceBindingId,
         workspaceRoot,
+        preparationClaim: await attemptPreparationClaimForTest(attemptId),
         ...(input.now ? { now: input.now } : {}),
       });
     },
@@ -462,6 +482,7 @@ describe("R07 真实 Environment 实例化与合规", () => {
         leaseId: lenientLease.id,
         capabilitiesJson: { verified: true, containerized: true },
         evidence: { verified: true } as never,
+        preparationClaim: await attemptPreparationClaimForTest(lenientCandidate.attemptId),
       }),
     ).rejects.toThrow(/PreparedEvidence|符合性证据/);
     const afterSelfReport = await getEnvironmentLeaseById(TENANT_ID, lenientLease.id);

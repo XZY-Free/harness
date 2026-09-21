@@ -13,6 +13,7 @@ import {
   acquireExecutionOwnership,
   getAuthorityDatabaseTime,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -149,7 +150,7 @@ async function takeOver(runtime: Awaited<ReturnType<typeof createActiveRuntime>>
   });
   const evidence = { kind: "action-authority-takeover", attemptId: attempt.id };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: digest(evidence),

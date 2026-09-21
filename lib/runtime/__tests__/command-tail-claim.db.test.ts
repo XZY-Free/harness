@@ -19,6 +19,7 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
 import {
   executionOwnershipTable,
@@ -110,7 +111,7 @@ describe("A09：命令尾部提交必须校验当前领取权", () => {
       attemptId: attempt.id,
     };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt.id,
         evidence: preparedEvidence,
         digest: protocolDigest(preparedEvidence),
@@ -282,7 +283,7 @@ describe("A09：内联投递必须持真实领取身份（null 旁路已消除�
     const tenantId = ctx.tenantId;
     const preparedEvidence = { kind: "command-tail-candidate", invocationId: invocation.id };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: attempt.id,
         evidence: preparedEvidence,
         digest: protocolDigest(preparedEvidence),

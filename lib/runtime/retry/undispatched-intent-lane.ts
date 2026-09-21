@@ -47,7 +47,9 @@ import {
   invocationTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
+import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
+import { executionSourceRequestForStart } from "@/lib/runtime/application/runtime-start";
 import { transitionTurnToQueued } from "@/lib/runtime/dispatcher";
 import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
@@ -419,10 +421,22 @@ async function recoverSupervisorHandoff(
   if (!claim) return false;
   const attempt = await getAttemptById(claim.attemptId);
   if (!attempt) return false;
+  const binding = await requireExecutionBinding(candidate.tenantId, candidate.invocationId);
+  const sourceOperationKey = `supervisor-handoff:${candidate.sourceOwnershipId}`;
+  const preparation = await acceptExecutionPreparation({
+    request: executionSourceRequestForStart({
+      tenantId: candidate.tenantId,
+      invocation: claim.invocation,
+      binding,
+      attempt,
+      sourceOperationKey,
+    }),
+    now,
+  });
+  if (preparation.disposition !== "claimed") return false;
   let transport: Awaited<ReturnType<typeof resolveRuntimeTransportFromBinding>>;
   let resources: Awaited<ReturnType<typeof resolveBoundExecutionResources>>;
   try {
-    const binding = await requireExecutionBinding(candidate.tenantId, candidate.invocationId);
     transport = await resolveRuntimeTransportFromBinding({
       tenantId: candidate.tenantId,
       binding,
@@ -441,7 +455,7 @@ async function recoverSupervisorHandoff(
       errorCode: error instanceof Error ? error.name : "RuntimeDispatchFailed",
       errorSummary: error instanceof Error ? error.message : String(error),
       now,
-      claim: null,
+      workIdentity: { kind: "preparation", claim: preparation.claim },
     });
     return true;
   }
@@ -449,6 +463,7 @@ async function recoverSupervisorHandoff(
     tenantId: candidate.tenantId,
     attemptId: attempt.id,
     claim: null,
+    preparationClaim: preparation.claim,
     runtimeClient: transport.runtimeClient,
     runtimeEndpointResolver: async () => ({
       runtimeEndpoint: transport.runtimeEndpoint,
@@ -589,10 +604,22 @@ async function recoverUndispatchedInvocation(
   if (!attempt) return false;
   const fresh = await getInvocationById(candidate.tenantId, invocation.id);
   if (!fresh) return false;
+  const binding = await requireExecutionBinding(candidate.tenantId, invocation.id);
+  const sourceOperationKey = `invocation:${invocation.id}`;
+  const preparation = await acceptExecutionPreparation({
+    request: executionSourceRequestForStart({
+      tenantId: candidate.tenantId,
+      invocation: fresh,
+      binding,
+      attempt,
+      sourceOperationKey,
+    }),
+    now,
+  });
+  if (preparation.disposition !== "claimed") return false;
   let transport: Awaited<ReturnType<typeof resolveRuntimeTransportFromBinding>>;
   let resources: Awaited<ReturnType<typeof resolveBoundExecutionResources>>;
   try {
-    const binding = await requireExecutionBinding(candidate.tenantId, invocation.id);
     transport = await resolveRuntimeTransportFromBinding({
       tenantId: candidate.tenantId,
       binding,
@@ -611,7 +638,7 @@ async function recoverUndispatchedInvocation(
       errorCode: error instanceof Error ? error.name : "RuntimeDispatchFailed",
       errorSummary: error instanceof Error ? error.message : String(error),
       now,
-      claim: null,
+      workIdentity: { kind: "preparation", claim: preparation.claim },
     });
     return true;
   }
@@ -621,6 +648,7 @@ async function recoverUndispatchedInvocation(
     // 请求内联语义（无 lease）：本 lane 从"不存在任何 Session"出发，Session 由
     // startRuntimeInvocation 在本次派发内一次建立，完成确认按 Session 自身 tuple 复核。
     claim: null,
+    preparationClaim: preparation.claim,
     runtimeClient: transport.runtimeClient,
     runtimeEndpointResolver: async () => ({
       runtimeEndpoint: transport.runtimeEndpoint,

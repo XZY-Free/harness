@@ -23,6 +23,7 @@ import {
   CommandDispatchClaimSupersededError,
   type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,
+  acceptResumeCommandPreparation,
   dispatchCancelCommand,
   dispatchCheckpointCommand,
   dispatchResumeCommand,
@@ -314,6 +315,13 @@ async function dispatchCommand(params: {
     });
     if (!capabilities.resume) return { dispatched: false, reason: "unsupported_capability" };
   }
+  const resumePreparationClaim =
+    params.type === "resume"
+      ? await acceptResumeCommandPreparation({
+          tenantId: params.tenantId,
+          commandId: params.commandId,
+        })
+      : null;
   const transport = await resolveTransport(params.tenantId, context);
   const input = {
     tenantId: params.tenantId,
@@ -324,6 +332,7 @@ async function dispatchCommand(params: {
     // `dispatched`），dispatcher 只按**已领取**状态进入 —— 没有 claim 就没有
     // `dispatched` 行，也就没有尾部写入。
     claimToken,
+    ...(resumePreparationClaim ? { resumePreparationClaim } : {}),
   };
   let command: CommandDispatchResult;
   try {

@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "813be9da-df33-4f21-91e5-5426873d53ff",
+  "id": "c03d7e50-d3c0-4132-b9ae-bdd0f79ba3ac",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -13907,6 +13907,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "preparationSourceJson": {
+          "name": "preparationSourceJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "preparationClaimId": {
           "name": "preparationClaimId",
           "type": "varchar(36)",
@@ -14110,7 +14117,7 @@
         },
         "InvocationAttempt_preparation_intent_shape": {
           "name": "InvocationAttempt_preparation_intent_shape",
-          "value": "(`preparationIntentKey` IS NULL AND `preparationRequestDigest` IS NULL) OR (`preparationIntentKey` IS NOT NULL AND `preparationRequestDigest` IS NOT NULL)"
+          "value": "(`preparationIntentKey` IS NULL AND `preparationRequestDigest` IS NULL AND `preparationSourceJson` IS NULL) OR (`preparationIntentKey` IS NOT NULL AND `preparationRequestDigest` IS NOT NULL AND `preparationSourceJson` IS NOT NULL)"
         },
         "InvocationAttempt_preparation_evidence_shape": {
           "name": "InvocationAttempt_preparation_evidence_shape",
@@ -15063,14 +15070,21 @@
           "name": "sourceOperationKey",
           "type": "varchar(128)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "sourceRequestDigest": {
           "name": "sourceRequestDigest",
           "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sourceRequestJson": {
+          "name": "sourceRequestJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "semanticRequestJson": {
@@ -15379,10 +15393,6 @@
         "RuntimeSessionBinding_supervisor_claim_shape": {
           "name": "RuntimeSessionBinding_supervisor_claim_shape",
           "value": "(`supervisorClaimId` IS NULL AND `supervisorInstanceId` IS NULL AND `supervisorLeaseExpiresAt` IS NULL AND `supervisorReleasedAt` IS NULL) OR (`supervisorClaimId` IS NOT NULL AND `supervisorInstanceId` IS NOT NULL AND `supervisorLeaseExpiresAt` IS NOT NULL)"
-        },
-        "RuntimeSessionBinding_source_intent_shape": {
-          "name": "RuntimeSessionBinding_source_intent_shape",
-          "value": "(`sourceOperationKey` IS NULL AND `sourceRequestDigest` IS NULL) OR (`sourceOperationKey` IS NOT NULL AND `sourceRequestDigest` IS NOT NULL)"
         },
         "RuntimeSessionBinding_dispatch_freeze_shape": {
           "name": "RuntimeSessionBinding_dispatch_freeze_shape",

@@ -18,7 +18,11 @@ import {
   OWNERSHIP_LEASE_MS,
   authorityIdentity,
 } from "@/lib/executions/domain/execution-authority";
-import { getAttemptById, getLatestAttempt } from "@/lib/executions/persistence/attempt-store";
+import {
+  type AttemptPreparationClaim,
+  getAttemptById,
+  getLatestAttempt,
+} from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   closeExecutionOwnershipInTransaction,
@@ -49,6 +53,10 @@ import {
   type HostedHarnessLoopResult,
   type TransientEventBatchSink,
 } from "@/lib/runtime/adapters/hosted-adapter";
+import {
+  type ExecutionPreparationDecision,
+  acceptExecutionPreparation,
+} from "@/lib/runtime/application/execution-preparation";
 import { resolveExecutionResources } from "@/lib/runtime/application/execution-resources";
 import type {
   HostedRuntimeApplicationService,
@@ -57,7 +65,7 @@ import type {
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import {
-  decideRuntimeStartSource,
+  executionSourceRequestForStart,
   startRuntimeInvocation,
 } from "@/lib/runtime/application/runtime-start";
 import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
@@ -81,6 +89,10 @@ import {
   markRuntimeSessionLostInTransaction,
   releaseRuntimeSessionSupervisorInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
+import type {
+  SessionDispatchClaim,
+  SessionDispatchIdentity,
+} from "@/lib/runtime/retry/dispatch-retry-queries";
 import type { RuntimeHttpClient, RuntimeStartTransportRequest } from "@/lib/runtime/runtime-client";
 import type {
   AuthorityIdentity,
@@ -104,34 +116,34 @@ import { and, desc, eq, sql } from "drizzle-orm";
  * - 子调用等待后的 continuation 唤醒 = 同一代际的存活 Supervisor，Attempt 仍在
  *   queued/running，"子调用 pending 不等于人工暂停"，不得因此拒绝重放原意图。
  */
-export async function resumeRuntimeInvocation(input: {
+type RuntimeResumePreparationInput = {
   tenantId: string;
   invocation: Invocation;
   binding: ExecutionBinding;
   attempt: InvocationAttempt;
-  runtimeClient: RuntimeHttpClient;
-  runtimeEndpoint: string;
-  auth: RuntimeStartTransportRequest["auth"];
-  callbackEndpoints: CallbackEndpoints;
   checkpointId?: string;
-  workspace?: WorkspaceExecutionResources;
-  environmentProvisioner?: EnvironmentProvisioner;
   anchor: string;
   anchorDigest: string;
-  /**
-   * A05：本次恢复的**来源操作键**，必须来自已持久事实。
-   *
-   * 用户恢复取 `command:<InvocationCommand.id>`（命令网关唯一入口给出）；
-   * External continuation 取已持久 continuation 的原始身份（`agent-call:<id>:<version>`）。
-   * 不用当前时间、不用调用序号：否则"同一次恢复的第二次投递"会被当成新恢复，
-   * 于是再跑一遍环境重准备、把上一次建好的 ready/激活抹掉 —— 那正是 A05 修的问题。
-   */
   sourceOperationKey: string;
-}): Promise<RuntimeStartResponse> {
+};
+
+export interface RuntimeResumePreparationAcceptance {
+  decision: ExecutionPreparationDecision;
+  invocation: Invocation;
+  attempt: InvocationAttempt;
+  environmentLease: EnvironmentLease | null;
+  environmentRevision: Awaited<ReturnType<typeof getEnvironmentRevisionById>>;
+}
+
+/**
+ * Resume 的最外层接纳边界。命令网关、continuation 和重投 Worker 都必须先调用它，
+ * 再解析 Runtime/Workspace/Environment 等可能换手的资源。
+ */
+export async function acceptRuntimeResumePreparation(
+  input: RuntimeResumePreparationInput & { preparationClaimId?: string },
+): Promise<RuntimeResumePreparationAcceptance> {
   const invocation = await getInvocationById(input.tenantId, input.invocation.id);
   const attempt = await getAttemptById(input.attempt.id);
-  // waiting_user = 受控暂停后的正式 Resume；running = UserAction resolve 事务已先落
-  // Authority 的 post-authority Resume（凭证由 command-dispatcher 校验）。
   if (
     !invocation ||
     !["waiting_user", "running"].includes(invocation.executionState) ||
@@ -141,6 +153,83 @@ export async function resumeRuntimeInvocation(input: {
   ) {
     throw new Error("AttemptMismatch");
   }
+  let environmentLease: EnvironmentLease | null = null;
+  let environmentRevision: Awaited<ReturnType<typeof getEnvironmentRevisionById>> = null;
+  if (input.binding.environmentMode === "MANAGED") {
+    if (!input.binding.environmentDefinitionRevisionId) {
+      throw new Error("EnvironmentRevisionMismatch");
+    }
+    environmentRevision = await getEnvironmentRevisionById(
+      input.tenantId,
+      input.binding.environmentDefinitionRevisionId,
+    );
+    environmentLease = await getEnvironmentLeaseByAttempt(
+      input.tenantId,
+      invocation.id,
+      attempt.id,
+    );
+    if (
+      !environmentRevision ||
+      !environmentLease ||
+      environmentLease.environmentDefinitionRevisionId !== environmentRevision.id ||
+      environmentLease.leaseState !== "active"
+    ) {
+      throw new Error("EnvironmentRevisionMismatch");
+    }
+  }
+  const request = executionSourceRequestForStart({
+    ...input,
+    invocation,
+    attempt,
+    intentType: "resume",
+    recovery: {
+      kind: "resume",
+      anchor: input.anchor,
+      anchorDigest: input.anchorDigest,
+      ...(input.checkpointId ? { checkpointId: input.checkpointId } : {}),
+    },
+  });
+  const decision = await acceptExecutionPreparation({
+    request,
+    ...(input.preparationClaimId ? { claimId: input.preparationClaimId } : {}),
+    ...(environmentLease
+      ? {
+          environmentReprepare: {
+            leaseId: environmentLease.id,
+            recoveryAnchorDigest: input.anchorDigest,
+          },
+        }
+      : {}),
+  });
+  return { decision, invocation, attempt, environmentLease, environmentRevision };
+}
+
+export async function resumeRuntimeInvocation(
+  input: RuntimeResumePreparationInput & {
+    runtimeClient: RuntimeHttpClient;
+    runtimeEndpoint: string;
+    auth: RuntimeStartTransportRequest["auth"];
+    callbackEndpoints: CallbackEndpoints;
+    workspace?: WorkspaceExecutionResources;
+    environmentProvisioner?: EnvironmentProvisioner;
+    preparationClaim?: AttemptPreparationClaim | null;
+    sessionDispatchClaim?: SessionDispatchClaim | SessionDispatchIdentity | null;
+    /**
+     * A05：本次恢复的**来源操作键**，必须来自已持久事实。
+     *
+     * 用户恢复取 `command:<InvocationCommand.id>`（命令网关唯一入口给出）；
+     * External continuation 取已持久 continuation 的原始身份（`agent-call:<id>:<version>`）。
+     * 不用当前时间、不用调用序号：否则"同一次恢复的第二次投递"会被当成新恢复，
+     * 于是再跑一遍环境重准备、把上一次建好的 ready/激活抹掉 —— 那正是 A05 修的问题。
+     */
+  },
+): Promise<RuntimeStartResponse> {
+  const accepted = await acceptRuntimeResumePreparation({
+    ...input,
+    ...(input.preparationClaim ? { preparationClaimId: input.preparationClaim.claimId } : {}),
+  });
+  const invocation = accepted.invocation;
+  const attempt = accepted.attempt;
   // A05：MANAGED 的 Resume 必须把受管实例**交还到可执行形状**，而不是"原样复验一遍"。
   //
   // 暂停（`execution.suspended`）把这些事实写成
@@ -152,87 +241,10 @@ export async function resumeRuntimeInvocation(input: {
   // 3. 恢复锚点证据必须按**本次**锚点重写（`activateEnvironmentLease` 会逐字比对）。
   // 三者由 `EnvironmentProvisioner.reprepare` 一次完成：清掉旧激活 → 推进恢复水位 →
   // 真实回读实例（必要时按稳定 operationId 幂等重建）→ 重写 Prepared 证据。
-  let environmentLease: EnvironmentLease | null = null;
-  let environmentRevision: Awaited<ReturnType<typeof getEnvironmentRevisionById>> = null;
-  if (input.binding.environmentMode === "MANAGED") {
-    if (!input.binding.environmentDefinitionRevisionId || !input.environmentProvisioner) {
-      throw new Error("EnvironmentRevisionMismatch");
-    }
-    const revision = await getEnvironmentRevisionById(
-      input.tenantId,
-      input.binding.environmentDefinitionRevisionId,
-    );
-    if (!revision) throw new Error("EnvironmentRevisionMismatch");
-    environmentRevision = revision;
-    const current = await getEnvironmentLeaseByAttempt(input.tenantId, invocation.id, attempt.id);
-    if (
-      !current ||
-      current.environmentDefinitionRevisionId !== revision.id ||
-      current.leaseState !== "active"
-    ) {
-      throw new Error("EnvironmentRevisionMismatch");
-    }
-    environmentLease = current;
-  }
+  let environmentLease = accepted.environmentLease;
+  const environmentRevision = accepted.environmentRevision;
   const checkpointId = input.checkpointId ?? attempt.filesystemCheckpointId ?? undefined;
-  const sourceDecision = await decideRuntimeStartSource({
-    tenantId: input.tenantId,
-    invocationId: invocation.id,
-    attemptId: attempt.id,
-    intentType: "resume",
-    sourceOperationKey: input.sourceOperationKey,
-    runtimeRevisionId: input.binding.runtimeRevisionId,
-    workspaceBindingId: input.binding.workspaceBindingId ?? null,
-    environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId ?? null,
-    anchorDigest: input.anchorDigest,
-    checkpointId: checkpointId ?? null,
-  });
-  let preparationClaimId: string | null = null;
-  if (input.binding.environmentMode === "MANAGED" && sourceDecision.disposition === "new") {
-    if (!environmentLease || !environmentRevision || !input.environmentProvisioner) {
-      throw new Error("EnvironmentRevisionMismatch");
-    }
-    // A05：把"这次恢复是哪一个意图"变成持久事实，再动环境。
-    //
-    // 来源意图取**已持久命令身份**，不取当前时间或调用序号：
-    // 只有稳定，ACK/started 丢失后的第二次投递才会被认出来是"同一意图重投"，
-    // 从而沿用已建好的 ready/激活，而不是重做准备把它们抹掉。
-    // 同一 Attempt 可以发生多轮合法暂停/恢复，因此不能退化成 `Invocation + Attempt`：
-    // 那会把第二轮不同命令误判为第一轮同意图的摘要冲突。
-    // 语义摘要覆盖锚点/检查点/Revision/Binding —— 同来源换其中任何一项都必须被拒。
-    const preparationIntentKey = input.sourceOperationKey;
-    const preparationRequestDigest = protocolDigest({
-      scope: "environment-reprepare",
-      tenantId: input.tenantId,
-      invocationId: invocation.id,
-      attemptId: attempt.id,
-      runtimeRevisionId: input.binding.runtimeRevisionId,
-      workspaceBindingId: input.binding.workspaceBindingId,
-      environmentDefinitionRevisionId: environmentRevision.id,
-      anchorDigest: input.anchorDigest ?? null,
-      checkpointId: checkpointId ?? null,
-    });
-    preparationClaimId = newSupervisorClaimId();
-    environmentLease = await input.environmentProvisioner.reprepare({
-      tenantId: input.tenantId,
-      lease: environmentLease,
-      revisionId: environmentRevision.id,
-      revision: environmentRevision,
-      workspaceBindingId: input.binding.workspaceBindingId,
-      workspaceRoot: input.workspace?.root ?? null,
-      recoveryAnchorDigest: input.anchorDigest ?? null,
-      preparationIntentKey,
-      preparationRequestDigest,
-      preparationClaimId,
-    });
-    if (
-      !isPreparedReadinessState(environmentLease.readinessState) ||
-      environmentLease.leaseState !== "active"
-    ) {
-      throw new Error("EnvironmentComplianceFailed");
-    }
-  }
-  const started = await startRuntimeInvocation({
+  const startInput = {
     tenantId: input.tenantId,
     invocation,
     binding: input.binding,
@@ -243,37 +255,50 @@ export async function resumeRuntimeInvocation(input: {
     callbackEndpoints: input.callbackEndpoints,
     environmentLeaseId: environmentLease?.id ?? null,
     environmentProvisioner: input.environmentProvisioner ?? null,
+    sessionDispatchClaim: input.sessionDispatchClaim ?? null,
     workspace: input.workspace,
-    intentType: "resume",
+    intentType: "resume" as const,
     sourceOperationKey: input.sourceOperationKey,
-    ...(preparationClaimId
-      ? {
-          preparationClaim: {
-            tenantId: input.tenantId,
-            invocationId: invocation.id,
-            attemptId: attempt.id,
-            intentKey: input.sourceOperationKey,
-            requestDigest: protocolDigest({
-              scope: "environment-reprepare",
-              tenantId: input.tenantId,
-              invocationId: invocation.id,
-              attemptId: attempt.id,
-              runtimeRevisionId: input.binding.runtimeRevisionId,
-              workspaceBindingId: input.binding.workspaceBindingId,
-              environmentDefinitionRevisionId: environmentRevision?.id ?? null,
-              anchorDigest: input.anchorDigest ?? null,
-              checkpointId: checkpointId ?? null,
-            }),
-            claimId: preparationClaimId,
-          },
-        }
-      : {}),
     recovery: {
-      kind: "resume",
+      kind: "resume" as const,
       anchor: input.anchor,
       anchorDigest: input.anchorDigest,
       ...(checkpointId ? { checkpointId } : {}),
     },
+  };
+  const preparationDecision = accepted.decision;
+  if (preparationDecision.disposition === "busy") throw new Error("AttemptPreparationBusy");
+  const preparationClaim =
+    preparationDecision.disposition === "claimed" ? preparationDecision.claim : null;
+  if (
+    input.binding.environmentMode === "MANAGED" &&
+    preparationDecision.disposition === "claimed" &&
+    preparationDecision.stage === "prepare"
+  ) {
+    if (!environmentLease || !environmentRevision || !input.environmentProvisioner) {
+      throw new Error("EnvironmentRevisionMismatch");
+    }
+    environmentLease = await input.environmentProvisioner.reprepare({
+      tenantId: input.tenantId,
+      lease: environmentLease,
+      revisionId: environmentRevision.id,
+      revision: environmentRevision,
+      workspaceBindingId: input.binding.workspaceBindingId,
+      workspaceRoot: input.workspace?.root ?? null,
+      recoveryAnchorDigest: input.anchorDigest ?? null,
+      preparationClaim: preparationDecision.claim,
+    });
+    if (
+      !isPreparedReadinessState(environmentLease.readinessState) ||
+      environmentLease.leaseState !== "active"
+    ) {
+      throw new Error("EnvironmentComplianceFailed");
+    }
+  }
+  const started = await startRuntimeInvocation({
+    ...startInput,
+    environmentLeaseId: environmentLease?.id ?? null,
+    ...(preparationClaim ? { preparationClaim } : {}),
   });
   return started.response;
 }
@@ -1012,15 +1037,30 @@ export async function resumeHarnessInvocation(input: {
     if (!attempt || INVOCATION_ATTEMPT_TERMINAL_STATES.includes(attempt.attemptState)) {
       throw new Error("AttemptMismatch");
     }
+    const anchor = attempt.filesystemCheckpointId
+      ? `checkpoint:${attempt.filesystemCheckpointId}`
+      : `invocation:${invocation.id}:recovery:${invocation.recoveryVersion}`;
+    const anchorDigest = attempt.resumeAnchorDigest ?? protocolDigest(anchor);
+    const sourceOperationKey = `agent-call:${input.agentCallId}:${input.sourceVersion}`;
+    const accepted = await acceptRuntimeResumePreparation({
+      tenantId: input.tenantId,
+      invocation,
+      binding,
+      attempt,
+      ...(attempt.filesystemCheckpointId ? { checkpointId: attempt.filesystemCheckpointId } : {}),
+      anchor,
+      anchorDigest,
+      sourceOperationKey,
+    });
+    if (accepted.decision.disposition === "busy") throw new Error("AttemptPreparationBusy");
+    const preparationClaim =
+      accepted.decision.disposition === "claimed" ? accepted.decision.claim : null;
     const endpoint = revision.endpointRef;
     const auth = await resolveOutboundRuntimeAuth({
       tenantId: input.tenantId,
       identityMode: revision.identityMode,
       credentialRefId: revision.credentialRefId,
     });
-    const anchor = attempt.filesystemCheckpointId
-      ? `checkpoint:${attempt.filesystemCheckpointId}`
-      : `invocation:${invocation.id}:recovery:${invocation.recoveryVersion}`;
     // A05：External continuation 与请求内联调度必须携带**同一份**受管执行资源。
     // 只换 Runtime Transport 而不给 Workspace 执行资源与 Environment Provisioner，
     // 会让 MANAGED 的 continuation 在默认路径上直接终态失败 —— 缺陷与命令网关同源。
@@ -1046,11 +1086,12 @@ export async function resumeHarnessInvocation(input: {
         ? { environmentProvisioner: resources.environmentProvisioner }
         : {}),
       anchor,
-      anchorDigest: attempt.resumeAnchorDigest ?? protocolDigest(anchor),
+      anchorDigest,
+      ...(preparationClaim ? { preparationClaim } : {}),
       // A05：子调用续接的来源意图 = 已持久 continuation 的**原始身份**
       // （`agentCallId` + 该次结果的 `sourceVersion`），不是当前时间或本次调用序号。
       // 同一次续接因 ACK/started 丢失而重投时会拿到同一个键，从而命中原 O/S。
-      sourceOperationKey: `agent-call:${input.agentCallId}:${input.sourceVersion}`,
+      sourceOperationKey,
     });
     return {
       status: "resumed",

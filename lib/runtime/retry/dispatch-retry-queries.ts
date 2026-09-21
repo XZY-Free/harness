@@ -15,6 +15,7 @@ import { db } from "@/lib/db/client";
 import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
 import type { InvocationAttempt, InvocationCommand } from "@/lib/persistence/schema/executions";
 import {
+  executionOwnershipTable,
   invocationAttemptTable,
   invocationCommandTable,
   runtimeSessionBindingTable,
@@ -309,13 +310,6 @@ export async function recordSessionDispatchAttemptStartedInTransaction(
   attempt: InvocationAttempt;
   session: typeof runtimeSessionBindingTable.$inferSelect;
 }> {
-  const session = await lockClaimedSessionInTransaction(tx, identity);
-  const updated = await recordRuntimeSessionDispatchInTransaction(tx, {
-    tenantId: session.tenantId,
-    id: session.id,
-    expectedVersionNo: session.versionNo,
-    now,
-  });
   const [attempt] = await tx
     .select()
     .from(invocationAttemptTable)
@@ -325,8 +319,30 @@ export async function recordSessionDispatchAttemptStartedInTransaction(
         eq(invocationAttemptTable.id, identity.attemptId),
       ),
     )
+    .for("update")
     .limit(1);
   if (!attempt) throw new Error(`InvocationAttempt 不存在（id=${identity.attemptId}）`);
+  const [ownership] = await tx
+    .select({ id: executionOwnershipTable.id })
+    .from(executionOwnershipTable)
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, identity.tenantId),
+        eq(executionOwnershipTable.id, identity.ownershipId),
+        eq(executionOwnershipTable.attemptId, identity.attemptId),
+        eq(executionOwnershipTable.leaseEpoch, identity.leaseEpoch),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!ownership) throw new SessionDispatchClaimSupersededError("ExecutionOwnership 已变化");
+  const session = await lockClaimedSessionInTransaction(tx, identity);
+  const updated = await recordRuntimeSessionDispatchInTransaction(tx, {
+    tenantId: session.tenantId,
+    id: session.id,
+    expectedVersionNo: session.versionNo,
+    now,
+  });
   return { attempt, session: updated };
 }
 
@@ -334,9 +350,23 @@ export async function recordSessionDispatchAttemptStarted(
   identity: SessionDispatchIdentity,
   now: Date,
 ): Promise<InvocationAttempt> {
-  const result = await db.transaction((tx) =>
-    recordSessionDispatchAttemptStartedInTransaction(tx, identity, now),
-  );
+  const [locator] = await db
+    .select({ invocationId: invocationAttemptTable.invocationId })
+    .from(invocationAttemptTable)
+    .where(
+      and(
+        eq(invocationAttemptTable.tenantId, identity.tenantId),
+        eq(invocationAttemptTable.id, identity.attemptId),
+      ),
+    )
+    .limit(1);
+  if (!locator) throw new Error(`InvocationAttempt 不存在（id=${identity.attemptId}）`);
+  const result = await db.transaction(async (tx) => {
+    if (!(await lockInvocationRootIfExists(tx, identity.tenantId, locator.invocationId))) {
+      throw new Error(`Invocation 不存在（id=${locator.invocationId}）`);
+    }
+    return recordSessionDispatchAttemptStartedInTransaction(tx, identity, now);
+  });
   return result.attempt;
 }
 
@@ -463,7 +493,18 @@ export type AttemptTransientFailureOutcome =
       nextDispatchAt: Date;
       attempt: InvocationAttempt;
     }
-  | { outcome: "exhausted"; dispatchCount: number; attempt: InvocationAttempt };
+  | {
+      outcome: "exhausted";
+      dispatchCount: number;
+      attempt: InvocationAttempt;
+      observedOwner: {
+        ownershipId: string;
+        attemptId: string;
+        leaseEpoch: number;
+        leaseExpiresAt: Date;
+        lastHeartbeatAt: Date;
+      };
+    };
 
 /**
  * 记录一次暂态 dispatch 失败并排定 durable retry（R04 §5：**必须**带 claim 身份）。
@@ -478,6 +519,8 @@ export async function recordAttemptDispatchTransientFailure(
     now: Date;
     retryReasonCode?: string | null;
     counted?: boolean;
+    /** Resume Command 只排定 Session/Command 重投，不得把 suspended Attempt 当 queued 派发失败收口。 */
+    updateAttempt?: boolean;
   },
 ): Promise<AttemptTransientFailureOutcome> {
   // 非锁定预读只用于定位执行根；事务内仍会在取得 Invocation 根锁后重新验证 Attempt。
@@ -516,11 +559,26 @@ export async function recordAttemptDispatchTransientFailure(
     if (currentAttempt.invocationId !== invocation.id) {
       throw new SessionDispatchClaimSupersededError("Attempt 已不属于预读定位的 Invocation");
     }
-    if (currentAttempt.attemptState !== "queued") {
+    const updateAttempt = params.updateAttempt ?? true;
+    if (updateAttempt && currentAttempt.attemptState !== "queued") {
       throw new SessionDispatchClaimSupersededError(
         `Attempt 已非 queued（id=${identity.attemptId}）`,
       );
     }
+    const [ownership] = await tx
+      .select()
+      .from(executionOwnershipTable)
+      .where(
+        and(
+          eq(executionOwnershipTable.tenantId, identity.tenantId),
+          eq(executionOwnershipTable.id, identity.ownershipId),
+          eq(executionOwnershipTable.attemptId, identity.attemptId),
+          eq(executionOwnershipTable.leaseEpoch, identity.leaseEpoch),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!ownership) throw new SessionDispatchClaimSupersededError("ExecutionOwnership 已变化");
     const session = await lockClaimedSessionInTransaction(tx, identity);
     const dispatchCount = params.counted ? session.dispatchCount : session.dispatchCount + 1;
     const exhausted = isRetryExhausted(dispatchCount);
@@ -536,7 +594,7 @@ export async function recordAttemptDispatchTransientFailure(
       nextDispatchAt,
       lastErrorCode: params.errorCode,
     });
-    if (exhausted) {
+    if (updateAttempt && exhausted) {
       await tx
         .update(invocationAttemptTable)
         .set({
@@ -549,7 +607,7 @@ export async function recordAttemptDispatchTransientFailure(
           versionNo: currentAttempt.versionNo + 1,
         })
         .where(eq(invocationAttemptTable.id, identity.attemptId));
-    } else if (currentAttempt.retryReasonCode === null && params.retryReasonCode) {
+    } else if (updateAttempt && currentAttempt.retryReasonCode === null && params.retryReasonCode) {
       await tx
         .update(invocationAttemptTable)
         .set({ retryReasonCode: params.retryReasonCode, updatedAt: params.now })
@@ -562,7 +620,18 @@ export async function recordAttemptDispatchTransientFailure(
       .limit(1);
     if (!attempt) throw new Error(`InvocationAttempt 更新后回查失败（id=${identity.attemptId}）`);
     return exhausted
-      ? { outcome: "exhausted" as const, dispatchCount, attempt }
+      ? {
+          outcome: "exhausted" as const,
+          dispatchCount,
+          attempt,
+          observedOwner: {
+            ownershipId: ownership.id,
+            attemptId: ownership.attemptId,
+            leaseEpoch: ownership.leaseEpoch,
+            leaseExpiresAt: ownership.leaseExpiresAt,
+            lastHeartbeatAt: ownership.lastHeartbeatAt,
+          },
+        }
       : {
           outcome: "scheduled" as const,
           dispatchCount,

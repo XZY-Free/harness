@@ -17,6 +17,8 @@ import {
   ENVIRONMENT_PREPARED_TTL_MS,
   buildEnvironmentPreparedEvidence,
 } from "@/lib/environment/environment-prepared-evidence";
+import type { AttemptPreparationClaim } from "@/lib/executions/persistence/attempt-store";
+import { attemptPreparationClaimForTest } from "@/lib/executions/test-support/preparation-fixtures";
 import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
 
@@ -41,7 +43,7 @@ export async function seedPreparedEnvironmentLease(input: {
    * A05：本次完成所依据的准备 claim。用于验证"迟到的旧完成不得提交证据"：
    * 提供时 `prepareEnvironmentLease` 会在事务内复核准备槽归属。
    */
-  preparationClaim?: { attemptId: string; preparationClaimId: string };
+  preparationClaim?: AttemptPreparationClaim;
   now?: Date;
 }): Promise<EnvironmentLease> {
   const now = input.now ?? new Date();
@@ -108,12 +110,14 @@ export async function seedPreparedEnvironmentLease(input: {
     verifiedAt: now,
     expiresAt: new Date(now.getTime() + ENVIRONMENT_PREPARED_TTL_MS),
   });
+  const preparationClaim =
+    input.preparationClaim ?? (await attemptPreparationClaimForTest(input.attemptId));
   return prepareEnvironmentLease({
     tenantId: input.tenantId,
     leaseId: lease.id,
     capabilitiesJson: input.capabilitiesJson ?? input.revision.requiredCapabilities,
     evidence,
-    preparationClaim: input.preparationClaim,
+    preparationClaim,
     now,
   });
 }

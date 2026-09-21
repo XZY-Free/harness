@@ -1697,6 +1697,7 @@ CREATE TABLE `InvocationAttempt` (
 	`preparedAt` datetime(6),
 	`preparationIntentKey` varchar(128),
 	`preparationRequestDigest` varchar(71),
+	`preparationSourceJson` json,
 	`preparationClaimId` varchar(36),
 	`preparationLeaseExpiresAt` datetime(6),
 	`nextPreparationAt` datetime(6),
@@ -1720,7 +1721,7 @@ CREATE TABLE `InvocationAttempt` (
 	CONSTRAINT `InvocationAttempt_preparation_state_allowed` CHECK(`preparationState` IN ('pending', 'preparing', 'prepared', 'failed')),
 	CONSTRAINT `InvocationAttempt_attempt_no_positive` CHECK(`attemptNo` >= 1),
 	CONSTRAINT `InvocationAttempt_preparing_claim_shape` CHECK(`preparationState` <> 'preparing' OR (`preparationClaimId` IS NOT NULL AND `preparationLeaseExpiresAt` IS NOT NULL)),
-	CONSTRAINT `InvocationAttempt_preparation_intent_shape` CHECK((`preparationIntentKey` IS NULL AND `preparationRequestDigest` IS NULL) OR (`preparationIntentKey` IS NOT NULL AND `preparationRequestDigest` IS NOT NULL)),
+	CONSTRAINT `InvocationAttempt_preparation_intent_shape` CHECK((`preparationIntentKey` IS NULL AND `preparationRequestDigest` IS NULL AND `preparationSourceJson` IS NULL) OR (`preparationIntentKey` IS NOT NULL AND `preparationRequestDigest` IS NOT NULL AND `preparationSourceJson` IS NOT NULL)),
 	CONSTRAINT `InvocationAttempt_preparation_evidence_shape` CHECK((`preparationState` = 'prepared' AND `preparationEvidence` IS NOT NULL AND `preparationDigest` IS NOT NULL AND `preparedAt` IS NOT NULL) OR `preparationState` <> 'prepared'),
 	CONSTRAINT `InvocationAttempt_terminal_shape` CHECK(((`finishedAt` IS NULL AND `attemptState` NOT IN ('completed', 'failed', 'cancelled', 'lost')) OR (`finishedAt` IS NOT NULL AND `attemptState` IN ('completed', 'failed', 'cancelled', 'lost'))))
 );
@@ -1841,8 +1842,9 @@ CREATE TABLE `RuntimeSessionBinding` (
 	`bindingState` varchar(32) NOT NULL DEFAULT 'prepared',
 	`intentType` varchar(32) NOT NULL,
 	`startIntentKey` varchar(128) NOT NULL,
-	`sourceOperationKey` varchar(128),
-	`sourceRequestDigest` varchar(71),
+	`sourceOperationKey` varchar(128) NOT NULL,
+	`sourceRequestDigest` varchar(71) NOT NULL,
+	`sourceRequestJson` json NOT NULL,
 	`semanticRequestJson` json,
 	`semanticRequestDigest` varchar(71),
 	`intentFrozenAt` datetime(6),
@@ -1877,7 +1879,6 @@ CREATE TABLE `RuntimeSessionBinding` (
 	CONSTRAINT `RuntimeSessionBinding_request_digest_shape` CHECK((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL)),
 	CONSTRAINT `RuntimeSessionBinding_active_started_shape` CHECK(`bindingState` <> 'active' OR `startedEventId` IS NOT NULL),
 	CONSTRAINT `RuntimeSessionBinding_supervisor_claim_shape` CHECK((`supervisorClaimId` IS NULL AND `supervisorInstanceId` IS NULL AND `supervisorLeaseExpiresAt` IS NULL AND `supervisorReleasedAt` IS NULL) OR (`supervisorClaimId` IS NOT NULL AND `supervisorInstanceId` IS NOT NULL AND `supervisorLeaseExpiresAt` IS NOT NULL)),
-	CONSTRAINT `RuntimeSessionBinding_source_intent_shape` CHECK((`sourceOperationKey` IS NULL AND `sourceRequestDigest` IS NULL) OR (`sourceOperationKey` IS NOT NULL AND `sourceRequestDigest` IS NOT NULL)),
 	CONSTRAINT `RuntimeSessionBinding_dispatch_freeze_shape` CHECK(((`semanticRequestJson` IS NULL AND `semanticRequestDigest` IS NULL AND `intentFrozenAt` IS NULL) OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` NOT IN ('dispatching', 'active') OR (`semanticRequestJson` IS NOT NULL AND `semanticRequestDigest` IS NOT NULL AND `intentFrozenAt` IS NOT NULL)) AND (`bindingState` <> 'active' OR (`remoteSessionRef` IS NOT NULL AND `remoteExecutionRef` IS NOT NULL AND `startedEventId` IS NOT NULL)))
 );
 --> statement-breakpoint

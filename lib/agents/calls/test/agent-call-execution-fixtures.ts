@@ -40,16 +40,13 @@ import {
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { db } from "@/lib/db/client";
-import {
-  claimAttemptPreparation,
-  createAttempt,
-  markAttemptPreparedInTransaction,
-} from "@/lib/executions/persistence/attempt-store";
+import { createAttempt } from "@/lib/executions/persistence/attempt-store";
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   agentCallAttemptTable,
   agentCallBindingTable,
@@ -648,25 +645,11 @@ export async function acquireExecutionAuthorityForInvocation(input: {
     attemptId: attempt.id,
   };
   const evidenceDigest = protocolDigest(evidence);
-  const preparation = await claimAttemptPreparation({
-    tenantId: input.tenantId,
-    invocationId: input.invocationId,
-    attemptId: attempt.id,
-    intentKey: `agent-call-test:${attempt.id}`,
-    requestDigest: evidenceDigest,
-    claimId: randomUUID(),
-  });
-  if (preparation.disposition !== "claimed") {
-    throw new Error(
-      `AgentCall test authority preparation was not claimed: ${preparation.disposition}`,
-    );
-  }
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: evidenceDigest,
-      preparationClaim: preparation.claim,
     }),
   );
   const acquired = await acquireExecutionOwnership({

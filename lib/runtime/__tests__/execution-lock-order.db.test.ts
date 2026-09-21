@@ -32,6 +32,7 @@ import {
 } from "@/lib/executions/application/require-current-execution-authority";
 import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
 import { createInvocation } from "@/lib/executions/persistence/invocation-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   createPreparedTakeoverAttempt,
@@ -87,7 +88,7 @@ async function sleep(ms: number): Promise<void> {
 async function markPrepared(tenantId: string, invocationId: string, attemptId: string) {
   const evidence = { kind: "lock-order-candidate", invocationId, attemptId };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId,
       evidence,
       digest: protocolDigest(evidence),
@@ -988,7 +989,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
     const anchor = `resume:${input.invocation.id}`;
     return {
       tenantId: input.tenantId,
-      sourceOperationKey: `invocation:${input.invocation.id}`,
+      sourceOperationKey: `command:lock-order:${input.invocation.id}`,
       invocation: input.invocation,
       binding: input.binding,
       attempt: input.attempt,
@@ -1139,6 +1140,10 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
     const first = await seedActiveOwner({ phase: "executing" });
     const tenantId = first.ctx.tenantId;
     const invocationId = first.invocation.id;
+    await db
+      .update(invocationTable)
+      .set({ executionState: "running", startedAt: new Date(), updatedAt: new Date() })
+      .where(eq(invocationTable.id, invocationId));
     const resumeInput = resumeInputFor({
       tenantId,
       invocation: first.invocation,

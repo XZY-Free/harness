@@ -58,6 +58,11 @@ import {
 import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import {
+  attemptPreparationClaimForTest,
+  executionSourceForTest,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
+import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
@@ -81,7 +86,11 @@ import {
   resumeHarnessInvocation,
   resumeRuntimeInvocation,
 } from "@/lib/runtime/application/runtime-resume";
-import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import {
+  RuntimeStartTransportError,
+  executionSourceRequestForStart,
+  startRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-start";
 import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
 import {
   dockerInfo,
@@ -1318,13 +1327,66 @@ async function readPreparationSlot(tenantId: string, attemptId: string) {
 async function markIntentAttemptPrepared(tenantId: string, attemptId: string): Promise<void> {
   const evidence = { kind: "a05-intent-attempt-prepared", attemptId };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId,
       evidence,
       digest: protocolDigest(evidence),
     }),
   );
   void tenantId;
+}
+
+async function claimLeaseReprepareForTest(input: {
+  tenantId: string;
+  invocationId: string;
+  attemptId: string;
+  leaseId: string;
+  sourceOperationKey: string;
+  claimId: string;
+  recoveryAnchorDigest: string;
+}) {
+  const [binding] = await db
+    .select()
+    .from(executionBindingTable)
+    .where(eq(executionBindingTable.invocationId, input.invocationId))
+    .limit(1);
+  const invocation = await getInvocationById(input.tenantId, input.invocationId);
+  if (!binding || !invocation) throw new Error("准备领取测试夹具不完整");
+  const claimed = await claimAttemptPreparation({
+    source: {
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      attemptId: input.attemptId,
+      sourceOperationKey: input.sourceOperationKey,
+      intentType: "resume",
+      sourceKind: "user_resume",
+      sourceRef: input.sourceOperationKey,
+      predecessor: null,
+      runtimeRevisionId: binding.runtimeRevisionId,
+      workspaceBindingId: binding.workspaceBindingId,
+      environmentDefinitionRevisionId: binding.environmentDefinitionRevisionId,
+      bindingConfigDigest: binding.configHash,
+      inputDigest: invocation.inputDigest,
+      recovery: {
+        kind: "resume",
+        anchor: `test-anchor:${input.recoveryAnchorDigest}`,
+        anchorDigest: input.recoveryAnchorDigest,
+        checkpointId: null,
+      },
+    },
+    claimId: input.claimId,
+  });
+  if (claimed.disposition !== "claimed" || !claimed.claim) {
+    throw new Error(`测试准备领取未成功（${claimed.disposition}）`);
+  }
+  return {
+    lease: await beginEnvironmentLeaseReprepare({
+      preparationClaim: claimed.claim,
+      leaseId: input.leaseId,
+      recoveryAnchorDigest: input.recoveryAnchorDigest,
+    }),
+    claim: claimed.claim,
+  };
 }
 
 /**
@@ -1373,13 +1435,13 @@ async function seedPreparedSlotLifecycle(input: {
     ownershipId: authority.ownership.id,
     recoveryAnchorDigest: input.recoveryAnchorDigest,
   });
-  await beginEnvironmentLeaseReprepare({
+  const prepared = await claimLeaseReprepareForTest({
     tenantId: input.tenantId,
+    invocationId: input.invocationId,
     leaseId: seeded.id,
     attemptId: input.attemptId,
-    preparationIntentKey: input.preparationIntentKey,
-    preparationRequestDigest: input.preparationRequestDigest,
-    preparationClaimId: input.preparationClaimId,
+    sourceOperationKey: input.preparationIntentKey,
+    claimId: input.preparationClaimId,
     recoveryAnchorDigest: input.recoveryAnchorDigest,
   });
   const reprepared = await seedPreparedEnvironmentLease({
@@ -1388,7 +1450,7 @@ async function seedPreparedSlotLifecycle(input: {
     attemptId: input.attemptId,
     revision,
     workspaceBindingId: input.workspaceBindingId,
-    lease: (await getEnvironmentLeaseById(input.tenantId, seeded.id)) ?? seeded,
+    lease: prepared.lease,
     recoveryAnchorDigest: input.recoveryAnchorDigest,
   });
   await activateSeededEnvironmentLease({
@@ -1461,18 +1523,23 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     const resumeKey = `command:${randomUUID()}`;
     stub.deliverStarted = false;
     stub.dropNextResponse = true;
-    await expect(
-      resumeRuntimeInvocation({
-        tenantId,
-        invocation,
-        binding,
-        attempt,
-        sourceOperationKey: resumeKey,
-        anchor: "a05-t01",
-        anchorDigest,
-        ...intentTransport(stub),
-      }),
-    ).rejects.toBeInstanceOf(RuntimeHttpClientError);
+    const firstFailure = await resumeRuntimeInvocation({
+      tenantId,
+      invocation,
+      binding,
+      attempt,
+      sourceOperationKey: resumeKey,
+      anchor: "a05-t01",
+      anchorDigest,
+      ...intentTransport(stub),
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(firstFailure).toBeInstanceOf(RuntimeStartTransportError);
+    if (!(firstFailure instanceof RuntimeStartTransportError)) {
+      throw new Error("首次 Resume 必须返回携带出发身份的失败");
+    }
 
     const sessionsWhenAckLost = await getRuntimeSessionBindingsByInvocation(
       tenantId,
@@ -1494,6 +1561,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       sourceOperationKey: resumeKey,
       anchor: "a05-t01",
       anchorDigest,
+      sessionDispatchClaim: firstFailure.dispatchIdentity,
       ...intentTransport(stub),
     });
     // 同一来源意图只有一个 S/O，且就是原来那一个。
@@ -1588,12 +1656,8 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     const slotBefore = await readPreparationSlot(managed.tenantId, managed.attempt.id);
 
     const replayedLease = await beginEnvironmentLeaseReprepare({
-      tenantId: managed.tenantId,
+      preparationClaim: await attemptPreparationClaimForTest(managed.attempt.id),
       leaseId: lifecycle.leaseId,
-      attemptId: managed.attempt.id,
-      preparationIntentKey: intentKey,
-      preparationRequestDigest: intentDigest,
-      preparationClaimId: "claim-second",
       recoveryAnchorDigest: envAnchor,
     });
     expect(replayedLease.id).toBe(lifecycle.leaseId);
@@ -1810,16 +1874,16 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       );
     const leaseBefore = await getEnvironmentLeaseById(managed.tenantId, lifecycle.leaseId);
     await expect(
-      beginEnvironmentLeaseReprepare({
+      claimLeaseReprepareForTest({
         tenantId: managed.tenantId,
+        invocationId: managed.invocation.id,
         leaseId: lifecycle.leaseId,
         attemptId: managed.attempt.id,
-        preparationIntentKey: intentKey,
-        preparationRequestDigest: intentDigest,
-        preparationClaimId: "claim-challenger",
+        sourceOperationKey: intentKey,
+        claimId: "claim-challenger",
         recoveryAnchorDigest: envAnchor,
       }),
-    ).rejects.toMatchObject({ name: "EnvironmentLeaseConflictError" });
+    ).rejects.toThrow("测试准备领取未成功（busy）");
     const leaseAfter = await getEnvironmentLeaseById(managed.tenantId, lifecycle.leaseId);
     expect(leaseAfter?.id).toBe(leaseBefore?.id);
     expect(leaseAfter?.readinessState).toBe(leaseBefore?.readinessState);
@@ -1949,16 +2013,16 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       anchorDigest: protocolDigest({ anchor: "a05-t04-env-changed" }),
     });
     await expect(
-      beginEnvironmentLeaseReprepare({
+      claimLeaseReprepareForTest({
         tenantId: managed.tenantId,
+        invocationId: managed.invocation.id,
         leaseId: lifecycle.leaseId,
         attemptId: managed.attempt.id,
-        preparationIntentKey: intentKey,
-        preparationRequestDigest: differentDigest,
-        preparationClaimId: "claim-t04-b",
+        sourceOperationKey: intentKey,
+        claimId: "claim-t04-b",
         recoveryAnchorDigest: protocolDigest({ anchor: "a05-t04-env-changed" }),
       }),
-    ).rejects.toMatchObject({ name: "EnvironmentComplianceFailed" });
+    ).rejects.toMatchObject({ name: "InvocationAttemptStateConflictError" });
     const leaseAfter = await getEnvironmentLeaseById(managed.tenantId, lifecycle.leaseId);
     expect(leaseAfter?.readinessState).toBe("ready");
     expect(leaseAfter?.activationOwnershipId).toBe(lifecycle.ownershipId);
@@ -1992,13 +2056,13 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     });
 
     // 第一个准备者登记准备槽（IO 即将开始）——随后"进程被杀"：本测试不再持有任何内存状态。
-    await beginEnvironmentLeaseReprepare({
+    const crashed = await claimLeaseReprepareForTest({
       tenantId: managed.tenantId,
+      invocationId: managed.invocation.id,
       leaseId: lease.id,
       attemptId: managed.attempt.id,
-      preparationIntentKey: intentKey,
-      preparationRequestDigest: intentDigest,
-      preparationClaimId: "claim-crashed",
+      sourceOperationKey: intentKey,
+      claimId: "claim-crashed",
       recoveryAnchorDigest: anchorDigest,
     });
     // 崩溃后仍可从库里读到进度（仅内存记录的实现在这里就失败了）：状态 + 来源意图 +
@@ -2006,7 +2070,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     const crashedSlot = await readPreparationSlot(managed.tenantId, managed.attempt.id);
     expect(crashedSlot.preparationState).toBe("preparing");
     expect(crashedSlot.preparationIntentKey).toBe(intentKey);
-    expect(crashedSlot.preparationRequestDigest).toBe(intentDigest);
+    expect(crashedSlot.preparationRequestDigest).toBe(crashed.claim.requestDigest);
     expect(crashedSlot.preparationClaimId).toBe("claim-crashed");
     expect(crashedSlot.preparationLeaseExpiresAt).toBeTruthy();
     // 登记只表示"开始做"：崩溃的这一轮**没有**完成，完成计数不得被虚增（夹具的初始准备
@@ -2023,15 +2087,16 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
           eq(invocationAttemptTable.id, managed.attempt.id),
         ),
       );
-    const resumedLease = await beginEnvironmentLeaseReprepare({
+    const resumed = await claimLeaseReprepareForTest({
       tenantId: managed.tenantId,
+      invocationId: managed.invocation.id,
       leaseId: lease.id,
       attemptId: managed.attempt.id,
-      preparationIntentKey: intentKey,
-      preparationRequestDigest: intentDigest,
-      preparationClaimId: "claim-successor",
+      sourceOperationKey: intentKey,
+      claimId: "claim-successor",
       recoveryAnchorDigest: anchorDigest,
     });
+    const resumedLease = resumed.lease;
     // 同一份稳定 operation/Lease，不另造无主资源。
     expect(resumedLease.id).toBe(lease.id);
     expect((resumedLease.resourceManifest as Record<string, unknown>).operationId as string).toBe(
@@ -2075,13 +2140,13 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     });
 
     // A 登记准备槽后 IO 卡住；claim 失效后 B 领取并完成、激活。
-    await beginEnvironmentLeaseReprepare({
+    await claimLeaseReprepareForTest({
       tenantId: managed.tenantId,
+      invocationId: managed.invocation.id,
       leaseId: lease.id,
       attemptId: managed.attempt.id,
-      preparationIntentKey: intentKey,
-      preparationRequestDigest: intentDigest,
-      preparationClaimId: "claim-A",
+      sourceOperationKey: intentKey,
+      claimId: "claim-A",
       recoveryAnchorDigest: anchorDigest,
     });
     await db
@@ -2093,13 +2158,13 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
           eq(invocationAttemptTable.id, managed.attempt.id),
         ),
       );
-    await beginEnvironmentLeaseReprepare({
+    await claimLeaseReprepareForTest({
       tenantId: managed.tenantId,
+      invocationId: managed.invocation.id,
       leaseId: lease.id,
       attemptId: managed.attempt.id,
-      preparationIntentKey: intentKey,
-      preparationRequestDigest: intentDigest,
-      preparationClaimId: "claim-B",
+      sourceOperationKey: intentKey,
+      claimId: "claim-B",
       recoveryAnchorDigest: anchorDigest,
     });
     const preparedByB = await seedPreparedEnvironmentLease({
@@ -2142,7 +2207,20 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
         workspaceBindingId: managed.workspace.id,
         lease: (await getEnvironmentLeaseById(managed.tenantId, lease.id)) ?? lease,
         recoveryAnchorDigest: anchorDigest,
-        preparationClaim: { attemptId: managed.attempt.id, preparationClaimId: "claim-A" },
+        preparationClaim: {
+          tenantId: managed.tenantId,
+          invocationId: managed.invocation.id,
+          attemptId: managed.attempt.id,
+          intentKey,
+          requestDigest: intentDigest,
+          claimId: "claim-A",
+          source: executionSourceForTest({
+            tenantId: managed.tenantId,
+            invocationId: managed.invocation.id,
+            attemptId: managed.attempt.id,
+            sourceOperationKey: intentKey,
+          }),
+        },
       }),
     ).rejects.toMatchObject({ name: "EnvironmentPreparationClaimSupersededError" });
 
@@ -2261,6 +2339,7 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
         preparedAt: null,
         preparationIntentKey: null,
         preparationRequestDigest: null,
+        preparationSourceJson: null,
         preparationClaimId: null,
         preparationLeaseExpiresAt: null,
         preparationCount: 0,
@@ -2275,11 +2354,16 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
   ) {
     const intentKey = `invocation:${fixture.invocation.id}`;
     return {
-      tenantId: fixture.tenantId,
-      invocationId: fixture.invocation.id,
-      attemptId: fixture.attempt.id,
-      intentKey,
-      requestDigest: protocolDigest({ scope: "topic02-preparation", intentKey }),
+      source: {
+        ...executionSourceRequestForStart({
+          tenantId: fixture.tenantId,
+          invocation: fixture.invocation,
+          binding: fixture.binding,
+          attempt: fixture.attempt,
+          sourceOperationKey: intentKey,
+        }),
+        predecessor: null,
+      },
       claimId,
     };
   }
@@ -2344,7 +2428,7 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
         errorCode: "LatePlainIoError",
         errorSummary: "W1 returned after W2 was running",
         now: new Date(),
-        preparationClaim: first.claim,
+        workIdentity: { kind: "preparation", claim: first.claim },
       }),
     ).rejects.toThrow("PreparationClaimSuperseded");
 

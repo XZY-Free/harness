@@ -31,6 +31,7 @@ import {
   renewExecutionOwnership,
   renewExecutionOwnershipInTransaction,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -205,7 +206,7 @@ async function seedReplacementAttempt(fixture: Fixture): Promise<string> {
     attemptId: attempt.id,
   };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: protocolDigest(evidence),
@@ -485,6 +486,17 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       errorCode: "RuntimeDispatchFailed",
       errorSummary: "auth-01 delayed failure",
       now: new Date(),
+      workIdentity: {
+        kind: "dispatch",
+        claim: {
+          tenantId: fixture.tenantId,
+          sessionBindingId: first.session.id,
+          attemptId: fixture.attempt.id,
+          ownershipId: first.ownership.id,
+          leaseEpoch: first.ownership.leaseEpoch,
+          claimToken: null,
+        },
+      },
     });
     expect(failedAttempt.id).toBe(fixture.attempt.id);
     expect(await readOwner(fixture.tenantId, takeover.ownership.id)).toEqual(healthy);

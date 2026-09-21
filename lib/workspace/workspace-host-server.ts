@@ -71,6 +71,7 @@ const CANDIDATES_DIR = "candidates";
 const RUNS_DIR = ".snow-runs";
 const GRANTS_DIR = "grants";
 const SAFE_POINTS_DIR = "safe-points";
+const SAFE_POINT_INTENTS_DIR = "safe-point-intents";
 const SNAPSHOT_DIR = "snapshot-storage";
 /** 每代际的"授权已物理撤销"墓碑目录（A07 7.4）。 */
 const REVOKED_DIR = "revoked";
@@ -104,6 +105,26 @@ export class WorkspaceWriterNotFencedError extends Error {
     this.name = "WorkspaceWriterNotFenced";
     this.detail = detail;
   }
+}
+
+/** 同一物理安全点意图已进入释放终态，迟到 freeze 不得复活屏障。 */
+export class CheckpointIntentRetiredError extends Error {
+  constructor() {
+    super("CheckpointIntentRetired");
+    this.name = "CheckpointIntentRetired";
+  }
+}
+
+type SafePointIntentState = "frozen" | "releasing" | "released";
+
+interface SafePointIntentRecord {
+  state: SafePointIntentState;
+  checkpointIntentId: string;
+  scopeDigest: string;
+  writerGeneration: number;
+  anchorDigest: string;
+  frozenAt: string;
+  updatedAt: string;
 }
 
 /** 实际存储/Host 身份与冻结事实不一致 → 连续性未证明（fail closed）。 */
@@ -349,6 +370,31 @@ function safeComponent(value: string): string {
   return digest;
 }
 
+function safeIntentComponent(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value)) {
+    throw new WorkspaceWriterNotFencedError("安全点 intent id 非法");
+  }
+  return value;
+}
+
+function sameSafePointTuple(
+  left: Pick<
+    SafePointIntentRecord,
+    "checkpointIntentId" | "scopeDigest" | "writerGeneration" | "anchorDigest"
+  >,
+  right: Pick<
+    SafePointIntentRecord,
+    "checkpointIntentId" | "scopeDigest" | "writerGeneration" | "anchorDigest"
+  >,
+): boolean {
+  return (
+    left.checkpointIntentId === right.checkpointIntentId &&
+    left.scopeDigest === right.scopeDigest &&
+    left.writerGeneration === right.writerGeneration &&
+    left.anchorDigest === right.anchorDigest
+  );
+}
+
 function isInside(parent: string, child: string): boolean {
   return (
     child === parent ||
@@ -432,6 +478,7 @@ export class WorkspaceHostBroker implements WorkspaceHost {
   private readonly storage: SnapshotStorage;
   private readonly testHooks: {
     beforeFreezeScopeLock?: () => Promise<void>;
+    afterReleaseBarrierRemoved?: () => Promise<void>;
   } | null;
   private controlRootCache: string | null = null;
 
@@ -444,6 +491,7 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     /** 仅供真实并发测试控制交错；生产装配不得传入。 */
     testHooks?: {
       beforeFreezeScopeLock?: () => Promise<void>;
+      afterReleaseBarrierRemoved?: () => Promise<void>;
     };
   }) {
     this.rootOverride = path.resolve(input.root);
@@ -628,6 +676,47 @@ export class WorkspaceHostBroker implements WorkspaceHost {
   }
   private async readFreeze(scopeDigest: string): Promise<WorkspaceFreezeRecord | null> {
     return readJson<WorkspaceFreezeRecord>(await this.freezePath(scopeDigest));
+  }
+  private async safePointIntentPath(
+    scopeDigest: string,
+    checkpointIntentId: string,
+  ): Promise<string> {
+    return path.join(
+      await this.controlRoot(),
+      SAFE_POINT_INTENTS_DIR,
+      safeComponent(scopeDigest),
+      `${safeIntentComponent(checkpointIntentId)}.json`,
+    );
+  }
+  private async readSafePointIntent(
+    scopeDigest: string,
+    checkpointIntentId: string,
+  ): Promise<SafePointIntentRecord | null> {
+    const file = await this.safePointIntentPath(scopeDigest, checkpointIntentId);
+    try {
+      const parsed = JSON.parse(await readFile(file, "utf8")) as SafePointIntentRecord;
+      if (
+        !["frozen", "releasing", "released"].includes(parsed.state) ||
+        parsed.checkpointIntentId !== checkpointIntentId ||
+        parsed.scopeDigest !== scopeDigest ||
+        !Number.isSafeInteger(parsed.writerGeneration) ||
+        typeof parsed.anchorDigest !== "string" ||
+        typeof parsed.frozenAt !== "string"
+      ) {
+        throw new WorkspaceWriterNotFencedError("安全点 intent 记录损坏");
+      }
+      return parsed;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      if (error instanceof WorkspaceWriterNotFencedError) throw error;
+      throw new WorkspaceWriterNotFencedError("安全点 intent 记录无法解析");
+    }
+  }
+  private async persistSafePointIntent(record: SafePointIntentRecord): Promise<void> {
+    await writeJsonDurable(
+      await this.safePointIntentPath(record.scopeDigest, record.checkpointIntentId),
+      record,
+    );
   }
   private async candidateClaimPath(operationId: string): Promise<string> {
     return path.join(await this.controlRoot(), CANDIDATES_DIR, `${sha256Hex(operationId)}.json`);
@@ -1580,14 +1669,25 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     return this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
       // grant 的当前性必须在 scope 锁内复核；否则 activate/revoke 可插在复核与落屏障之间。
       await this.assertWriter(input.grant);
+      const intentTuple = {
+        checkpointIntentId: input.checkpointIntentId,
+        scopeDigest: input.grant.scopeDigest,
+        writerGeneration: input.grant.writerGeneration,
+        anchorDigest: input.anchorDigest,
+      };
+      const intent = await this.readSafePointIntent(probe.scopeDigest, input.checkpointIntentId);
+      if (intent && !sameSafePointTuple(intent, intentTuple)) {
+        throw new WorkspaceWriterNotFencedError("同一 intent id 的物理冻结 tuple 冲突");
+      }
+      if (intent?.state === "releasing" || intent?.state === "released") {
+        throw new CheckpointIntentRetiredError();
+      }
       const existing = await this.readFreeze(probe.scopeDigest);
       if (existing) {
-        if (
-          existing.scopeDigest === input.grant.scopeDigest &&
-          existing.checkpointIntentId === input.checkpointIntentId &&
-          existing.writerGeneration === input.grant.writerGeneration &&
-          existing.anchorDigest === input.anchorDigest
-        ) {
+        if (sameSafePointTuple(existing, intentTuple)) {
+          if (!intent) {
+            throw new WorkspaceWriterNotFencedError("冻结屏障缺少物理 intent 记录");
+          }
           return {
             checkpointIntentId: existing.checkpointIntentId,
             scopeDigest: existing.scopeDigest,
@@ -1600,6 +1700,16 @@ export class WorkspaceHostBroker implements WorkspaceHost {
           `scope 已由另一安全点冻结（intent ${existing.checkpointIntentId}）`,
         );
       }
+      const frozenAt = intent?.frozenAt ?? new Date().toISOString();
+      const frozenIntent: SafePointIntentRecord = {
+        ...intentTuple,
+        state: "frozen",
+        frozenAt,
+        updatedAt: new Date().toISOString(),
+      };
+      // 先持久化可恢复的 freeze 意图；若进程死在停 Writer/落屏障前，
+      // 同 tuple 重放会继续完成，release 也能先将其单向终结。
+      await this.persistSafePointIntent(frozenIntent);
       const stopEvidence = await this.stopWriterGeneration(
         probe.scopeDigest,
         input.grant.writerGeneration,
@@ -1608,11 +1718,8 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         throw new WorkspaceWriterNotFencedError("冻结未能确认已登记的受管 Writer 已停止");
       }
       const receipt: SafePointReceipt = {
-        checkpointIntentId: input.checkpointIntentId,
-        scopeDigest: input.grant.scopeDigest,
-        writerGeneration: input.grant.writerGeneration,
-        anchorDigest: input.anchorDigest,
-        frozenAt: new Date().toISOString(),
+        ...intentTuple,
+        frozenAt,
       };
       await writeJsonStable(await this.freezePath(probe.scopeDigest), {
         scopeDigest: probe.scopeDigest,
@@ -1622,7 +1729,7 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         frozenAt: receipt.frozenAt,
         stopEvidence,
       } satisfies WorkspaceFreezeRecord);
-      await writeJsonExclusive(
+      await writeJsonStable(
         path.join(await this.controlRoot(), SAFE_POINTS_DIR, `${input.checkpointIntentId}.json`),
         receipt,
       );
@@ -1638,26 +1745,34 @@ export class WorkspaceHostBroker implements WorkspaceHost {
     // A07 7.1：屏障必须随解冻一起撤销，否则安全点结束后该 scope 永久拒绝写入。
     // 只撤销**完整 tuple 匹配**的屏障：迟到的旧 release 不得解掉更新的冻结。
     await this.withScopeLock(probe.scopeDigest, probe.hostIdentity, async () => {
+      const intent = await this.readSafePointIntent(probe.scopeDigest, receipt.checkpointIntentId);
+      if (intent && !sameSafePointTuple(intent, receipt)) {
+        throw new WorkspaceWriterNotFencedError("同一 intent id 的物理释放 tuple 冲突");
+      }
+      const releasing: SafePointIntentRecord = {
+        checkpointIntentId: receipt.checkpointIntentId,
+        scopeDigest: receipt.scopeDigest,
+        writerGeneration: receipt.writerGeneration,
+        anchorDigest: receipt.anchorDigest,
+        frozenAt: intent?.frozenAt ?? receipt.frozenAt,
+        state: "releasing",
+        updatedAt: new Date().toISOString(),
+      };
+      // releasing 是不可逆的终结决定：先持久它，再删屏障。删除失败会向上抛出，
+      // 盘上仍为 releasing，后续原消费者可按同 tuple 续做。
+      if (intent?.state !== "released") await this.persistSafePointIntent(releasing);
       const freeze = await this.readFreeze(probe.scopeDigest);
-      if (
-        freeze &&
-        freeze.scopeDigest === receipt.scopeDigest &&
-        freeze.checkpointIntentId === receipt.checkpointIntentId &&
-        freeze.writerGeneration === receipt.writerGeneration &&
-        freeze.anchorDigest === receipt.anchorDigest
-      ) {
+      if (freeze && sameSafePointTuple(freeze, receipt)) {
         // 匹配当前屏障时，物理删除失败就是 release 失败，必须沿 RPC 返回给持久维护 lane。
         // 只有文件本来不存在（`force:true`）或当前屏障属于更新 tuple 时才是幂等成功。
         await rm(await this.freezePath(probe.scopeDigest), { force: true });
+        await this.testHooks?.afterReleaseBarrierRemoved?.();
       }
-      // A06：解冻登记是追加式持久事实，且与屏障判定处于同一临界区。
-      const file = path.join(
-        await this.controlRoot(),
-        SAFE_POINTS_DIR,
-        `${receipt.checkpointIntentId}.released`,
-      );
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, JSON.stringify(receipt), { flag: "a" });
+      await this.persistSafePointIntent({
+        ...releasing,
+        state: "released",
+        updatedAt: new Date().toISOString(),
+      });
     });
   }
 
@@ -1908,6 +2023,7 @@ export function createWorkspaceHostBroker(input: {
   /** 仅供真实并发测试控制交错；生产装配不得传入。 */
   testHooks?: {
     beforeFreezeScopeLock?: () => Promise<void>;
+    afterReleaseBarrierRemoved?: () => Promise<void>;
   };
 }): WorkspaceHostBroker {
   return new WorkspaceHostBroker(input);

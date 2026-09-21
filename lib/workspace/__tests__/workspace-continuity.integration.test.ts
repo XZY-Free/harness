@@ -12,6 +12,7 @@ import {
   closeExecutionOwnership,
   getActiveExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -227,7 +228,7 @@ describe("Workspace continuity integration", () => {
       });
       const evidence = { kind: "workspace-recovery", attemptId: attempt2.id };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId: attempt2.id,
           evidence,
           digest: protocolDigest(evidence),
@@ -441,7 +442,7 @@ describe("Workspace continuity integration", () => {
       });
       const takeoverEvidence = { kind: "workspace-takeover", attemptId: attempt2.id };
       await db.transaction((tx) =>
-        markAttemptPreparedInTransaction(tx, {
+        markAttemptPreparedForTestInTransaction(tx, {
           attemptId: attempt2.id,
           evidence: takeoverEvidence,
           digest: protocolDigest(takeoverEvidence),

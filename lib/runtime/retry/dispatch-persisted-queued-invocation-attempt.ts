@@ -83,7 +83,7 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
         errorCode: error instanceof Error ? error.name : "RuntimeTransportMismatch",
         errorSummary: error instanceof Error ? error.message : String(error),
         now: new Date(),
-        claim,
+        workIdentity: { kind: "dispatch", claim },
       });
       return;
     }
@@ -114,7 +114,7 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
           errorCode: error instanceof Error ? error.name : "RuntimeDispatchFailed",
           errorSummary: error instanceof Error ? error.message : String(error),
           now: new Date(),
-          claim,
+          workIdentity: { kind: "dispatch", claim },
         });
       }
     }

@@ -18,6 +18,7 @@ import {
   getAuthorityDatabaseTime,
   renewExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { seedPreparedRuntimeAttempt } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
@@ -25,7 +26,10 @@ import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/run
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { resumeRuntimeInvocation } from "@/lib/runtime/application/runtime-resume";
-import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import {
+  RuntimeStartTransportError,
+  startRuntimeInvocation,
+} from "@/lib/runtime/application/runtime-start";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import {
   getRuntimeSessionBindingById,
@@ -252,6 +256,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 async function startFixture(
   fixture: Awaited<ReturnType<typeof seedPreparedRuntimeAttempt>>,
   runtimeEndpoint: string,
+  sessionDispatchClaim?: RuntimeStartTransportError["dispatchIdentity"],
 ) {
   return startRuntimeInvocation({
     tenantId: fixture.tenantId,
@@ -263,6 +268,7 @@ async function startFixture(
     runtimeEndpoint,
     auth: { mode: "none" },
     callbackEndpoints,
+    ...(sessionDispatchClaim ? { sessionDispatchClaim } : {}),
   });
 }
 
@@ -378,16 +384,19 @@ describe("Runtime Start / Resume durable recovery", () => {
     await runtime.start();
     runtime.dropNextStartResponse = true;
 
-    await expect(startFixture(fixture, runtime.endpoint)).rejects.toBeInstanceOf(
-      RuntimeHttpClientError,
+    const failure = await startFixture(fixture, runtime.endpoint).then(
+      () => null,
+      (error: unknown) => error,
     );
+    expect(failure).toBeInstanceOf(RuntimeStartTransportError);
+    if (!(failure instanceof RuntimeStartTransportError)) throw new Error("缺少原始派发身份");
     const active = await getActiveExecutionOwnership({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
     });
     expect(active).not.toBeNull();
     await runtime.restart();
-    const recovered = await startFixture(fixture, runtime.endpoint);
+    const recovered = await startFixture(fixture, runtime.endpoint, failure.dispatchIdentity);
     const startKey = `start:${recovered.authority.ownershipId}`;
     expect((await runtime.store()).starts[startKey]).toMatchObject({ executionCount: 1 });
     expect(runtime.requests.filter((entry) => entry.idempotencyKey === startKey)).toHaveLength(2);
@@ -428,19 +437,22 @@ describe("Runtime Start / Resume durable recovery", () => {
         );
       },
     });
-    await expect(
-      startRuntimeInvocation({
-        tenantId: fixture.tenantId,
-        invocation: fixture.invocation,
-        sourceOperationKey: `invocation:${fixture.invocation.id}`,
-        binding: fixture.binding,
-        attempt: fixture.attempt,
-        runtimeClient: unavailable,
-        runtimeEndpoint: "http://127.0.0.1:1",
-        auth: { mode: "none" },
-        callbackEndpoints,
-      }),
-    ).rejects.toBeInstanceOf(RuntimeHttpClientError);
+    const failure = await startRuntimeInvocation({
+      tenantId: fixture.tenantId,
+      invocation: fixture.invocation,
+      sourceOperationKey: `invocation:${fixture.invocation.id}`,
+      binding: fixture.binding,
+      attempt: fixture.attempt,
+      runtimeClient: unavailable,
+      runtimeEndpoint: "http://127.0.0.1:1",
+      auth: { mode: "none" },
+      callbackEndpoints,
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(RuntimeStartTransportError);
+    if (!(failure instanceof RuntimeStartTransportError)) throw new Error("缺少原始派发身份");
     const [owner] = await db
       .select()
       .from(executionOwnershipTable)
@@ -459,7 +471,7 @@ describe("Runtime Start / Resume durable recovery", () => {
 
     runtime = new DurableReferenceRuntime(fixture.tenantId, fixture.binding.runtimeRevisionId);
     await runtime.start();
-    const recovered = await startFixture(fixture, runtime.endpoint);
+    const recovered = await startFixture(fixture, runtime.endpoint, failure.dispatchIdentity);
     expect(recovered.authority.ownershipId).toBe(owner?.id);
     expect(recovered.sessionBindingId).toBe(sessions[0]?.id);
     expect(Object.keys((await runtime.store()).starts)).toEqual([`start:${owner?.id}`]);
@@ -485,7 +497,7 @@ describe("Runtime Start / Resume durable recovery", () => {
     });
     const evidence = { kind: "reference-takeover", attemptId: replacementAttempt.id };
     await db.transaction((tx) =>
-      markAttemptPreparedInTransaction(tx, {
+      markAttemptPreparedForTestInTransaction(tx, {
         attemptId: replacementAttempt.id,
         evidence,
         digest: protocolDigest(evidence),
@@ -539,25 +551,11 @@ describe("Runtime Start / Resume durable recovery", () => {
     });
     runtime.callbackBeforeResponse = false;
     runtime.dropNextStartResponse = true;
-    await expect(
-      resumeRuntimeInvocation({
-        tenantId: fixture.tenantId,
-        invocation: fixture.invocation,
-        sourceOperationKey: `invocation:${fixture.invocation.id}`,
-        binding: fixture.binding,
-        attempt: fixture.attempt,
-        runtimeClient: createHttpRuntimeClient(),
-        runtimeEndpoint: runtime.endpoint,
-        auth: { mode: "none" },
-        callbackEndpoints,
-        anchor: "reference-suspension",
-        anchorDigest,
-      }),
-    ).rejects.toBeInstanceOf(RuntimeHttpClientError);
-    const resumed = await resumeRuntimeInvocation({
+    const resumeSourceOperationKey = `command:${randomUUID()}`;
+    const firstResumeFailure = await resumeRuntimeInvocation({
       tenantId: fixture.tenantId,
       invocation: fixture.invocation,
-      sourceOperationKey: `invocation:${fixture.invocation.id}`,
+      sourceOperationKey: resumeSourceOperationKey,
       binding: fixture.binding,
       attempt: fixture.attempt,
       runtimeClient: createHttpRuntimeClient(),
@@ -566,6 +564,27 @@ describe("Runtime Start / Resume durable recovery", () => {
       callbackEndpoints,
       anchor: "reference-suspension",
       anchorDigest,
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(firstResumeFailure).toBeInstanceOf(RuntimeStartTransportError);
+    if (!(firstResumeFailure instanceof RuntimeStartTransportError)) {
+      throw new Error("缺少 Resume 原始派发身份");
+    }
+    const resumed = await resumeRuntimeInvocation({
+      tenantId: fixture.tenantId,
+      invocation: fixture.invocation,
+      sourceOperationKey: resumeSourceOperationKey,
+      binding: fixture.binding,
+      attempt: fixture.attempt,
+      runtimeClient: createHttpRuntimeClient(),
+      runtimeEndpoint: runtime.endpoint,
+      auth: { mode: "none" },
+      callbackEndpoints,
+      anchor: "reference-suspension",
+      anchorDigest,
+      sessionDispatchClaim: firstResumeFailure.dispatchIdentity,
     });
     const sessions = await getRuntimeSessionBindingsByInvocation(
       fixture.tenantId,
@@ -593,7 +612,7 @@ describe("Runtime Start / Resume durable recovery", () => {
     await expect(
       startRuntimeInvocation({
         tenantId: fixture.tenantId,
-        sourceOperationKey: `invocation:${fixture.invocation.id}`,
+        sourceOperationKey: resumeSourceOperationKey,
         invocation: (
           await db
             .select()

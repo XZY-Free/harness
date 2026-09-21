@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import {
+  type AttemptPreparationClaim,
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
@@ -12,6 +13,8 @@ import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
+import { attemptPreparationClaimForTest } from "@/lib/executions/test-support/preparation-fixtures";
 import { DEFAULT_TENANT_ID } from "@/lib/identity/tenant-bootstrap";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
@@ -134,7 +137,7 @@ export async function seedPreparedJobRuntimeAttempt(
     attemptId: attempt.id,
   };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: protocolDigest(evidence),
@@ -258,7 +261,7 @@ export async function seedPreparedRuntimeAttempt(
   const attempt = await createAttempt({ tenantId, invocationId: invocation.id });
   const evidence = { kind: "test-candidate", invocationId: invocation.id, attemptId: attempt.id };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: protocolDigest(evidence),
@@ -284,7 +287,7 @@ export async function createPreparedTakeoverAttempt(input: {
   tenantId: string;
   invocationId: string;
   retryReasonCode?: string | null;
-}): Promise<InvocationAttempt> {
+}): Promise<InvocationAttempt & { preparationClaim: AttemptPreparationClaim }> {
   const attempt = await createAttempt({
     tenantId: input.tenantId,
     invocationId: input.invocationId,
@@ -296,13 +299,15 @@ export async function createPreparedTakeoverAttempt(input: {
     attemptId: attempt.id,
   };
   await db.transaction((tx) =>
-    markAttemptPreparedInTransaction(tx, {
+    markAttemptPreparedForTestInTransaction(tx, {
       attemptId: attempt.id,
       evidence,
       digest: protocolDigest(evidence),
     }),
   );
-  return attempt;
+  return Object.assign(attempt, {
+    preparationClaim: await attemptPreparationClaimForTest(attempt.id),
+  });
 }
 
 export async function acquireTestRuntimeAuthority(input: {
