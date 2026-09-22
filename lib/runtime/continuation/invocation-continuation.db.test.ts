@@ -87,12 +87,13 @@ describe("Invocation continuation handler", () => {
     expect(resumeParent).toHaveBeenCalledOnce();
   });
 
-  it("waiting_user 只调用幂等协调能力", async () => {
-    const coordinateWaitingUser = vi.fn(async () => undefined);
+  it("普通 input-required 先落父 Harness observation 再恢复规划", async () => {
+    const coordinateWaitingUser = vi.fn(async () => ({ disposition: "resume_parent" as const }));
+    const resumeParent = vi.fn(async () => undefined);
     const handler = createInvocationContinuationHandler({
       getAgentCall: async () => call("waiting_user"),
       coordinateWaitingUser,
-      resumeParent: vi.fn(),
+      resumeParent,
       resumeAfterAgentResponse: vi.fn(),
       resumeAgentFromUserAction: vi.fn(),
     });
@@ -100,6 +101,28 @@ describe("Invocation continuation handler", () => {
     await handler(event("coordinate_user_input"));
 
     expect(coordinateWaitingUser).toHaveBeenCalledWith("tenant-1", "call-1");
+    expect(resumeParent).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      invocationId: "invocation-1",
+      agentCallId: "call-1",
+      sourceVersion: 2,
+    });
+  });
+
+  it("a2a_confirmation 仍由平台确定性等待，不恢复父规划器", async () => {
+    const coordinateWaitingUser = vi.fn(async () => ({ disposition: "waiting_user" as const }));
+    const resumeParent = vi.fn(async () => undefined);
+    const handler = createInvocationContinuationHandler({
+      getAgentCall: async () => call("waiting_user"),
+      coordinateWaitingUser,
+      resumeParent,
+      resumeAfterAgentResponse: vi.fn(),
+      resumeAgentFromUserAction: vi.fn(),
+    });
+
+    await handler(event("coordinate_user_input"));
+
+    expect(resumeParent).not.toHaveBeenCalled();
   });
 
   it("tenant 或父 Invocation 不一致时永久失败", async () => {

@@ -9,6 +9,7 @@ import {
 import { DEFAULT_USER_ID } from "@/lib/constants";
 import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-plane-event-delivery";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { TEST_EXECUTION_BINDING_EVIDENCE } from "@/lib/executions/test-support/create-unverified-execution-binding";
@@ -115,10 +116,10 @@ describe("生产 continuation worker durable topology", () => {
   it.each([
     ["approve", false],
     ["deny", false],
-    ["cancel", true],
-    ["cancel", false],
+    ["input_observation", true],
+    ["input_observation", false],
   ] as const)(
-    "%s 通过真实 Employee API、持久 Delivery 和生产 Worker 恢复同一 AgentCall",
+    "%s 通过持久 Delivery 和生产 Worker 保持正确父编排语义",
     async (resolution, cancelSupported) => {
       const defaultUserIdentity = await upsertUserIdentity({
         tenantId: DEFAULT_TENANT_ID,
@@ -171,7 +172,8 @@ describe("生产 continuation worker durable topology", () => {
       const scenario = await seedAgentCallExecutionScenario({
         tenantId: DEFAULT_TENANT_ID,
         threadOwnerUserId: defaultUserIdentity.id,
-        providerScenario: resolution === "cancel" ? "input_required" : "confirmation_resolution",
+        providerScenario:
+          resolution === "input_observation" ? "input_required" : "confirmation_resolution",
         contract: {
           ...EXECUTION_FIXTURE_CONTRACT,
           interaction: {
@@ -219,12 +221,50 @@ describe("生产 continuation worker durable topology", () => {
         shortPurpose: "提交请假",
         payload: { agentId: scenario.agentId, task: "提交我的年假申请" },
       };
+      const actionDigest = computeCanonicalDigest({
+        actionType: action.actionType,
+        payload: action.payload,
+      });
+      const firstSequence =
+        ((await getLatestProducerSequence(scenario.tenantId, scenario.parentInvocationId)) ?? 0) +
+        1;
+      const actionPayload = {
+        action_id: action.actionId,
+        step_no: action.stepNo,
+        action_type: action.actionType,
+        action_digest: actionDigest,
+        purpose_code: action.purposeCode,
+        short_purpose: action.shortPurpose,
+        target_ref: scenario.agentId,
+        action_payload: action.payload,
+      };
+      await ingressEventBatch({
+        tenantId: scenario.tenantId,
+        invocationId: scenario.parentInvocationId,
+        producerSequenceStart: firstSequence,
+        events: [
+          {
+            producer_event_id: `test-action-${scenario.actionId}-proposed`,
+            producer_sequence: firstSequence,
+            type: "harness.action.proposed",
+            schema_version: 1,
+            payload: { ...actionPayload, state: "proposed" },
+          },
+          {
+            producer_event_id: `test-action-${scenario.actionId}-started`,
+            producer_sequence: firstSequence + 1,
+            type: "harness.action.started",
+            schema_version: 1,
+            payload: { ...actionPayload, state: "started" },
+          },
+        ],
+      });
       const started = await execute(action, {
         invocationId: scenario.parentInvocationId,
         tenantId: scenario.tenantId,
         threadId: scenario.threadId,
         turnId: scenario.turnId,
-        actionDigest: `sha256:${"b".repeat(64)}`,
+        actionDigest,
       });
       expect(started.pending).toMatchObject({ kind: "agent_call", callId: scenario.callId });
       expect(scenario.provider.captured).toHaveLength(1);
@@ -235,9 +275,24 @@ describe("生产 continuation worker durable topology", () => {
         .select()
         .from(userActionRequestTable)
         .where(eq(userActionRequestTable.invocationId, scenario.parentInvocationId));
+      if (resolution === "input_observation") {
+        expect(initialRequests).toHaveLength(0);
+        expect(runtime.requests).toHaveLength(1);
+        const [waitingCall] = await db
+          .select()
+          .from(agentCallTable)
+          .where(eq(agentCallTable.id, scenario.callId));
+        expect(waitingCall?.state).toBe("waiting_user");
+        const [completedParent] = await db
+          .select()
+          .from(invocationTable)
+          .where(eq(invocationTable.id, scenario.parentInvocationId));
+        expect(completedParent?.executionState).toBe("completed");
+        return;
+      }
       expect(initialRequests).toHaveLength(1);
       const request = initialRequests[0]!;
-      expect(request.requestType).toBe(resolution === "cancel" ? "input" : "confirmation");
+      expect(request.requestType).toBe("confirmation");
       expect(request.requestState).toBe("pending");
 
       const response = await resolveUserAction(
@@ -293,34 +348,19 @@ describe("生产 continuation worker durable topology", () => {
         .select()
         .from(agentCallTable)
         .where(eq(agentCallTable.id, scenario.callId));
-      if (resolution === "cancel" && !cancelSupported) {
-        expect(completedCall?.state).toBe("waiting_user");
-        expect(scenario.provider.rpcMethods).not.toContain("tasks/cancel");
-        const [parent] = await db
-          .select()
-          .from(invocationTable)
-          .where(eq(invocationTable.id, scenario.parentInvocationId));
-        expect(parent?.executionState).toBe("failed");
-        expect(parent?.errorCode).toContain("AGENT_INPUT_CANCELLATION_UNSUPPORTED");
-        return;
-      }
       expect(completedCall).toMatchObject({
         id: scenario.callId,
-        state: resolution === "cancel" ? "cancelled" : "completed",
+        state: "completed",
       });
-      expect(scenario.provider.captured).toHaveLength(resolution === "cancel" ? 1 : 2);
+      expect(scenario.provider.captured).toHaveLength(2);
       const initial = scenario.provider.captured[0]!;
-      if (resolution === "cancel") {
-        expect(scenario.provider.cancelledTaskIds).toEqual([initial.responseTaskId]);
-      } else {
-        const resumed = scenario.provider.captured[1]!;
-        expect(resumed).toMatchObject({
-          resume: true,
-          taskId: initial.responseTaskId,
-          contextId: initial.responseContextId,
-          confirmationResolution: resolution,
-        });
-      }
+      const resumed = scenario.provider.captured[1]!;
+      expect(resumed).toMatchObject({
+        resume: true,
+        taskId: initial.responseTaskId,
+        contextId: initial.responseContextId,
+        confirmationResolution: resolution,
+      });
       expect(await db.select().from(agentCallTable)).toHaveLength(1);
       expect(
         await db
@@ -368,7 +408,7 @@ describe("生产 continuation worker durable topology", () => {
         createdAt: new Date(),
       });
       await resumedWorker.pollOnce();
-      expect(scenario.provider.captured).toHaveLength(resolution === "cancel" ? 1 : 2);
+      expect(scenario.provider.captured).toHaveLength(2);
       expect(runtime.requests).toHaveLength(1);
       expect(
         await db

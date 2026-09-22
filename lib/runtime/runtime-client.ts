@@ -89,7 +89,12 @@ export interface RuntimeCapabilitiesResponse {
   harness_action_protocol?: {
     version: "1";
     action_types: Array<
-      "knowledge.search" | "tool.call" | "agent.call" | "request_user_input" | "respond"
+      | "knowledge.search"
+      | "tool.call"
+      | "agent.call"
+      | "agent.resume"
+      | "request_user_input"
+      | "respond"
     >;
   };
 }

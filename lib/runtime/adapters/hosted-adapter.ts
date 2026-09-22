@@ -318,6 +318,7 @@ export function hostedAdapterCapabilities(): RuntimeCapabilitiesResponse {
         "knowledge.search",
         "tool.call",
         "agent.call",
+        "agent.resume",
         "request_user_input",
         "respond",
       ],

@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
-import { loadAgentCallContract } from "@/lib/agents/calls/transport/agent-call-transport-factory";
 import {
   type ConfirmationProposal,
   parseHostControls,
 } from "@/lib/agents/calls/transport/a2a/host-control-contract";
+import { loadAgentCallContract } from "@/lib/agents/calls/transport/agent-call-transport-factory";
 import { agentHostControlConfig } from "@/lib/config";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
@@ -21,10 +21,12 @@ import {
   buildConfirmationActionId,
   computeConfirmationProposalSemanticDigest,
 } from "@/lib/runtime/harness-loop/confirmation-proposal-identity";
+import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { and, desc, eq } from "drizzle-orm";
 
 export interface CoordinateAgentInputRequiredResult {
   coordinated: boolean;
+  disposition?: "resume_parent" | "waiting_user";
   runtimeProducerEventId?: string;
 }
 
@@ -110,9 +112,8 @@ export function buildAgentInputRequiredRuntimePayload(params: {
 }
 
 /**
- * Runtime 侧把已落库的 AgentCall input-required 子事实提升为 Parent 的正式等待点。
- * A2A mapper 仍只写 AgentCall；本应用协调器经 RuntimeEventIngress 原子创建
- * UserActionRequest，并同步 Parent Invocation / Turn → waiting_user。
+ * confirmation 由平台确定性提升为 Parent 等待点；普通 input-required
+ * 则先作为 Agent observation 完成当前 Harness action，再由父规划器决定是否询问用户。
  */
 export async function coordinateAgentInputRequired(
   tenantId: string,
@@ -179,9 +180,70 @@ export async function coordinateAgentInputRequired(
   const parsedHostControls = parseHostControls(payload?.data, "input-required", hostControlPolicy);
   const confirmation =
     parsedHostControls?.kind === "confirmation" ? parsedHostControls.proposal : null;
-  const producerEventId = `agent-input-required:${inputEvent.id}`;
+  const producerEventId = confirmation
+    ? `agent-input-required:${inputEvent.id}`
+    : `agent-input-required-observation:${inputEvent.id}`;
   const existing = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
-  if (existing) return { coordinated: true, runtimeProducerEventId: producerEventId };
+  if (existing) {
+    return {
+      coordinated: true,
+      disposition: confirmation ? "waiting_user" : "resume_parent",
+      runtimeProducerEventId: producerEventId,
+    };
+  }
+
+  if (!confirmation) {
+    const snapshot = await createMySqlHarnessLoopRecoveryPort(tenantId).load(parent.id);
+    const actionEntry = snapshot.actionHistory.findLast(
+      (entry) =>
+        entry.state === "started" &&
+        ((entry.action.actionType === "agent.call" && entry.actionId === call.sourceRef) ||
+          (entry.action.actionType === "agent.resume" &&
+            entry.action.payload.agentCallId === call.id)),
+    );
+    if (!actionEntry) {
+      throw new Error(`AgentCall ${callId} input-required 找不到待完成的 Harness action`);
+    }
+    const observation = {
+      observationType: "agent" as const,
+      summary: prompt.slice(0, 20_000),
+      sourceRefs: [`agent-call:${call.id}`, `agent-call-event:${inputEvent.id}`],
+      data: {
+        callId: call.id,
+        agentId: call.agentId,
+        state: "input_required",
+        prompt,
+        inputSchema,
+        taskId: call.currentAttempt.externalTaskRef,
+        contextId: call.sessionBinding.externalContextRef,
+        resumeSupported: capabilities.resume,
+      },
+    };
+    await writeRuntimeEventWithRetry({
+      tenantId,
+      invocationId: parent.id,
+      producerEventId,
+      type: "harness.action.completed",
+      payload: {
+        action_id: actionEntry.actionId,
+        step_no: actionEntry.stepNo,
+        action_type: actionEntry.actionType,
+        action_digest: actionEntry.actionDigest,
+        purpose_code: actionEntry.purposeCode,
+        short_purpose: actionEntry.shortPurpose,
+        target_ref: actionEntry.targetRef,
+        state: "completed",
+        action_payload: actionEntry.action.payload,
+        authority_ref: `agent-call:${call.id}`,
+        observation,
+      },
+    });
+    return {
+      coordinated: true,
+      disposition: "resume_parent",
+      runtimeProducerEventId: producerEventId,
+    };
+  }
 
   const runtimePayload = buildAgentInputRequiredRuntimePayload({
     callId: call.id,
@@ -196,32 +258,58 @@ export async function coordinateAgentInputRequired(
     confirmation,
     now: new Date(),
   });
+  await writeRuntimeEventWithRetry({
+    tenantId,
+    invocationId: parent.id,
+    producerEventId,
+    type: "user_action.requested",
+    payload: { ...runtimePayload },
+  });
+  return {
+    coordinated: true,
+    disposition: "waiting_user",
+    runtimeProducerEventId: producerEventId,
+  };
+}
+
+async function writeRuntimeEventWithRetry(params: {
+  tenantId: string;
+  invocationId: string;
+  producerEventId: string;
+  type: "harness.action.completed" | "user_action.requested";
+  payload: Record<string, unknown>;
+}): Promise<void> {
   for (let retry = 0; retry < 3; retry += 1) {
-    const ingress = await getIngressByInvocation(tenantId, parent.id, { limit: 500 });
+    const ingress = await getIngressByInvocation(params.tenantId, params.invocationId, {
+      limit: 500,
+    });
     const sequence = Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1;
     try {
       await ingressEventBatch({
-        tenantId,
-        invocationId: parent.id,
+        tenantId: params.tenantId,
+        invocationId: params.invocationId,
         producerSequenceStart: sequence,
         events: [
           {
-            producer_event_id: producerEventId,
+            producer_event_id: params.producerEventId,
             producer_sequence: sequence,
-            type: "user_action.requested",
+            type: params.type,
             schema_version: 1,
-            payload: { ...runtimePayload },
+            payload: params.payload,
           },
         ],
       });
-      return { coordinated: true, runtimeProducerEventId: producerEventId };
+      return;
     } catch (error) {
-      const raced = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
-      if (raced) return { coordinated: true, runtimeProducerEventId: producerEventId };
+      const raced = await getIngressByProducerEventId(
+        params.tenantId,
+        params.invocationId,
+        params.producerEventId,
+      );
+      if (raced) return;
       if (!(error instanceof EventSequenceGapError) || retry === 2) throw error;
     }
   }
-  return { coordinated: false };
 }
 
 function confirmationPrompt(

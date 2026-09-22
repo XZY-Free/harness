@@ -2,6 +2,7 @@ export const HARNESS_ACTION_TYPES = [
   "knowledge.search",
   "tool.call",
   "agent.call",
+  "agent.resume",
   "request_user_input",
   "respond",
 ] as const;
@@ -45,6 +46,14 @@ export type AgentCallAction = HarnessActionBase<
   }
 >;
 
+export type AgentResumeAction = HarnessActionBase<
+  "agent.resume",
+  {
+    agentCallId: string;
+    inputSource: { kind: "original_objective" } | { kind: "user_input"; sourceRef: string };
+  }
+>;
+
 export type RequestUserInputAction = HarnessActionBase<
   "request_user_input",
   {
@@ -65,6 +74,7 @@ export type HarnessNextAction =
   | KnowledgeSearchAction
   | ToolCallAction
   | AgentCallAction
+  | AgentResumeAction
   | RequestUserInputAction
   | RespondAction;
 

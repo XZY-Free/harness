@@ -8,6 +8,7 @@ import {
 } from "./capability-catalog";
 import {
   type AgentCallAction,
+  type AgentResumeAction,
   HARNESS_ACTION_TYPES,
   type HarnessActionHistoryEntry,
   type HarnessActionType,
@@ -84,6 +85,8 @@ export interface HarnessActionExecutionContext {
   threadId: string;
   turnId: string;
   actionDigest: string;
+  /** 当前 Turn 的原始用户目标；恢复 Agent 时不接受模型自由编造的文本。 */
+  objective?: string;
   /** 上游运行时的真实绝对截止；行动内的短等待必须继续取更早值。 */
   deadlineAt?: Date;
   abortSignal?: AbortSignal;
@@ -100,6 +103,10 @@ export interface HarnessActionExecutors {
   ) => Promise<HarnessActionExecutionResult>;
   "agent.call"?: (
     action: AgentCallAction,
+    context: HarnessActionExecutionContext,
+  ) => Promise<HarnessActionExecutionResult>;
+  "agent.resume"?: (
+    action: AgentResumeAction,
     context: HarnessActionExecutionContext,
   ) => Promise<HarnessActionExecutionResult>;
   request_user_input?: (
@@ -323,7 +330,7 @@ export class HarnessLoop {
                   ? "KNOWLEDGE_ACTION_FAILED"
                   : current?.actionType === "tool.call"
                     ? "TOOL_ACTION_FAILED"
-                    : current?.actionType === "agent.call"
+                    : current?.actionType === "agent.call" || current?.actionType === "agent.resume"
                       ? (explicitErrorCode ?? "AGENT_CALL_FAILED")
                       : current?.actionType === "respond"
                         ? "MODEL_EXECUTION_FAILED"
@@ -385,7 +392,7 @@ export class HarnessLoop {
     const executor = this.executorFor(action);
     if (!executor) {
       throw new HarnessLoopError(
-        action.actionType === "agent.call"
+        action.actionType === "agent.call" || action.actionType === "agent.resume"
           ? "AGENT_CALL_EXECUTOR_UNAVAILABLE"
           : "HARNESS_ACTION_EXECUTOR_UNAVAILABLE",
         `${action.actionType} 执行器未注册`,
@@ -402,6 +409,7 @@ export class HarnessLoop {
       threadId: this.params.threadId,
       turnId: this.params.turnId,
       actionDigest: historyEntry.actionDigest,
+      objective: this.params.objective,
       deadlineAt: this.params.actionDeadlineAt,
       abortSignal: this.params.abortSignal,
     });
@@ -441,7 +449,9 @@ export class HarnessLoop {
       };
     }
     const agentFailure =
-      action.actionType === "agent.call" ? this.terminalPreferredAgentFailure() : null;
+      action.actionType === "agent.call" || action.actionType === "agent.resume"
+        ? this.terminalPreferredAgentFailure()
+        : null;
     if (agentFailure) return await this.completeAgentFailureResponse(agentFailure);
     return null;
   }
@@ -615,9 +625,13 @@ export class HarnessLoop {
   }
 
   private validateTypeBudget(actionType: HarnessActionType): void {
-    const count = this.actionHistory.filter((entry) => entry.actionType === actionType).length;
+    const count = this.actionHistory.filter((entry) =>
+      actionType === "agent.call" || actionType === "agent.resume"
+        ? entry.actionType === "agent.call" || entry.actionType === "agent.resume"
+        : entry.actionType === actionType,
+    ).length;
     const limit =
-      actionType === "agent.call"
+      actionType === "agent.call" || actionType === "agent.resume"
         ? this.limits.maxAgentCalls
         : actionType === "tool.call"
           ? this.limits.maxToolCalls
@@ -671,7 +685,9 @@ export class HarnessLoop {
   private buildView(): HarnessLoopView {
     const used = {
       loopSteps: this.actionHistory.length,
-      agentCalls: this.actionHistory.filter((entry) => entry.actionType === "agent.call").length,
+      agentCalls: this.actionHistory.filter(
+        (entry) => entry.actionType === "agent.call" || entry.actionType === "agent.resume",
+      ).length,
       toolCalls: this.actionHistory.filter((entry) => entry.actionType === "tool.call").length,
       knowledgeSearches: this.actionHistory.filter(
         (entry) => entry.actionType === "knowledge.search",
@@ -739,9 +755,10 @@ export class HarnessLoop {
     if (!preferredAgentId) return null;
     const failed = this.actionHistory.findLast((entry) => {
       if (
-        entry.action.actionType !== "agent.call" ||
+        (entry.action.actionType !== "agent.call" && entry.action.actionType !== "agent.resume") ||
         (entry.state !== "completed" && entry.state !== "failed") ||
-        entry.action.payload.agentId !== preferredAgentId ||
+        (entry.action.actionType === "agent.call" &&
+          entry.action.payload.agentId !== preferredAgentId) ||
         entry.observation?.observationType !== "agent"
       ) {
         return false;
@@ -881,6 +898,8 @@ function actionTargetRef(action: HarnessNextAction): string | null {
       return `${action.payload.toolId}:${action.payload.operationId}`;
     case "agent.call":
       return action.payload.agentId;
+    case "agent.resume":
+      return action.payload.agentCallId;
     case "request_user_input":
       return action.payload.purpose;
     case "respond":
@@ -912,7 +931,7 @@ function failureObservation(
       ? "knowledge"
       : actionType === "tool.call"
         ? "tool"
-        : actionType === "agent.call"
+        : actionType === "agent.call" || actionType === "agent.resume"
           ? "agent"
           : actionType === "request_user_input"
             ? "user_input"

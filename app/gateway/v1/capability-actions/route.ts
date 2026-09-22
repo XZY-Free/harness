@@ -1,3 +1,4 @@
+import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { API_ERROR_CODES, type ApiErrorCode } from "@/lib/error-codes";
@@ -312,11 +313,13 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
   }
-  const actionTypeCount = snapshot.actionHistory.filter(
-    (entry) => entry.actionType === body.action.actionType,
+  const actionTypeCount = snapshot.actionHistory.filter((entry) =>
+    body.action.actionType === "agent.call" || body.action.actionType === "agent.resume"
+      ? entry.actionType === "agent.call" || entry.actionType === "agent.resume"
+      : entry.actionType === body.action.actionType,
   ).length;
   const typeLimit =
-    body.action.actionType === "agent.call"
+    body.action.actionType === "agent.call" || body.action.actionType === "agent.resume"
       ? limits.maxAgentCalls
       : body.action.actionType === "tool.call"
         ? limits.maxToolCalls
@@ -389,7 +392,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!executor) {
     const errorCode =
-      body.action.actionType === "agent.call"
+      body.action.actionType === "agent.call" || body.action.actionType === "agent.resume"
         ? "AGENT_CALL_EXECUTOR_UNAVAILABLE"
         : "HARNESS_ACTION_EXECUTOR_UNAVAILABLE";
     const failedSequence = existing ? snapshot.nextProducerSequence : start + 1;
@@ -430,12 +433,16 @@ export async function POST(request: Request): Promise<Response> {
   });
   try {
     await invocationCancellation.refresh();
+    const triggerItem = invocation.triggerItemId
+      ? await getItemById(principal.tenantId, invocation.triggerItemId)
+      : null;
     execution = await executor(body.action as never, {
       invocationId: principal.invocationId,
       tenantId: principal.tenantId,
       threadId: invocation.threadId ?? "",
       turnId: invocation.turnId,
       actionDigest: digest,
+      objective: readItemText(triggerItem?.contentJson),
       deadlineAt: new Date(principal.expiresAt),
       abortSignal: invocationCancellation.signal,
     });
@@ -604,9 +611,17 @@ function targetRef(action: HarnessNextAction): string | null {
       return `${action.payload.toolId}:${action.payload.operationId}`;
     case "agent.call":
       return action.payload.agentId;
+    case "agent.resume":
+      return action.payload.agentCallId;
     case "request_user_input":
       return action.payload.purpose;
     case "respond":
       return null;
   }
+}
+
+function readItemText(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const text = (value as Record<string, unknown>).text;
+  return typeof text === "string" ? text : "";
 }

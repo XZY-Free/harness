@@ -56,6 +56,29 @@ export const HARNESS_NEXT_ACTION_SCHEMA = z.discriminatedUnion("actionType", [
   z
     .object({
       ...common,
+      actionType: z.literal("agent.resume"),
+      payload: z
+        .object({
+          agentCallId: id,
+          inputSource: z.discriminatedUnion("kind", [
+            z.object({ kind: z.literal("original_objective") }).strict(),
+            z
+              .object({
+                kind: z.literal("user_input"),
+                sourceRef: z
+                  .string()
+                  .regex(/^user-action:[^\s:]+$/)
+                  .max(512),
+              })
+              .strict(),
+          ]),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
       actionType: z.literal("request_user_input"),
       payload: z
         .object({
@@ -87,6 +110,7 @@ export const HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA = z
       "knowledge.search",
       "tool.call",
       "agent.call",
+      "agent.resume",
       "request_user_input",
       "respond",
     ]),

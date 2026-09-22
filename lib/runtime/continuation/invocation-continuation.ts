@@ -78,7 +78,10 @@ export function classifyInvocationContinuationError(error: unknown): {
 
 export interface InvocationContinuationDependencies {
   getAgentCall(params: { tenantId: string; callId: string }): Promise<AgentCall | null>;
-  coordinateWaitingUser(tenantId: string, callId: string): Promise<unknown>;
+  coordinateWaitingUser(
+    tenantId: string,
+    callId: string,
+  ): Promise<{ disposition?: "resume_parent" | "waiting_user" } | undefined>;
   resumeParent(params: {
     tenantId: string;
     invocationId: string;
@@ -191,7 +194,15 @@ export function createInvocationContinuationHandler(
 
     if (parsed.kind === "coordinate_user_input") {
       if (call.state !== "waiting_user") return;
-      await dependencies.coordinateWaitingUser(event.tenantId, call.id);
+      const coordination = await dependencies.coordinateWaitingUser(event.tenantId, call.id);
+      if (coordination?.disposition === "resume_parent") {
+        await dependencies.resumeParent({
+          tenantId: event.tenantId,
+          invocationId: call.parentInvocationId,
+          agentCallId: call.id,
+          sourceVersion: parsed.sourceVersion,
+        });
+      }
       return;
     }
     if (parsed.kind === "resume_parent") {

@@ -1421,4 +1421,136 @@ describe("HarnessLoop", () => {
     expect(decideNextAction).not.toHaveBeenCalled();
     expect(generateFinalResponse).not.toHaveBeenCalled();
   });
+
+  it("agent.resume 只用原始用户目标恢复当前 Invocation 的同一 AgentCall", async () => {
+    const resumeAgent = vi.fn(async () => ({
+      observation: {
+        observationType: "agent" as const,
+        summary: "已返回本人医疗期余额",
+        sourceRefs: ["agent-call:call-1"],
+        data: { callId: "call-1", state: "completed" },
+      },
+      authorityRef: "agent-call:call-1",
+    }));
+    const loop = new HarnessLoop(
+      baseParams({
+        objective: "查询我本人的医疗期余额",
+        decisionPort: decisionPort([
+          {
+            actionId: "resume-1",
+            stepNo: 1,
+            actionType: "agent.resume",
+            purposeCode: "resume_with_existing_context",
+            shortPurpose: "继续查询本人余额",
+            payload: {
+              agentCallId: "call-1",
+              inputSource: { kind: "original_objective" },
+            },
+          },
+          {
+            actionId: "respond-1",
+            stepNo: 2,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "回答",
+            payload: { evidenceRefs: ["agent-call:call-1"] },
+          },
+        ]),
+        executors: { "agent.resume": resumeAgent },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result.completed).toBe(true);
+    expect(resumeAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: "agent.resume",
+        payload: {
+          agentCallId: "call-1",
+          inputSource: { kind: "original_objective" },
+        },
+      }),
+      expect.objectContaining({ objective: "查询我本人的医疗期余额" }),
+    );
+  });
+
+  it("agent.call 与 agent.resume 共用 Agent 调用预算，不得无限自动恢复", async () => {
+    const originalAction = {
+      actionId: "call-1",
+      stepNo: 1,
+      actionType: "agent.call" as const,
+      purposeCode: "query_balance",
+      shortPurpose: "查询余额",
+      payload: { agentId: "agent-1", task: "查询我本人的余额" },
+    };
+    const inputRequiredObservation = {
+      observationType: "agent" as const,
+      summary: "请补充查询类型",
+      sourceRefs: ["agent-call:agent-call-1"],
+      data: { callId: "agent-call-1", state: "input_required" },
+    };
+    const executeResume = vi.fn(async () => ({
+      authorityRef: "agent-call:agent-call-1",
+      observation: inputRequiredObservation,
+    }));
+    const loop = new HarnessLoop(
+      baseParams({
+        limits: { maxAgentCalls: 2 },
+        recoveryPort: {
+          async load() {
+            return {
+              invocationState: "running" as const,
+              nextProducerSequence: 4,
+              observations: [inputRequiredObservation],
+              actionHistory: [
+                {
+                  ...originalAction,
+                  action: originalAction,
+                  actionDigest: computeCanonicalDigest({
+                    actionType: originalAction.actionType,
+                    payload: originalAction.payload,
+                  }),
+                  targetRef: "agent-1",
+                  state: "completed" as const,
+                  observation: inputRequiredObservation,
+                },
+              ],
+            };
+          },
+        },
+        decisionPort: decisionPort([
+          {
+            actionId: "resume-1",
+            stepNo: 2,
+            actionType: "agent.resume",
+            purposeCode: "retry_existing_call",
+            shortPurpose: "继续同一查询",
+            payload: {
+              agentCallId: "agent-call-1",
+              inputSource: { kind: "original_objective" },
+            },
+          },
+          {
+            actionId: "resume-2",
+            stepNo: 3,
+            actionType: "agent.resume",
+            purposeCode: "retry_existing_call_again",
+            shortPurpose: "再次继续同一查询",
+            payload: {
+              agentCallId: "agent-call-1",
+              inputSource: { kind: "original_objective" },
+            },
+          },
+        ]),
+        executors: { "agent.resume": executeResume },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(executeResume).toHaveBeenCalledOnce();
+    expect(result.completed).toBe(true);
+    expect(result.actionHistory).toHaveLength(2);
+  });
 });

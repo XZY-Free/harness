@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createAgentActionExecutor } from "@/lib/agents/calls/application/agent-action-executor";
+import { createAgentResumeActionExecutor } from "@/lib/agents/calls/application/agent-resume-action-executor";
 import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/resume-agent-call-from-user-action";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
@@ -8,6 +9,7 @@ import {
   waitForCallTerminal,
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolve-queries";
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -23,6 +25,10 @@ import { workspaceAttachmentAccessGrant } from "@/lib/persistence/schema/workspa
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
+import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
+import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
+import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import {
   createManagedWorkspaceAttachment,
@@ -422,14 +428,15 @@ describe("AgentActionExecutor", () => {
     expect(scenario.provider.captured).toHaveLength(1);
   });
 
-  it("input-required 原子投影 Parent/Turn waiting_user 与关联同一 AgentCall 的 UAR，重放不重复", async () => {
+  it("普通 input-required 先成为父 Harness observation，再用原始目标恢复同一 AgentCall", async () => {
     const scenario = await seed("input_required");
+    const executionSubject = executionSubjectFromUserIdentity(
+      scenario.tenantId,
+      scenario.userIdentityId,
+    );
     const execute = createAgentActionExecutor({
       tenantId: scenario.tenantId,
-      executionSubject: executionSubjectFromUserIdentity(
-        scenario.tenantId,
-        scenario.userIdentityId,
-      ),
+      executionSubject,
       resolveRoute,
       transportChannel: "hosted",
     });
@@ -437,130 +444,167 @@ describe("AgentActionExecutor", () => {
       actionId: "action-agent-input",
       stepNo: 1,
       actionType: "agent.call" as const,
-      purposeCode: "collect_employee_id",
-      shortPurpose: "补充员工编号",
-      payload: { agentId: scenario.agentId, task: "查询当前员工年假余额" },
+      purposeCode: "query_medical_balance",
+      shortPurpose: "查询本人医疗期余额",
+      payload: { agentId: scenario.agentId, task: "查询我本人的医疗期余额" },
     };
+    const actionDigest = computeCanonicalDigest({
+      actionType: action.actionType,
+      payload: action.payload,
+    });
     const context = {
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
       turnId: scenario.turnId,
-      actionDigest: `sha256:${"d".repeat(64)}`,
+      actionDigest,
     };
+    const sequence =
+      ((await getLatestProducerSequence(scenario.tenantId, scenario.parentInvocationId)) ?? 0) + 1;
+    const actionPayload = {
+      action_id: action.actionId,
+      step_no: action.stepNo,
+      action_type: action.actionType,
+      action_digest: actionDigest,
+      purpose_code: action.purposeCode,
+      short_purpose: action.shortPurpose,
+      target_ref: scenario.agentId,
+      action_payload: action.payload,
+    };
+    await ingressEventBatch({
+      tenantId: scenario.tenantId,
+      invocationId: scenario.parentInvocationId,
+      producerSequenceStart: sequence,
+      events: [
+        {
+          producer_event_id: "test-input-required-proposed",
+          producer_sequence: sequence,
+          type: "harness.action.proposed",
+          schema_version: 1,
+          payload: { ...actionPayload, state: "proposed" },
+        },
+        {
+          producer_event_id: "test-input-required-started",
+          producer_sequence: sequence + 1,
+          type: "harness.action.started",
+          schema_version: 1,
+          payload: { ...actionPayload, state: "started" },
+        },
+      ],
+    });
 
     const first = await execute(action, context);
     const callId = first.pending?.callId as string;
-    let waitingCall: typeof agentCallTable.$inferSelect | undefined;
-    let projectedRequest: typeof userActionRequestTable.$inferSelect | undefined;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      [waitingCall] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, callId));
-      const requests = await db.select().from(userActionRequestTable);
-      projectedRequest = requests.find(
-        (request) => (request.promptJson as Record<string, unknown>).agent_call_id === callId,
-      );
-      if (projectedRequest || waitingCall?.finishedAt) break;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    expect(waitingCall).toMatchObject({ state: "waiting_user", errorCode: null });
-    await createProductionInvocationContinuationWorker(
-      "agent-action-executor-input-required-test",
-    ).pollOnce();
-    const requestsAfterContinuation = await db.select().from(userActionRequestTable);
-    projectedRequest = requestsAfterContinuation.find(
-      (request) => (request.promptJson as Record<string, unknown>).agent_call_id === callId,
+    await coordinateAgentInputRequired(scenario.tenantId, callId);
+    expect(await db.select().from(userActionRequestTable)).toHaveLength(0);
+    const snapshot = await createMySqlHarnessLoopRecoveryPort(scenario.tenantId).load(
+      scenario.parentInvocationId,
     );
-    expect(projectedRequest).toBeTruthy();
-    const replay = await execute(action, context);
-
-    expect(first).toMatchObject({
-      pending: { kind: "agent_call", state: "waiting_user" },
-    });
-    expect(replay).toEqual(first);
-    const requests = await db.select().from(userActionRequestTable);
-    const request = requests.find(
-      (row) => (row.promptJson as Record<string, unknown>).agent_call_id === callId,
+    expect(snapshot.actionHistory).toContainEqual(
+      expect.objectContaining({
+        actionId: action.actionId,
+        state: "completed",
+        observation: expect.objectContaining({
+          observationType: "agent",
+          data: expect.objectContaining({ callId, state: "input_required" }),
+        }),
+      }),
     );
-    expect(request).toMatchObject({
-      tenantId: scenario.tenantId,
-      invocationId: scenario.parentInvocationId,
-      turnId: scenario.turnId,
-      requestType: "input",
-      purpose: "a2a_input_required",
-      requestState: "pending",
-    });
-    expect(request?.promptJson).toMatchObject({
-      agent_call_id: callId,
-      agent_call_event_id: expect.any(String),
-      task_id: expect.any(String),
-      context_id: expect.any(String),
-    });
     const [invocation] = await db
       .select()
       .from(invocationTable)
       .where(eq(invocationTable.id, scenario.parentInvocationId));
     const [turn] = await db.select().from(turnTable).where(eq(turnTable.id, scenario.turnId));
-    expect(invocation?.executionState).toBe("waiting_user");
-    expect(turn?.turnState).toBe("waiting_user");
-    expect(requests).toHaveLength(1);
-    const requestedEvents = await db
-      .select()
-      .from(threadEventTable)
-      .where(eq(threadEventTable.eventType, "user_action.requested"));
-    expect(requestedEvents).toHaveLength(1);
-    expect(requestedEvents[0]?.payloadJson).toMatchObject({
-      request_id: request?.id,
-      agent_call_id: callId,
-      action_id: request?.harnessActionId,
-      harness_action_id: action.actionId,
-      task_id: (request?.promptJson as Record<string, unknown>)?.task_id,
-      context_id: (request?.promptJson as Record<string, unknown>)?.context_id,
-    });
+    expect(invocation?.executionState).toBe("running");
+    expect(turn?.turnState).toBe("running");
 
-    const changedPreferredAgentId = randomUUID();
-    await db
-      .update(turnTable)
-      .set({ preferredAgentId: changedPreferredAgentId })
-      .where(eq(turnTable.id, scenario.turnId));
-    const resolved = await resolveGenericUserAction({
+    const resume = createAgentResumeActionExecutor({
       tenantId: scenario.tenantId,
-      requestId: request?.id as string,
-      resolution: "submit",
-      resolvedBy: randomUUID(),
-      responseRedactedJson: { text: "2026-09-01" },
+      executionSubject,
     });
-    const [resumedTurn] = await db
-      .select()
-      .from(turnTable)
-      .where(eq(turnTable.id, scenario.turnId));
-    expect(resumedTurn?.turnState).toBe("running");
-    expect(resolved.resumeCommand.commandPayloadJson).toMatchObject({
-      agent_call_id: callId,
-      action_id: request?.harnessActionId,
-      task_id: (request?.promptJson as Record<string, unknown>)?.task_id,
-      context_id: (request?.promptJson as Record<string, unknown>)?.context_id,
-      resume_payload: { text: "2026-09-01" },
+    const resumed = await resume(
+      {
+        actionId: "resume-agent-input",
+        stepNo: 2,
+        actionType: "agent.resume",
+        purposeCode: "resume_with_original_objective",
+        shortPurpose: "继续查询本人医疗期余额",
+        payload: { agentCallId: callId, inputSource: { kind: "original_objective" } },
+      },
+      { ...context, objective: action.payload.task },
+    );
+    expect(resumed.observation).toMatchObject({
+      observationType: "agent",
+      data: { callId },
     });
-
-    const resumed = await resumeAgentCallFromUserAction({
-      tenantId: scenario.tenantId,
-      request: resolved.request,
-      responseRedactedJson: { text: "2026-09-01" },
-      executionSubject: executionSubjectFromUserIdentity(
-        scenario.tenantId,
-        scenario.userIdentityId,
-      ),
-    });
-    expect(resumed).toMatchObject({ resumed: true, callId, state: "completed" });
     expect(scenario.provider.captured).toHaveLength(2);
     expect(scenario.provider.captured[1]).toMatchObject({
       resume: true,
-      taskId: (request?.promptJson as Record<string, unknown>)?.task_id,
-      contextId: (request?.promptJson as Record<string, unknown>)?.context_id,
-      text: "2026-09-01",
+      taskId: scenario.provider.captured[0]?.responseTaskId,
+      contextId: scenario.provider.captured[0]?.responseContextId,
+      text: action.payload.task,
     });
     expect(await db.select().from(agentCallTable)).toHaveLength(1);
-    expect(changedPreferredAgentId).not.toBe(scenario.agentId);
+  });
+
+  it("agent.resume 拒绝恢复其他 Invocation 的 AgentCall", async () => {
+    const scenario = await seed("input_required");
+    const executionSubject = executionSubjectFromUserIdentity(
+      scenario.tenantId,
+      scenario.userIdentityId,
+    );
+    const execute = createAgentActionExecutor({
+      tenantId: scenario.tenantId,
+      executionSubject,
+      resolveRoute,
+      transportChannel: "hosted",
+    });
+    const started = await execute(
+      {
+        actionId: "cross-invocation-call",
+        stepNo: 1,
+        actionType: "agent.call",
+        purposeCode: "query_balance",
+        shortPurpose: "查询余额",
+        payload: { agentId: scenario.agentId, task: "查询我本人的余额" },
+      },
+      {
+        invocationId: scenario.parentInvocationId,
+        tenantId: scenario.tenantId,
+        threadId: scenario.threadId,
+        turnId: scenario.turnId,
+        actionDigest: `sha256:${"8".repeat(64)}`,
+      },
+    );
+    const resume = createAgentResumeActionExecutor({
+      tenantId: scenario.tenantId,
+      executionSubject,
+    });
+
+    await expect(
+      resume(
+        {
+          actionId: "cross-invocation-resume",
+          stepNo: 2,
+          actionType: "agent.resume",
+          purposeCode: "resume",
+          shortPurpose: "恢复查询",
+          payload: {
+            agentCallId: started.pending?.callId as string,
+            inputSource: { kind: "original_objective" },
+          },
+        },
+        {
+          invocationId: randomUUID(),
+          tenantId: scenario.tenantId,
+          threadId: scenario.threadId,
+          turnId: scenario.turnId,
+          actionDigest: `sha256:${"9".repeat(64)}`,
+          objective: "查询我本人的余额",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_RESUME_NOT_ALLOWED" });
+    expect(scenario.provider.captured).toHaveLength(1);
   });
 
   it("同一 AgentCall 可连续产生两次 confirmation，分别落为 UAR 并两次复用同一 task/context", async () => {

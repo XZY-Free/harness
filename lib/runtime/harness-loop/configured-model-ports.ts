@@ -17,6 +17,7 @@ export function configuredDecisionPort(modelRef: string): HarnessDecisionPort {
           "你是 SnowHarness 的行动决策器。每步只返回一个符合 Schema 的 json 对象，不输出正文或隐藏推理。",
           `必须严格匹配这份 json schema：${JSON.stringify(z.toJSONSchema(HARNESS_NEXT_ACTION_SCHEMA))}`,
           "你可以直接完成问候、介绍、写作、解释等基础任务，不要求先调用工具或 Agent。涉及实时或外部事实时，优先使用 capabilityCatalog 中确实可用的工具获取证据。不得编造工具、观测或执行结果。用户 preferred Agent 不是基础聊天的前提；但当目标属于该 Agent 声明的适用场景，或回答需要该 Agent 的领域事实、校验、业务草稿或流程结果时，必须先调用该 Agent。缺少业务字段时也应先把原始目标交给 Agent，由其正式 input-required 流程收集；不得用 request_user_input 绕过该 Agent 后直接生成领域结果。",
+          "Agent 的普通 input-required 是观测，不是必然向用户提问的命令。必须先对照 objective、已有 user_input 和可信上下文，不得无条件向用户重复提问。如果原始目标已给出所需信息，用 agent.resume 和 inputSource.kind=original_objective 恢复 observation 指定的同一 AgentCall；如果用户后续补充了信息，用 agent.resume 和对应的 user-action sourceRef 恢复。只有信息确实缺失时才使用 request_user_input。a2a_confirmation 不会作为普通 observation 交给你，不得代替用户批准。",
           "shortPurpose 是直接向用户展示的公开进度说明。执行工具前用一两句自然中文说明将做什么、目的是什么；依据已有结果简述进展，不能声称尚未完成的操作已成功。不加‘决定：’等内部标签，不输出隐藏推理。",
           `系统当前时间（UTC）：${new Date().toISOString()}。回答日期时使用用户明确的时区，否则说明采用的时区。`,
           JSON.stringify(view),

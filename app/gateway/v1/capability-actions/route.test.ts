@@ -1,17 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
+import { createAgent, updateAgentLifecycle } from "@/lib/agents/persistence/agent-queries";
+import { DEFAULT_USER_ID } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import {
   DEFAULT_TENANT_ID,
   INITIAL_GOVERNANCE_CONFIG,
   computeGovernanceConfigDigest,
   ensureDefaultTenant,
 } from "@/lib/identity/tenant-bootstrap";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import {
   agentCallAttemptTable,
@@ -20,7 +24,11 @@ import {
 } from "@/lib/persistence/schema/agent-calls";
 import { capabilityUseTable } from "@/lib/persistence/schema/capability-use";
 import { threadEventTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
-import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
+import {
+  executionBindingTable,
+  invocationTable,
+  runtimeEventIngressTable,
+} from "@/lib/persistence/schema/executions";
 import {
   governanceConfigRevisionTable,
   governanceConfigSetTable,
@@ -30,6 +38,7 @@ import {
   type CapabilityCatalogAgent,
   buildCapabilityCatalogSnapshot,
 } from "@/lib/runtime/harness-loop/capability-catalog";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { and, asc, eq, like } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST as runtimeEventsPOST } from "../runtime-events/route";
@@ -60,10 +69,16 @@ async function seedRunningTurn(
   const threadId = randomUUID();
   const turnId = randomUUID();
   const invocationId = randomUUID();
+  const identity = await upsertUserIdentity({
+    tenantId: TENANT,
+    externalSubject: `gateway-action-user:${invocationId}`,
+    email: `${invocationId}@gateway-action.test`,
+    displayName: "Gateway Action 测试用户",
+  });
   await db.insert(threadTable).values({
     id: threadId,
     tenantId: TENANT,
-    ownerUserId: "user-1",
+    ownerUserId: identity.id,
     lifecycleState: "active",
     lastActivityAt: new Date(),
     lastTurnSequence: 1,
@@ -96,6 +111,21 @@ async function seedRunningTurn(
     executionState: "running",
     versionNo: 1,
   });
+  if (preferredAgentId) {
+    const principalBinding = await upsertPrincipalBinding({
+      tenantId: TENANT,
+      subjectType: "user",
+      externalId: identity.externalSubject,
+      userIdentityId: identity.id,
+      displayName: identity.displayName,
+    });
+    await seedActionPermission({
+      tenantId: TENANT,
+      principalBindingId: principalBinding.id,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "agent", ids: [preferredAgentId] },
+    });
+  }
   const [governanceSet] = await db
     .select({ revisionId: governanceConfigSetTable.currentRevisionId })
     .from(governanceConfigSetTable)
@@ -140,6 +170,7 @@ async function seedRunningTurn(
             invocationId,
             preferredAgentId,
             agentCandidate ?? testAgentCandidate(preferredAgentId),
+            identity.id,
           ),
         }
       : {}),
@@ -169,6 +200,7 @@ function capabilityCatalogFields(
   invocationId: string,
   preferredAgentId: string,
   agentCandidate: CapabilityCatalogAgent,
+  executionSubjectId = DEFAULT_USER_ID,
 ) {
   const catalog = buildCapabilityCatalogSnapshot({
     invocationId,
@@ -186,7 +218,7 @@ function capabilityCatalogFields(
     capabilityCatalogSourceRefs: catalog.sourceRefs,
     capabilityCatalogCreatedAt: catalog.createdAt,
     executionSubjectType: "user" as const,
-    executionSubjectId: "test-user",
+    executionSubjectId,
     executionSubjectSource: "authenticated_user" as const,
     executionSubjectFrozenAt: new Date("2026-09-04T00:00:00.000Z"),
   };
@@ -424,7 +456,6 @@ describe("POST /gateway/v1/capability-actions", () => {
         payload: { agentId: "agent-other", task: "查询员工年假余额" },
       }),
     );
-
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: { code: "AGENT_ACTION_NOT_ALLOWED" } });
     const ingress = await db
@@ -434,8 +465,21 @@ describe("POST /gateway/v1/capability-actions", () => {
     expect(ingress).toHaveLength(0);
   });
 
-  it("agent.call 通过统一执行器解析 Route，Route 不存在时稳定失败且不伪装成功", async () => {
-    const seeded = await seedRunningTurn("agent-allowed");
+  it("agent.call 对未具备可调用策略的 Agent fail-closed 并记录已提交行动失败", async () => {
+    const owner = await upsertUserIdentity({
+      tenantId: TENANT,
+      externalSubject: `route-missing-owner:${randomUUID()}`,
+      email: `${randomUUID()}@route-missing.test`,
+      displayName: "Route Missing Agent Owner",
+    });
+    const agent = await createAgent({
+      tenantId: TENANT,
+      agentKey: `route-missing-${randomUUID()}`,
+      displayName: "Route Missing Agent",
+      ownerUserId: owner.id,
+    });
+    await updateAgentLifecycle(TENANT, agent.id, "enabled", agent.versionNo);
+    const seeded = await seedRunningTurn(agent.id);
     const response = await POST(
       request(seeded.invocationId, {
         actionId: "agent-committed",
@@ -443,13 +487,12 @@ describe("POST /gateway/v1/capability-actions", () => {
         actionType: "agent.call",
         purposeCode: "query_balance",
         shortPurpose: "查询余额",
-        payload: { agentId: "agent-allowed", task: "查询员工年假余额" },
+        payload: { agentId: agent.id, task: "查询员工年假余额" },
       }),
     );
-
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({
-      error: { code: "AGENT_ROUTE_UNAVAILABLE" },
+      error: { code: "ACTION_SCOPE_DENIED" },
     });
     const events = await db
       .select({ type: runtimeEventIngressTable.candidateType })
@@ -474,6 +517,9 @@ describe("POST /gateway/v1/capability-actions", () => {
       .where(eq(capabilityUseTable.invocationId, scenario.parentInvocationId));
     scenario.provider.reset();
     scenario.provider.setScenario("long_running");
+    await db
+      .delete(executionBindingTable)
+      .where(eq(executionBindingTable.invocationId, scenario.parentInvocationId));
     const agentCandidate: CapabilityCatalogAgent = {
       agentId: scenario.agentId,
       agentRevisionId: scenario.agentRevisionId,
@@ -504,6 +550,7 @@ describe("POST /gateway/v1/capability-actions", () => {
         scenario.parentInvocationId,
         scenario.agentId,
         agentCandidate,
+        scenario.userIdentityId,
       ),
     });
     const action = {
@@ -529,7 +576,6 @@ describe("POST /gateway/v1/capability-actions", () => {
       ),
     );
     const body = await response.json();
-
     expect(response.status).toBe(200);
     expect(body).toMatchObject({
       action_id: action.actionId,

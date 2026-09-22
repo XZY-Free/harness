@@ -64,6 +64,25 @@ describe("configured Harness model ports", () => {
     expect(prompt).toContain("不得用 request_user_input 绕过该 Agent");
   });
 
+  it("普通 input-required 必须先判断现有上下文，并可受约束地恢复同一 AgentCall", async () => {
+    process.env.LLM_API_KEY = "test-key";
+
+    await configuredDecisionPort("test-model").decideNextAction({
+      objective: "查询我本人的医疗期余额",
+      observations: [
+        {
+          observationType: "agent",
+          data: { state: "input_required", agentCallId: "call-1" },
+        },
+      ],
+    } as never);
+
+    const prompt = mocks.generateObject.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("不得无条件向用户重复提问");
+    expect(prompt).toContain("agent.resume");
+    expect(prompt).toContain("original_objective");
+  });
+
   it("最终正文不把用户补填内容当作业务执行证据", async () => {
     process.env.LLM_API_KEY = "test-key";
     mocks.streamText.mockReturnValueOnce({
