@@ -100,6 +100,17 @@ describe("Topic 01 production wiring", () => {
     expect(adapter).not.toContain("Resume 不需要额外事件");
   });
 
+  it("默认本地开发入口同时启动 Web 与 continuation Worker", () => {
+    const packageJson = JSON.parse(source("package.json")) as {
+      scripts?: Record<string, string>;
+    };
+    const launcher = source("scripts/dev-with-control-plane-worker.mjs");
+    expect(packageJson.scripts?.dev).toContain("dev-with-control-plane-worker.mjs");
+    expect(packageJson.scripts?.["dev:web"]).toContain("next dev");
+    expect(launcher).toContain('"dev:web"');
+    expect(launcher).toContain('"worker:control-plane-outbox"');
+  });
+
   it("External Runtime 默认生产入口创建绑定 HTTP transport 且不回退 Hosted", () => {
     const dispatcher = source("lib/runtime/employee-turn-dispatcher.ts");
     const transport = source("lib/runtime/transport/http-harness-runtime-transport.ts");

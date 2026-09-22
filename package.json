@@ -6,7 +6,8 @@
   "main": "desktop/bundle/main/index.js",
   "private": true,
   "scripts": {
-    "dev": "APP_ENV=development next dev --turbo",
+    "dev": "node scripts/dev-with-control-plane-worker.mjs",
+    "dev:web": "APP_ENV=development next dev --turbo",
     "dev:test": "APP_ENV=test next dev --turbo",
     "build": "next build",
     "build:dev": "APP_ENV=development next build",

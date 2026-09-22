@@ -44,7 +44,7 @@ docker run -d --name snow-mysql \
 #    只需把你的 LLM 密钥放进个人覆盖文件（git 忽略、不入库）：
 echo 'LLM_API_KEY=<你的 OpenAI 兼容端点密钥>' >> .env.development.local
 
-# 4. 启动开发服务器
+# 4. 启动完整本地开发拓扑（Web + Control Plane Outbox Worker）
 pnpm dev          # = APP_ENV=development，加载 .env.development(.local)
 # 打开 http://localhost:3000
 ```
@@ -113,7 +113,8 @@ workspaces/             运行时生成的用户项目（git 忽略）
 
 | 脚本 | 环境 |
 |---|---|
-| `pnpm dev` | development（`next dev`） |
+| `pnpm dev` | development（`next dev` + Control Plane Outbox Worker） |
+| `pnpm dev:web` | development（仅 `next dev`，不会推进异步 continuation） |
 | `pnpm dev:test` | test |
 | `pnpm build` / `build:test` / `build:prod` | 构建 |
 | `pnpm start:test` / `start:prod` | 以对应环境起生产服 |
