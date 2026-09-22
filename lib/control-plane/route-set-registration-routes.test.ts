@@ -331,7 +331,13 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
   it("鉴权：无效 Bearer → 401；无 route.update 授权 → 403；均零行", async () => {
     const { POST } = await loadCreateRouteSetRoute();
     const { tenantId, userIdentityId } = await seedAdmin({ withRouteUpdate: false });
-    const agent = await seedAgent(tenantId, userIdentityId, "route-set-register-agent-5");
+    const nonOwner = await upsertUserIdentity({
+      tenantId,
+      externalSubject: `route-set-non-owner-${userIdentityId}`,
+      email: "route-set-non-owner@example.test",
+      displayName: "路由测试非所有者",
+    });
+    const agent = await seedAgent(tenantId, nonOwner.id, "route-set-register-agent-5");
     const body = {
       target: { kind: "agent", agent_id: agent.id },
       route_scope_key: "default",

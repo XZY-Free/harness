@@ -15,10 +15,7 @@ import * as path from "node:path";
  * - did-create-window：防御性回调，对子窗口套用相同导航约束。
  */
 import { BrowserWindow, shell } from "electron";
-import {
-  isAllowedAuthenticationWindowNavigation,
-  shouldBlockNavigation,
-} from "./origin-guard";
+import { isAllowedAuthenticationWindowNavigation, shouldBlockNavigation } from "./origin-guard";
 
 /** Desktop 路由路径（本机 renderer origin 后追加）。 */
 const DESKTOP_ROUTE_PATH = "/desktop";

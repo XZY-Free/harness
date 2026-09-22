@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
@@ -52,7 +51,7 @@ describe("AgentCallBinding Authority", () => {
         tenantId: scenario.tenantId,
         executionSubject: executionSubjectFromUserIdentity(
           scenario.tenantId,
-          `user:${randomUUID()}`,
+          scenario.userIdentityId,
         ),
         now: new Date("2026-08-29T00:01:10.000Z"),
         timezone: "Asia/Shanghai",

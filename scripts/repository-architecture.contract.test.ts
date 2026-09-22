@@ -29,7 +29,18 @@ function sourceFiles(path: string): string[] {
   if (!existsSync(path)) return [];
   if (!statSync(path).isDirectory()) return [path];
   return readdirSync(path).flatMap((entry) => {
-    if (["node_modules", ".git", ".next", "build", "dist", "__pycache__"].includes(entry)) {
+    if (
+      [
+        "node_modules",
+        ".git",
+        ".next",
+        "build",
+        "dist",
+        "bundle",
+        "renderer-dist",
+        "__pycache__",
+      ].includes(entry)
+    ) {
       return [];
     }
     return sourceFiles(join(path, entry));

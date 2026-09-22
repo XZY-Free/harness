@@ -16,13 +16,20 @@
  *   - lib/control-plane/admin-routes.test.ts（If-Match 412 + 幂等重放）
  *   - lib/admin/export-queries.test.ts（导出 CRUD + 审计）
  *   - lib/admin/export-runner.test.ts（导出执行 + 脱敏 + NDJSON）
- * - e2e 环境使用 dev 认证（APP_ENV=test → SNOW_AUTH_MODE=dev），默认用户无 action binding，
- *   action scope 校验返回 403；header 守卫（If-Match/Idempotency-Key）在 action scope 之前校验。
+ * - POST 拒绝使用已登录管理员（无 admin.export.create）；GET 拒绝使用有效 CI/CD
+ *   Service Identity（无 admin.export.read），避免权限模板演进后把已授权主体误当成拒绝夹具。
+ * - header 守卫（If-Match/Idempotency-Key）在 action scope 之前校验。
  *
  * 运行：
  *   pnpm test:e2e
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import {
+  WORKLOAD_TOKEN_SIGNING_SECRET_ENV,
+  issueWorkloadToken as issueSignedWorkloadToken,
+} from "../lib/identity/workload-token";
 
 const ADMIN_BASE = "/admin/api/v1";
 const REQUEST_ID_HEADER = "x-request-id";
@@ -67,17 +74,16 @@ interface ApiErrorResponse {
  * issueWorkloadToken 一致。仅供 e2e 测试构造错误 audience 的 token；生产 token 由
  * 网关 / Invocation Dispatcher 颁发。
  */
-function issueWorkloadToken(claims: {
-  type: "runtime" | "gateway" | "service";
-  tenantId: string;
-  audience: string;
-  serviceId?: string;
-  invocationId?: string;
-  runtimeRevisionId?: string;
-  expiresAt: number;
-}): string {
-  const full = { ...claims, issuedAt: Date.now() };
-  return Buffer.from(JSON.stringify(full), "utf-8").toString("base64url");
+function issueWorkloadToken(claims: Parameters<typeof issueSignedWorkloadToken>[0]): string {
+  const envLine = readFileSync(resolve(process.cwd(), ".env.test"), "utf8")
+    .split(/\r?\n/)
+    .find((line) => line.startsWith(`${WORKLOAD_TOKEN_SIGNING_SECRET_ENV}=`));
+  const signingSecret = envLine?.slice(envLine.indexOf("=") + 1).trim();
+  if (!signingSecret) {
+    throw new Error(`.env.test 缺少 ${WORKLOAD_TOKEN_SIGNING_SECRET_ENV}`);
+  }
+  process.env[WORKLOAD_TOKEN_SIGNING_SECRET_ENV] = signingSecret;
+  return issueSignedWorkloadToken(claims);
 }
 
 /** 从响应解析 API 错误体。 */
@@ -263,7 +269,16 @@ test.describe("S11-W08 管理操作一致性", () => {
   test("Action Scope 一致性：GET exports 缺少 action binding → ACTION_SCOPE_DENIED", async ({
     request,
   }) => {
-    const response = await request.get(`${ADMIN_BASE}/exports`);
+    const token = issueWorkloadToken({
+      type: "service",
+      tenantId: NON_EXISTENT_UUID,
+      audience: "admin",
+      serviceId: "cicd",
+      expiresAt: Date.now() + 600_000,
+    });
+    const response = await request.get(`${ADMIN_BASE}/exports`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
 
     expect(response.status()).toBe(403);
     const body = await parseErrorBody(response);

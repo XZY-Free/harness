@@ -240,17 +240,15 @@ describe("authorization", () => {
       displayName: "资产负责人",
     });
     for (const id of ["agt_1", "agt_2", "agt_any"])
-      await db
-        .insert(agentTable)
-        .values({
-          id,
-          tenantId,
-          agentKey: id,
-          displayName: id,
-          ownerUserId: resourceOwner.id,
-          lifecycleState: "enabled",
-          currentRevisionId: "published",
-        });
+      await db.insert(agentTable).values({
+        id,
+        tenantId,
+        agentKey: id,
+        displayName: id,
+        ownerUserId: resourceOwner.id,
+        lifecycleState: "enabled",
+        currentRevisionId: "published",
+      });
   });
 
   // ── checkActionScope ──
@@ -663,17 +661,15 @@ describe("正式角色、用户组与资产范围", () => {
   });
   it("角色保存只修改角色分配，保留资产专项授权", async () => {
     const { tenant, admin, employee } = await setup();
-    await db
-      .insert(agentTable)
-      .values({
-        id: "special-agent",
-        tenantId: tenant.id,
-        agentKey: "special-agent",
-        displayName: "专项智能体",
-        ownerUserId: admin.identity.id,
-        lifecycleState: "enabled",
-        currentRevisionId: "published",
-      });
+    await db.insert(agentTable).values({
+      id: "special-agent",
+      tenantId: tenant.id,
+      agentKey: "special-agent",
+      displayName: "专项智能体",
+      ownerUserId: admin.identity.id,
+      lifecycleState: "enabled",
+      currentRevisionId: "published",
+    });
     const specific = await seedActionPermission({
       tenantId: tenant.id,
       principalBindingId: employee.binding.id,

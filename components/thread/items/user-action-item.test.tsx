@@ -59,7 +59,9 @@ afterEach(() => {
 
 describe("UserActionItem input submit 主流程", () => {
   it("冻结合同不支持取消时不展示关闭或跳过入口", () => {
-    render(<UserActionItem threadId="thread-1" item={makeInputItem({ cancel_supported: false })} />);
+    render(
+      <UserActionItem threadId="thread-1" item={makeInputItem({ cancel_supported: false })} />,
+    );
 
     expect(screen.queryByRole("button", { name: "关闭输入请求" })).toBeNull();
     expect(screen.queryByRole("button", { name: "取消" })).toBeNull();

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const FILES = [
   "components/studio/nav.tsx",
   "components/studio/appearance-setting.tsx",
-  "components/studio/settings-user-role-manager.tsx",
+  "components/studio/permission-manager.tsx",
   "components/studio/studio-page.tsx",
   "components/studio/studio-settings-section.tsx",
 ] as const;
@@ -13,7 +13,7 @@ const FILES = [
 const CLIENT_API_COMPONENTS = [
   "governance-editor.tsx",
   "permission-rules-editor.tsx",
-  "settings-user-role-manager.tsx",
+  "permission-manager.tsx",
   "skill-creator.tsx",
   "skill-delete-button.tsx",
   "skill-file-editor.tsx",
@@ -41,9 +41,9 @@ describe("Studio 新界面组件合同", () => {
     expect(appearance).not.toContain("@/components/icons");
   });
 
-  it("角色管理使用 Button 与 Checkbox，不手写基础控件", () => {
+  it("权限管理使用 Button 与 Checkbox，不手写基础控件", () => {
     const source = readFileSync(
-      resolve(process.cwd(), "components/studio/settings-user-role-manager.tsx"),
+      resolve(process.cwd(), "components/studio/permission-manager.tsx"),
       "utf8",
     );
     expect(source).toContain("@/components/ui/button");

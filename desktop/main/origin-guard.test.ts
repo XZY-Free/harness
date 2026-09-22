@@ -162,7 +162,9 @@ describe("认证窗口导航规则", () => {
     expect(
       isAllowedAuthenticationWindowNavigation("http://ldap-uat.crc.com.cn/login", rendererOrigin),
     ).toBe(false);
-    expect(isAllowedAuthenticationWindowNavigation("file:///tmp/login", rendererOrigin)).toBe(false);
+    expect(isAllowedAuthenticationWindowNavigation("file:///tmp/login", rendererOrigin)).toBe(
+      false,
+    );
     expect(isAllowedAuthenticationWindowNavigation("not-a-url", rendererOrigin)).toBe(false);
   });
 });
