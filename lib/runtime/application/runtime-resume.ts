@@ -371,7 +371,7 @@ async function loadAuthorityFromTuple(tenantId: string, authority: AuthorityIden
     !owner ||
     owner.id !== authority.ownershipId ||
     owner.attemptId !== authority.attemptId ||
-    owner.leaseEpoch !== decimalStringToNumber(authority.leaseEpoch)
+    owner.leaseEpoch !== BigInt(authority.leaseEpoch)
   ) {
     throw new Error("NotCurrentExecutor");
   }
@@ -381,7 +381,7 @@ async function loadAuthorityFromTuple(tenantId: string, authority: AuthorityIden
     session.invocationId !== authority.invocationId ||
     session.ownershipId !== owner.id ||
     session.attemptId !== authority.attemptId ||
-    session.leaseEpoch !== decimalStringToNumber(authority.leaseEpoch) ||
+    session.leaseEpoch !== BigInt(authority.leaseEpoch) ||
     session.runtimeRevisionId !== authority.runtimeRevisionId
   ) {
     throw new Error("RuntimeSessionMismatch");
@@ -604,7 +604,7 @@ export async function handOffSupervisorGeneration(input: {
   invocationId: string;
   ownershipId: string;
   attemptId: string;
-  leaseEpoch: number;
+  leaseEpoch: number | bigint;
   sessionBindingId: string;
   claimId: string;
 }): Promise<void> {
@@ -803,7 +803,7 @@ async function runHostedInvocation(input: {
           events: [
             {
               eventId: randomUUID(),
-              producerSequence: String(input.invocation.lastProducerSequence + 1),
+              producerSequence: String(input.invocation.lastProducerSequence + 1n),
               type: "execution.started",
               schemaVersion: 1,
               payload: {
@@ -1252,7 +1252,7 @@ export const hostedRuntimeApplicationService: HostedRuntimeApplicationService = 
         !owner ||
         owner.id !== input.authority.ownershipId ||
         owner.attemptId !== input.authority.attemptId ||
-        owner.leaseEpoch !== decimalStringToNumber(input.authority.leaseEpoch)
+        owner.leaseEpoch !== BigInt(input.authority.leaseEpoch)
       ) {
         // 目标代际已失效：无副作用，且**不**重定向到当前 Owner。新代际要么已接管并
         // 自行收口，要么自己就是被取消的目标——无论如何都不该由这次旧 Cancel 决定。

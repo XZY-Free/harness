@@ -460,7 +460,7 @@ function extractUserMessage(inputItems: unknown[]): string {
 export class HostedHarnessLoop {
   private readonly params: HostedHarnessLoopParams;
   private readonly sentEvents: RuntimeEvent[] = [];
-  private nextSequence = 1;
+  private nextSequence = 1n;
   private nextTransientSequence = 1;
 
   constructor(params: HostedHarnessLoopParams) {
@@ -543,7 +543,7 @@ export class HostedHarnessLoop {
               if (!snapshot) {
                 throw new Error("Harness Loop recovery snapshot 缺失");
               }
-              this.nextSequence = snapshot.nextProducerSequence;
+              this.nextSequence = BigInt(snapshot.nextProducerSequence);
               return snapshot;
             },
           }
@@ -621,7 +621,7 @@ export class HostedHarnessLoop {
       payload,
     };
     this.sentEvents.push(event);
-    this.nextSequence = seq + 1;
+    this.nextSequence = seq + 1n;
     await ingressClient.postEventBatch(
       this.params.invocationId,
       this.params.authority ?? failMissingAuthority(),

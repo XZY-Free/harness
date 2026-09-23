@@ -62,6 +62,7 @@ export const INVOCATION_CHECKPOINT_GATE_HELD: readonly InvocationCheckpointGate[
 
 const ascii = (name: string, length: number) => varchar(name, { length }).$type<string>();
 const bigintUnsigned = (name: string) => bigint(name, { mode: "number", unsigned: true });
+const preciseBigintUnsigned = (name: string) => bigint(name, { mode: "bigint", unsigned: true });
 const timestamp = (name: string) => datetime(name, { mode: "date", fsp: 6 });
 const currentTimestamp = () => sql`CURRENT_TIMESTAMP(6)`;
 
@@ -91,8 +92,8 @@ export const invocationTable = mysqlTable(
     inputDigest: ascii("inputDigest", 71).notNull(),
     resultRef: varchar("resultRef", { length: 512 }),
     resultDigest: ascii("resultDigest", 71),
-    lastOwnershipEpoch: bigintUnsigned("lastOwnershipEpoch").notNull().default(0),
-    lastProducerSequence: bigintUnsigned("lastProducerSequence").notNull().default(0),
+    lastOwnershipEpoch: preciseBigintUnsigned("lastOwnershipEpoch").notNull().default(0n),
+    lastProducerSequence: preciseBigintUnsigned("lastProducerSequence").notNull().default(0n),
     recoveryVersion: bigintUnsigned("recoveryVersion").notNull().default(0),
     checkpointGate: ascii("checkpointGate", 32)
       .$type<InvocationCheckpointGate>()
@@ -101,7 +102,7 @@ export const invocationTable = mysqlTable(
     checkpointIntentId: ascii("checkpointIntentId", 36),
     checkpointOwnerId: ascii("checkpointOwnerId", 36),
     checkpointDeadline: timestamp("checkpointDeadline"),
-    checkpointProducerSequence: bigintUnsigned("checkpointProducerSequence"),
+    checkpointProducerSequence: preciseBigintUnsigned("checkpointProducerSequence"),
     checkpointRecoveryVersion: bigintUnsigned("checkpointRecoveryVersion"),
     checkpointAnchor: json("checkpointAnchor"),
     checkpointPreparedEvidence: json("checkpointPreparedEvidence"),
@@ -429,7 +430,7 @@ export const executionOwnershipTable = mysqlTable(
       .references(() => invocationTable.id),
     attemptId: ascii("attemptId", 36).notNull(),
     environmentLeaseId: ascii("environmentLeaseId", 36),
-    leaseEpoch: bigintUnsigned("leaseEpoch").notNull(),
+    leaseEpoch: preciseBigintUnsigned("leaseEpoch").notNull(),
     ownershipState: ascii("ownershipState", 32)
       .$type<ExecutionOwnershipState>()
       .notNull()
@@ -553,7 +554,7 @@ export const runtimeSessionBindingTable = mysqlTable(
     attemptId: ascii("attemptId", 36).notNull(),
     ownershipId: ascii("ownershipId", 36).notNull(),
     runtimeRevisionId: ascii("runtimeRevisionId", 36).notNull(),
-    leaseEpoch: bigintUnsigned("leaseEpoch").notNull(),
+    leaseEpoch: preciseBigintUnsigned("leaseEpoch").notNull(),
     bindingState: ascii("bindingState", 32)
       .$type<RuntimeSessionBindingState>()
       .notNull()
@@ -702,9 +703,9 @@ export const runtimeEventIngressTable = mysqlTable(
     acceptedAttemptId: ascii("acceptedAttemptId", 36).notNull(),
     acceptedOwnershipId: ascii("acceptedOwnershipId", 36).notNull(),
     acceptedSessionId: ascii("acceptedSessionId", 36).notNull(),
-    acceptedEpoch: bigintUnsigned("acceptedEpoch").notNull(),
+    acceptedEpoch: preciseBigintUnsigned("acceptedEpoch").notNull(),
     producerEventId: ascii("producerEventId", 128).notNull(),
-    producerSequence: bigintUnsigned("producerSequence").notNull(),
+    producerSequence: preciseBigintUnsigned("producerSequence").notNull(),
     candidateType: ascii("candidateType", 64).notNull(),
     schemaVersion: int("schemaVersion", { unsigned: true }).notNull().default(1),
     payloadHash: ascii("payloadHash", 71).notNull(),

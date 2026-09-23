@@ -1141,7 +1141,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     const built = events.map((event, index) => ({
       eventId: randomUUID(),
       producerSequence: String(
-        current.lastProducerSequence + 1 + index + (options.sequenceOffset?.(index) ?? 0),
+        current.lastProducerSequence + 1n + BigInt(index + (options.sequenceOffset?.(index) ?? 0)),
       ),
       type: event.type,
       schemaVersion: 1,
@@ -1360,7 +1360,9 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(await readFile(path.join(restored.destination, "state.txt"), "utf8")).toBe(
       "control-only",
     );
-    expect(restored.replayFromProducerSequence).toBe(checkpoint.checkpoint.producerSequence);
+    expect(restored.replayFromProducerSequence).toBe(
+      String(checkpoint.checkpoint.producerSequence),
+    );
   });
 
   it("A06-T03: 快照之后真实采用行动结果 → 旧 Snapshot 必须陈旧，且不启动缺状态的 Runtime", async () => {

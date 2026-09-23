@@ -329,11 +329,11 @@ export async function produceFilesystemCheckpoint(input: {
         invocation.checkpointOwnerId !== input.ownershipId ||
         invocation.checkpointDeadline === null ||
         invocation.checkpointDeadline <= (await getAuthorityDatabaseTime(tx)) ||
-        invocation.checkpointProducerSequence !== Number(frozenAnchor.producerSequence) ||
+        invocation.checkpointProducerSequence !== BigInt(frozenAnchor.producerSequence) ||
         // §2 步骤 7：**当前**恢复事实必须仍与冻结锚点等价。只跟冻结标记自比不够——
         // 若 Snapshot 上传期间又有已消费事实被应用，当前水位会前进，该 Checkpoint 必须
         // 判为陈旧（§3「对 Frozen 期间到达的必要正式子结果，要么让 Checkpoint 失效」）。
-        invocation.lastProducerSequence !== Number(frozenAnchor.producerSequence) ||
+        invocation.lastProducerSequence !== BigInt(frozenAnchor.producerSequence) ||
         invocation.recoveryVersion !== Number(frozenAnchor.recoveryVersion)
       )
         throw new Error("CheckpointStale");
@@ -370,7 +370,7 @@ export async function produceFilesystemCheckpoint(input: {
         checkpointIntentId,
         writerGeneration: binding.writerGeneration,
         recoveryVersion: Number(frozenAnchor.recoveryVersion),
-        producerSequence: Number(frozenAnchor.producerSequence),
+        producerSequence: BigInt(frozenAnchor.producerSequence),
         recoveryAnchor: frozenAnchor,
         recoveryAnchorDigest: digest,
         snapshotFormat: "content_manifest",
@@ -397,7 +397,7 @@ export async function produceFilesystemCheckpoint(input: {
           checkpointIntentId,
           checkpointOwnerId: input.ownershipId,
           checkpointDeadline: null,
-          checkpointProducerSequence: Number(frozenAnchor.producerSequence),
+          checkpointProducerSequence: BigInt(frozenAnchor.producerSequence),
           checkpointRecoveryVersion: Number(frozenAnchor.recoveryVersion),
           checkpointAnchor: frozenAnchor,
           checkpointPreparedEvidence: {
@@ -539,7 +539,7 @@ async function freezeCheckpointGate(input: {
         checkpointGate: "frozen",
         // 冻结的是**重建后**的锚点；这一刻的水位才是可恢复边界。
         checkpointAnchor: input.frozenAnchor,
-        checkpointProducerSequence: Number(input.frozenAnchor.producerSequence),
+        checkpointProducerSequence: BigInt(input.frozenAnchor.producerSequence),
         checkpointRecoveryVersion: Number(input.frozenAnchor.recoveryVersion),
         checkpointPreparedEvidence: {
           ...(invocation.checkpointPreparedEvidence as Record<string, unknown> | null),

@@ -43,7 +43,7 @@ import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-
 import { handleRuntimeHeartbeat } from "@/lib/runtime/application/runtime-heartbeat";
 import { resolveRuntimePrincipal } from "@/lib/runtime/route-helpers";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 /** R02 §4：Acquire 侧环境前置复验所需的最小 Revision 输入。 */
@@ -110,6 +110,53 @@ describe("ExecutionOwnership database fencing", () => {
     ).toBe(first.ownership.id);
   });
 
+  it("MIGRATE-04: 超过 2^53 的 Ownership epoch 经 DB 读取、签名和 wire 保持精确", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    await db.execute(
+      sql`UPDATE Invocation SET lastOwnershipEpoch = 9007199254740992 WHERE id = ${fixture.invocation.id}`,
+    );
+    const [before] = await db
+      .select({ epoch: invocationTable.lastOwnershipEpoch })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id));
+    expect(before?.epoch).toBe(9007199254740992n);
+    const acquired = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    });
+    expect(String(acquired.ownership.leaseEpoch)).toBe("9007199254740993");
+    expect(acquired.authority.leaseEpoch).toBe("9007199254740993");
+    const token = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      attemptId: fixture.attempt.id,
+      ownershipId: acquired.ownership.id,
+      leaseEpoch: acquired.authority.leaseEpoch,
+      sessionBindingId: acquired.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    expect(decodeWorkloadToken(token).leaseEpoch).toBe("9007199254740993");
+    const heartbeat = await handleRuntimeHeartbeat({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      request: {
+        protocolVersion: 3,
+        authority: acquired.authority,
+        heartbeatId: randomUUID(),
+        runtimeState: "running",
+        lastObservedProducerSequence: "0",
+        requestCredentialRefresh: false,
+      },
+    });
+    expect(heartbeat.continueExecution).toBe(true);
+  });
+
   it("FENCE-03/FENCE-04: expired generation cannot renew and takeover fences it", async () => {
     const fixture = await seedPreparedRuntimeAttempt();
     const first = await acquireTestRuntimeAuthority({
@@ -154,7 +201,7 @@ describe("ExecutionOwnership database fencing", () => {
       acquiredById: "replacement-runtime",
     });
     expect(replacement.takeover).toBe(true);
-    expect(replacement.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1);
+    expect(replacement.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
     const [stale] = await db
       .select()
       .from(executionOwnershipTable)
@@ -322,7 +369,7 @@ describe("ExecutionOwnership database fencing", () => {
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
     });
-    expect(active?.leaseEpoch).toBe(first.ownership.leaseEpoch + 1);
+    expect(active?.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
     const stale = rows.find((r) => r.id === first.ownership.id);
     expect(stale?.ownershipState).toBe("lost");
   });
@@ -377,8 +424,8 @@ describe("ExecutionOwnership database fencing", () => {
       invocationId: fixture.invocation.id,
     });
     expect(active?.id).not.toBe(first.ownership.id);
-    expect(active?.leaseEpoch).toBe(first.ownership.leaseEpoch + 1);
-    const epochs = rows.map((r) => r.leaseEpoch).sort((a, b) => a - b);
+    expect(active?.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
+    const epochs = rows.map((r) => r.leaseEpoch).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     expect(new Set(epochs).size).toBe(epochs.length);
     const stale = rows.find((r) => r.id === first.ownership.id);
     expect(["released", "lost"]).toContain(stale?.ownershipState);
@@ -405,7 +452,7 @@ describe("ExecutionOwnership database fencing", () => {
         tenantId: fixture.tenantId,
         invocationId: fixture.invocation.id,
         attemptId: bypassAttempt.id,
-        leaseEpoch: first.ownership.leaseEpoch + 1,
+        leaseEpoch: first.ownership.leaseEpoch + 1n,
         ownershipState: "active",
         executionPhase: "activating",
         acquiredAt: new Date(),
@@ -430,7 +477,7 @@ describe("ExecutionOwnership database fencing", () => {
       invocationId: fixture.invocation.id,
       attemptId: bypassAttempt.id,
       // 使用远端 epoch，不占用服务侧 lastOwnershipEpoch 序号，仅验证非 active 历史允许存在。
-      leaseEpoch: first.ownership.leaseEpoch + 1000,
+      leaseEpoch: first.ownership.leaseEpoch + 1000n,
       ownershipState: "lost",
       executionPhase: "activating",
       acquiredAt: new Date(),
@@ -452,7 +499,7 @@ describe("ExecutionOwnership database fencing", () => {
       acquiredByType: "service",
       acquiredById: "post-release-acquire",
     });
-    expect(secondActive.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1);
+    expect(secondActive.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
   });
 
   it("FENCE-12: platform renewals cannot extend a not-yet-started owner past its dispatch deadline", async () => {

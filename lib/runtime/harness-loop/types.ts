@@ -185,7 +185,7 @@ export interface HarnessLoopView {
 
 export interface HarnessLoopRecoverySnapshot {
   invocationState: "running" | "waiting_user";
-  nextProducerSequence: number;
+  nextProducerSequence: number | string;
   observations: HarnessObservation[];
   actionHistory: HarnessActionHistoryEntry[];
 }

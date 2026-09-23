@@ -4,10 +4,10 @@ import type { HarnessNextAction } from "./types";
 export interface HarnessActionPort {
   execute(
     action: Exclude<HarnessNextAction, { actionType: "respond" }>,
-    context: HarnessActionExecutionContext & { producerSequenceStart: number },
+    context: HarnessActionExecutionContext & { producerSequenceStart: number | string },
   ): Promise<
     HarnessActionExecutionResult & {
-      nextProducerSequence: number;
+      nextProducerSequence: number | string;
     }
   >;
 }
@@ -44,7 +44,7 @@ export function createHttpHarnessActionPort(params: {
       });
       const body = (await response.json()) as {
         error?: { code?: string; message?: string };
-        next_producer_sequence?: number;
+        next_producer_sequence?: number | string;
         observation?: HarnessActionExecutionResult["observation"];
         authority_ref?: string;
         waiting_for_user?: HarnessActionExecutionResult["waitingForUser"];
@@ -56,7 +56,14 @@ export function createHttpHarnessActionPort(params: {
           body.error?.message ?? `Capability Action HTTP ${response.status}`,
         );
       }
-      if (typeof body.next_producer_sequence !== "number") {
+      if (
+        !(
+          (typeof body.next_producer_sequence === "number" &&
+            Number.isSafeInteger(body.next_producer_sequence)) ||
+          (typeof body.next_producer_sequence === "string" &&
+            /^[1-9][0-9]*$/.test(body.next_producer_sequence))
+        )
+      ) {
         throw new Error("Capability Action 响应缺少 next_producer_sequence");
       }
       if (body.pending) {

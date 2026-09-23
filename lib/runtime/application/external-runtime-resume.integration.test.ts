@@ -94,7 +94,7 @@ const invocation = {
   threadId: "thread-1",
   turnId: "turn-1",
   triggerItemId: null,
-  lastProducerSequence: 1,
+  lastProducerSequence: 1n,
   recoveryVersion: 2,
 } as Invocation;
 

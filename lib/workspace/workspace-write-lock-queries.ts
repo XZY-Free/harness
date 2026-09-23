@@ -428,7 +428,7 @@ export async function activateWorkspaceWriter(
     lockId: string;
     writerGeneration: number;
     ownershipId: string;
-    leaseEpoch: number;
+    leaseEpoch: number | bigint;
     backendGrantRef: string;
     backendEvidence?: unknown;
     backendOperationId?: string | null;

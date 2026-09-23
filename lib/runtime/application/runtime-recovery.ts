@@ -148,7 +148,7 @@ export interface MarkInvocationLostParams {
 export interface ObservedOwnerTuple {
   ownershipId: string;
   attemptId: string;
-  leaseEpoch: number;
+  leaseEpoch: number | bigint;
   leaseExpiresAt: Date;
   lastHeartbeatAt: Date;
 }
@@ -395,7 +395,7 @@ function evaluateStaleObservation(
 export async function getLatestProducerSequence(
   tenantId: string,
   invocationId: string,
-): Promise<number | null> {
+): Promise<bigint | null> {
   const [invocation] = await db
     .select({ id: invocationTable.id })
     .from(invocationTable)
@@ -403,7 +403,7 @@ export async function getLatestProducerSequence(
     .limit(1);
   if (!invocation) return null;
   const [row] = await db
-    .select({ maxSeq: sql<number>`COALESCE(MAX(${runtimeEventIngressTable.producerSequence}), 0)` })
+    .select({ maxSeq: sql<string>`COALESCE(MAX(${runtimeEventIngressTable.producerSequence}), 0)` })
     .from(runtimeEventIngressTable)
     .where(
       and(
@@ -411,7 +411,7 @@ export async function getLatestProducerSequence(
         eq(runtimeEventIngressTable.invocationId, invocationId),
       ),
     );
-  return row?.maxSeq ?? 0;
+  return BigInt(row?.maxSeq ?? 0);
 }
 
 export type { Tx };

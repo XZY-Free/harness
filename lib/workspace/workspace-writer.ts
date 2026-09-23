@@ -219,7 +219,7 @@ export function workspaceWriterActivationOperationId(input: {
   storageScopeDigest: string;
   attemptId: string;
   ownershipId: string;
-  leaseEpoch: number | string;
+  leaseEpoch: number | string | bigint;
 }): string {
   return [
     "writer-activate",

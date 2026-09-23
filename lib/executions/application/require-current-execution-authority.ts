@@ -74,7 +74,7 @@ export async function requireCurrentExecutionAuthority(input: {
       invocationId: input.authority.invocationId,
       attemptId: input.authority.attemptId,
       ownershipId: input.authority.ownershipId,
-      leaseEpoch: Number(input.authority.leaseEpoch),
+      leaseEpoch: input.authority.leaseEpoch,
     },
     executor,
     requiredPhase: allowedPhases ?? undefined,

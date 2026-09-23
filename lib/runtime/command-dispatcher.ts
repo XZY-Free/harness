@@ -1079,6 +1079,12 @@ async function dispatchFilesystemCheckpoint(input: {
     if (!existing || existing.checkpointIntentId !== payload.checkpointIntentId) {
       throw new Error("CheckpointStale");
     }
+    const checkpointReceipt = {
+      checkpointId: existing.id,
+      manifestRef: existing.manifestRef,
+      manifestDigest: existing.manifestDigest,
+      contentRootDigest: existing.contentRootDigest,
+    };
     // 已提交对象的命令重投只补做原 release，不再请求新安全点、重建 Snapshot 或调用 abandon。
     try {
       await input.runtimeClient.releaseSafePoint({
@@ -1098,7 +1104,7 @@ async function dispatchFilesystemCheckpoint(input: {
         invocationId: input.context.invocation.id,
         checkpointIntentId: payload.checkpointIntentId,
       });
-      return { checkpoint: existing, release, replayed: true };
+      return { checkpoint: checkpointReceipt, release, replayed: true };
     } catch (error) {
       await recordCheckpointReleaseFailure({
         tenantId: input.tenantId,
@@ -1106,7 +1112,7 @@ async function dispatchFilesystemCheckpoint(input: {
         checkpointIntentId: payload.checkpointIntentId,
         reasonCode: error instanceof Error ? error.message : "RuntimeReleaseFailed",
       });
-      return { checkpoint: existing, releasePending: true, replayed: true };
+      return { checkpoint: checkpointReceipt, releasePending: true, replayed: true };
     }
   }
   const request: SafePointRequest = {

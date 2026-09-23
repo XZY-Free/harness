@@ -57,12 +57,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   if (!Number.isFinite(limit) || limit <= 0) {
     return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
-  let afterSequence: number | undefined;
+  let afterSequence: bigint | undefined;
   if (afterSequenceParam) {
-    afterSequence = Number.parseInt(afterSequenceParam, 10);
-    if (!Number.isFinite(afterSequence)) {
+    if (!/^(0|[1-9][0-9]*)$/.test(afterSequenceParam)) {
       return schemaInvalidTable(requestId, "after_sequence 必须是整数");
     }
+    afterSequence = BigInt(afterSequenceParam);
   }
 
   const ingress = await getIngressByInvocation(principal.tenantId, invocationId, {
@@ -75,7 +75,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     invocationId: g.invocationId,
     tenant_id: g.tenantId,
     producer_event_id: g.producerEventId,
-    producer_sequence: g.producerSequence,
+    producer_sequence: String(g.producerSequence),
     candidate_type: g.candidateType,
     schema_version: g.schemaVersion,
     payload_hash: g.payloadHash,
@@ -83,7 +83,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     accepted_attempt_id: g.acceptedAttemptId,
     accepted_ownership_id: g.acceptedOwnershipId,
     accepted_session_id: g.acceptedSessionId,
-    accepted_epoch: g.acceptedEpoch,
+    accepted_epoch: String(g.acceptedEpoch),
     receipt_json: g.receiptJson,
     recovery_version_after: g.recoveryVersionAfter,
     received_at: g.receivedAt.toISOString(),

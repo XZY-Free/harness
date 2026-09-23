@@ -98,7 +98,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         replayed.invocationId === invocationId &&
         replayed.intentType === "resume" &&
         replayed.ownershipId === claims.ownershipId &&
-        replayed.leaseEpoch === Number(claims.leaseEpoch) &&
+        replayed.leaseEpoch === BigInt(claims.leaseEpoch) &&
         replayed.bindingState === "active";
 
       await requireCurrentExecutionAuthority({

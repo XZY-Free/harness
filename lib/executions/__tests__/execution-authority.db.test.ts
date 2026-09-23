@@ -456,7 +456,7 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       attemptId: await seedReplacementAttempt(fixture),
       runtimeRevisionId: fixture.binding.runtimeRevisionId,
     });
-    expect(takeover.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1);
+    expect(takeover.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
     const healthy = await readOwner(fixture.tenantId, takeover.ownership.id);
     expect(healthy.ownershipState).toBe("active");
 
@@ -747,7 +747,7 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
         invocationId: a.invocation.id,
         ownershipId: ownerA.ownership.id,
         attemptId: ownerA.ownership.attemptId,
-        leaseEpoch: ownerA.ownership.leaseEpoch + 5,
+        leaseEpoch: ownerA.ownership.leaseEpoch + 5n,
         state: "revoked",
         reasonCode: "wrong_epoch",
       }),
@@ -813,7 +813,7 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
     });
     expect(await countActiveOwners(fixture.tenantId, invocationId)).toBe(1);
     const winner = acquireWon[0]!.value.result.ownership;
-    expect(winner.leaseEpoch).toBe(1);
+    expect(winner.leaseEpoch).toBe(1n);
 
     // (b) 过期代际上两个连接同时 Takeover：仍只有一个新代际胜出，
     // lastOwnershipEpoch 恰好 +1（不丢更新、也不双授权）。
@@ -837,10 +837,10 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
     expect(takeoverWon[0]!.value.result.takeover).toBe(true);
     expect(await countActiveOwners(fixture.tenantId, invocationId)).toBe(1);
     expect((await readInvocation(fixture.tenantId, invocationId)).lastOwnershipEpoch).toBe(
-      epochBefore + 1,
+      epochBefore + 1n,
     );
     const current = takeoverWon[0]!.value.result.ownership;
-    expect(current.leaseEpoch).toBe(epochBefore + 1);
+    expect(current.leaseEpoch).toBe(epochBefore + 1n);
 
     // (c) 两个连接同时 Renew 同一代际：同样线性化，两次都落库，不丢更新。
     const beforeRenew = await readOwner(fixture.tenantId, current.id);

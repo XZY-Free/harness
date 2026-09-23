@@ -453,7 +453,7 @@ export async function startRuntimeInvocation(
     checkpointId: string;
     manifestDigest: string;
     /** 该 Checkpoint 的输入水位：恢复后从这里之后继续消费新输入。 */
-    replayFromProducerSequence: number;
+    replayFromProducerSequence: string;
     /**
      * 实际恢复落地的目录 —— §4 要求"授权运行的 root 必须与这个目录/generation 一致"，
      * 因此 ready 回执里必须同时钉住目录与 generation，而不是只记一个 checkpointId。
@@ -490,7 +490,11 @@ export async function startRuntimeInvocation(
         saved.checkpointId !== input.recovery.checkpointId ||
         saved.restoredRoot !== workspaceCandidate.preparation.candidateRoot ||
         typeof saved.manifestDigest !== "string" ||
-        typeof saved.replayFromProducerSequence !== "number"
+        !(
+          typeof saved.replayFromProducerSequence === "string" ||
+          (typeof saved.replayFromProducerSequence === "number" &&
+            Number.isSafeInteger(saved.replayFromProducerSequence))
+        )
       ) {
         throw new Error("CheckpointStale");
       }
@@ -511,7 +515,7 @@ export async function startRuntimeInvocation(
       });
       if (
         restored.manifestDigest !== saved.manifestDigest ||
-        restored.replayFromProducerSequence !== saved.replayFromProducerSequence ||
+        restored.replayFromProducerSequence !== String(saved.replayFromProducerSequence) ||
         restored.destination !== saved.restoredRoot
       ) {
         throw new Error("CheckpointIntegrityFailed");
@@ -1152,7 +1156,7 @@ async function dispatchRuntimeStartTransport(inputParams: {
     recovery: input.recovery,
     activationEvidenceRef:
       ownership.activationDigest ?? protocolDigest(ownership.activationEvidence),
-    attempt: { producerSequenceStart: input.invocation.lastProducerSequence + 1 },
+    attempt: { producerSequenceStart: String(input.invocation.lastProducerSequence + 1n) },
     // R02 §1：重试读回已冻结语义请求（首派发时为 null，由水位推导后一次写死）。
     frozenSemanticRequest: session.semanticRequestJson,
     now,
@@ -1329,7 +1333,7 @@ async function dispatchRuntimeStartTransport(inputParams: {
             eq(executionOwnershipTable.tenantId, input.tenantId),
             eq(executionOwnershipTable.id, dispatchIdentity.ownershipId),
             eq(executionOwnershipTable.attemptId, dispatchIdentity.attemptId),
-            eq(executionOwnershipTable.leaseEpoch, dispatchIdentity.leaseEpoch),
+            eq(executionOwnershipTable.leaseEpoch, BigInt(dispatchIdentity.leaseEpoch)),
           ),
         )
         .for("update")

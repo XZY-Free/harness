@@ -8,6 +8,7 @@ import {
   OWNERSHIP_DISPATCH_DEADLINE_MS,
   OWNERSHIP_LEASE_MS,
   authorityIdentity,
+  preciseLeaseEpoch,
 } from "@/lib/executions/domain/execution-authority";
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import { environmentDefinitionRevisionTable } from "@/lib/persistence/schema/environment-definition-revision";
@@ -365,7 +366,7 @@ export async function acquireExecutionOwnershipInTransaction(
     // Workspace Writer 释放 lane 按 W→I 顺序完成（`workspace-writer-release.ts`）；
     // 新 Writer 的接管由 `reserveWorkspaceWriter` 在 W 路径中复核"父 Owner 已失权"。
   }
-  const leaseEpoch = invocation.lastOwnershipEpoch + 1;
+  const leaseEpoch = invocation.lastOwnershipEpoch + 1n;
   const ownershipId = randomUUID();
   const expiredCheckpointGate = active && invocation.checkpointOwnerId === active.id;
   await tx
@@ -438,7 +439,7 @@ export async function renewExecutionOwnership(input: {
   invocationId: string;
   ownershipId: string;
   attemptId: string;
-  leaseEpoch: number;
+  leaseEpoch: number | bigint;
 }): Promise<ExecutionOwnership> {
   return db.transaction(async (tx) => renewExecutionOwnershipInTransaction(tx, input));
 }
@@ -471,7 +472,7 @@ export async function renewExecutionOwnershipInTransaction(
     invocationId: string;
     ownershipId: string;
     attemptId: string;
-    leaseEpoch: number;
+    leaseEpoch: number | bigint;
   },
 ): Promise<ExecutionOwnership> {
   // 锁序不变量：任何 Owner 操作先锁 Invocation 根。
@@ -500,7 +501,11 @@ export async function renewExecutionOwnershipInTransaction(
     .for("update")
     .limit(1);
   const now = await getAuthorityDatabaseTime(tx);
-  if (!owner || owner.attemptId !== input.attemptId || owner.leaseEpoch !== input.leaseEpoch)
+  if (
+    !owner ||
+    owner.attemptId !== input.attemptId ||
+    owner.leaseEpoch !== preciseLeaseEpoch(input.leaseEpoch)
+  )
     throw new ExecutionAuthorityError("NotCurrentExecutor", "Owner tuple 不匹配");
   if (owner.ownershipState !== "active")
     throw new ExecutionAuthorityError("NotCurrentExecutor", "Owner 已关闭");
@@ -596,7 +601,7 @@ export interface HostedLeaseRenewalInput {
     invocationId: string;
     attemptId: string;
     ownershipId: string;
-    leaseEpoch: number;
+    leaseEpoch: number | bigint;
     sessionBindingId: string;
     runtimeRevisionId: string;
   };
@@ -698,7 +703,7 @@ export async function renewHostedExecutionLeaseInTransaction(
   if (
     !owner ||
     owner.attemptId !== authority.attemptId ||
-    owner.leaseEpoch !== authority.leaseEpoch ||
+    owner.leaseEpoch !== preciseLeaseEpoch(authority.leaseEpoch) ||
     owner.ownershipState !== "active"
   ) {
     return denied("not_current_executor");
@@ -795,7 +800,12 @@ export async function renewHostedExecutionLease(
 
 export async function requireCurrentExecutionOwnership(input: {
   tenantId: string;
-  authority: { invocationId: string; attemptId: string; ownershipId: string; leaseEpoch: number };
+  authority: {
+    invocationId: string;
+    attemptId: string;
+    ownershipId: string;
+    leaseEpoch: string | number | bigint;
+  };
   /**
    * A01-03：本函数是多语句操作（`SELECT … FOR UPDATE` + 数据库时间 + 复核），
    * **必须**在调用方已开启的事务里执行。参数类型就是真实事务类型，不存在
@@ -836,7 +846,7 @@ export async function requireCurrentExecutionOwnership(input: {
   if (
     !owner ||
     owner.attemptId !== input.authority.attemptId ||
-    owner.leaseEpoch !== input.authority.leaseEpoch ||
+    owner.leaseEpoch !== preciseLeaseEpoch(input.authority.leaseEpoch) ||
     owner.ownershipState !== "active"
   )
     throw new ExecutionAuthorityError("NotCurrentExecutor", "不是 Current ExecutionOwnership");
@@ -867,7 +877,7 @@ export interface CloseExecutionOwnershipInput {
   ownershipId: string;
   /** 调用方持有的 Owner 代际 tuple（缺一不可）。 */
   attemptId?: string;
-  leaseEpoch?: number;
+  leaseEpoch?: number | bigint;
   state: "released" | "lost" | "revoked";
   reasonCode: string;
 }
@@ -907,7 +917,7 @@ export async function closeExecutionOwnershipInTransaction(
   if (
     owner.invocationId !== input.invocationId ||
     (input.attemptId !== undefined && owner.attemptId !== input.attemptId) ||
-    (input.leaseEpoch !== undefined && owner.leaseEpoch !== input.leaseEpoch)
+    (input.leaseEpoch !== undefined && owner.leaseEpoch !== preciseLeaseEpoch(input.leaseEpoch))
   ) {
     throw new ExecutionAuthorityError(
       "NotCurrentExecutor",

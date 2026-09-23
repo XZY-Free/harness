@@ -137,7 +137,12 @@ export function createMySqlHarnessLoopRecoveryPort(
           invocation.executionState === "waiting_user" && options.resumeWaitingUser
             ? "running"
             : invocation.executionState,
-        nextProducerSequence: Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1,
+        nextProducerSequence: String(
+          ingress.reduce(
+            (max, row) => (row.producerSequence > max ? row.producerSequence : max),
+            0n,
+          ) + 1n,
+        ),
         actionHistory,
         observations: [
           ...actionHistory.flatMap((entry) =>

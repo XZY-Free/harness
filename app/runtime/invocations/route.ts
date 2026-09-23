@@ -109,7 +109,7 @@ export async function POST(request: Request): Promise<Response> {
         !!replayed &&
         replayed.invocationId === claims.invocationId &&
         replayed.ownershipId === claims.ownershipId &&
-        replayed.leaseEpoch === Number(claims.leaseEpoch) &&
+        replayed.leaseEpoch === BigInt(claims.leaseEpoch) &&
         replayed.bindingState === "active";
 
       await requireCurrentExecutionAuthority({
@@ -132,7 +132,7 @@ export async function POST(request: Request): Promise<Response> {
         !current ||
         current.invocationId !== claims.invocationId ||
         current.ownershipId !== claims.ownershipId ||
-        current.leaseEpoch !== Number(claims.leaseEpoch)
+        current.leaseEpoch !== BigInt(claims.leaseEpoch)
       ) {
         throw new Error("RuntimeSessionMismatch");
       }

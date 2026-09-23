@@ -357,9 +357,9 @@ async function setupCheckpointFixture(
       acceptedAttemptId: acquired.authority.attemptId,
       acceptedOwnershipId: acquired.authority.ownershipId,
       acceptedSessionId: acquired.authority.sessionBindingId,
-      acceptedEpoch: Number(acquired.authority.leaseEpoch),
+      acceptedEpoch: BigInt(acquired.authority.leaseEpoch),
       producerEventId: `seed-${event.producerSequence}`,
-      producerSequence: event.producerSequence,
+      producerSequence: BigInt(event.producerSequence),
       candidateType: event.type,
       schemaVersion: 1,
       payloadHash,
@@ -372,7 +372,7 @@ async function setupCheckpointFixture(
     await db
       .update(invocationTable)
       .set({
-        lastProducerSequence: event.producerSequence,
+        lastProducerSequence: BigInt(event.producerSequence),
         recoveryVersion: event.recoveryVersionAfter,
       })
       .where(eq(invocationTable.id, fixture.invocation.id));
@@ -616,7 +616,7 @@ describe("FilesystemCheckpoint integration", () => {
         .where(eq(invocationTable.id, ctx.invocationId));
       expect(atRequest?.recoveryVersion).toBe(0);
       // 请求时的记载就是当时的正式水位（已接纳到 seq 2）。
-      expect(atRequest?.producerSequence).toBe(2);
+      expect(atRequest?.producerSequence).toBe(2n);
 
       // (a) 新 Action 被挡：安全点期间不得产生新决策/新行动。
       await expect(
@@ -648,7 +648,7 @@ describe("FilesystemCheckpoint integration", () => {
       const produced = await produceFor(ctx, requested.checkpointIntentId);
       const row = await readCheckpointById(produced.checkpointId);
       expect(row?.recoveryVersion).toBe(1);
-      expect(row?.producerSequence).toBe(3);
+      expect(row?.producerSequence).toBe(3n);
       expect((row?.recoveryAnchor as { producerSequence: string }).producerSequence).toBe("3");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

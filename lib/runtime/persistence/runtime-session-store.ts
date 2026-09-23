@@ -108,7 +108,7 @@ export interface CreateRuntimeSessionBindingInput {
   attemptId: string;
   ownershipId: string;
   runtimeRevisionId: string;
-  leaseEpoch: number;
+  leaseEpoch: number | bigint;
   intentType: RuntimeSessionIntentType;
   startIntentKey: string;
   /** Session 来源只能从同一事务内已复核的准备槽复制。 */
@@ -219,7 +219,7 @@ export async function createRuntimeSessionBindingInTransaction(
     attemptId: input.attemptId,
     ownershipId: input.ownershipId,
     runtimeRevisionId: input.runtimeRevisionId,
-    leaseEpoch: input.leaseEpoch,
+    leaseEpoch: BigInt(input.leaseEpoch),
     bindingState: "prepared",
     intentType: input.intentType,
     startIntentKey: input.startIntentKey,

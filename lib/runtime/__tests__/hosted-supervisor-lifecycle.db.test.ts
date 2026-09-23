@@ -891,7 +891,7 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
           events: [
             {
               eventId: randomUUID(),
-              producerSequence: String(invocation.lastProducerSequence + 2),
+              producerSequence: String(invocation.lastProducerSequence + 2n),
               type: "harness.action.completed",
               schemaVersion: 1,
               payload: { action_id: IN_FLIGHT_ACTION_ID, state: "completed" },
@@ -1418,7 +1418,7 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
           events: [
             {
               eventId: lateEventId,
-              producerSequence: String(invocation.lastProducerSequence + 3),
+              producerSequence: String(invocation.lastProducerSequence + 3n),
               type: "harness.action.proposed",
               schemaVersion: 1,
               payload: { action_id: "late-a-action", step_no: 9 },

@@ -29,7 +29,7 @@ interface TurnGenerationRow {
   readonly executionState: string | null;
   readonly ownershipId: string | null;
   readonly attemptId: string | null;
-  readonly leaseEpoch: number | null;
+  readonly leaseEpoch: bigint | null;
 }
 
 /**

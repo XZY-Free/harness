@@ -146,11 +146,8 @@ function sameAuthority(left: AuthorityIdentity, right: AuthorityIdentity): boole
   );
 }
 
-function toNumber(value: string): number {
-  const result = Number(value);
-  if (!Number.isSafeInteger(result))
-    throw new RangeError(`decimal value exceeds local safe integer boundary: ${value}`);
-  return result;
+function toSequence(value: string): bigint {
+  return BigInt(value);
 }
 
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/;
@@ -412,7 +409,7 @@ async function requireIngressAuthority(
     attempt.id !== owner.attemptId ||
     session.attemptId !== authority.attemptId ||
     session.ownershipId !== authority.ownershipId ||
-    session.leaseEpoch !== toNumber(authority.leaseEpoch) ||
+    session.leaseEpoch !== BigInt(authority.leaseEpoch) ||
     session.runtimeRevisionId !== authority.runtimeRevisionId ||
     binding.runtimeRevisionId !== authority.runtimeRevisionId ||
     ["closed", "lost"].includes(session.bindingState)
@@ -516,7 +513,7 @@ async function findExisting(
       and(
         eq(runtimeEventIngressTable.tenantId, tenantId),
         eq(runtimeEventIngressTable.invocationId, invocationId),
-        eq(runtimeEventIngressTable.producerSequence, toNumber(event.producerSequence)),
+        eq(runtimeEventIngressTable.producerSequence, toSequence(event.producerSequence)),
       ),
     )
     .limit(1);
@@ -542,7 +539,7 @@ async function findExisting(
   }
   if (
     byId.producerEventId !== event.eventId ||
-    byId.producerSequence !== toNumber(event.producerSequence)
+    byId.producerSequence !== toSequence(event.producerSequence)
   ) {
     return {
       kind: "conflict",
@@ -1266,7 +1263,7 @@ export async function ingressRuntimeEvents(
     const newEvents: Array<{ event: RuntimeEvent; payloadHash: string }> = [];
     const receipts: EventReceipt[] = [];
     const replayedEventIds: string[] = [];
-    let expected = invocation.lastProducerSequence + 1;
+    let expected = invocation.lastProducerSequence + 1n;
     for (const event of parsed.events) {
       const payloadHash = computeEventPayloadHash(event);
       const existing = await findExisting(tx, input.tenantId, input.invocationId, event);
@@ -1295,14 +1292,14 @@ export async function ingressRuntimeEvents(
         replayedEventIds.push(event.eventId);
         continue;
       }
-      const sequence = toNumber(event.producerSequence);
+      const sequence = toSequence(event.producerSequence);
       if (sequence !== expected)
         throw new ProducerSequenceGapError(
           input.invocationId,
           String(expected),
           event.producerSequence,
         );
-      expected += 1;
+      expected += 1n;
       newEvents.push({ event, payloadHash });
     }
     if (newEvents.length === 0) {
@@ -1317,7 +1314,7 @@ export async function ingressRuntimeEvents(
       throw new IngressInvocationTerminalError(input.invocationId, invocation.executionState);
     // 本批的序列水位在本事务中先归并一次：终态写入与 Job 终态桥必须是这条 Invocation
     // 在本事务内的最后一次状态写入，否则 JobCommand.terminalVersion 会落后于实际版本。
-    const lastSequence = toNumber(newEvents[newEvents.length - 1]?.event.producerSequence ?? "0");
+    const lastSequence = toSequence(newEvents[newEvents.length - 1]?.event.producerSequence ?? "0");
     await tx
       .update(invocationTable)
       .set({
@@ -1380,9 +1377,9 @@ export async function ingressRuntimeEvents(
         acceptedAttemptId: parsed.authority.attemptId,
         acceptedOwnershipId: parsed.authority.ownershipId,
         acceptedSessionId: parsed.authority.sessionBindingId,
-        acceptedEpoch: toNumber(parsed.authority.leaseEpoch),
+        acceptedEpoch: BigInt(parsed.authority.leaseEpoch),
         producerEventId: event.eventId,
-        producerSequence: toNumber(event.producerSequence),
+        producerSequence: toSequence(event.producerSequence),
         candidateType: event.type,
         schemaVersion: event.schemaVersion,
         payloadHash,
@@ -1407,9 +1404,11 @@ export async function ingressRuntimeEvents(
     }
     return {
       invocationId: input.invocationId,
-      receipts: [...receipts, ...newReceipts].sort(
-        (a, b) => toNumber(a.producerSequence) - toNumber(b.producerSequence),
-      ),
+      receipts: [...receipts, ...newReceipts].sort((a, b) => {
+        const left = toSequence(a.producerSequence);
+        const right = toSequence(b.producerSequence);
+        return left < right ? -1 : left > right ? 1 : 0;
+      }),
       replayedEventIds,
       acceptedThroughProducerSequence: String(lastSequence),
     };
@@ -1458,7 +1457,7 @@ async function coordinateChildThreadTerminal(
 export async function getIngressByInvocation(
   tenantId: string,
   invocationId: string,
-  options?: { afterSequence?: number; limit?: number },
+  options?: { afterSequence?: number | bigint; limit?: number },
 ) {
   const query = db
     .select()

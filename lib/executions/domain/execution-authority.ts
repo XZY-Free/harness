@@ -6,12 +6,19 @@ export const OWNERSHIP_DISPATCH_DEADLINE_MS = 120_000 as const;
 
 export type ExecutionAuthority = AuthorityIdentity;
 
+export function preciseLeaseEpoch(value: string | number | bigint): bigint {
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
+    throw new RangeError("leaseEpoch 已超出 JavaScript 安全整数范围");
+  }
+  return BigInt(value);
+}
+
 export function authorityIdentity(input: {
   invocationId: string;
   runtimeRevisionId: string;
   attemptId: string;
   ownershipId: string;
-  leaseEpoch: number;
+  leaseEpoch: string | number | bigint;
   sessionBindingId: string;
 }): AuthorityIdentity {
   return {
@@ -19,7 +26,7 @@ export function authorityIdentity(input: {
     runtimeRevisionId: input.runtimeRevisionId,
     attemptId: input.attemptId,
     ownershipId: input.ownershipId,
-    leaseEpoch: String(input.leaseEpoch),
+    leaseEpoch: preciseLeaseEpoch(input.leaseEpoch).toString(),
     sessionBindingId: input.sessionBindingId,
   };
 }

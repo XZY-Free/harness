@@ -29,7 +29,7 @@ export interface BuildRuntimeStartRequestInput {
   recovery?: Recovery;
   activationEvidenceRef: string;
   attempt?: {
-    producerSequenceStart?: number;
+    producerSequenceStart?: string | number | bigint;
     checkpointId?: string;
     anchor?: string;
     anchorDigest?: string;
@@ -201,7 +201,7 @@ export async function buildRuntimeStartRequestForInvocation(
     recovery,
     producerSequenceStart:
       frozenProducerSequenceStart ??
-      String(input.attempt?.producerSequenceStart ?? invocation.lastProducerSequence + 1),
+      String(input.attempt?.producerSequenceStart ?? invocation.lastProducerSequence + 1n),
     callbackEndpoints: input.callbackEndpoints,
     credentials: input.credentials,
     executionLimits: {

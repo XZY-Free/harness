@@ -82,7 +82,7 @@ function projectOwnership(ownership: ExecutionOwnership): Record<string, unknown
     invocation_id: ownership.invocationId,
     environment_lease_id: ownership.environmentLeaseId,
     ownership_state: ownership.ownershipState,
-    lease_epoch: ownership.leaseEpoch,
+    lease_epoch: String(ownership.leaseEpoch),
     acquired_at: ownership.acquiredAt.toISOString(),
     last_heartbeat_at: ownership.lastHeartbeatAt.toISOString(),
     released_at: ownership.releasedAt?.toISOString() ?? null,

@@ -59,16 +59,19 @@ const resolveRoute: RouteResolver = async (input) =>
 
 function parseBody(raw: unknown): {
   invocationId: string;
-  producerSequenceStart: number;
+  producerSequenceStart: string;
   action: Exclude<HarnessNextAction, { actionType: "respond" }>;
 } | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const body = raw as Record<string, unknown>;
   if (Object.keys(body).some((key) => !BODY_KEYS.has(key))) return null;
   if (typeof body.invocation_id !== "string" || !body.invocation_id) return null;
+  const sequence = body.producer_sequence_start;
   if (
-    !Number.isInteger(body.producer_sequence_start) ||
-    (body.producer_sequence_start as number) < 1
+    !(
+      (typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0) ||
+      (typeof sequence === "string" && /^[1-9][0-9]*$/.test(sequence))
+    )
   ) {
     return null;
   }
@@ -76,7 +79,7 @@ function parseBody(raw: unknown): {
   if (!action.success || action.data.actionType === "respond") return null;
   return {
     invocationId: body.invocation_id,
-    producerSequenceStart: body.producer_sequence_start as number,
+    producerSequenceStart: String(sequence),
     action: action.data as Exclude<HarnessNextAction, { actionType: "respond" }>,
   };
 }
@@ -259,7 +262,7 @@ export async function POST(request: Request): Promise<Response> {
         state: "completed",
         observation: existing.observation,
         authority_ref: existing.authorityRef ?? null,
-        next_producer_sequence: snapshot.nextProducerSequence,
+        next_producer_sequence: wireSequence(BigInt(snapshot.nextProducerSequence)),
       });
     }
     if (existing.state === "failed") {
@@ -288,7 +291,7 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
   }
-  if (!existing && body.producerSequenceStart !== snapshot.nextProducerSequence) {
+  if (!existing && body.producerSequenceStart !== String(snapshot.nextProducerSequence)) {
     await auditCapabilityAction({
       principal,
       executionSubject,
@@ -379,7 +382,7 @@ export async function POST(request: Request): Promise<Response> {
         context: HarnessActionExecutionContext,
       ) => Promise<HarnessActionExecutionResult>)
     | undefined;
-  const start = existing ? snapshot.nextProducerSequence : body.producerSequenceStart;
+  const start = BigInt(existing ? snapshot.nextProducerSequence : body.producerSequenceStart);
   if (!existing) {
     await ingressActionEvent(principal, body.action, digest, "proposed", start);
   }
@@ -388,7 +391,7 @@ export async function POST(request: Request): Promise<Response> {
       body.action.actionType === "agent.call"
         ? "AGENT_CALL_EXECUTOR_UNAVAILABLE"
         : "HARNESS_ACTION_EXECUTOR_UNAVAILABLE";
-    const failedSequence = existing ? snapshot.nextProducerSequence : start + 1;
+    const failedSequence = existing ? BigInt(snapshot.nextProducerSequence) : start + 1n;
     await ingressActionEvent(principal, body.action, digest, "failed", failedSequence, {
       error_code: errorCode,
     });
@@ -403,7 +406,7 @@ export async function POST(request: Request): Promise<Response> {
     return apiError(errorCode, `${body.action.actionType} 执行器未注册`, { requestId });
   }
 
-  const startedSequence = existing ? snapshot.nextProducerSequence : start + 1;
+  const startedSequence = existing ? BigInt(snapshot.nextProducerSequence) : start + 1n;
   if (existing?.state !== "started") {
     await ingressActionEvent(principal, body.action, digest, "started", startedSequence);
   }
@@ -441,7 +444,7 @@ export async function POST(request: Request): Promise<Response> {
           : reportedCode && reportedCode in API_ERROR_CODES
             ? (reportedCode as ApiErrorCode)
             : "AGENT_CALL_FAILED";
-    const failedSequence = startedSequence + (existing?.state === "started" ? 0 : 1);
+    const failedSequence = startedSequence + (existing?.state === "started" ? 0n : 1n);
     await ingressActionEvent(principal, body.action, digest, "failed", failedSequence, {
       error_code: errorCode,
     });
@@ -474,10 +477,12 @@ export async function POST(request: Request): Promise<Response> {
       disposition: "pending",
       pending: execution.pending,
       authority_ref: execution.authorityRef ?? null,
-      next_producer_sequence: startedSequence + (existing?.state === "started" ? 0 : 1),
+      next_producer_sequence: wireSequence(
+        startedSequence + (existing?.state === "started" ? 0n : 1n),
+      ),
     });
   }
-  const completedSequence = startedSequence + (existing?.state === "started" ? 0 : 1);
+  const completedSequence = startedSequence + (existing?.state === "started" ? 0n : 1n);
   await ingressActionEvent(principal, body.action, digest, "completed", completedSequence, {
     ...(execution.authorityRef ? { authority_ref: execution.authorityRef } : {}),
     observation: execution.observation,
@@ -495,7 +500,7 @@ export async function POST(request: Request): Promise<Response> {
     observation: execution.observation,
     authority_ref: execution.authorityRef ?? null,
     waiting_for_user: execution.waitingForUser ?? null,
-    next_producer_sequence: completedSequence + 1,
+    next_producer_sequence: wireSequence(completedSequence + 1n),
   });
 }
 
@@ -544,12 +549,16 @@ function getErrorCode(error: unknown): string | null {
   return typeof error.code === "string" && error.code ? error.code : null;
 }
 
+function wireSequence(sequence: bigint): number | string {
+  return sequence <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(sequence) : String(sequence);
+}
+
 async function ingressActionEvent(
   principal: GatewayPrincipal,
   action: HarnessNextAction,
   digest: string,
   state: "proposed" | "started" | "completed" | "failed",
-  sequence: number,
+  sequence: bigint,
   extra: Record<string, unknown> = {},
 ): Promise<void> {
   const authority: AuthorityIdentity = {

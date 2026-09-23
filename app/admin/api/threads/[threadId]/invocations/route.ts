@@ -82,7 +82,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     result_ref: i.resultRef,
     input_digest: i.inputDigest,
     result_digest: i.resultDigest,
-    last_ownership_epoch: i.lastOwnershipEpoch,
+    last_ownership_epoch: String(i.lastOwnershipEpoch),
     recovery_version: i.recoveryVersion,
     started_at: i.startedAt?.toISOString() ?? null,
     finished_at: i.finishedAt?.toISOString() ?? null,

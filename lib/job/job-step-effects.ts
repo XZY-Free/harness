@@ -535,7 +535,7 @@ async function appendInvocationEvent(input: {
       .limit(1);
     const producerSequence = alreadyAccepted
       ? String(alreadyAccepted.producerSequence)
-      : String(invocation.lastProducerSequence + 1);
+      : String(invocation.lastProducerSequence + 1n);
     try {
       const result = await ingressRuntimeEvents({
         tenantId: input.tenantId,

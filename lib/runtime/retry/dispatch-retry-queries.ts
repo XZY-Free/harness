@@ -64,7 +64,7 @@ export interface SessionDispatchIdentity {
   sessionBindingId: string;
   attemptId: string;
   ownershipId: string;
-  leaseEpoch: number;
+  leaseEpoch: number | bigint;
   /**
    * 领取令牌（= `dispatchLeaseOwner`）。
    * 请求内联调度（从未领取 lease）时为 `null`，此时只按 Session 自身冻结的 tuple 复核。
@@ -346,7 +346,7 @@ export async function recordSessionDispatchAttemptStartedInTransaction(
         eq(executionOwnershipTable.tenantId, identity.tenantId),
         eq(executionOwnershipTable.id, identity.ownershipId),
         eq(executionOwnershipTable.attemptId, identity.attemptId),
-        eq(executionOwnershipTable.leaseEpoch, identity.leaseEpoch),
+        eq(executionOwnershipTable.leaseEpoch, BigInt(identity.leaseEpoch)),
       ),
     )
     .for("update")
@@ -516,7 +516,7 @@ export type AttemptTransientFailureOutcome =
       observedOwner: {
         ownershipId: string;
         attemptId: string;
-        leaseEpoch: number;
+        leaseEpoch: number | bigint;
         leaseExpiresAt: Date;
         lastHeartbeatAt: Date;
       };
@@ -589,7 +589,7 @@ export async function recordAttemptDispatchTransientFailure(
           eq(executionOwnershipTable.tenantId, identity.tenantId),
           eq(executionOwnershipTable.id, identity.ownershipId),
           eq(executionOwnershipTable.attemptId, identity.attemptId),
-          eq(executionOwnershipTable.leaseEpoch, identity.leaseEpoch),
+          eq(executionOwnershipTable.leaseEpoch, BigInt(identity.leaseEpoch)),
         ),
       )
       .for("update")

@@ -22,6 +22,9 @@ const poolOptions: mysql.PoolOptions = {
   connectionLimit: Number.parseInt(process.env.SNOW_DB_CONNECTION_LIMIT ?? "10", 10),
   waitForConnections: true,
   queueLimit: Number.parseInt(process.env.SNOW_DB_QUEUE_LIMIT ?? "100", 10),
+  // BIGINT 的 DB→driver 边界必须保留十进制原文；默认 Number 会在 2^53 后舍入。
+  supportBigNumbers: true,
+  bigNumberStrings: true,
 };
 
 const globalForDb = globalThis as unknown as {

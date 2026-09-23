@@ -30,7 +30,7 @@ export async function handleRuntimeHeartbeat(input: {
     session.attemptId !== request.authority.attemptId ||
     session.ownershipId !== request.authority.ownershipId ||
     session.runtimeRevisionId !== request.authority.runtimeRevisionId ||
-    session.leaseEpoch !== Number(request.authority.leaseEpoch)
+    session.leaseEpoch !== BigInt(request.authority.leaseEpoch)
   ) {
     throw new Error("RuntimeSessionBinding 不匹配");
   }
@@ -39,7 +39,7 @@ export async function handleRuntimeHeartbeat(input: {
     invocationId: input.invocationId,
     ownershipId: request.authority.ownershipId,
     attemptId: request.authority.attemptId,
-    leaseEpoch: Number(request.authority.leaseEpoch),
+    leaseEpoch: BigInt(request.authority.leaseEpoch),
   });
   const response: HeartbeatResponse = {
     protocolVersion: 3,

@@ -42,7 +42,7 @@ export async function restoreFilesystemCheckpoint(input: {
   destination: string;
   manifestDigest: string;
   /** 该 Checkpoint 的水位；恢复后从这里之后继续消费新输入。 */
-  replayFromProducerSequence: number;
+  replayFromProducerSequence: string;
 }> {
   const checkpoint = await getFilesystemCheckpoint(input.tenantId, input.checkpointId);
   if (!checkpoint) throw new Error("CheckpointStale");
@@ -112,6 +112,6 @@ export async function restoreFilesystemCheckpoint(input: {
     checkpointId: checkpoint.id,
     destination: input.destination,
     manifestDigest: checkpoint.manifestDigest,
-    replayFromProducerSequence: checkpoint.producerSequence,
+    replayFromProducerSequence: String(checkpoint.producerSequence),
   };
 }

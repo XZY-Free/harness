@@ -208,7 +208,7 @@ function fixture(executionState: Invocation["executionState"]) {
     threadId: "thread-1",
     turnId: "turn-1",
     triggerItemId: null,
-    lastProducerSequence: 1,
+    lastProducerSequence: 1n,
   } as Invocation;
   const binding = {
     invocationId: "invocation-1",
@@ -230,7 +230,7 @@ function fixture(executionState: Invocation["executionState"]) {
   const ownership = {
     id: "ownership-1",
     attemptId: "attempt-1",
-    leaseEpoch: 1,
+    leaseEpoch: 1n,
     executionPhase: "executing",
   } as ExecutionOwnership;
   const session = {
@@ -239,7 +239,7 @@ function fixture(executionState: Invocation["executionState"]) {
     attemptId: "attempt-1",
     ownershipId: "ownership-1",
     runtimeRevisionId: "runtime-revision-1",
-    leaseEpoch: 1,
+    leaseEpoch: 1n,
     bindingState: "active",
     startIntentKey: "start:ownership-1",
     semanticRequestDigest: null,

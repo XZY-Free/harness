@@ -212,7 +212,9 @@ export async function coordinateAgentInputRequired(
   });
   for (let retry = 0; retry < 3; retry += 1) {
     const ingress = await getIngressByInvocation(tenantId, parent.id, { limit: 500 });
-    const sequence = Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1;
+    const sequence =
+      ingress.reduce((max, row) => (row.producerSequence > max ? row.producerSequence : max), 0n) +
+      1n;
     try {
       await ingressRuntimeEvents({
         tenantId,

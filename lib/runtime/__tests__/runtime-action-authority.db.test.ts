@@ -229,7 +229,7 @@ describe("Runtime action authority", () => {
         checkpointIntentId,
         checkpointOwnerId: runtime.acquired.ownership.id,
         checkpointDeadline: new Date(Date.now() + 60_000),
-        checkpointProducerSequence: 1,
+        checkpointProducerSequence: 1n,
         checkpointRecoveryVersion: 0,
         checkpointAnchor: { kind: "action-gate" },
         checkpointPreparedEvidence: { checkpointIntentId },

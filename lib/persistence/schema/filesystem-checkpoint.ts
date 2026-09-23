@@ -40,11 +40,11 @@ export const filesystemCheckpointTable = mysqlTable(
     environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", {
       length: 36,
     }).notNull(),
-    leaseEpoch: bigint("leaseEpoch", { mode: "number", unsigned: true }).notNull(),
+    leaseEpoch: bigint("leaseEpoch", { mode: "bigint", unsigned: true }).notNull(),
     checkpointIntentId: varchar("checkpointIntentId", { length: 36 }).notNull(),
     writerGeneration: bigint("writerGeneration", { mode: "number", unsigned: true }).notNull(),
     recoveryVersion: bigint("recoveryVersion", { mode: "number", unsigned: true }).notNull(),
-    producerSequence: bigint("producerSequence", { mode: "number", unsigned: true }).notNull(),
+    producerSequence: bigint("producerSequence", { mode: "bigint", unsigned: true }).notNull(),
     recoveryAnchor: json("recoveryAnchor").notNull(),
     recoveryAnchorDigest: varchar("recoveryAnchorDigest", { length: 71 }).notNull(),
     snapshotFormat: varchar("snapshotFormat", { length: 32 })

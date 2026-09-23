@@ -100,9 +100,9 @@ function assertNoDuplicates(refs: readonly string[], label: string): void {
 
 function sortFacts(facts: RecoveryAnchorFact[]): RecoveryAnchorFact[] {
   return facts.sort((a, b) => {
-    const left = Number(a.producerSequence);
-    const right = Number(b.producerSequence);
-    if (left !== right) return left - right;
+    const left = BigInt(a.producerSequence);
+    const right = BigInt(b.producerSequence);
+    if (left !== right) return left < right ? -1 : 1;
     return a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0;
   });
 }
@@ -265,7 +265,7 @@ export async function buildRecoveryAnchor(
 function ingressFact(row: {
   id: string;
   candidateType: string;
-  producerSequence: number;
+  producerSequence: bigint;
   payloadHash: string;
 }): RecoveryAnchorFact {
   return {
@@ -368,17 +368,17 @@ interface LedgerDerivation {
   byId: Map<string, typeof runtimeEventIngressTable.$inferSelect>;
   advancedById: Map<string, boolean>;
   consumedInputs: RecoveryAnchorFact[];
-  watermark: number;
+  watermark: bigint;
   /** 已应用（推进过 recoveryVersion）事实的最大 producerSequence；没有则为 0。 */
-  appliedHighWater: number;
+  appliedHighWater: bigint;
 }
 
 function deriveLedger(rows: (typeof runtimeEventIngressTable.$inferSelect)[]): LedgerDerivation {
   const advancedById = new Map<string, boolean>();
   const consumedInputs: RecoveryAnchorFact[] = [];
   let previousRecoveryVersion: number | null = null;
-  let watermark = 0;
-  let appliedHighWater = 0;
+  let watermark = 0n;
+  let appliedHighWater = 0n;
   let interrupted = false;
   for (const row of rows) {
     // `advanced` = 这一行的被接纳确实推进了恢复水位（§3 推进表）。这是"已被正式消费/采用"
@@ -473,7 +473,7 @@ async function assertRecoveryBoundaryIntact(
     );
 
   // 4) 已应用事实不能越过 Anchor 水位。未消费输入/控制元数据不在此列（它们不推进水位）。
-  if (ledger.appliedHighWater > Number(anchor.producerSequence))
+  if (ledger.appliedHighWater > BigInt(anchor.producerSequence))
     reject(
       "AppliedFactAfterCheckpoint",
       `Checkpoint 之后已应用事实 producerSequence=${ledger.appliedHighWater} 超出锚点 ${anchor.producerSequence}`,
@@ -497,7 +497,7 @@ async function assertRecoveryBoundaryIntact(
       "RecoveryVersionAdvanced",
       `当前 recoveryVersion ${invocation.recoveryVersion} 与 Anchor ${anchor.recoveryVersion} 不一致`,
     );
-  if (invocation.lastProducerSequence < Number(anchor.producerSequence))
+  if (invocation.lastProducerSequence < BigInt(anchor.producerSequence))
     reject(
       "ProducerSequenceRegressed",
       `当前 producerSequence ${invocation.lastProducerSequence} 回退到锚点 ${anchor.producerSequence} 之前`,

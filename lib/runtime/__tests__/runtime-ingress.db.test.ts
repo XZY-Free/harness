@@ -51,7 +51,7 @@ import {
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 /** R02 §3：该夹具 Session 冻结的发布能力证据（Hosted Revision 的能力名列表）。 */
@@ -233,6 +233,22 @@ describe("RuntimeEventIngress database fencing", () => {
     await ensureDefaultTenant();
   });
 
+  it("MIGRATE-04: 大于 2^53 的事件序号写入、读取与 wire 回执不丢精度", async () => {
+    const runtime = await createActiveRuntime();
+    await db.execute(
+      sql`UPDATE Invocation SET lastProducerSequence = 9007199254740992 WHERE id = ${runtime.fixture.invocation.id}`,
+    );
+    const event = progressEvent("9007199254740993");
+    const result = await ingressBatch(runtime, [event]);
+    expect(result.acceptedThroughProducerSequence).toBe("9007199254740993");
+    expect(result.receipts[0]?.producerSequence).toBe("9007199254740993");
+    const [stored] = await db
+      .select()
+      .from(runtimeEventIngressTable)
+      .where(eq(runtimeEventIngressTable.producerEventId, event.eventId));
+    expect(String(stored?.producerSequence)).toBe("9007199254740993");
+  });
+
   it("INGRESS-01/INGRESS-11: execution.started is the only formal transition to running", async () => {
     const fixture = await seedPreparedRuntimeAttempt();
     const acquired = await acquireTestRuntimeAuthority({
@@ -303,14 +319,14 @@ describe("RuntimeEventIngress database fencing", () => {
       .from(executionOwnershipTable)
       .where(eq(executionOwnershipTable.id, takeover.value.ownership.id));
     expect(current[0]?.ownershipState).toBe("active");
-    expect(current[0]?.leaseEpoch).toBe(runtime.acquired.ownership.leaseEpoch + 1);
+    expect(current[0]?.leaseEpoch).toBe(runtime.acquired.ownership.leaseEpoch + 1n);
 
     const ledger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
     const committed = ledger.filter((row) => row.producerEventId === event.eventId);
     if (callback.status === "fulfilled") {
       expect(committed).toHaveLength(1);
       expect(committed[0]?.acceptedOwnershipId).toBe(runtime.acquired.ownership.id);
-      expect(committed[0]?.producerSequence).toBe(2);
+      expect(committed[0]?.producerSequence).toBe(2n);
     } else {
       expect(["OwnershipExpired", "NotCurrentExecutor"]).toContain(callback.reason?.code);
       expect(committed).toHaveLength(0);
@@ -328,14 +344,14 @@ describe("RuntimeEventIngress database fencing", () => {
     const firstEvent = progressEvent("2");
     await ingressBatch(acceptedFirst, [firstEvent]);
     const successor = await replaceCurrentOwner(acceptedFirst);
-    expect(successor.ownership.leaseEpoch).toBe(acceptedFirst.acquired.ownership.leaseEpoch + 1);
+    expect(successor.ownership.leaseEpoch).toBe(acceptedFirst.acquired.ownership.leaseEpoch + 1n);
     const acceptedLedger = await readLedger(
       acceptedFirst.fixture.tenantId,
       acceptedFirst.fixture.invocation.id,
     );
     expect(acceptedLedger.find((row) => row.producerEventId === firstEvent.eventId)).toMatchObject({
       acceptedOwnershipId: acceptedFirst.acquired.ownership.id,
-      producerSequence: 2,
+      producerSequence: 2n,
     });
   });
 
@@ -408,7 +424,7 @@ describe("RuntimeEventIngress database fencing", () => {
           eq(invocationTable.id, runtime.fixture.invocation.id),
         ),
       );
-    expect(invocation?.lastProducerSequence).toBe(2);
+    expect(invocation?.lastProducerSequence).toBe(2n);
     const ingress = await db
       .select()
       .from(runtimeEventIngressTable)
@@ -489,7 +505,7 @@ describe("RuntimeEventIngress database fencing", () => {
     // 不得"按 eventId 判为已重放"，也不得"按 sequence 覆盖 B"：两行都原样保留。
     const ledgerAfter = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
     expect(ledgerAfter).toEqual(ledgerBefore);
-    expect(ledgerAfter.map((row) => row.producerSequence)).toEqual([1, 2, 3]);
+    expect(ledgerAfter.map((row) => row.producerSequence)).toEqual([1n, 2n, 3n]);
   });
 
   it("REPLAY-04: 同一 Authority 用仍合法凭据逐字重放同一事件返回原 receipt，计数与产品映射全不变", async () => {
@@ -579,7 +595,7 @@ describe("RuntimeEventIngress database fencing", () => {
       (await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).map(
         (row) => row.producerSequence,
       ),
-    ).toEqual([1]);
+    ).toEqual([1n]);
 
     // (c) 合法新事件 + 冲突事件同批：冲突把同批的新事件与其产品映射一起回滚。
     const e1 = progressEvent("2");
@@ -707,7 +723,7 @@ describe("RuntimeEventIngress database fencing", () => {
     // 五次拒绝都不许留下任何 Ledger 事实（只有夹具的 execution.started）。
     expect(
       (await readLedger(fixture.tenantId, invocationId)).map((row) => row.producerSequence),
-    ).toEqual([1]);
+    ).toEqual([1n]);
   });
 
   it("R04: 终态事件是最后一条状态写入，Job 桥版本与批次水位一次归并", async () => {
@@ -760,7 +776,7 @@ describe("RuntimeEventIngress database fencing", () => {
         ),
       );
     expect(invocation?.executionState).toBe("completed");
-    expect(invocation?.lastProducerSequence).toBe(4);
+    expect(invocation?.lastProducerSequence).toBe(4n);
     // 批次水位只归并一次（+1），终态推进一次（+1）：终态写入之后不再有兜底版本更新。
     expect(invocation?.versionNo).toBe(beforeVersion + 2);
   });

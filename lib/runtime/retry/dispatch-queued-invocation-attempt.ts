@@ -357,7 +357,7 @@ export async function failAttemptAndInvokeRecoveryAuthority(params: {
               eq(executionOwnershipTable.tenantId, params.tenantId),
               eq(executionOwnershipTable.id, predecessor.ownershipId),
               eq(executionOwnershipTable.attemptId, predecessor.attemptId),
-              eq(executionOwnershipTable.leaseEpoch, Number(predecessor.leaseEpoch)),
+              eq(executionOwnershipTable.leaseEpoch, BigInt(predecessor.leaseEpoch)),
             ),
           )
           .for("update")
@@ -376,7 +376,7 @@ export async function failAttemptAndInvokeRecoveryAuthority(params: {
             eq(executionOwnershipTable.tenantId, params.tenantId),
             eq(executionOwnershipTable.id, params.workIdentity.claim.ownershipId),
             eq(executionOwnershipTable.attemptId, params.workIdentity.claim.attemptId),
-            eq(executionOwnershipTable.leaseEpoch, params.workIdentity.claim.leaseEpoch),
+            eq(executionOwnershipTable.leaseEpoch, BigInt(params.workIdentity.claim.leaseEpoch)),
           ),
         )
         .for("update")
