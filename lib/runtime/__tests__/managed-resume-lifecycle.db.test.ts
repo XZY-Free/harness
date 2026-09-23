@@ -29,6 +29,11 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { POST as resolveUserActionPOST } from "@/app/api/threads/[threadId]/user-actions/[requestId]/resolve/route";
+import { createAgentActionExecutor } from "@/lib/agents/calls/application/agent-action-executor";
+import {
+  EXECUTION_FIXTURE_CONTRACT,
+  seedAgentCallExecutionScenario,
+} from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -80,6 +85,8 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
@@ -104,6 +111,7 @@ import {
   listContainersByLabel,
   removeContainer,
 } from "@/lib/runtime/container/docker-cli";
+import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
@@ -123,6 +131,7 @@ import {
   RuntimeStartRequestSchema,
   protocolDigest,
 } from "@/lib/runtime/runtime-protocol";
+import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
@@ -156,6 +165,7 @@ let environmentControlRoot = "";
 const temporaryRoots: string[] = [];
 /** 外部 Runtime 对端（真实 HTTP server）；每个用例结束必须关闭，否则会泄漏端口。 */
 const externalRuntimeStubs: Array<{ dispose(): Promise<void> }> = [];
+const agentCallScenarios: Array<Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>> = [];
 let seededTenantId = "";
 
 async function seedTestResumeCommand(input: {
@@ -244,6 +254,10 @@ afterAll(async () => {
 afterEach(async () => {
   setCommandGatewayHostedApplicationServiceForTest(null);
   for (const stub of externalRuntimeStubs.splice(0)) await stub.dispose();
+  for (const scenario of agentCallScenarios.splice(0)) {
+    delete process.env[scenario.credentialEnvVar];
+    await scenario.provider.close();
+  }
   if (ORIGINAL_AUTH_MODE === undefined) {
     Reflect.deleteProperty(process.env, "SNOW_VITEST_IDENTITY_FIXTURE");
   } else {
@@ -1125,26 +1139,126 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     expect(await countIngressEvents(invocation.id, "execution.started")).toBe(2);
     expect((await getInvocationById(ctx.tenantId, invocation.id))?.executionState).toBe("running");
 
-    const secondSource = `a05-external-second:${randomUUID()}`;
-    const secondResult = await resumeHarnessInvocation({
+    // 两次正式 AgentCall：从父 Runtime 的当前 Authority 创建，经 UserAction API
+    // 与持久 Outbox Delivery 由生产 Worker 恢复；不能用测试直接调用 Resume 冒充消费者。
+    const scenario = await seedAgentCallExecutionScenario({
       tenantId: ctx.tenantId,
-      invocationId: invocation.id,
-      sourceType: "agent_call",
-      agentCallId: secondSource,
-      sourceVersion: 1,
+      threadOwnerUserId: ctx.ownerId,
+      providerScenario: "confirmation_resolution",
+      contract: {
+        ...EXECUTION_FIXTURE_CONTRACT,
+        interaction: {
+          ...EXECUTION_FIXTURE_CONTRACT.interaction,
+          input_required: true,
+          resume: true,
+        },
+      },
+      agentInterfaceRequirements: {
+        host_controls: { confirmation_action_keys: ["hr.leave.submit"] },
+      },
     });
-    expect(secondResult).toMatchObject({ status: "resumed", runtime: "external" });
-    expect(stub.resumeRequests).toHaveLength(2);
-    const secondLease = await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id);
+    agentCallScenarios.push(scenario);
+    await db
+      .update(turnTable)
+      .set({ preferredAgentId: scenario.agentId, agentUseMode: "preferred" })
+      .where(eq(turnTable.id, ctx.turnId));
+    const execute = createAgentActionExecutor({
+      tenantId: ctx.tenantId,
+      executionSubject: executionSubjectFromUserIdentity(ctx.tenantId, ctx.ownerId),
+      resolveRoute: createResolveRoute({ store: mysqlRouteEligibilityResolutionStore }),
+      transportChannel: "hosted",
+    });
+    const worker = createProductionInvocationContinuationWorker("a05-managed-agent-call");
+    const callIds: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      const currentOwner = await getActiveExecutionOwnership({
+        tenantId: ctx.tenantId,
+        invocationId: invocation.id,
+      });
+      if (!currentOwner) throw new Error("AgentCall 前缺少当前 Owner");
+      const currentSession = await getRuntimeSessionBindingByOwnership(
+        ctx.tenantId,
+        currentOwner.id,
+      );
+      if (!currentSession) throw new Error("AgentCall 前缺少当前 Session");
+      const started = await execute(
+        {
+          actionId: `a05-managed-agent-call-${index}`,
+          stepNo: index + 1,
+          actionType: "agent.call",
+          purposeCode: "submit_leave",
+          shortPurpose: "提交请假",
+          payload: { agentId: scenario.agentId, task: "提交我的年假申请" },
+        },
+        {
+          invocationId: invocation.id,
+          tenantId: ctx.tenantId,
+          threadId: ctx.threadId,
+          turnId: ctx.turnId,
+          actionDigest: protocolDigest({ managedAgentCall: index }),
+          authority: authorityIdentity({
+            invocationId: invocation.id,
+            runtimeRevisionId: externalRevisionId,
+            attemptId: currentOwner.attemptId,
+            ownershipId: currentOwner.id,
+            leaseEpoch: currentOwner.leaseEpoch,
+            sessionBindingId: currentSession.id,
+          }),
+        },
+      );
+      if (started.pending?.kind !== "agent_call") throw new Error("未创建正式 AgentCall");
+      const callId = started.pending.callId;
+      callIds.push(callId);
+      await worker.pollOnce();
+      const requests = await db
+        .select()
+        .from(userActionRequestTable)
+        .where(eq(userActionRequestTable.invocationId, invocation.id));
+      const request = requests.find(
+        (row) => (row.promptJson as Record<string, unknown>).agent_call_id === callId,
+      );
+      if (!request) throw new Error("AgentCall 没有产生正式 UserActionRequest");
+      const response = await resolveUserActionPOST(
+        new Request(
+          `http://snow.test/api/threads/${ctx.threadId}/user-actions/${request.id}/resolve`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "idempotency-key": `a05-resolve-${request.id}`,
+            },
+            body: JSON.stringify({ resolution: "approve" }),
+          },
+        ),
+        { params: Promise.resolve({ threadId: ctx.threadId, requestId: request.id }) },
+      );
+      expect(response.status).toBe(200);
+      await worker.pollOnce(); // resume_agent_after_user_response
+      await worker.pollOnce(); // resume_parent → MANAGED Environment + External Runtime
+      expect(stub.resumeRequests).toHaveLength(index + 2);
+      const currentLease = await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id);
+      const sessionsNow = await getRuntimeSessionBindingsByInvocation(ctx.tenantId, invocation.id);
+      const callSession = sessionsNow.find((row) =>
+        row.sourceOperationKey.startsWith(`agent-call:${callId}:`),
+      );
+      expect(callSession?.ownershipId).toBeTruthy();
+      expect(callSession?.ownershipId).not.toBe(currentOwner.id);
+      expect(callSession?.attemptId).toBe(attempt.id);
+      expect(currentLease?.readinessState).toBe("ready");
+      expect(currentLease?.activationOwnershipId).toBe(callSession?.ownershipId);
+      const [retiredOwner] = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.id, currentOwner.id));
+      expect(retiredOwner?.ownershipState).toBe("released");
+      expect(sessionsNow.find((row) => row.id === currentSession.id)?.bindingState).toBe("lost");
+      expect((await inspectContainer(containerName))?.Id).toBe(containerBefore?.Id);
+    }
+    expect(callIds[0]).not.toBe(callIds[1]);
     const secondSessions = await getRuntimeSessionBindingsByInvocation(ctx.tenantId, invocation.id);
-    const secondSession = secondSessions.find(
-      (row) => row.sourceOperationKey === `agent-call:${secondSource}:1`,
+    const secondSession = secondSessions.find((row) =>
+      row.sourceOperationKey.startsWith(`agent-call:${callIds[1]}:`),
     );
-    expect(secondSession?.ownershipId).toBeTruthy();
-    expect(secondSession?.ownershipId).not.toBe(resumedSession?.ownershipId);
-    expect(secondLease?.readinessState).toBe("ready");
-    expect(secondLease?.activationOwnershipId).toBe(secondSession?.ownershipId);
-    expect((await inspectContainer(containerName))?.Id).toBe(containerBefore?.Id);
     await resumeHarnessInvocation({
       tenantId: ctx.tenantId,
       invocationId: invocation.id,
@@ -1152,7 +1266,7 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
       agentCallId: firstSource,
       sourceVersion: 1,
     });
-    expect(stub.resumeRequests).toHaveLength(2);
+    expect(stub.resumeRequests).toHaveLength(3);
     expect(
       (await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id))?.activationOwnershipId,
     ).toBe(secondSession?.ownershipId);
