@@ -1567,6 +1567,7 @@ CREATE TABLE `RuntimeRevision` (
 	`createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 	`publishedAt` datetime(6),
 	CONSTRAINT `RuntimeRevision_id` PRIMARY KEY(`id`),
+	CONSTRAINT `RuntimeRevision_tenant_id_uq` UNIQUE(`tenantId`,`id`),
 	CONSTRAINT `RuntimeRevision_runtime_revisionNo_uq` UNIQUE(`runtimeId`,`revisionNo`),
 	CONSTRAINT `RuntimeRevision_evidence_allowed` CHECK(`runtimeEvidenceKind` IN ('hosted_artifact', 'external_endpoint')),
 	CONSTRAINT `RuntimeRevision_state_allowed` CHECK(`revisionState` IN ('draft', 'published', 'withdrawn')),
@@ -2981,6 +2982,7 @@ ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_invocationId
 ALTER TABLE `ExecutionOwnership` ADD CONSTRAINT `ExecutionOwnership_tenant_invocation_attempt_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`) REFERENCES `InvocationAttempt`(`tenantId`,`invocationId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `InvocationAttempt` ADD CONSTRAINT `InvocationAttempt_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `InvocationAttempt` ADD CONSTRAINT `InvocationAttempt_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `InvocationAttempt` ADD CONSTRAINT `InvocationAttempt_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `InvocationCommand` ADD CONSTRAINT `InvocationCommand_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `InvocationCommand` ADD CONSTRAINT `InvocationCommand_tenant_invocation_fk` FOREIGN KEY (`tenantId`,`invocationId`) REFERENCES `Invocation`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2992,6 +2994,7 @@ ALTER TABLE `RuntimeEventIngress` ADD CONSTRAINT `RuntimeEventIngress_tenantId_T
 ALTER TABLE `RuntimeEventIngress` ADD CONSTRAINT `RuntimeEventIngress_tenant_session_fk` FOREIGN KEY (`tenantId`,`invocationId`,`acceptedAttemptId`,`acceptedOwnershipId`,`acceptedEpoch`,`acceptedSessionId`) REFERENCES `RuntimeSessionBinding`(`tenantId`,`invocationId`,`attemptId`,`ownershipId`,`leaseEpoch`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeSessionBinding` ADD CONSTRAINT `RuntimeSessionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeSessionBinding` ADD CONSTRAINT `RuntimeSessionBinding_tenant_owner_fk` FOREIGN KEY (`tenantId`,`invocationId`,`attemptId`,`ownershipId`,`leaseEpoch`) REFERENCES `ExecutionOwnership`(`tenantId`,`invocationId`,`attemptId`,`id`,`leaseEpoch`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `RuntimeSessionBinding` ADD CONSTRAINT `RuntimeSessionBinding_tenant_runtime_revision_fk` FOREIGN KEY (`tenantId`,`runtimeRevisionId`) REFERENCES `RuntimeRevision`(`tenantId`,`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IncidentContainment` ADD CONSTRAINT `IncidentContainment_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IncidentContainment` ADD CONSTRAINT `IncidentContainment_incidentId_SecurityIncident_id_fk` FOREIGN KEY (`incidentId`) REFERENCES `SecurityIncident`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `SecurityIncident` ADD CONSTRAINT `SecurityIncident_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { contextCheckpoint } from "@/lib/persistence/schema/context-checkpoint";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { tenant } from "@/lib/persistence/schema/identity";
-import type { RuntimeEvidenceKind } from "@/lib/persistence/schema/runtimes";
+import { type RuntimeEvidenceKind, runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
@@ -373,6 +373,11 @@ export const invocationAttemptTable = mysqlTable(
       t.invocationId,
       t.id,
     ),
+    invocationFk: foreignKey({
+      columns: [t.tenantId, t.invocationId],
+      foreignColumns: [invocationTable.tenantId, invocationTable.id],
+      name: "InvocationAttempt_tenant_invocation_fk",
+    }),
     preparationIdx: index("InvocationAttempt_preparation_idx").on(
       t.preparationState,
       t.nextPreparationAt,
@@ -662,6 +667,11 @@ export const runtimeSessionBindingTable = mysqlTable(
         executionOwnershipTable.id,
         executionOwnershipTable.leaseEpoch,
       ],
+    }),
+    runtimeRevisionFk: foreignKey({
+      name: "RuntimeSessionBinding_tenant_runtime_revision_fk",
+      columns: [t.tenantId, t.runtimeRevisionId],
+      foreignColumns: [runtimeRevisionTable.tenantId, runtimeRevisionTable.id],
     }),
     identityUq: uniqueIndex("RuntimeSessionBinding_identity_uq").on(
       t.tenantId,

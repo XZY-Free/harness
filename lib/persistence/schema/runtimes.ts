@@ -218,6 +218,7 @@ export const runtimeRevisionTable = mysqlTable(
     publishedAt: datetime("publishedAt", { mode: "date", fsp: 6 }),
   },
   (t) => ({
+    tenantIdUq: uniqueIndex("RuntimeRevision_tenant_id_uq").on(t.tenantId, t.id),
     runtimeRevisionNoUq: uniqueIndex("RuntimeRevision_runtime_revisionNo_uq").on(
       t.runtimeId,
       t.revisionNo,

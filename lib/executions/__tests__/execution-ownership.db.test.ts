@@ -39,6 +39,8 @@ import {
   invocationAttemptTable,
   invocationTable,
 } from "@/lib/persistence/schema/executions";
+import { tenant } from "@/lib/persistence/schema/identity";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { handleRuntimeHeartbeat } from "@/lib/runtime/application/runtime-heartbeat";
 import { resolveRuntimePrincipal } from "@/lib/runtime/route-helpers";
@@ -155,6 +157,132 @@ describe("ExecutionOwnership database fencing", () => {
       },
     });
     expect(heartbeat.continueExecution).toBe(true);
+  });
+
+  it("MIGRATE-03: 跨 Tenant 的 Attempt、Owner、Session、Lease 直接写入均被复合外键拒绝", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const acquired = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    });
+    const otherTenantId = randomUUID();
+    await db
+      .insert(tenant)
+      .values({ id: otherTenantId, key: `migrate-${randomUUID()}`, name: "跨租户约束测试" });
+    const crossTenantWrites = [
+      [
+        "InvocationAttempt_tenant_invocation_fk",
+        sql`INSERT INTO InvocationAttempt (id, tenantId, invocationId, attemptNo)
+          VALUES (${randomUUID()}, ${otherTenantId}, ${fixture.invocation.id}, 99)`,
+      ],
+      [
+        "ExecutionOwnership_tenant_invocation_attempt_fk",
+        sql`INSERT INTO ExecutionOwnership
+          (id, tenantId, invocationId, attemptId, leaseEpoch, acquiredAt, lastHeartbeatAt,
+           leaseExpiresAt, dispatchDeadline, acquiredByType, acquiredById)
+          VALUES (${randomUUID()}, ${otherTenantId}, ${fixture.invocation.id}, ${fixture.attempt.id}, 99,
+                  CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6), DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 HOUR),
+                  DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 MINUTE), 'service', 'migrate-test')`,
+      ],
+      [
+        "RuntimeSessionBinding_tenant_owner_fk",
+        sql`INSERT INTO RuntimeSessionBinding
+          (id, tenantId, invocationId, attemptId, ownershipId, runtimeRevisionId, leaseEpoch,
+           intentType, startIntentKey, sourceOperationKey, sourceRequestDigest, sourceRequestJson)
+          VALUES (${randomUUID()}, ${otherTenantId}, ${fixture.invocation.id}, ${fixture.attempt.id},
+                  ${acquired.ownership.id}, ${fixture.binding.runtimeRevisionId}, ${acquired.ownership.leaseEpoch},
+                  'start', ${`cross:${randomUUID()}`}, ${`cross:${randomUUID()}`}, 'sha256:test', JSON_OBJECT())`,
+      ],
+    ] as const;
+    for (const [constraint, statement] of crossTenantWrites) {
+      await expect(db.execute(statement)).rejects.toMatchObject({
+        cause: { code: "ER_NO_REFERENCED_ROW_2", sqlMessage: expect.stringContaining(constraint) },
+      });
+    }
+    const environment = await createEnvironmentDefinition({
+      tenantId: fixture.tenantId,
+      environmentKey: `migrate-${randomUUID()}`,
+      displayName: "复合外键测试环境",
+      revision: environmentRevisionInput(),
+    });
+    await expect(
+      db.execute(sql`INSERT INTO EnvironmentLease
+        (id, tenantId, invocationId, attemptId, environmentDefinitionRevisionId, resourceManifest,
+         allocatedAt, expiresAt)
+        VALUES (${randomUUID()}, ${otherTenantId}, ${fixture.invocation.id}, ${fixture.attempt.id},
+                ${environment.currentRevisionId}, JSON_OBJECT(), CURRENT_TIMESTAMP(6),
+                DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 HOUR))`),
+    ).rejects.toMatchObject({
+      cause: {
+        code: "ER_NO_REFERENCED_ROW_2",
+        sqlMessage: expect.stringContaining("EnvironmentLease_tenant_invocation_attempt_fk"),
+      },
+    });
+  });
+
+  it("MIGRATE-05: 直接 DB 写入非法 NULL 分支、双 active 和错误 RuntimeRevision 均被约束拒绝", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const acquired = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    });
+    await expect(
+      db.execute(sql`UPDATE Invocation SET subjectType = 'job', threadId = NULL, turnId = NULL,
+        jobId = NULL WHERE id = ${fixture.invocation.id}`),
+    ).rejects.toMatchObject({ cause: { code: "ER_CHECK_CONSTRAINT_VIOLATED" } });
+    await expect(
+      db.execute(sql`INSERT INTO ExecutionOwnership
+        (id, tenantId, invocationId, attemptId, leaseEpoch, acquiredAt, lastHeartbeatAt,
+         leaseExpiresAt, dispatchDeadline, acquiredByType, acquiredById)
+        VALUES (${randomUUID()}, ${fixture.tenantId}, ${fixture.invocation.id}, ${fixture.attempt.id}, 2,
+                CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6), DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 HOUR),
+                DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 MINUTE), 'service', 'migrate-test')`),
+    ).rejects.toMatchObject({ cause: { code: "ER_DUP_ENTRY" } });
+    const otherTenantId = randomUUID();
+    const otherRuntimeId = randomUUID();
+    const otherRevisionId = randomUUID();
+    await db
+      .insert(tenant)
+      .values({ id: otherTenantId, key: `migrate-${randomUUID()}`, name: "另一租户" });
+    await db.insert(runtimeTable).values({
+      id: otherRuntimeId,
+      tenantId: otherTenantId,
+      runtimeKey: `migrate-runtime-${randomUUID()}`,
+      displayName: "另一租户 Runtime",
+      runtimeKind: "external",
+      ownerUserId: "test-user",
+      lifecycleState: "enabled",
+    });
+    await db.insert(runtimeRevisionTable).values({
+      id: otherRevisionId,
+      tenantId: otherTenantId,
+      runtimeId: otherRuntimeId,
+      revisionNo: 1,
+      protocolType: "harness_runtime_protocol",
+      protocolVersion: 3,
+      protocolContractDigest: protocolDigest({ contract: "test" }),
+      runtimeEvidenceKind: "external_endpoint",
+      runtimeTargetDigest: protocolDigest({ target: "test" }),
+      endpointRef: "https://runtime.example.invalid",
+      runtimeCapabilitiesJson: ["event_stream"],
+      identityMode: "none",
+      networkZone: "external",
+      configHash: protocolDigest({ config: "test" }),
+      createdBy: "test-service",
+    });
+    await expect(
+      db.execute(sql`UPDATE RuntimeSessionBinding SET runtimeRevisionId = ${otherRevisionId}
+        WHERE id = ${acquired.session.id}`),
+    ).rejects.toMatchObject({
+      cause: {
+        code: "ER_NO_REFERENCED_ROW_2",
+        sqlMessage: expect.stringContaining("RuntimeSessionBinding_tenant_runtime_revision_fk"),
+      },
+    });
   });
 
   it("FENCE-03/FENCE-04: expired generation cannot renew and takeover fences it", async () => {

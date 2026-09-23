@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import mysql from "mysql2/promise";
+import { assertFreshSchema } from "./verify-fresh-schema.mts";
 
 const ROOT = process.cwd();
 const EXPECTED_TABLES = JSON.parse(
@@ -125,6 +126,7 @@ async function main(): Promise<void> {
 
     const connection = await mysql.createConnection(connectionString);
     try {
+      await assertFreshSchema(connection);
       const [tableRows] = await connection.query<Record<string, string>[]>("SHOW TABLES");
       const tables = tableRows
         .map((row) => String(Object.values(row)[0]))
