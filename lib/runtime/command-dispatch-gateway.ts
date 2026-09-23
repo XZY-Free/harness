@@ -24,6 +24,7 @@ import {
   type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,
   acceptResumeCommandPreparation,
+  acknowledgeHistoricalResumeCommand,
   dispatchCancelCommand,
   dispatchCheckpointCommand,
   dispatchResumeCommand,
@@ -302,6 +303,14 @@ async function dispatchCommand(params: {
   const context = loaded;
   if (context.command.commandType !== params.type)
     return { dispatched: false, reason: "command_not_found" };
+  if (params.type === "resume") {
+    const historical = await acknowledgeHistoricalResumeCommand({
+      tenantId: params.tenantId,
+      commandId: params.commandId,
+      claimToken,
+    });
+    if (historical) return { dispatched: true, command: historical };
+  }
   // Resume 前置 capability 门控：effective capability（SessionBinding 冻结快照与
   // RuntimeRevision 发布事实的交集；session 缺省时回退发布事实，形状不可识别一律
   // fail-closed）未声明 resume 时零网络拒绝，不产生 transport 调用。

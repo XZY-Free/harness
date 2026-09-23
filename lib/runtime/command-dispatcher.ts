@@ -2,6 +2,10 @@
 import { db } from "@/lib/db/client";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import {
+  assertExecutionSourceSnapshot,
+  executionSourceDigest,
+} from "@/lib/executions/domain/preparation-source";
+import {
   type AttemptPreparationClaim,
   getAttemptById,
   getLatestAttempt,
@@ -48,7 +52,7 @@ import type {
   SafePointRequest,
   SteerRequest,
 } from "@/lib/runtime/runtime-protocol";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { RuntimeStartResponseSchema, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import {
   abandonFilesystemCheckpoint,
   produceFilesystemCheckpoint,
@@ -218,16 +222,39 @@ async function resolveResumeCommandPreparation(
     throw new CommandInvocationNotFoundError(`source-attempt:${historicalSession.attemptId}`);
   }
   if (!attempt) throw new CommandInvocationNotFoundError(context.invocation.id);
-  const anchor = attempt.filesystemCheckpointId
-    ? `checkpoint:${attempt.filesystemCheckpointId}`
-    : `invocation:${context.invocation.id}:recovery:${context.invocation.recoveryVersion}`;
-  const anchorDigest = attempt.resumeAnchorDigest ?? protocolDigest(anchor);
+  const historicalSource = historicalSession
+    ? assertExecutionSourceSnapshot(historicalSession.sourceRequestJson)
+    : null;
+  if (
+    historicalSession &&
+    (!historicalSource ||
+      historicalSession.sourceRequestDigest !== executionSourceDigest(historicalSource) ||
+      historicalSource.sourceOperationKey !== sourceOperationKey ||
+      historicalSource.sourceRef !== sourceOperationKey ||
+      historicalSource.recovery.kind !== "resume")
+  ) {
+    throw new Error("RuntimeSessionMismatch");
+  }
+  const anchor =
+    historicalSource?.recovery.kind === "resume"
+      ? historicalSource.recovery.anchor
+      : attempt.filesystemCheckpointId
+        ? `checkpoint:${attempt.filesystemCheckpointId}`
+        : `invocation:${context.invocation.id}:recovery:${context.invocation.recoveryVersion}`;
+  const anchorDigest =
+    historicalSource?.recovery.kind === "resume"
+      ? historicalSource.recovery.anchorDigest
+      : (attempt.resumeAnchorDigest ?? protocolDigest(anchor));
+  const checkpointId =
+    historicalSource?.recovery.kind === "resume"
+      ? historicalSource.recovery.checkpointId
+      : attempt.filesystemCheckpointId;
   const accepted = await acceptRuntimeResumePreparation({
     tenantId: context.invocation.tenantId,
     invocation: context.invocation,
     binding: context.binding,
     attempt,
-    ...(attempt.filesystemCheckpointId ? { checkpointId: attempt.filesystemCheckpointId } : {}),
+    ...(checkpointId ? { checkpointId } : {}),
     anchor,
     anchorDigest,
     sourceOperationKey,
@@ -238,7 +265,7 @@ async function resolveResumeCommandPreparation(
     attempt,
     anchor,
     anchorDigest,
-    ...(attempt.filesystemCheckpointId ? { checkpointId: attempt.filesystemCheckpointId } : {}),
+    ...(checkpointId ? { checkpointId } : {}),
     preparationClaim: accepted.decision.disposition === "claimed" ? accepted.decision.claim : null,
   };
 }
@@ -375,6 +402,53 @@ async function acknowledgeResumeCommand(params: {
       })
       .where(eq(invocationCommandTable.id, params.commandId));
   });
+}
+
+/** 原 Resume 已收到真实 Transport 接纳时，只按冻结来源和原回执收口命令。 */
+export async function acknowledgeHistoricalResumeCommand(input: {
+  tenantId: string;
+  commandId: string;
+  claimToken: string;
+}): Promise<CommandDispatchResult | null> {
+  const context = await loadCommand(input.tenantId, input.commandId);
+  if (context.command.commandType !== "resume") return null;
+  const sourceOperationKey = `command:${input.commandId}`;
+  const session = await getRuntimeSessionBindingBySourceOperation(input.tenantId, {
+    invocationId: context.invocation.id,
+    intentType: "resume",
+    sourceOperationKey,
+  });
+  if (!session?.transportAcknowledgement) return null;
+  const source = assertExecutionSourceSnapshot(session.sourceRequestJson);
+  const receipt = RuntimeStartResponseSchema.parse(session.transportAcknowledgement);
+  if (
+    session.sourceRequestDigest !== executionSourceDigest(source) ||
+    source.tenantId !== input.tenantId ||
+    source.invocationId !== context.invocation.id ||
+    source.attemptId !== session.attemptId ||
+    source.sourceOperationKey !== sourceOperationKey ||
+    source.sourceRef !== sourceOperationKey ||
+    source.intentType !== "resume" ||
+    source.bindingConfigDigest !== context.binding.configHash ||
+    receipt.accepted !== true ||
+    receipt.semanticRequestDigest !== session.semanticRequestDigest ||
+    receipt.authority.invocationId !== context.invocation.id ||
+    receipt.authority.runtimeRevisionId !== context.binding.runtimeRevisionId ||
+    receipt.authority.attemptId !== session.attemptId ||
+    receipt.authority.ownershipId !== session.ownershipId ||
+    receipt.authority.leaseEpoch !== String(session.leaseEpoch) ||
+    receipt.authority.sessionBindingId !== session.id
+  ) {
+    throw new Error("RuntimeSessionMismatch");
+  }
+  await recordCommandDispatchAttemptStarted(input.tenantId, input.commandId, input.claimToken);
+  await acknowledgeResumeCommand({ ...input, response: receipt });
+  return {
+    commandId: input.commandId,
+    commandState: "acknowledged",
+    response: receipt,
+    events: [],
+  };
 }
 
 async function acknowledge(

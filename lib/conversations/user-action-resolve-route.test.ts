@@ -32,6 +32,7 @@ import {
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
+import { acquireTestRuntimeAuthority } from "@/lib/executions/test-support/seed-runtime-authority";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationCommandTable } from "@/lib/persistence/schema/executions";
@@ -402,6 +403,40 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
     if (!invocation) throw new Error("调度失败：未创建 Invocation");
     // hosted Invocation 推进到 waiting_user + UAR。canonical Resume 的前置事实：
     // latest Attempt 处于 suspended（与 ingress execution.suspended 的暂停面一致）。
+    const attempt = await getLatestAttempt(invocation.id);
+    if (!attempt) throw new Error("调度失败：缺少 InvocationAttempt");
+    if (!dispatch.binding) throw new Error("调度失败：缺少 ExecutionBinding");
+    const preparationEvidence = { kind: "hosted-resume-route-test", attemptId: attempt.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedForTestInTransaction(tx, {
+        attemptId: attempt.id,
+        evidence: preparationEvidence,
+        digest: protocolDigest(preparationEvidence),
+      }),
+    );
+    const [revision] = await db
+      .select()
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.id, dispatch.binding.runtimeRevisionId));
+    if (!revision) throw new Error("调度失败：缺少 RuntimeRevision");
+    const current = await acquireTestRuntimeAuthority({
+      tenantId: ctx.tenantId,
+      invocationId: invocation.id,
+      attemptId: attempt.id,
+      runtimeRevisionId: revision.id,
+      runtimeCapabilitiesJson: revision.runtimeCapabilitiesJson,
+      phase: "executing",
+    });
+    const semanticRequest = { fixture: "hosted-resume-route", invocationId: invocation.id };
+    await applyRuntimeSessionDispatchForTest(ctx.tenantId, current.session.id, {
+      bindingState: "active",
+      semanticRequestJson: semanticRequest,
+      semanticRequestDigest: protocolDigest(semanticRequest),
+      remoteSessionRef: `hosted-session:${current.session.id}`,
+      remoteExecutionRef: `hosted-execution:${current.ownership.id}`,
+      transportAcknowledgement: { capabilitiesDigest: protocolDigest(semanticRequest) },
+      startedEventId: randomUUID(),
+    });
     await db
       .update(invocationTable)
       .set({ executionState: "waiting_user" })
@@ -410,8 +445,6 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
       .update(turnTable)
       .set({ turnState: "waiting_user" })
       .where(eq(turnTable.id, ctx.turnId));
-    const attempt = await getLatestAttempt(invocation.id);
-    if (!attempt) throw new Error("调度失败：缺少 InvocationAttempt");
     await db
       .update(invocationAttemptTable)
       .set({ attemptState: "suspended", preparationState: "pending", updatedAt: new Date() })

@@ -29,7 +29,10 @@ import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
-import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
+import {
+  attemptPreparationClaimForTest,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -755,6 +758,7 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
         invocation: fixture.invocation,
         sourceOperationKey: `invocation:${fixture.invocation.id}`,
         attempt: fixture.attempt,
+        preparationClaim: await attemptPreparationClaimForTest(fixture.attempt.id),
         binding: fixture.binding,
         environmentLeaseId: lease.id,
         runtimeClient: {} as Parameters<typeof startRuntimeInvocation>[0]["runtimeClient"],

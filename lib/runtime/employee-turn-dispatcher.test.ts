@@ -615,6 +615,14 @@ async function createExternalResumeCommand(params: {
   invocationId: string;
 }) {
   const id = randomUUID();
+  const owner = await getActiveExecutionOwnership({
+    tenantId: params.tenantId,
+    invocationId: params.invocationId,
+  });
+  const session = (
+    await getRuntimeSessionBindingsByInvocation(params.tenantId, params.invocationId)
+  ).find((row) => row.ownershipId === owner?.id);
+  if (!owner || !session) throw new Error("Resume 测试缺少当前执行权与 Session");
   const commandPayload = { resume_payload: { answer: "继续" }, turn_id: params.turnId };
   await db.insert(invocationCommandTable).values({
     id,
@@ -624,6 +632,8 @@ async function createExternalResumeCommand(params: {
     payloadJson: commandPayload,
     payloadDigest: computeInvocationCommandPayloadHash(commandPayload),
     commandState: "queued",
+    targetOwnershipId: owner.id,
+    targetSessionId: session.id,
     idempotencyKey: `external-resume:${id}`,
     requestedByType: "system",
     requestedById: "external-resume-fixture",

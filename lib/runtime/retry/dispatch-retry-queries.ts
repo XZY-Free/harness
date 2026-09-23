@@ -12,7 +12,10 @@
  *   claim token** 条件，过期 Worker 不能改新 claim 的结果。
  */
 import { db } from "@/lib/db/client";
-import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  getAuthorityDatabaseTime,
+  lockInvocationRootIfExists,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import type { InvocationAttempt, InvocationCommand } from "@/lib/persistence/schema/executions";
 import {
   executionOwnershipTable,
@@ -239,6 +242,7 @@ export async function sessionDispatchIdentityForAttempt(input: {
 export async function lockClaimedSessionInTransaction(
   tx: Tx,
   identity: SessionDispatchIdentity,
+  options?: { allowUnclaimedRead?: boolean },
 ): Promise<typeof runtimeSessionBindingTable.$inferSelect> {
   const [session] = await tx
     .select()
@@ -259,8 +263,16 @@ export async function lockClaimedSessionInTransaction(
   ) {
     throw new SessionDispatchClaimSupersededError("Session dispatch 身份代际已变化");
   }
-  if (identity.claimToken !== null && session.dispatchLeaseOwner !== identity.claimToken) {
+  if (identity.claimToken === null) {
+    if (options?.allowUnclaimedRead === true) return session;
+    throw new SessionDispatchClaimSupersededError("Session dispatch 缺少领取身份");
+  }
+  if (session.dispatchLeaseOwner !== identity.claimToken) {
     throw new SessionDispatchClaimSupersededError("Session dispatch claim 已被接管");
+  }
+  const now = await getAuthorityDatabaseTime(tx);
+  if (!session.dispatchLeaseExpiresAt || session.dispatchLeaseExpiresAt <= now) {
+    throw new SessionDispatchClaimSupersededError("Session dispatch claim 已过期");
   }
   return session;
 }
@@ -291,8 +303,12 @@ export async function assertSessionDispatchClaimHeld(
   ) {
     throw new SessionDispatchClaimSupersededError("Session dispatch 身份代际已变化");
   }
-  if (identity.claimToken !== null && session.dispatchLeaseOwner !== identity.claimToken) {
+  if (identity.claimToken === null || session.dispatchLeaseOwner !== identity.claimToken) {
     throw new SessionDispatchClaimSupersededError("Session dispatch claim 已被接管");
+  }
+  const now = await getAuthorityDatabaseTime(db);
+  if (!session.dispatchLeaseExpiresAt || session.dispatchLeaseExpiresAt <= now) {
+    throw new SessionDispatchClaimSupersededError("Session dispatch claim 已过期");
   }
 }
 

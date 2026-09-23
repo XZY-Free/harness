@@ -45,6 +45,7 @@ import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import {
   executionBindingTable,
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationTable,
   runtimeEventIngressTable,
 } from "@/lib/persistence/schema/executions";
@@ -54,6 +55,12 @@ import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runt
 import { createConfiguredHostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
+import { getRuntimeSessionBindingsByInvocation } from "@/lib/runtime/persistence/runtime-session-store";
+import { DISPATCH_STUCK_GRACE_MS } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  runDueUndispatchedIntentRecoveries,
+  scanUndispatchedInvocations,
+} from "@/lib/runtime/retry/undispatched-intent-lane";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { RuntimeStartRequest, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
@@ -549,6 +556,46 @@ describe("Thread-independent Job runtime integration", () => {
     expect(consumed.job.jobState).toBe("completed");
     const job = await getJobById(TENANT_ID, fixture.job.id);
     expect(job?.resultRef).toBe("job://result/ref");
+  });
+
+  it("JOB-REG-13: 无 Thread Job 接纳后由持久消费者创建首次 Attempt 和 Session", async () => {
+    const fixture = await seedJobFixture({ inputJson: { task: "run from job admission" } });
+    const due = new Date(Date.now() + DISPATCH_STUCK_GRACE_MS + 1_000);
+    const candidates = await scanUndispatchedInvocations({ now: due, limit: 10 });
+    expect(candidates.map((candidate) => candidate.invocationId)).toContain(fixture.invocation.id);
+
+    const service = createConfiguredHostedRuntimeApplicationService({
+      ...createDirectResponsePorts(() => "job consumer completed"),
+      modelRef: "test-managed-model",
+    });
+    const summary = await runDueUndispatchedIntentRecoveries({
+      now: due,
+      dependencies: { hostedApplicationService: service },
+    });
+    expect(summary.invocations.recovered).toBe(1);
+    const attempts = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.invocationId, fixture.invocation.id));
+    expect(attempts).toHaveLength(1);
+    const sessions = await getRuntimeSessionBindingsByInvocation(TENANT_ID, fixture.invocation.id);
+    expect(sessions).toHaveLength(1);
+    await expect
+      .poll(
+        async () =>
+          (
+            await db
+              .select({ state: invocationTable.executionState })
+              .from(invocationTable)
+              .where(eq(invocationTable.id, fixture.invocation.id))
+              .limit(1)
+          )[0]?.state,
+        { interval: 50, timeout: 10_000 },
+      )
+      .toBe("completed");
+    const worker = createProductionWorkerRole("job-worker");
+    await worker.pollOnce();
+    expect((await getJobById(TENANT_ID, fixture.job.id))?.jobState).toBe("completed");
   });
 
   it("JOB-REG-02: two racing scheduler deliveries return the identical frozen Invocation and Binding", async () => {

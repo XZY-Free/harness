@@ -185,6 +185,33 @@ describe("Session dispatch claim integration", () => {
     expect(fixture.attempt.id).toBe(authority.session.attemptId);
   });
 
+  it("V02: claim 已过期但尚未被接管时，发送与失败尾部也不能提交", async () => {
+    const { fixture, authority } = await dispatchingFixture();
+    const claim = await claimSessionDispatch({
+      sessionBindingId: authority.session.id,
+      leaseOwner: "worker:expired",
+      leaseDurationMs: LEASE_MS,
+      now: new Date(),
+    });
+    if (!claim) throw new Error("claim missing");
+    await db
+      .update(runtimeSessionBindingTable)
+      .set({ dispatchLeaseExpiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(runtimeSessionBindingTable.id, authority.session.id));
+    const before = await readSession(authority.session.id);
+    await expect(recordSessionDispatchAttemptStarted(claim, new Date())).rejects.toBeInstanceOf(
+      SessionDispatchClaimSupersededError,
+    );
+    await expect(
+      recordAttemptDispatchTransientFailure(claim, {
+        errorCode: "runtime_network_unavailable",
+        now: new Date(),
+      }),
+    ).rejects.toBeInstanceOf(SessionDispatchClaimSupersededError);
+    expect(await readSession(authority.session.id)).toEqual(before);
+    expect((await readAttempt(fixture.attempt.id)).attemptState).toBe("queued");
+  });
+
   it("CLAIM-04: 暂态重试排定按 claim 身份复核；错身份被拒且状态不变", async () => {
     const { authority } = await dispatchingFixture();
     const now = new Date();

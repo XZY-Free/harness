@@ -920,6 +920,32 @@ describe("Workspace writer release lane integration", () => {
       // 进程已退出
     }
   });
+
+  it("G1.2: 同一归属重复确认 active Writer 不触发撤销或清理", async () => {
+    const root = await makeRoot();
+    const broker = createWorkspaceHostBroker({ root });
+    const probe = await broker.probeIdentity();
+    const run = await activateWithRealWriter({ root, broker, probe });
+    const before = await readLock(run.activated.lockId);
+    const repeated = await activatePreparedWorkspaceWriter({
+      tenantId: TENANT_ID,
+      invocationId: run.fixture.invocation.id,
+      attemptId: run.fixture.attempt.id,
+      ownership: run.authority.ownership,
+      authority: run.authority.authority,
+      candidate: run.candidate,
+    });
+    expect(repeated.lockId).toBe(run.activated.lockId);
+    expect(repeated.writerGeneration).toBe(run.activated.writerGeneration);
+    expect(repeated.grant.grantRef).toBe(run.activated.grant.grantRef);
+    expect(await readLock(run.activated.lockId)).toEqual(before);
+    await assertStopsGrowingByGrowth(run.activityFile);
+    try {
+      process.kill(-run.spawned.pid, "SIGKILL");
+    } catch {
+      // 进程已退出
+    }
+  });
 });
 
 /** 断言文件在等待窗口内**继续**增长（证明真实 Writer 仍存活，未被误杀）。 */

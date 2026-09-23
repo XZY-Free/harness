@@ -448,7 +448,7 @@ export async function activateWorkspaceWriter(
     .limit(1);
   if (
     !lock ||
-    lock.lockState !== "reserved" ||
+    (lock.lockState !== "reserved" && lock.lockState !== "active") ||
     lock.writerGeneration !== input.writerGeneration ||
     lock.storageScopeDigest !== input.storageScopeDigest ||
     lock.holderInvocationId !== input.invocationId ||
@@ -486,6 +486,12 @@ export async function activateWorkspaceWriter(
     .limit(1);
   if (!owner || owner.leaseEpoch !== input.leaseEpoch) {
     throw new WorkspaceWriterConflictError("Workspace writer 的 Owner 代际已变化");
+  }
+  if (lock.lockState === "active") {
+    if (lock.backendGrantRef !== input.backendGrantRef) {
+      throw new WorkspaceWriterConflictError("Workspace writer 已激活但 Backend grant 不一致");
+    }
+    return lock;
   }
   await tx
     .update(workspaceWriteLock)

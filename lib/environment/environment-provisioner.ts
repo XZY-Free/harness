@@ -1,3 +1,4 @@
+import { db } from "@/lib/db/client";
 /**
  * R07：EnvironmentProvisioner——Revision → 实际实例 → 符合性证据 → Lease → 清理。
  *
@@ -52,6 +53,7 @@ import {
   type AttemptPreparationClaim,
   assertAttemptPreparationClaimHeld,
 } from "@/lib/executions/persistence/attempt-store";
+import { getAuthorityDatabaseTime } from "@/lib/executions/persistence/execution-ownership-store";
 import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
 
@@ -318,13 +320,48 @@ async function provisionWithBackend(input: {
       preparationClaim: input.preparationClaim,
     }));
   if (existing && isPreparedReadinessState(existing.readinessState)) {
-    // 已备妥（`ready` = 同一份 Prepared 事实 + Writer 已激活）：Transport Retry 只需确认
-    // 实例仍在（真实回读），既不重复建资源，也不重复写 Prepared 证据 ——
-    // `prepareEnvironmentLease` 只接受 `unresolved` / `preparing`，重复写入会把一次
-    // 合法的同 Attempt 重投变成终态失败，而且在失败之前已经真实创建出第二份实例。
+    // 已备妥时先真实回读实例；ready 与未过期 prepared 保持原证据，
+    // 过期 prepared 才在当前准备 claim 下对同一实例续写核验证据。
     const facts = await input.backend.inspect(requestFor(input, lease, operationId, input.spec));
     await assertAttemptPreparationClaimHeld(input.preparationClaim);
     assertPreparedInstanceMatches(lease, facts);
+    const oldEvidence = existing.preparedEvidence as { expiresAt?: unknown } | null;
+    if (
+      existing.readinessState === "prepared" &&
+      typeof oldEvidence?.expiresAt === "string" &&
+      Date.parse(oldEvidence.expiresAt) <= input.now.getTime()
+    ) {
+      const evidence = buildEnvironmentPreparedEvidence({
+        revisionId: input.spec.revisionId,
+        semanticDigest: input.spec.semanticDigest,
+        actualTargetDigest: facts.actualTargetDigest,
+        verifier: facts.verifier,
+        policyChecks: facts.policyChecks,
+        instance: facts.identity,
+        candidate: {
+          attemptId: input.attemptId,
+          workspaceBindingId: input.workspaceBindingId,
+          recoveryAnchorDigest: input.recoveryAnchorDigest,
+        },
+        resourceManifest: {
+          operationId,
+          resources: facts.resources,
+          backendKind: input.backend.kind,
+          targetDigest: facts.actualTargetDigest,
+        },
+        verifiedAt: input.now,
+        expiresAt: new Date(input.now.getTime() + ENVIRONMENT_PREPARED_TTL_MS),
+      });
+      return prepareEnvironmentLease({
+        tenantId: input.tenantId,
+        leaseId: lease.id,
+        capabilitiesJson: facts.capabilities,
+        evidence,
+        preparationClaim: input.preparationClaim,
+        refreshPreparedEvidence: true,
+        now: input.now,
+      });
+    }
     return (await getEnvironmentLeaseById(input.tenantId, lease.id)) ?? lease;
   }
   const request = requestFor(input, lease, operationId, input.spec);
@@ -503,7 +540,7 @@ export function createEnvironmentProvisioner(dependencies: {
   return {
     async provision(input) {
       assertRevisionFrozen(input);
-      const now = input.now ?? new Date();
+      const now = input.now ?? (await getAuthorityDatabaseTime(db));
       const spec = normalizeEnvironmentInstanceSpec(input.revision);
       if (spec.backendKind !== backend.kind) {
         throw new EnvironmentComplianceError(

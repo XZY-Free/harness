@@ -7,9 +7,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import type { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
 import {
   createAttempt,
+  getAttemptById,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import {
@@ -18,7 +20,10 @@ import {
   getAuthorityDatabaseTime,
   renewExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
-import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
+import {
+  attemptPreparationClaimForTest,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
 import { seedPreparedRuntimeAttempt } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
@@ -28,7 +33,7 @@ import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-
 import { resumeRuntimeInvocation } from "@/lib/runtime/application/runtime-resume";
 import {
   RuntimeStartTransportError,
-  startRuntimeInvocation,
+  startRuntimeInvocation as startRuntimeInvocationProduction,
 } from "@/lib/runtime/application/runtime-start";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import {
@@ -251,6 +256,19 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function startRuntimeInvocation(
+  input: Parameters<typeof startRuntimeInvocationProduction>[0],
+): ReturnType<typeof startRuntimeInvocationProduction> {
+  const attempt = await getAttemptById(input.attempt.id);
+  const preparationClaim =
+    input.preparationClaim ??
+    (attempt?.preparationClaimId ? await attemptPreparationClaimForTest(attempt.id) : null);
+  return startRuntimeInvocationProduction({
+    ...input,
+    ...(preparationClaim ? { preparationClaim } : {}),
+  });
 }
 
 async function startFixture(
@@ -551,7 +569,18 @@ describe("Runtime Start / Resume durable recovery", () => {
     });
     runtime.callbackBeforeResponse = false;
     runtime.dropNextStartResponse = true;
-    const resumeSourceOperationKey = `command:${randomUUID()}`;
+    const resumeCommandId = await db.transaction((tx) =>
+      createInvocationCommandInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        commandType: "resume",
+        idempotencyKey: `reference-resume:${randomUUID()}`,
+        payloadJson: { resume_source: "user_pause", resume_payload: { source: "user_pause" } },
+        requestedByType: "user",
+        requestedById: "reference-test",
+      }),
+    );
+    const resumeSourceOperationKey = `command:${resumeCommandId}`;
     const firstResumeFailure = await resumeRuntimeInvocation({
       tenantId: fixture.tenantId,
       invocation: fixture.invocation,

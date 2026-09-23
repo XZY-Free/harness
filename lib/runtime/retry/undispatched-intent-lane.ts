@@ -47,6 +47,7 @@ import {
   invocationTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
+import { jobTable } from "@/lib/persistence/schema/job";
 import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
 import { executionSourceRequestForStart } from "@/lib/runtime/application/runtime-start";
@@ -73,6 +74,7 @@ import {
   lte,
   notExists,
   notInArray,
+  or,
   sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
@@ -222,13 +224,25 @@ export async function scanUndispatchedInvocations(params: {
   return db
     .select({ tenantId: invocationTable.tenantId, invocationId: invocationTable.id })
     .from(invocationTable)
-    .innerJoin(turnTable, eq(turnTable.id, invocationTable.turnId))
+    .leftJoin(turnTable, eq(turnTable.id, invocationTable.turnId))
+    .leftJoin(jobTable, eq(jobTable.id, invocationTable.jobId))
     .where(
       and(
         eq(invocationTable.executionState, "queued"),
-        isNotNull(invocationTable.turnId),
+        or(
+          and(
+            eq(invocationTable.subjectType, "thread"),
+            isNotNull(invocationTable.turnId),
+            notInArray(turnTable.turnState, [...TURN_TERMINAL_STATES]),
+          ),
+          and(
+            eq(invocationTable.subjectType, "job"),
+            isNull(invocationTable.turnId),
+            isNotNull(invocationTable.jobId),
+            eq(jobTable.jobState, "queued"),
+          ),
+        ),
         lte(invocationTable.updatedAt, new Date(params.now.getTime() - DISPATCH_STUCK_GRACE_MS)),
-        notInArray(turnTable.turnState, [...TURN_TERMINAL_STATES]),
         notExists(
           db
             .select({ one: sql`1` })
@@ -564,6 +578,15 @@ export async function claimUndispatchedInvocation(
         .for("update")
         .limit(1);
       if (turn && TURN_TERMINAL_STATES.includes(turn.turnState)) return null;
+    } else if (row.subjectType === "job" && row.jobId) {
+      const [job] = await tx
+        .select({ jobState: jobTable.jobState })
+        .from(jobTable)
+        .where(and(eq(jobTable.tenantId, row.tenantId), eq(jobTable.id, row.jobId)))
+        .limit(1);
+      if (job?.jobState !== "queued") return null;
+    } else {
+      return null;
     }
     // 唯一候选 Attempt：已存在的 queued Attempt 一律复用（重跑不产生新候选）。
     const attempts = await tx
@@ -623,12 +646,13 @@ async function recoverUndispatchedInvocation(
     transport = await resolveRuntimeTransportFromBinding({
       tenantId: candidate.tenantId,
       binding,
+      hostedApplicationService: dependencies?.hostedApplicationService,
     });
     // 运行资源只从冻结 Binding 解析（唯一生产组合层），不在这里另拼一份。
     resources = await resolveBoundExecutionResources({
       tenantId: candidate.tenantId,
       binding,
-      purpose: "thread",
+      purpose: invocation.subjectType === "job" ? "job" : "thread",
     });
   } catch (error) {
     await failAttemptAndInvokeRecoveryAuthority({

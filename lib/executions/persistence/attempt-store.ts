@@ -6,13 +6,17 @@ import {
   assertExecutionSourceSnapshot,
   executionSourceDigest,
 } from "@/lib/executions/domain/preparation-source";
-import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  getAuthorityDatabaseTime,
+  lockInvocationRootIfExists,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import {
   type InvocationAttempt,
   type InvocationAttemptState,
   type InvocationPreparationState,
   invocationAttemptTable,
   invocationTable,
+  runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import {
   InvocationAttemptNotFoundError,
@@ -170,7 +174,7 @@ export async function claimAttemptPreparationInTransaction(
   tx: AttemptTx,
   input: ClaimAttemptPreparationInput,
 ): Promise<AttemptPreparationClaimOutcome> {
-  const now = input.now ?? new Date();
+  const now = input.now ?? (await getAuthorityDatabaseTime(tx));
   const source = assertExecutionSourceSnapshot(input.source);
   const requestDigest = executionSourceDigest(source);
   const [attempt] = await tx
@@ -197,10 +201,34 @@ export async function claimAttemptPreparationInTransaction(
       "PreparationIntentConflict",
     );
   }
+  const currentClaim = ["preparing", "prepared"].includes(attempt.preparationState)
+    ? attempt.preparationClaimId
+    : null;
+  const claimExpiresAt = attempt.preparationLeaseExpiresAt?.getTime() ?? 0;
+  // 已登记 Session 的准备来源已完成交接。后续 continuation 可以在同一 Attempt 上
+  // 立即取得新来源的准备权；原 claim 即使租期未到，也不能阻塞这个正式续接。
+  const priorIntentKey = attempt.preparationIntentKey;
+  const priorSourceRegistered =
+    currentClaim && priorIntentKey && priorIntentKey !== source.sourceOperationKey
+      ? (
+          await tx
+            .select({ id: runtimeSessionBindingTable.id })
+            .from(runtimeSessionBindingTable)
+            .where(
+              and(
+                eq(runtimeSessionBindingTable.tenantId, source.tenantId),
+                eq(runtimeSessionBindingTable.invocationId, source.invocationId),
+                eq(runtimeSessionBindingTable.attemptId, source.attemptId),
+                eq(runtimeSessionBindingTable.sourceOperationKey, priorIntentKey),
+              ),
+            )
+            .limit(1)
+        ).length > 0
+      : false;
   if (
-    attempt.preparationState === "preparing" &&
-    attempt.preparationClaimId !== input.claimId &&
-    (attempt.preparationLeaseExpiresAt?.getTime() ?? 0) > now.getTime()
+    currentClaim &&
+    ((currentClaim !== input.claimId && claimExpiresAt > now.getTime() && !priorSourceRegistered) ||
+      (currentClaim === input.claimId && claimExpiresAt <= now.getTime()))
   ) {
     return { disposition: "busy", attempt, claim: null };
   }

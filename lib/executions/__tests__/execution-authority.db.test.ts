@@ -477,28 +477,29 @@ describe("ExecutionAuthority semantics（R03/R04/R08）", () => {
       "queued",
     );
 
-    // (b) 生产入口：旧 Attempt 的失败收口走 `failAttemptAndInvokeRecoveryAuthority`
-    // （内部重新读当前 Owner）。新 Owner 健康 → 仍必须只丢弃，不把整个 Invocation 判 lost。
-    const failedAttempt = await failAttemptAndInvokeRecoveryAuthority({
-      tenantId: fixture.tenantId,
-      attempt: fixture.attempt,
-      invocation: fixture.invocation,
-      errorCode: "RuntimeDispatchFailed",
-      errorSummary: "auth-01 delayed failure",
-      now: new Date(),
-      workIdentity: {
-        kind: "dispatch",
-        claim: {
-          tenantId: fixture.tenantId,
-          sessionBindingId: first.session.id,
-          attemptId: fixture.attempt.id,
-          ownershipId: first.ownership.id,
-          leaseEpoch: first.ownership.leaseEpoch,
-          claimToken: null,
+    // (b) 生产入口：旧派发者没有有效 Session claim，失败收口直接拒绝；
+    // 新 Owner 健康且旧 Attempt 已在接管时收口，不得再写任何结论。
+    await expect(
+      failAttemptAndInvokeRecoveryAuthority({
+        tenantId: fixture.tenantId,
+        attempt: fixture.attempt,
+        invocation: fixture.invocation,
+        errorCode: "RuntimeDispatchFailed",
+        errorSummary: "auth-01 delayed failure",
+        now: new Date(),
+        workIdentity: {
+          kind: "dispatch",
+          claim: {
+            tenantId: fixture.tenantId,
+            sessionBindingId: first.session.id,
+            attemptId: fixture.attempt.id,
+            ownershipId: first.ownership.id,
+            leaseEpoch: first.ownership.leaseEpoch,
+            claimToken: null,
+          },
         },
-      },
-    });
-    expect(failedAttempt.id).toBe(fixture.attempt.id);
+      }),
+    ).rejects.toThrow("Session dispatch 缺少领取身份");
     expect(await readOwner(fixture.tenantId, takeover.ownership.id)).toEqual(healthy);
     expect((await readInvocation(fixture.tenantId, fixture.invocation.id)).executionState).toBe(
       "queued",

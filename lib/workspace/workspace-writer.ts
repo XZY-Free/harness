@@ -13,9 +13,7 @@ import {
   type WorkspaceReleasePending,
   activateWorkspaceWriter,
   getActiveLocksByInvocation,
-  requestWorkspaceWriterRelease,
   reserveWorkspaceWriter,
-  workspaceWriterIdentityFromLock,
 } from "@/lib/workspace/workspace-write-lock-queries";
 
 /**
@@ -138,71 +136,48 @@ export async function activatePreparedWorkspaceWriter(input: {
     );
   }
   const reserved = reservedOutcome;
-  try {
-    if (reserved.lock.lockState === "active") {
-      // 已激活：只读真实 Backend 回执，绝不重复开 Writer。
-      const grant = await input.candidate.backend.host.getWriter(
-        scopeDigest,
-        reserved.writerGeneration,
-      );
-      if (!grant) throw new Error("WorkspaceWriterNotFenced");
-      await input.candidate.backend.host.assertWriter(grant);
-      return { grant, lockId: reserved.lock.id, writerGeneration: reserved.writerGeneration };
-    }
-    const grant = await input.candidate.backend.host.activateWriter({
-      tenantId: input.tenantId,
+  if (reserved.lock.lockState === "active") {
+    // 已激活：只读真实 Backend 回执，绝不重复开 Writer。
+    const grant = await input.candidate.backend.host.getWriter(
       scopeDigest,
-      writerGeneration: reserved.writerGeneration,
-      authority: input.authority,
-      expectedStorageIdentity: storageIdentity,
-      operationId,
-      root: input.candidate.root,
-    });
-    const active = await db.transaction((tx) =>
-      // W→I 顺序（R04 §2/§4）：先锁 WorkspaceWriteLock，再按 Invocation → Attempt →
-      // Ownership 复核 Current Ownership 与代际；不能用"先读到的 ownership row"绕过复核，
-      // 也不能先锁 Ownership 再锁 W。
-      activateWorkspaceWriter(
-        {
-          tenantId: input.tenantId,
-          storageScopeDigest: scopeDigest,
-          invocationId: input.invocationId,
-          attemptId: input.attemptId,
-          lockId: reserved.lock.id,
-          writerGeneration: reserved.writerGeneration,
-          ownershipId: input.ownership.id,
-          leaseEpoch: input.ownership.leaseEpoch,
-          backendGrantRef: grant.grantRef,
-          backendEvidence: grant.backendEvidence,
-          backendOperationId: operationId,
-          backendReceipt: grant.backendEvidence,
-        },
-        tx,
-      ),
+      reserved.writerGeneration,
     );
-    return { grant, lockId: active.id, writerGeneration: active.writerGeneration };
-  } catch (error) {
-    // 先让 Backend 真实撤销该 generation 的 Writer（尽力而为，失败也会被释放 lane 重做），
-    // 再写**持久**释放请求；控制面不直接写 released、也不清空 Backend 定位字段
-    // （§7：不能先清空回执定位再失去清理能力）。
-    // A07 决策五：补偿也必须带**精确归属身份**。没有完整归属时**不撤销** ——
-    // 按 generation 撤回一个可能已属于别段执行权的 Writer，正是要消灭的误杀形态；
-    // 释放义务仍由 `requestWorkspaceWriterRelease` 落进持久状态去重试。
-    const compensationIdentity = workspaceWriterIdentityFromLock(reserved.lock);
-    if (compensationIdentity) {
-      await input.candidate.backend.host
-        .revokeWriterGeneration(compensationIdentity)
-        .catch(() => undefined);
-    }
-    await requestWorkspaceWriterRelease({
-      tenantId: input.tenantId,
-      lockId: reserved.lock.id,
-      ownershipId: input.ownership.id,
-      reasonCode: "writer_activation_failed",
-    }).catch(() => undefined);
-    await input.candidate.backend.host.cleanup(input.candidate.preparation).catch(() => undefined);
-    throw error;
+    if (!grant) throw new Error("WorkspaceWriterNotFenced");
+    await input.candidate.backend.host.assertWriter(grant);
+    return { grant, lockId: reserved.lock.id, writerGeneration: reserved.writerGeneration };
   }
+  const grant = await input.candidate.backend.host.activateWriter({
+    tenantId: input.tenantId,
+    scopeDigest,
+    writerGeneration: reserved.writerGeneration,
+    authority: input.authority,
+    expectedStorageIdentity: storageIdentity,
+    operationId,
+    root: input.candidate.root,
+  });
+  const active = await db.transaction((tx) =>
+    // W→I 顺序（R04 §2/§4）：先锁 WorkspaceWriteLock，再按 Invocation → Attempt →
+    // Ownership 复核 Current Ownership 与代际；不能用"先读到的 ownership row"绕过复核，
+    // 也不能先锁 Ownership 再锁 W。
+    activateWorkspaceWriter(
+      {
+        tenantId: input.tenantId,
+        storageScopeDigest: scopeDigest,
+        invocationId: input.invocationId,
+        attemptId: input.attemptId,
+        lockId: reserved.lock.id,
+        writerGeneration: reserved.writerGeneration,
+        ownershipId: input.ownership.id,
+        leaseEpoch: input.ownership.leaseEpoch,
+        backendGrantRef: grant.grantRef,
+        backendEvidence: grant.backendEvidence,
+        backendOperationId: operationId,
+        backendReceipt: grant.backendEvidence,
+      },
+      tx,
+    ),
+  );
+  return { grant, lockId: active.id, writerGeneration: active.writerGeneration };
 }
 
 export async function prepareWorkspaceWriter(input: {

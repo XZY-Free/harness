@@ -225,6 +225,8 @@ export interface PrepareEnvironmentLeaseInput {
    * （首次准备、测试夹具）。
    */
   preparationClaim: AttemptPreparationClaim;
+  /** 同一实例的旧证据已过期时，允许当前准备者用真实 inspect 结果续写。 */
+  refreshPreparedEvidence?: boolean;
 }
 
 /**
@@ -278,7 +280,11 @@ export async function prepareEnvironmentLeaseInTransaction(
     )
     .limit(1);
   if (!lease) throw new EnvironmentLeaseConflictError(input.leaseId);
-  if (!["unresolved", "preparing"].includes(lease.readinessState)) {
+  const refreshing =
+    input.refreshPreparedEvidence === true &&
+    lease.readinessState === "prepared" &&
+    lease.activationOwnershipId === null;
+  if (!refreshing && !["unresolved", "preparing"].includes(lease.readinessState)) {
     throw new EnvironmentLeaseStateError(
       `EnvironmentLease 未处于可准备状态：${lease.readinessState}`,
     );
@@ -288,6 +294,21 @@ export async function prepareEnvironmentLeaseInTransaction(
   }
   if (!input.evidence) {
     throw new EnvironmentComplianceError("生产写入必须提供实际实例符合性证据（PreparedEvidence）");
+  }
+  if (refreshing) {
+    const old = lease.preparedEvidence as EnvironmentPreparedEvidence | null;
+    if (
+      !old ||
+      lease.preparedDigest !== environmentPreparedEvidenceDigest(old) ||
+      !Number.isFinite(Date.parse(old.expiresAt)) ||
+      Date.parse(old.expiresAt) > now.getTime() ||
+      old.resourceManifest.operationId !== input.evidence.resourceManifest.operationId ||
+      old.instance.workerRef !== input.evidence.instance.workerRef ||
+      old.instance.hostIdentity !== input.evidence.instance.hostIdentity ||
+      old.instance.storageIdentity !== input.evidence.instance.storageIdentity
+    ) {
+      throw new EnvironmentComplianceError("Prepared 证据复验身份不匹配或尚未过期");
+    }
   }
   // Revision 查询严格限定 tenant（跨租户引用必须失败，不能只按 id）。
   const [revision] = await tx

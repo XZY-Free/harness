@@ -1383,13 +1383,19 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       .update(invocationAttemptTable)
       .set({ attemptState: "suspended", preparationState: "pending", updatedAt: new Date() })
       .where(eq(invocationAttemptTable.id, attempt.id));
+    const resumeCommandId = await freezeCommand({
+      tenantId,
+      invocationId,
+      commandType: "resume",
+      payloadJson: { resume_source: "user_pause", resume_payload: { source: "user_pause" } },
+    });
 
     const resumeOnce = async () => {
       const current = await getInvocationById(tenantId, invocationId);
       if (!current) throw new Error("Invocation 回读失败");
       return resumeRuntimeInvocation({
         tenantId,
-        sourceOperationKey: "command:control-06-resume-1",
+        sourceOperationKey: `command:${resumeCommandId}`,
         invocation: current,
         binding,
         attempt,

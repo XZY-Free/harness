@@ -32,7 +32,10 @@ import {
 } from "@/lib/executions/application/require-current-execution-authority";
 import { markAttemptPreparedInTransaction } from "@/lib/executions/persistence/attempt-store";
 import { createInvocation } from "@/lib/executions/persistence/invocation-store";
-import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
+import {
+  attemptPreparationClaimForTest,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   createPreparedTakeoverAttempt,
@@ -490,6 +493,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
       invocation,
       binding,
       attempt: takeoverAttempt,
+      preparationClaim: await attemptPreparationClaimForTest(takeoverAttempt.id),
       runtimeClient: client,
       runtimeEndpoint: "in-process://hosted",
       auth: { mode: "workload_token" as const, token: "lock-order-token" },
@@ -623,6 +627,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
     if (!invocation || !binding || !attempt) throw new Error("调度失败");
     const tenantId = ctx.tenantId;
     await markPrepared(tenantId, invocation.id, attempt.id);
+    const preparationClaim = await attemptPreparationClaimForTest(attempt.id);
     // 根为空：此前没有任何 Owner（也不存在"用一行不存在的 O 当根锁"的空间）。
     expect(await activeOwnerships(tenantId, invocation.id)).toHaveLength(0);
 
@@ -632,6 +637,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
       invocation,
       binding,
       attempt,
+      preparationClaim,
       runtimeClient: createInProcessHostedRuntimeClient({
         tenantId,
         publishedCapabilityEvidence: {
@@ -932,6 +938,10 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
           }
         : {}),
     });
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationClaimId: null, preparationLeaseExpiresAt: null })
+      .where(eq(invocationAttemptTable.id, attempt.id));
     return { ctx, invocation, binding, attempt, gen };
   }
 
@@ -970,6 +980,10 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
           }
         : {}),
     });
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationClaimId: null, preparationLeaseExpiresAt: null })
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
     return { fixture, gen };
   }
 
@@ -989,7 +1003,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
     const anchor = `resume:${input.invocation.id}`;
     return {
       tenantId: input.tenantId,
-      sourceOperationKey: `command:lock-order:${input.invocation.id}`,
+      sourceOperationKey: `agent-call:${input.invocation.id}:1`,
       invocation: input.invocation,
       binding: input.binding,
       attempt: input.attempt,
@@ -1196,7 +1210,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
       (result) => ({ ok: true as const, error: null, result }),
       (error: unknown) => ({ ok: false as const, error, result: null }),
     );
-    expect(resumeOutcome.ok, "真实 Resume 必须完成换代").toBe(true);
+    expect(resumeOutcome.ok, `真实 Resume 必须完成换代：${String(resumeOutcome.error)}`).toBe(true);
     expect(resumeSettled).toBe(true);
     const activesAfterResume = await activeOwnerships(tenantId, invocationId);
     expect(activesAfterResume).toHaveLength(1);

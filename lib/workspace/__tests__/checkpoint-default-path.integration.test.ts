@@ -984,6 +984,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     const nextAttempt = await createAttempt({
       tenantId: TENANT_ID,
       invocationId: ctx.invocationId,
+      retryReasonCode: "checkpoint_restore",
     });
     const bindingRow = (await db
       .select()
@@ -991,7 +992,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       .where(eq(executionBindingTable.invocationId, ctx.invocationId))
       .limit(1))![0]!;
     const invocation = (await readGate(ctx.invocationId))!;
-    const sourceOperationKey = `command:a06-resume:${checkpoint.checkpointId}`;
+    const sourceOperationKey = `checkpoint-restore:${checkpoint.checkpointId}`;
     const accepted = await acceptExecutionPreparation({
       request: executionSourceRequestForStart({
         tenantId: TENANT_ID,
@@ -1241,7 +1242,11 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
   ) {
     const anchor = `checkpoint:${checkpoint.checkpointId}`;
     const anchorDigest = protocolDigest(anchor);
-    const attempt = await createAttempt({ tenantId: TENANT_ID, invocationId: ctx.invocationId });
+    const attempt = await createAttempt({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+      retryReasonCode: "checkpoint_restore",
+    });
     const bindingRow = (
       await db
         .select()
@@ -1251,7 +1256,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     )[0];
     if (!bindingRow) throw new Error("ExecutionBinding 缺失");
     const invocation = await readInvocationFacts(ctx.invocationId);
-    const sourceOperationKey = `command:a06-resume:${checkpoint.checkpointId}`;
+    const sourceOperationKey = `checkpoint-restore:${checkpoint.checkpointId}`;
     const accepted = await acceptExecutionPreparation({
       request: executionSourceRequestForStart({
         tenantId: TENANT_ID,

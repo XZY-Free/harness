@@ -672,6 +672,23 @@ describe("R07 真实 Environment 实例化与合规", () => {
     expect(acquired.ownership.environmentLeaseId).toBe(okLease.id);
   });
 
+  it("ENV-REG-01: Prepared 证据过期后同来源真实复验并续写新证据", async () => {
+    const fixture = await makeFixture();
+    const { revision } = await fixture.createManagedRevision();
+    const candidate = await fixture.seedCandidate(revision.id);
+    const base = new Date();
+    const lease = await fixture.provisionFor({ revision, candidate, now: base });
+    const expiredAt = new Date(base.getTime() + ENVIRONMENT_PREPARED_TTL_MS + 1_000);
+    const renewed = await fixture.provisionFor({ revision, candidate, now: expiredAt });
+    expect(renewed.id).toBe(lease.id);
+    expect(preparedEvidenceOf(renewed).instance.workerRef).toBe(
+      preparedEvidenceOf(lease).instance.workerRef,
+    );
+    expect(new Date(preparedEvidenceOf(renewed).expiresAt).getTime()).toBeGreaterThan(
+      expiredAt.getTime(),
+    );
+  });
+
   it("ENV-05: Default 已改为 R2，旧 Binding 冻结 R1 的 Redispatch 只实例化 R1；R1 不可用时 fail closed", async () => {
     const fixture = await makeFixture();
     const { definitionId, revision: r1 } = await fixture.createManagedRevision();

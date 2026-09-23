@@ -14,13 +14,19 @@ import {
   type AttemptPreparationClaim,
   claimAttemptPreparationInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
-import { lockInvocationRootIfExists } from "@/lib/executions/persistence/execution-ownership-store";
-import { getAuthorityDatabaseTime } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  getAuthorityDatabaseTime,
+  lockInvocationRootIfExists,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import {
   executionOwnershipTable,
   invocationAttemptTable,
+  invocationCommandTable,
+  runtimeEventIngressTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { and, desc, eq } from "drizzle-orm";
 
 export type ExecutionPreparationDecision =
@@ -57,8 +63,8 @@ export async function acceptExecutionPreparation(input: {
   };
   now?: Date;
 }): Promise<ExecutionPreparationDecision> {
-  const now = input.now ?? new Date();
   return db.transaction(async (tx): Promise<ExecutionPreparationDecision> => {
+    const now = input.now ?? (await getAuthorityDatabaseTime(tx));
     const invocation = await lockInvocationRootIfExists(
       tx,
       input.request.tenantId,
@@ -168,6 +174,140 @@ export async function acceptExecutionPreparation(input: {
       return { disposition: "claimed", stage: "activate", claim: claimed.claim, source };
     }
 
+    let suspensionPredecessor: ExecutionSourceSnapshot["predecessor"] = null;
+    if (input.request.sourceKind === "user_resume") {
+      if (input.request.recovery.kind !== "resume") {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 缺少恢复锚点");
+      }
+      const anchorDigest = input.request.recovery.anchorDigest;
+      const databaseNow = await getAuthorityDatabaseTime(tx);
+      if (
+        attempt.attemptState !== "suspended" ||
+        (attempt.resumeAnchorDigest !== null && attempt.resumeAnchorDigest !== anchorDigest)
+      ) {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 来源与当前暂停前驱不匹配");
+      }
+      const commandId = input.request.sourceOperationKey.startsWith("command:")
+        ? input.request.sourceOperationKey.slice("command:".length)
+        : "";
+      const [command] = commandId
+        ? await tx
+            .select()
+            .from(invocationCommandTable)
+            .where(
+              and(
+                eq(invocationCommandTable.tenantId, input.request.tenantId),
+                eq(invocationCommandTable.invocationId, input.request.invocationId),
+                eq(invocationCommandTable.id, commandId),
+              ),
+            )
+            .for("update")
+            .limit(1)
+        : [];
+      if (
+        !command ||
+        command.commandType !== "resume" ||
+        !["queued", "dispatched"].includes(command.commandState) ||
+        command.payloadDigest !== protocolDigest(command.payloadJson)
+      ) {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 命令不存在或已失效");
+      }
+      const healthyOwner = ownerships.find(
+        (owner) => owner.ownershipState === "active" && owner.leaseExpiresAt > databaseNow,
+      );
+      if (
+        healthyOwner &&
+        (command.targetOwnershipId !== healthyOwner.id ||
+          !command.targetSessionId ||
+          !sessions.some(
+            (session) =>
+              session.id === command.targetSessionId && session.ownershipId === healthyOwner.id,
+          ))
+      ) {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 来源与当前执行权不匹配");
+      }
+      const payload = command.payloadJson;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        const requestId = (payload as Record<string, unknown>).request_id;
+        if (requestId !== undefined) {
+          const [action] =
+            typeof requestId === "string"
+              ? await tx
+                  .select({ requestState: userActionRequestTable.requestState })
+                  .from(userActionRequestTable)
+                  .where(
+                    and(
+                      eq(userActionRequestTable.tenantId, input.request.tenantId),
+                      eq(userActionRequestTable.invocationId, input.request.invocationId),
+                      eq(userActionRequestTable.id, requestId),
+                    ),
+                  )
+                  .limit(1)
+              : [];
+          if (action?.requestState !== "resolved") {
+            throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 用户操作尚未完成");
+          }
+        }
+      }
+      const suspensionEvents = await tx
+        .select()
+        .from(runtimeEventIngressTable)
+        .where(
+          and(
+            eq(runtimeEventIngressTable.tenantId, input.request.tenantId),
+            eq(runtimeEventIngressTable.invocationId, input.request.invocationId),
+            eq(runtimeEventIngressTable.acceptedAttemptId, input.request.attemptId),
+            eq(runtimeEventIngressTable.candidateType, "execution.suspended"),
+          ),
+        )
+        .orderBy(desc(runtimeEventIngressTable.producerSequence));
+      const suspension = suspensionEvents.find((event) => {
+        const eventPayload = event.payloadJson;
+        return (
+          eventPayload !== null &&
+          typeof eventPayload === "object" &&
+          !Array.isArray(eventPayload) &&
+          (eventPayload as Record<string, unknown>).resumeAnchorDigest === anchorDigest
+        );
+      });
+      const targetSession = sessions.find((session) => session.id === command.targetSessionId);
+      if (
+        healthyOwner &&
+        targetSession?.intentType === "resume" &&
+        suspension?.acceptedSessionId !== targetSession.id
+      ) {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "当前恢复来源尚未完成新的暂停");
+      }
+      if (suspension) {
+        const owner = ownerships.find((row) => row.id === suspension.acceptedOwnershipId);
+        const session = sessions.find((row) => row.id === suspension.acceptedSessionId);
+        if (!owner || !session || session.ownershipId !== owner.id) {
+          throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 暂停前驱已失效");
+        }
+        suspensionPredecessor = {
+          attemptId: owner.attemptId,
+          ownershipId: owner.id,
+          leaseEpoch: String(owner.leaseEpoch),
+          sessionBindingId: session.id,
+        };
+      } else if (healthyOwner && command.targetSessionId) {
+        suspensionPredecessor = {
+          attemptId: healthyOwner.attemptId,
+          ownershipId: healthyOwner.id,
+          leaseEpoch: String(healthyOwner.leaseEpoch),
+          sessionBindingId: command.targetSessionId,
+        };
+      }
+      if (
+        (command.targetOwnershipId &&
+          command.targetOwnershipId !== suspensionPredecessor?.ownershipId) ||
+        (command.targetSessionId &&
+          command.targetSessionId !== suspensionPredecessor?.sessionBindingId)
+      ) {
+        throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 命令目标与暂停前驱不匹配");
+      }
+    }
+
     let source: ExecutionSourceSnapshot;
     if (
       attempt.preparationIntentKey === input.request.sourceOperationKey &&
@@ -184,7 +324,6 @@ export async function acceptExecutionPreparation(input: {
       if (
         attempt.preparationIntentKey !== null &&
         attempt.preparationIntentKey !== input.request.sourceOperationKey &&
-        attempt.attemptState !== "suspended" &&
         !sessions.some((session) => session.sourceOperationKey === attempt.preparationIntentKey)
       ) {
         throw new ExecutionAuthorityError(
@@ -192,21 +331,23 @@ export async function acceptExecutionPreparation(input: {
           "原准备来源尚未登记 Session，不得被另一来源覆盖",
         );
       }
-      const predecessorOwner = ownerships[0] ?? null;
+      const predecessorOwner =
+        input.request.sourceKind === "user_resume" ? null : (ownerships[0] ?? null);
       const predecessorSession = predecessorOwner
         ? (sessions.find((session) => session.ownershipId === predecessorOwner.id) ?? null)
         : null;
       source = {
         ...input.request,
         predecessor:
-          predecessorOwner && predecessorSession
+          suspensionPredecessor ??
+          (predecessorOwner && predecessorSession
             ? {
                 attemptId: predecessorOwner.attemptId,
                 ownershipId: predecessorOwner.id,
                 leaseEpoch: String(predecessorOwner.leaseEpoch),
                 sessionBindingId: predecessorSession.id,
               }
-            : null,
+            : null),
       };
     }
     const samePersistedSource =

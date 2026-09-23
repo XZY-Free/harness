@@ -47,6 +47,7 @@ import {
   activateSeededEnvironmentLease,
   seedPreparedEnvironmentLease,
 } from "@/lib/environment/test-support/seed-prepared-environment-lease";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
 import {
   claimAttemptPreparation,
@@ -79,19 +80,23 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import {
   createConfiguredHostedRuntimeApplicationService,
   resumeHarnessInvocation,
-  resumeRuntimeInvocation,
+  resumeRuntimeInvocation as resumeRuntimeInvocationProduction,
 } from "@/lib/runtime/application/runtime-resume";
 import {
   RuntimeStartTransportError,
   executionSourceRequestForStart,
   startRuntimeInvocation,
 } from "@/lib/runtime/application/runtime-start";
-import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
+import {
+  dispatchResumeCommandToRuntime,
+  setCommandGatewayHostedApplicationServiceForTest,
+} from "@/lib/runtime/command-dispatch-gateway";
 import {
   dockerInfo,
   inspectContainer,
@@ -152,6 +157,42 @@ const temporaryRoots: string[] = [];
 /** 外部 Runtime 对端（真实 HTTP server）；每个用例结束必须关闭，否则会泄漏端口。 */
 const externalRuntimeStubs: Array<{ dispose(): Promise<void> }> = [];
 let seededTenantId = "";
+
+async function seedTestResumeCommand(input: {
+  tenantId: string;
+  invocationId: string;
+  sourceOperationKey: string;
+}): Promise<void> {
+  if (!input.sourceOperationKey.startsWith("command:")) return;
+  const id = input.sourceOperationKey.slice("command:".length);
+  const payloadJson = { resume_source: "user_pause", resume_payload: { source: "user_pause" } };
+  await db
+    .insert(invocationCommandTable)
+    .values({
+      id,
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      commandType: "resume",
+      commandState: "queued",
+      idempotencyKey: `test-resume:${id}`,
+      payloadJson,
+      payloadDigest: protocolDigest(payloadJson),
+      requestedByType: "user",
+      requestedById: "test-user",
+    })
+    .onDuplicateKeyUpdate({ set: { id } });
+}
+
+async function resumeRuntimeInvocation(
+  input: Parameters<typeof resumeRuntimeInvocationProduction>[0],
+): ReturnType<typeof resumeRuntimeInvocationProduction> {
+  await seedTestResumeCommand({
+    tenantId: input.tenantId,
+    invocationId: input.invocation.id,
+    sourceOperationKey: input.sourceOperationKey,
+  });
+  return resumeRuntimeInvocationProduction(input);
+}
 
 beforeAll(async () => {
   dockerReady = await dockerInfo();
@@ -874,6 +915,39 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
       }),
     );
 
+    // 第一轮命令的 ACK 丢失后，原 Session 已成为历史且 Invocation 已终态。
+    // 只从真实原回执收口交付，不再解析已释放的资源或重启旧执行。
+    const firstCommandId = firstResumedSession?.sourceOperationKey?.replace(/^command:/, "");
+    if (!firstCommandId || !firstResumedSession?.transportAcknowledgement) {
+      throw new Error("第一轮 Resume 缺少持久命令或原 Transport 回执");
+    }
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "queued",
+        receiptJson: null,
+        completedAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+      })
+      .where(eq(invocationCommandTable.id, firstCommandId));
+    const historical = await dispatchResumeCommandToRuntime({
+      tenantId: ctx.tenantId,
+      commandId: firstCommandId,
+    });
+    expect(historical.dispatched).toBe(true);
+    expect((await getRuntimeSessionBindingsByInvocation(ctx.tenantId, invocation.id)).length).toBe(
+      3,
+    );
+    const [redelivered] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, firstCommandId))
+      .limit(1);
+    expect(redelivered?.commandState).toBe("acknowledged");
+    expect(redelivered?.receiptJson).toEqual(firstResumedSession.transportAcknowledgement);
+    expect(decisionViews).toHaveLength(3);
+
     const [turn] = await db.select().from(turnTable).where(eq(turnTable.id, ctx.turnId)).limit(1);
     expect(turn?.turnState).toBe("completed");
 
@@ -1435,6 +1509,12 @@ async function seedPreparedSlotLifecycle(input: {
     ownershipId: authority.ownership.id,
     recoveryAnchorDigest: input.recoveryAnchorDigest,
   });
+  // fixture 的 acquireTestRuntimeAuthority 不执行真实 Start 的 claim 消费；
+  // 此处显式模拟激活提交，否则下一来源会正确地看到健康旧 claim 并返回 busy。
+  await db
+    .update(invocationAttemptTable)
+    .set({ preparationClaimId: null, preparationLeaseExpiresAt: null })
+    .where(eq(invocationAttemptTable.id, input.attemptId));
   const prepared = await claimLeaseReprepareForTest({
     tenantId: input.tenantId,
     invocationId: input.invocationId,
@@ -1494,6 +1574,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       binding,
       attempt,
       sourceOperationKey: `invocation:${invocation.id}`,
+      preparationClaim: await attemptPreparationClaimForTest(attempt.id),
       ...intentTransport(stub),
     });
     expect(await countIngressEvents(invocation.id, "execution.started")).toBe(1);
@@ -1685,6 +1766,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       binding,
       attempt,
       sourceOperationKey: `invocation:${invocation.id}`,
+      preparationClaim: await attemptPreparationClaimForTest(attempt.id),
       ...intentTransport(stub),
     });
     const anchorDigest = protocolDigest({ anchor: "a05-t02" });
@@ -1769,6 +1851,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       binding,
       attempt,
       sourceOperationKey: `invocation:${invocation.id}`,
+      preparationClaim: await attemptPreparationClaimForTest(attempt.id),
       ...intentTransport(stub),
     });
     const anchorDigest = protocolDigest({ anchor: "a05-t03" });
@@ -1916,6 +1999,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       binding,
       attempt,
       sourceOperationKey: `invocation:${invocation.id}`,
+      preparationClaim: await attemptPreparationClaimForTest(attempt.id),
       ...intentTransport(stub),
     });
     const anchorDigest = protocolDigest({ anchor: "a05-t04-original" });
@@ -2044,6 +2128,10 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       workspaceBindingId: managed.workspace.id,
       recoveryAnchorDigest: anchorDigest,
     });
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationClaimId: null, preparationLeaseExpiresAt: null })
+      .where(eq(invocationAttemptTable.id, managed.attempt.id));
     const operationIdBefore = (lease.resourceManifest as Record<string, unknown>)
       .operationId as string;
     const intentKey = `resume:${managed.invocation.id}:${managed.attempt.id}`;
@@ -2130,6 +2218,10 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       workspaceBindingId: managed.workspace.id,
       recoveryAnchorDigest: anchorDigest,
     });
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationClaimId: null, preparationLeaseExpiresAt: null })
+      .where(eq(invocationAttemptTable.id, managed.attempt.id));
     const intentKey = `resume:${managed.invocation.id}:${managed.attempt.id}`;
     const intentDigest = protocolDigest({
       scope: "environment-reprepare",
@@ -2253,6 +2345,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       binding,
       attempt,
       sourceOperationKey: `invocation:${invocation.id}`,
+      preparationClaim: await attemptPreparationClaimForTest(attempt.id),
       ...intentTransport(stub),
     });
     const anchorDigest = protocolDigest({ anchor: "a05-t07" });
@@ -2274,7 +2367,27 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       },
     });
 
+    const unacceptedKey = `command:${randomUUID()}`;
+    const beforeUnaccepted = await readPreparationSlot(tenantId, attempt.id);
+    await expect(
+      acceptExecutionPreparation({
+        request: executionSourceRequestForStart({
+          tenantId,
+          invocation,
+          binding,
+          attempt,
+          sourceOperationKey: unacceptedKey,
+          intentType: "resume",
+          recovery: { kind: "resume", anchor: "a05-t07", anchorDigest },
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    expect(await readPreparationSlot(tenantId, attempt.id)).toEqual(beforeUnaccepted);
+
     const firstResumeKey = `command:${randomUUID()}`;
+    // 快来源已取得 O/S，但 execution.started 尚未到：Attempt 仍是 suspended。
+    // 慢来源不能借这个窗口把快来源的准备槽和后续 Lease 重新归属。
+    stub.deliverStarted = false;
     await resumeRuntimeInvocation({
       tenantId,
       invocation,
@@ -2294,6 +2407,52 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
     });
     expect(ownerBefore?.id).toBe(resumedSession.ownershipId);
     const startedBefore = await countIngressEvents(invocation.id, "execution.started");
+    const slotBefore = await readPreparationSlot(tenantId, attempt.id);
+    const lateCommandId = await db.transaction((tx) =>
+      createInvocationCommandInTransaction(tx, {
+        tenantId,
+        invocationId: invocation.id,
+        commandType: "resume",
+        idempotencyKey: `late-resume:${randomUUID()}`,
+        payloadJson: { resume_source: "user_pause", resume_payload: { source: "user_pause" } },
+        requestedByType: "user",
+        requestedById: "test-user",
+      }),
+    );
+    await expect(
+      acceptExecutionPreparation({
+        request: executionSourceRequestForStart({
+          tenantId,
+          invocation,
+          binding,
+          attempt,
+          sourceOperationKey: `command:${lateCommandId}`,
+          intentType: "resume",
+          recovery: { kind: "resume", anchor: "a05-t07", anchorDigest },
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    expect(await readPreparationSlot(tenantId, attempt.id)).toEqual(slotBefore);
+    const competingKey = `command:${randomUUID()}`;
+    await seedTestResumeCommand({
+      tenantId,
+      invocationId: invocation.id,
+      sourceOperationKey: competingKey,
+    });
+    await expect(
+      acceptExecutionPreparation({
+        request: executionSourceRequestForStart({
+          tenantId,
+          invocation,
+          binding,
+          attempt,
+          sourceOperationKey: competingKey,
+          intentType: "resume",
+          recovery: { kind: "resume", anchor: "a05-t07", anchorDigest },
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    expect(await readPreparationSlot(tenantId, attempt.id)).toEqual(slotBefore);
 
     // 另一个来源意图的恢复请求：当前健康 Owner 不属于它 → 拒绝，不改写执行权。
     await expect(
@@ -2302,7 +2461,7 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
         invocation,
         binding,
         attempt,
-        sourceOperationKey: `command:${randomUUID()}`,
+        sourceOperationKey: competingKey,
         anchor: "a05-t07",
         anchorDigest,
         ...intentTransport(stub),
@@ -2380,6 +2539,36 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
     expect(second.disposition).toBe("claimed");
     expect(second.attempt.id).toBe(fixture.attempt.id);
     expect(second.attempt.preparationCount).toBe(0);
+  });
+
+  it("N02-T1: Prepared 进度仍由健康 claim 排他，过期 nonce 不能续领", async () => {
+    const fixture = await seedClaimFixture();
+    const first = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    if (!first.claim) throw new Error("W1 未取得准备 claim");
+    const evidence = { kind: "prepared-exclusive", attemptId: fixture.attempt.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: fixture.attempt.id,
+        evidence,
+        digest: protocolDigest(evidence),
+        preparationClaim: first.claim!,
+      }),
+    );
+    const competing = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    expect(competing.disposition).toBe("busy");
+    expect(competing.attempt.preparationClaimId).toBe(first.claim.claimId);
+    expect(competing.attempt.preparationState).toBe("prepared");
+
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+    const stale = await claimAttemptPreparation(preparationInput(fixture, first.claim.claimId));
+    expect(stale.disposition).toBe("busy");
+    const successor = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    expect(successor.disposition).toBe("claimed");
+    expect(successor.attempt.preparationState).toBe("prepared");
+    expect(successor.attempt.preparationDigest).toBe(protocolDigest(evidence));
   });
 
   it("N02-T1/N02-T3/N02-T4: 旧 claim 的普通失败和成功迟到均不能污染已运行继任代际", async () => {

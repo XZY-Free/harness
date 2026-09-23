@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
+import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
 import {
   activateEnvironmentLeaseInTransaction,
   getEnvironmentLeaseById,
@@ -81,7 +82,10 @@ import {
 import { restoreFilesystemCheckpoint } from "@/lib/workspace/checkpoint-restore";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
-import { requestWorkspaceWriterRelease } from "@/lib/workspace/workspace-write-lock-queries";
+import {
+  getActiveLocksByInvocation,
+  requestWorkspaceWriterRelease,
+} from "@/lib/workspace/workspace-write-lock-queries";
 import {
   type ActivatedWorkspaceWriter,
   type PreparedWorkspaceCandidate,
@@ -174,7 +178,13 @@ export function executionSourceRequestForStart(
     intentType === "resume"
       ? input.sourceOperationKey.startsWith("agent-call:")
         ? "continuation"
-        : "user_resume"
+        : input.sourceOperationKey.startsWith("command:")
+          ? "user_resume"
+          : input.attempt.retryReasonCode === "supervisor_handoff"
+            ? "handoff"
+            : input.attempt.retryReasonCode
+              ? "redispatch"
+              : "user_resume"
       : input.attempt.retryReasonCode === "supervisor_handoff"
         ? "handoff"
         : input.attempt.retryReasonCode
@@ -276,7 +286,7 @@ async function activateWorkspaceWriterConvergingStaleRelease(input: {
 export async function startRuntimeInvocation(
   input: RuntimeStartInput,
 ): Promise<RuntimeStartResult> {
-  const now = input.now ?? new Date();
+  const now = input.now ?? (await getAuthorityDatabaseTime(db));
   // 纯输入冻结检查可在领取前失败；不得在此前解析 Endpoint/Environment/Workspace。
   if (
     input.expectedInputDigest !== undefined &&
@@ -302,7 +312,7 @@ export async function startRuntimeInvocation(
   const preparationDecision = await acceptExecutionPreparation({
     request: sourceRequest,
     ...(input.preparationClaim ? { claimId: input.preparationClaim.claimId } : {}),
-    now,
+    ...(input.now ? { now: input.now } : {}),
   });
   if (preparationDecision.disposition === "busy") throw new Error("AttemptPreparationBusy");
   const preparationClaim =
@@ -450,6 +460,70 @@ export async function startRuntimeInvocation(
      */
     restoredRoot: string;
   } | null = null;
+  if (preparedReplay && workspaceCandidate) {
+    const evidence = preparedReplay.preparationEvidence as Record<string, unknown> | null;
+    const workspace = evidence?.workspace as Record<string, unknown> | null;
+    if (
+      !evidence ||
+      preparedReplay.preparationDigest !== protocolDigest(evidence) ||
+      evidence.kind !== "candidate-prepared" ||
+      evidence.invocationId !== input.invocation.id ||
+      evidence.attemptId !== input.attempt.id ||
+      evidence.runtimeRevisionId !== input.binding.runtimeRevisionId ||
+      !workspace ||
+      workspace.resourceId !== workspaceCandidate.preparation.resourceId ||
+      workspace.operationId !== workspaceCandidate.operationId ||
+      workspace.bindingId !== workspaceBinding.id
+    ) {
+      throw new Error("WorkspaceNotReady");
+    }
+    if (
+      input.recovery?.kind === "resume" &&
+      workspaceBinding.continuityMode === "CHECKPOINT_RESTORABLE"
+    ) {
+      const saved = workspace.restoration as Record<string, unknown> | null;
+      if (
+        !saved ||
+        !input.recovery.checkpointId ||
+        !input.workspace ||
+        !input.binding.environmentDefinitionRevisionId ||
+        saved.checkpointId !== input.recovery.checkpointId ||
+        saved.restoredRoot !== workspaceCandidate.preparation.candidateRoot ||
+        typeof saved.manifestDigest !== "string" ||
+        typeof saved.replayFromProducerSequence !== "number"
+      ) {
+        throw new Error("CheckpointStale");
+      }
+      // 相同 operation 的 restore 会核对已发布目录和 manifest 的真实字节；
+      // 目标已被活跃执行改动时会拒绝，不重新覆盖该目录。
+      const restored = await restoreFilesystemCheckpoint({
+        tenantId: input.tenantId,
+        checkpointId: input.recovery.checkpointId,
+        destination: workspaceCandidate.preparation.candidateRoot,
+        storage: input.workspace.snapshotStorage,
+        backend: input.workspace.backend,
+        expected: {
+          invocationId: input.invocation.id,
+          workspaceBindingId: workspaceBinding.id,
+          environmentDefinitionRevisionId: input.binding.environmentDefinitionRevisionId,
+          recoveryVersion: input.invocation.recoveryVersion,
+        },
+      });
+      if (
+        restored.manifestDigest !== saved.manifestDigest ||
+        restored.replayFromProducerSequence !== saved.replayFromProducerSequence ||
+        restored.destination !== saved.restoredRoot
+      ) {
+        throw new Error("CheckpointIntegrityFailed");
+      }
+      restoration = {
+        checkpointId: restored.checkpointId,
+        manifestDigest: restored.manifestDigest,
+        replayFromProducerSequence: restored.replayFromProducerSequence,
+        restoredRoot: restored.destination,
+      };
+    }
+  }
   if (
     preparationDecision.stage === "prepare" &&
     input.recovery?.kind === "resume" &&
@@ -528,6 +602,34 @@ export async function startRuntimeInvocation(
         now,
       });
     }));
+  if (preparedReplay && input.environmentLeaseId) {
+    const revisionId = input.binding.environmentDefinitionRevisionId;
+    const lease = await getEnvironmentLeaseById(input.tenantId, input.environmentLeaseId);
+    if (
+      !revisionId ||
+      !lease ||
+      lease.readinessState !== "prepared" ||
+      !input.environmentProvisioner
+    ) {
+      throw new Error("EnvironmentRevisionMismatch");
+    }
+    const revision = await getEnvironmentRevisionById(input.tenantId, revisionId);
+    if (!revision) throw new Error("EnvironmentRevisionMismatch");
+    const verified = await input.environmentProvisioner.provision({
+      tenantId: input.tenantId,
+      invocationId: input.invocation.id,
+      attemptId: input.attempt.id,
+      revisionId,
+      revision,
+      workspaceBindingId: workspaceBinding.id,
+      workspaceRoot: input.workspace?.root ?? null,
+      recoveryAnchorDigest: input.recovery?.kind === "resume" ? input.recovery.anchorDigest : null,
+      preparationClaim,
+    });
+    if (verified.id !== input.environmentLeaseId || verified.readinessState !== "prepared") {
+      throw new Error("EnvironmentComplianceFailed");
+    }
+  }
   // A05：本次取得执行权所依据的恢复水位。必须在 **Acquire 之前**确定：`prepareChecks`
   // 会用它与 Lease 上的 Prepared 证据比对，写死 `null` 会让正式 Resume 被判成
   // "恢复 Anchor 已变化"（同一份事实两套判据）。
@@ -867,6 +969,7 @@ export async function startRuntimeInvocation(
       input,
       ownership,
       session.id,
+      preparationClaim,
     ).catch(() => false);
     // 同源并发的另一投递可能已经把同一 O/S/Lease 成功推进到 dispatching。
     // 失败者只有在同一事务内把仍处于 activating 的代际收口后，才有权撤销物理资源；
@@ -890,6 +993,24 @@ export async function startRuntimeInvocation(
           ? { resolveHost: async () => workspaceCandidate.backend.host }
           : undefined,
       }).catch(() => undefined);
+    } else if (workspaceCandidate) {
+      const locks = await getActiveLocksByInvocation(input.tenantId, input.invocation.id);
+      for (const lock of locks) {
+        if (lock.holderOwnershipId !== ownership.id || lock.holderAttemptId !== preparedAttempt.id)
+          continue;
+        await requestWorkspaceWriterRelease({
+          tenantId: input.tenantId,
+          lockId: lock.id,
+          ownershipId: ownership.id,
+          reasonCode: "activation_failed",
+        }).catch(() => undefined);
+        await runWorkspaceWriterRelease({
+          tenantId: input.tenantId,
+          lockId: lock.id,
+          leaseOwner: `activation-failure:${ownership.id}`,
+          deps: { resolveHost: async () => workspaceCandidate.backend.host },
+        }).catch(() => undefined);
+      }
     }
     if (input.environmentLeaseId) {
       // 真实资源清理优先：控制面 released 必须对应真实释放回执。
@@ -1037,6 +1158,9 @@ async function dispatchRuntimeStartTransport(inputParams: {
     now,
   });
   const requestedDispatchClaim = input.sessionDispatchClaim ?? null;
+  if (requestedDispatchClaim && !requestedDispatchClaim.claimToken) {
+    throw new Error("SessionDispatchClaimSuperseded");
+  }
   if (requestedDispatchClaim && requestedDispatchClaim.sessionBindingId !== session.id) {
     throw new Error("SessionDispatchClaimSuperseded");
   }
@@ -1100,7 +1224,9 @@ async function dispatchRuntimeStartTransport(inputParams: {
       leaseEpoch: ownership.leaseEpoch,
       claimToken: requestedDispatchClaim?.claimToken ?? null,
     };
-    let claimedSession = await lockClaimedSessionInTransaction(tx, identity);
+    let claimedSession = await lockClaimedSessionInTransaction(tx, identity, {
+      allowUnclaimedRead: !requestedDispatchClaim,
+    });
     if (requestedDispatchClaim) {
       if (
         claimedSession.dispatchLeaseExpiresAt === null ||
@@ -1274,6 +1400,7 @@ async function claimActivationFailureCompensation(
   input: RuntimeStartInput,
   ownership: ExecutionOwnership,
   sessionBindingId: string,
+  preparationClaim: AttemptPreparationClaim,
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     const [invocation] = await tx
@@ -1289,7 +1416,7 @@ async function claimActivationFailureCompensation(
       .limit(1);
     if (!invocation) return false;
     const [attempt] = await tx
-      .select({ id: invocationAttemptTable.id })
+      .select()
       .from(invocationAttemptTable)
       .where(
         and(
@@ -1301,6 +1428,15 @@ async function claimActivationFailureCompensation(
       .for("update")
       .limit(1);
     if (!attempt) return false;
+    const now = await getAuthorityDatabaseTime(tx);
+    if (
+      attempt.preparationState !== "prepared" ||
+      attempt.preparationClaimId !== preparationClaim.claimId ||
+      attempt.preparationIntentKey !== preparationClaim.intentKey ||
+      attempt.preparationRequestDigest !== preparationClaim.requestDigest ||
+      (attempt.preparationLeaseExpiresAt?.getTime() ?? 0) <= now.getTime()
+    )
+      return false;
     const [current] = await tx
       .select()
       .from(executionOwnershipTable)
@@ -1326,7 +1462,6 @@ async function claimActivationFailureCompensation(
       tenantId: input.tenantId,
       id: sessionBindingId,
     });
-    const now = await getAuthorityDatabaseTime(tx);
     await tx
       .update(executionOwnershipTable)
       .set({
