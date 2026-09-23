@@ -57,7 +57,9 @@ import type { WorkspaceWriterGrant, WorkspaceWriterIdentity } from "@/lib/worksp
 import {
   WorkspaceWriterNotFencedError,
   continuousWriterArgs,
+  createRemoteWorkspaceHost,
   createWorkspaceHostBroker,
+  listenWorkspaceHostRpc,
 } from "@/lib/workspace/workspace-host-server";
 import { workspaceWriterActivationOperationId } from "@/lib/workspace/workspace-writer";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1234,6 +1236,73 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     ).rejects.toThrow("CheckpointIntentRetired");
     expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
   });
+
+  it("R5-b 跨进程 RPC 延迟 freeze：另一进程 release 先提交后旧请求不得复活屏障", async () => {
+    const fixture = await setup();
+    const grant = await activate(fixture);
+    const barrierRoot = await mkdtemp(path.join(tmpdir(), "r5-cross-process-rpc-"));
+    roots.push(barrierRoot);
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.join(process.cwd(), "lib/workspace/test-support/delayed-freeze-rpc-child.mts"),
+        fixture.hostRoot,
+        fixture.writerRoot,
+        barrierRoot,
+      ],
+      { cwd: process.cwd(), stdio: "ignore" },
+    );
+    childHandles.push(child);
+    const readyPath = path.join(barrierRoot, "ready");
+    await waitForFileExists(readyPath);
+    expect(child.exitCode).toBeNull();
+    const delayedRemote = createRemoteWorkspaceHost(await readFile(readyPath, "utf8"));
+    const intentId = "00000000-0000-4000-8000-0000000000fa";
+    const delayed = delayedRemote.freeze({
+      grant,
+      checkpointIntentId: intentId,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    await waitForFileExists(path.join(barrierRoot, "entered"));
+    const lockPath = scopeLockFilePath(fixture.grantsRoot);
+    const lockIdentity = scopeLockIdentity(lockPath);
+
+    const releaseBroker = createWorkspaceHostBroker({
+      root: fixture.hostRoot,
+      managedRoot: fixture.writerRoot,
+    });
+    const releaseRpc = await listenWorkspaceHostRpc({ broker: releaseBroker });
+    try {
+      const releaseRemote = createRemoteWorkspaceHost(releaseRpc.url);
+      await releaseRemote.releaseFreeze({
+        checkpointIntentId: intentId,
+        scopeDigest: grant.scopeDigest,
+        writerGeneration: grant.writerGeneration,
+        anchorDigest: ANCHOR_DIGEST,
+        frozenAt: new Date(0).toISOString(),
+      });
+      await writeFile(path.join(barrierRoot, "release"), "release", "utf8");
+      await expect(delayed).rejects.toThrow("CheckpointIntentRetired");
+      expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
+      const record = JSON.parse(
+        await readFile(
+          path.join(
+            fixture.controlRoot,
+            "safe-point-intents",
+            scopeComponent(grant.scopeDigest),
+            `${intentId}.json`,
+          ),
+          "utf8",
+        ),
+      ) as { state: string };
+      expect(record.state).toBe("released");
+      expect(scopeLockIdentity(lockPath).inode).toBe(lockIdentity.inode);
+    } finally {
+      await releaseRpc.close();
+    }
+  }, 40_000);
 
   it("R5-d 删屏障后回执前崩溃：releasing 可由重启 Broker 收敛为 released", async () => {
     let failOnce = true;
