@@ -14,7 +14,7 @@
  * - 组合 ThreadHeader（顶部固定）+ ThreadTimeline（时间线）+ ThreadInput（输入框，内嵌运行控制与待办队列）。
  * - 加载 Thread 详情（useThreadDetail）+ Item 投影（useThread）。
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
- * - 会话加载错误展示（visibleError → ErrorCard）；Turn 执行失败由时间线内的 Harness 答复承接。
+ * - 会话同步错误只提示连接状态，保留已加载的时间线与输入区；Turn 执行失败由时间线内的 Harness 答复承接。
  * - 输入区集成助手单次调用选择、模型选择；不绑定主 Agent，不做 handoff。
  * - Agent 与 Runtime Authority §35：不再绑定主 Agent（primary_agent_id 已移除），无 Agent 时输入区照常可用。
  * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 ThreadInput 内部，
@@ -200,45 +200,6 @@ export function ThreadPage({
     </div>
   );
 
-  // 错误状态
-  if (visibleError || error) {
-    const displayError = visibleError ?? error;
-    const errorCard = (
-      <div className="flex h-full flex-col items-center justify-center gap-4 px-4">
-        <div
-          role="alert"
-          className="rounded-lg border border-destructive/40 bg-destructive/5 px-6 py-4 text-center"
-        >
-          <h2 className="font-semibold text-base text-destructive">
-            {displayError?.title ?? "加载失败"}
-          </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {displayError?.description ?? "无法加载会话"}
-          </p>
-          {displayError?.retryable && (
-            <button
-              type="button"
-              onClick={() => void resnapshot()}
-              aria-label="重新加载会话"
-              className="mt-4 rounded-sm bg-primary px-4 py-2 text-sm text-primary-foreground transition hover:bg-[var(--accent-hover)]"
-            >
-              重试
-            </button>
-          )}
-        </div>
-      </div>
-    );
-    if (variant === "desktop") {
-      return (
-        <div className="flex h-full flex-col">
-          {desktopTitlebar}
-          <div className="min-h-0 flex-1">{errorCard}</div>
-        </div>
-      );
-    }
-    return errorCard;
-  }
-
   // 加载状态（W4-1）。
   // 仅「首次加载」（无任何已渲染内容）进入稳定骨架：与正常页面同高的顶部标题区、
   // 消息区局部加载反馈、底部 ThreadInput（"助手"与平台默认模型仍可见）。
@@ -247,7 +208,27 @@ export function ThreadPage({
   // 已有 items 或 thread 时的 resnapshot（如 item.created/item.updated 触发的后台刷新）
   // 必须保留已渲染内容，不走骨架。
   const hasRenderedContent = items.length > 0 || thread !== null;
-  const isFirstLoad = !hasRenderedContent && (snapshotStatus === "loading" || loading);
+  const displayError = visibleError ?? error;
+  const isFirstLoad =
+    !hasRenderedContent && !displayError && (snapshotStatus === "loading" || loading);
+  const connectionNotice = displayError && (
+    <div role="alert" className="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-sm">
+      <div className="composer-track flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium text-foreground">{displayError.title}</span>
+        <span className="text-muted-foreground">{displayError.description}</span>
+        {displayError.retryable && (
+          <button
+            type="button"
+            aria-label="重新连接"
+            onClick={() => void Promise.all([resnapshot(), refresh()])}
+            className="ml-auto shrink-0 text-foreground underline-offset-4 hover:underline"
+          >
+            重新连接
+          </button>
+        )}
+      </div>
+    </div>
+  );
 
   // 首次加载时消息区的局部加载反馈（仅占消息区，不替换整页）。
   const messageAreaLoading = (
@@ -328,6 +309,7 @@ export function ThreadPage({
       {webHeader}
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {connectionNotice}
           {isFirstLoad ? (
             messageAreaLoading
           ) : (
@@ -377,6 +359,7 @@ export function ThreadPage({
         <div className="flex min-h-0 flex-1">
           {/* 左侧：时间线 + 输入区（输入区内嵌运行控制与待办队列） */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {connectionNotice}
             {isFirstLoad ? (
               messageAreaLoading
             ) : (

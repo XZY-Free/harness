@@ -17,7 +17,7 @@
  * - 网络中断 → 指数退避（500ms / 1s / 2s / 4s / 8s，最大 8s），最多 5 次后 failed。
  * - EVENT_CURSOR_EXPIRED → 立即触发 onCursorExpired，不自动重连。
  * - 409 其他错误 → failed。
- * - 4xx（除 409）→ failed（不自动重试）。
+ * - 429（SSE 配额暂满）→ 遵循 Retry-After 重试；其他 4xx（除 409）→ failed。
  * - 5xx → 按网络中断处理（自动重试）。
  */
 import { apiPath } from "@/lib/api-fetch";
@@ -185,6 +185,16 @@ export function createSSEClient(
         return;
       }
 
+      if (response.status === 429) {
+        const retryAfterSeconds = Number(response.headers.get("retry-after"));
+        scheduleRetry(
+          Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? Math.min(retryAfterSeconds * 1000, 60_000)
+            : 0,
+        );
+        return;
+      }
+
       if (response.status >= 500) {
         scheduleRetry();
         return;
@@ -309,7 +319,7 @@ export function createSSEClient(
     }
   }
 
-  function scheduleRetry(): void {
+  function scheduleRetry(minDelayMs = 0): void {
     if (closed) return;
     // 连接结束 / 进入重试：健康计时器不再有意义，必须清理，避免泄漏。
     clearHealthyResetTimer();
@@ -319,7 +329,7 @@ export function createSSEClient(
     }
     retryCount += 1;
     callbacks.onReconnecting(retryCount);
-    const backoff = Math.min(baseBackoffMs * 2 ** (retryCount - 1), 8000);
+    const backoff = Math.max(Math.min(baseBackoffMs * 2 ** (retryCount - 1), 8000), minDelayMs);
     retryTimer = setTimeout(() => {
       // 触发后清空句柄，避免 close 时 clearTimeout 悬空句柄。
       retryTimer = null;

@@ -116,6 +116,7 @@ function proxyRequest(
   const incomingUrl = new URL(request.url ?? "/", "http://127.0.0.1");
   const basePath = upstream.pathname.replace(/\/$/, "");
   const transport = upstream.protocol === "https:" ? requestHttps : requestHttp;
+  let upstreamResponse: IncomingMessage | null = null;
   const proxied = transport(
     {
       protocol: upstream.protocol,
@@ -134,15 +135,31 @@ function proxyRequest(
         "x-snowharness-desktop-origin": desktopRendererOrigin,
       },
     },
-    (upstreamResponse) => {
+    (received) => {
+      upstreamResponse = received;
+      if (response.destroyed) {
+        received.destroy();
+        return;
+      }
       response.writeHead(
-        upstreamResponse.statusCode ?? 502,
-        proxyResponseHeaders(upstreamResponse.headers, basePath),
+        received.statusCode ?? 502,
+        proxyResponseHeaders(received.headers, basePath),
       );
-      upstreamResponse.pipe(response);
+      received.pipe(response);
     },
   );
+  // pipe 只会转发数据与正常结束；页面关闭或重建 SSE 时，需要显式取消上游订阅。
+  // 否则服务端会一直保留旧连接，最终触发每会话 SSE 并发上限。
+  const abortUpstream = () => {
+    upstreamResponse?.destroy();
+    proxied.destroy();
+  };
+  request.on("aborted", abortUpstream);
+  response.on("close", () => {
+    if (!response.writableEnded) abortUpstream();
+  });
   proxied.on("error", () => {
+    if (response.destroyed || response.writableEnded) return;
     if (!response.headersSent) {
       response.writeHead(502, { "content-type": "application/json; charset=utf-8" });
     }

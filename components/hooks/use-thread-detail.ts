@@ -117,6 +117,7 @@ export function useThreadDetail(threadId: string): UseThreadDetailResult {
         setThread(threadData.thread);
         setActiveGoal(threadData.active_goal);
         setLatestTurn(threadData.latest_turn);
+        setError(null);
 
         // 处理 Turn 列表响应（失败不阻断 Thread 详情）
         if (turnsResp.ok) {

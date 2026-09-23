@@ -287,3 +287,40 @@ describe("ThreadPage 首次加载稳定骨架（不整页替换）", () => {
     expect(inputFrame.disabled).toBe(true);
   });
 });
+
+describe("ThreadPage 会话同步失败", () => {
+  it.each(["web", "desktop"] as const)(
+    "%s 保留已加载的消息与输入框，并提供轻量重连入口",
+    (surface) => {
+      const resnapshot = vi.fn();
+      mocks.useThread.mockReturnValue({
+        items: [{ id: "saved-reply", item_type: "assistant_message", item_state: "completed" }],
+        streamStatus: "failed",
+        reconnectAttempt: 5,
+        reconnectMax: 5,
+        snapshotStatus: "ready",
+        visibleError: {
+          code: "STREAM_BACKPRESSURE",
+          title: "会话同步中断",
+          description: "连接暂时中断，请重新连接。",
+          retryable: true,
+          recoveryAction: "reconnect",
+          requestId: null,
+        },
+        lastAppliedEventSequence: 38,
+        resnapshot,
+      });
+
+      render(<ThreadPage threadId="t-1" variant={surface} />);
+
+      expect(screen.getByTestId("thread-timeline").dataset.itemIds).toBe("saved-reply");
+      expect(screen.getByTestId("thread-input")).toBeTruthy();
+      expect((screen.getByTestId("thread-input-frame") as HTMLFieldSetElement).disabled).toBe(
+        false,
+      );
+      expect(screen.getByRole("alert").textContent).toContain("会话同步中断");
+      fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+      expect(resnapshot).toHaveBeenCalledTimes(1);
+    },
+  );
+});

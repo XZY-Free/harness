@@ -78,8 +78,8 @@ const ERROR_MAPPINGS: Readonly<Record<string, ErrorMapping>> = {
     recoveryAction: "reload_page",
   },
   STREAM_BACKPRESSURE: {
-    title: "网络较慢",
-    description: "数据量较大，正在重新建立连接。",
+    title: "会话同步中断",
+    description: "连接暂时中断，已显示的消息仍可查看。",
     recoveryAction: "reconnect",
   },
 

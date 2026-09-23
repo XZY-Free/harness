@@ -92,6 +92,40 @@ describe("createSSEClient transient events", () => {
 });
 
 describe("createSSEClient retry budget", () => {
+  it("SSE 配额暂满时按 Retry-After 重连，不直接终止会话", async () => {
+    vi.useFakeTimers();
+    try {
+      const long = controllableBody();
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { code: "STREAM_BACKPRESSURE", retryable: true } }),
+            { status: 429, headers: { "Retry-After": "1" } },
+          ),
+        )
+        .mockResolvedValueOnce(new Response(long.body, { status: 200 }));
+      const callbacks = makeCallbacks();
+      const handle = createSSEClient(
+        { threadId: "thread-1", getLastEventId: () => null, fetchImpl, baseBackoffMs: 100 },
+        callbacks,
+      );
+
+      handle.start();
+      await flush();
+      expect(callbacks.onFailed).not.toHaveBeenCalled();
+      expect(callbacks.onReconnecting).toHaveBeenCalledWith(1);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(callbacks.onOpen).toHaveBeenCalledTimes(1);
+      handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("连续立即结束的 200 SSE 流不能无限重连：受 maxRetries 限制并最终只失败一次", async () => {
     vi.useFakeTimers();
     try {

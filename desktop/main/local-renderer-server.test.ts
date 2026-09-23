@@ -120,6 +120,43 @@ describe("startLocalRendererServer", () => {
     expect(response.headers.get("set-cookie")).not.toContain("Path=/snowharness");
   });
 
+  it("页面取消 SSE 订阅时关闭上游连接", async () => {
+    let upstreamClosed!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      upstreamClosed = resolve;
+    });
+    const upstream = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write("event: ping\ndata: ok\n\n");
+      response.on("close", upstreamClosed);
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    cleanups.push(async () => {
+      upstream.closeAllConnections();
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    });
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("upstream 未监听 TCP 端口");
+    const server = await startLocalRendererServer({
+      rendererDir: await createRendererFiles(),
+      serverOrigin: `http://127.0.0.1:${address.port}`,
+    });
+    cleanups.push(() => server.close());
+
+    const controller = new AbortController();
+    const response = await fetch(`${server.origin}/api/v1/threads/test/events`, {
+      signal: controller.signal,
+    });
+    await response.body?.getReader().read();
+    controller.abort();
+
+    const outcome = await Promise.race([
+      closed.then(() => "closed"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("still_open"), 300)),
+    ]);
+    expect(outcome).toBe("closed");
+  });
+
   it("不将任意本地路径作为远端代理", async () => {
     const server = await startLocalRendererServer({
       rendererDir: await createRendererFiles(),
