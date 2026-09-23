@@ -523,6 +523,44 @@ describe("RuntimeEventIngress database fencing", () => {
     ).toEqual(mappingBefore);
   });
 
+  it("INGRESS-13: 终态事件精确历史重放返回原回执，不重开 Invocation 或重复映射", async () => {
+    const runtime = await createActiveRuntime();
+    const terminal = {
+      eventId: randomUUID(),
+      producerSequence: "2",
+      type: "execution.completed" as const,
+      schemaVersion: 1,
+      payload: { finish_reason: "execution.completed" },
+    };
+    const first = await ingressBatch(runtime, [terminal]);
+    const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const countersBefore = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const mappingBefore = await readProductMappingCounts(
+      runtime.fixture.tenantId,
+      runtime.fixture.threadId,
+    );
+    const replay = await ingressBatch(runtime, [terminal]);
+    expect(replay.replayedEventIds).toEqual([terminal.eventId]);
+    expect(replay.receipts).toEqual(first.receipts);
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      ledgerBefore,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(countersBefore);
+    expect(
+      await readProductMappingCounts(runtime.fixture.tenantId, runtime.fixture.threadId),
+    ).toEqual(mappingBefore);
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, runtime.fixture.invocation.id));
+    expect(invocation?.executionState).toBe("completed");
+  });
+
   it("REPLAY-05: 批内重复 ID/sequence、合法新事件混一个冲突事件都必须整批回滚", async () => {
     const runtime = await createActiveRuntime();
     const sharedEventId = randomUUID();
