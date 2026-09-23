@@ -27,6 +27,7 @@ import {
   updateRuntimeSessionDispatchInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { ensureTestRuntimeRevision } from "@/lib/runtime/test-support/seed-test-runtime-revision";
 import { and, eq } from "drizzle-orm";
 
 type CreateRuntimeSessionBindingFixtureInput = Omit<
@@ -40,6 +41,7 @@ type CreateRuntimeSessionBindingFixtureInput = Omit<
 export async function createRuntimeSessionBindingForTest(
   input: CreateRuntimeSessionBindingFixtureInput,
 ): Promise<RuntimeSessionBinding> {
+  await ensureTestRuntimeRevision(input.tenantId, input.runtimeRevisionId);
   return db.transaction(async (tx) => {
     if (!(await lockInvocationRootIfExists(tx, input.tenantId, input.invocationId))) {
       throw new Error("测试 Session 的 Invocation 不存在");

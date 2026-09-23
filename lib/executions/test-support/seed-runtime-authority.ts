@@ -27,7 +27,6 @@ import {
   invocationTable,
 } from "@/lib/persistence/schema/executions";
 import { type JobType, jobTable } from "@/lib/persistence/schema/job";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import {
   MAX_TRAFFIC_WEIGHT,
@@ -35,6 +34,7 @@ import {
 } from "@/lib/routes/application/deployment-route-service";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { ensureTestRuntimeRevision } from "@/lib/runtime/test-support/seed-test-runtime-revision";
 import {
   createRuntimeSessionBindingForTest,
   sourceIntentForFixture,
@@ -243,46 +243,7 @@ export async function seedPreparedRuntimeAttempt(
   const workspace =
     input.workspaceBinding ?? (await createNoPlatformWorkspaceBinding(tenantId, "test-service"));
   const runtimeRevisionId = input.runtimeRevisionId ?? TEST_RUNTIME_REVISION_ID;
-  const [existingRevision] = await db
-    .select({ tenantId: runtimeRevisionTable.tenantId })
-    .from(runtimeRevisionTable)
-    .where(eq(runtimeRevisionTable.id, runtimeRevisionId))
-    .limit(1);
-  if (existingRevision && existingRevision.tenantId !== tenantId) {
-    throw new Error("测试 RuntimeRevision 属于另一 Tenant");
-  }
-  if (!existingRevision) {
-    const runtimeId = randomUUID();
-    await db.insert(runtimeTable).values({
-      id: runtimeId,
-      tenantId,
-      runtimeKey: `fixture-${runtimeRevisionId}`,
-      displayName: "测试 Runtime",
-      runtimeKind: "hosted",
-      ownerUserId: "test-user",
-      lifecycleState: "enabled",
-    });
-    await db.insert(runtimeRevisionTable).values({
-      id: runtimeRevisionId,
-      tenantId,
-      runtimeId,
-      revisionNo: 1,
-      protocolType: "harness_runtime_protocol",
-      protocolVersion: 3,
-      protocolContractDigest: protocolDigest({ contract: "test" }),
-      runtimeEvidenceKind: "hosted_artifact",
-      runtimeTargetDigest: protocolDigest({ target: runtimeRevisionId }),
-      endpointRef: "https://runtime.example.invalid",
-      runtimeArtifactRef: "oci://registry.example.invalid/runtime:test",
-      runtimeCapabilitiesJson: ["event_stream"],
-      identityMode: "managed",
-      networkZone: "internal",
-      configHash: protocolDigest({ config: runtimeRevisionId }),
-      createdBy: "test-service",
-      revisionState: "published",
-      publishedAt: new Date(),
-    });
-  }
+  await ensureTestRuntimeRevision(tenantId, runtimeRevisionId);
   const binding = await createExecutionBinding({
     tenantId,
     invocationId: invocation.id,
