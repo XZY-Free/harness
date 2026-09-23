@@ -289,6 +289,56 @@ describe("RuntimeEventIngress database fencing", () => {
     ).rejects.toBeInstanceOf(IngressAuthorityMismatchError);
   });
 
+  it("INGRESS-02: Callback 与 Takeover 并发时旧事件只可能先提交或被拒，不能跨换代写入", async () => {
+    const runtime = await createActiveRuntime();
+    const event = progressEvent("2");
+    const [callback, takeover] = await Promise.allSettled([
+      ingressBatch(runtime, [event]),
+      replaceCurrentOwner(runtime),
+    ]);
+    expect(takeover.status).toBe("fulfilled");
+    if (takeover.status !== "fulfilled") return;
+    const current = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, takeover.value.ownership.id));
+    expect(current[0]?.ownershipState).toBe("active");
+    expect(current[0]?.leaseEpoch).toBe(runtime.acquired.ownership.leaseEpoch + 1);
+
+    const ledger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const committed = ledger.filter((row) => row.producerEventId === event.eventId);
+    if (callback.status === "fulfilled") {
+      expect(committed).toHaveLength(1);
+      expect(committed[0]?.acceptedOwnershipId).toBe(runtime.acquired.ownership.id);
+      expect(committed[0]?.producerSequence).toBe(2);
+    } else {
+      expect(["OwnershipExpired", "NotCurrentExecutor"]).toContain(callback.reason?.code);
+      expect(committed).toHaveLength(0);
+    }
+    const beforeLate = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    await expect(
+      ingressBatch(runtime, [progressEvent(callback.status === "fulfilled" ? "3" : "2")]),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      beforeLate,
+    );
+
+    // 另一合法提交顺序：Callback 先完整提交，随后 Takeover 不得抹去已接纳事实。
+    const acceptedFirst = await createActiveRuntime();
+    const firstEvent = progressEvent("2");
+    await ingressBatch(acceptedFirst, [firstEvent]);
+    const successor = await replaceCurrentOwner(acceptedFirst);
+    expect(successor.ownership.leaseEpoch).toBe(acceptedFirst.acquired.ownership.leaseEpoch + 1);
+    const acceptedLedger = await readLedger(
+      acceptedFirst.fixture.tenantId,
+      acceptedFirst.fixture.invocation.id,
+    );
+    expect(acceptedLedger.find((row) => row.producerEventId === firstEvent.eventId)).toMatchObject({
+      acceptedOwnershipId: acceptedFirst.acquired.ownership.id,
+      producerSequence: 2,
+    });
+  });
+
   it("INGRESS-05/INGRESS-08/INGRESS-09: exact replay returns the original receipt, but payload conflicts and gaps fail closed", async () => {
     const runtime = await createActiveRuntime();
     const event = progressEvent("2");
