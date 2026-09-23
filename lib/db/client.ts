@@ -39,6 +39,11 @@ if (!globalForDb.__snowMysqlPool) {
 
 export const db = drizzle(pool, { schema, mode: "default" });
 
+/** 迁移的 MySQL 命名锁与 DDL 必须共用同一条物理连接。 */
+export async function openMigrationConnection(): Promise<mysql.PoolConnection> {
+  return pool.getConnection();
+}
+
 /** 关闭当前测试文件的业务连接池，避免 Vitest 文件隔离造成连接池累积。 */
 export async function closeDbPool(): Promise<void> {
   const currentPool = globalForDb.__snowMysqlPool;

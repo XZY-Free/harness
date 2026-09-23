@@ -1,7 +1,8 @@
 import { logger } from "@/lib/logger";
-import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
-import { db } from "./client";
+import type { RowDataPacket } from "mysql2";
+import { openMigrationConnection } from "./client";
 
 /**
  * 应用 drizzle 迁移（幂等）。由 instrumentation 在启动时调用，确保表结构就绪。
@@ -12,27 +13,28 @@ import { db } from "./client";
  * 超时仍失败 → throw(fail-closed,启动失败优于表结构不一致)。
  */
 export async function runMigrations(): Promise<void> {
+  const connection = await openMigrationConnection();
   const maxWaitMs = 120_000;
   const deadline = Date.now() + maxWaitMs;
-  let got = 0;
-  while (Date.now() < deadline && got !== 1) {
-    const lockResult = await db
-      .execute(sql`SELECT GET_LOCK('snow_migrate', 10) AS got`)
-      .catch(() => null);
-    const rows = lockResult?.[0] as unknown as Array<{ got?: number }> | undefined;
-    got = rows?.[0]?.got ?? 0;
-    if (got !== 1) {
-      logger.warn("[migrate] 未获迁移锁,等待其他实例完成迁移", { got });
-      await new Promise((r) => setTimeout(r, 5_000));
-    }
-  }
-  if (got !== 1) {
-    throw new Error("[migrate] 获迁移锁超时(120s),表结构可能未就绪——fail-closed");
-  }
+  let got = false;
   try {
-    await migrate(db, { migrationsFolder: "./drizzle" });
+    while (Date.now() < deadline && !got) {
+      const [rows] = await connection.query<(RowDataPacket & { got: number | string })[]>(
+        "SELECT GET_LOCK('snow_migrate', 10) AS got",
+      );
+      got = Number(rows[0]?.got) === 1;
+      if (!got) {
+        logger.warn("[migrate] 未获迁移锁,等待其他实例完成迁移", { got: rows[0]?.got });
+        await new Promise((r) => setTimeout(r, 5_000));
+      }
+    }
+    if (!got) {
+      throw new Error("[migrate] 获迁移锁超时(120s),表结构可能未就绪——fail-closed");
+    }
+    await migrate(drizzle(connection, { mode: "default" }), { migrationsFolder: "./drizzle" });
     logger.info("db migrations applied");
   } finally {
-    await db.execute(sql`SELECT RELEASE_LOCK('snow_migrate')`).catch(() => {});
+    if (got) await connection.query("SELECT RELEASE_LOCK('snow_migrate')").catch(() => {});
+    connection.release();
   }
 }
