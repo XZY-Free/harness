@@ -165,7 +165,19 @@ async function seedTestResumeCommand(input: {
 }): Promise<void> {
   if (!input.sourceOperationKey.startsWith("command:")) return;
   const id = input.sourceOperationKey.slice("command:".length);
-  const payloadJson = { resume_source: "user_pause", resume_payload: { source: "user_pause" } };
+  const invocation = await getInvocationById(input.tenantId, input.invocationId);
+  const attempt = await getLatestAttempt(input.invocationId);
+  if (!invocation || !attempt) throw new Error("测试恢复来源缺少 Invocation/Attempt");
+  const payloadJson = {
+    resume_source: "user_pause",
+    resume_payload: { source: "user_pause" },
+    pause_source_digest: protocolDigest({
+      attemptId: attempt.id,
+      recoveryVersion: invocation.recoveryVersion,
+      resumeAnchor: attempt.resumeAnchor,
+      resumeAnchorDigest: attempt.resumeAnchorDigest,
+    }),
+  };
   await db
     .insert(invocationCommandTable)
     .values({
@@ -1058,11 +1070,12 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     // ── 3. External continuation：走**生产入口**，不自拼 runtimeClient ──
     // 缺 `environmentProvisioner` 时这里必然抛 EnvironmentRevisionMismatch；
     // 正因如此，下面的"环境被重新准备"断言就是该缺陷的直接反证。
+    const firstSource = `a05-external:${randomUUID()}`;
     const result = await resumeHarnessInvocation({
       tenantId: ctx.tenantId,
       invocationId: invocation.id,
       sourceType: "user_action",
-      agentCallId: `a05-external:${randomUUID()}`,
+      agentCallId: firstSource,
       sourceVersion: 1,
     });
     expect(result).toMatchObject({ status: "resumed", runtime: "external", pending: true });
@@ -1111,6 +1124,38 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     // 投递了执行事实。
     expect(await countIngressEvents(invocation.id, "execution.started")).toBe(2);
     expect((await getInvocationById(ctx.tenantId, invocation.id))?.executionState).toBe("running");
+
+    const secondSource = `a05-external-second:${randomUUID()}`;
+    const secondResult = await resumeHarnessInvocation({
+      tenantId: ctx.tenantId,
+      invocationId: invocation.id,
+      sourceType: "agent_call",
+      agentCallId: secondSource,
+      sourceVersion: 1,
+    });
+    expect(secondResult).toMatchObject({ status: "resumed", runtime: "external" });
+    expect(stub.resumeRequests).toHaveLength(2);
+    const secondLease = await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id);
+    const secondSessions = await getRuntimeSessionBindingsByInvocation(ctx.tenantId, invocation.id);
+    const secondSession = secondSessions.find(
+      (row) => row.sourceOperationKey === `agent-call:${secondSource}:1`,
+    );
+    expect(secondSession?.ownershipId).toBeTruthy();
+    expect(secondSession?.ownershipId).not.toBe(resumedSession?.ownershipId);
+    expect(secondLease?.readinessState).toBe("ready");
+    expect(secondLease?.activationOwnershipId).toBe(secondSession?.ownershipId);
+    expect((await inspectContainer(containerName))?.Id).toBe(containerBefore?.Id);
+    await resumeHarnessInvocation({
+      tenantId: ctx.tenantId,
+      invocationId: invocation.id,
+      sourceType: "user_action",
+      agentCallId: firstSource,
+      sourceVersion: 1,
+    });
+    expect(stub.resumeRequests).toHaveLength(2);
+    expect(
+      (await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id))?.activationOwnershipId,
+    ).toBe(secondSession?.ownershipId);
   });
 });
 

@@ -183,6 +183,7 @@ const RETIRED_NAMING_EXCEPTIONS = [
   /^docs\/V12\/02\/snowharness-execution-design\//,
   /^docs\/topic02\/nexharness-topic02-closure\//,
   /^docs\/topic02\/nexharness-topic02-repair\//,
+  /^docs\/topic02\/专题02固定关闭检查表\/(?:固定检查表\.md|固定检查表\.json|sources\/原专题02基础验收矩阵\.json)$/,
   /\.test\.tsx?$/,
 ];
 

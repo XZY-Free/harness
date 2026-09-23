@@ -3,11 +3,13 @@ import { randomUUID } from "node:crypto";
 import type { OwnershipTx } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationCommandTable,
+  invocationTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 export interface CreateInvocationCommandInput {
   tenantId: string;
@@ -52,6 +54,50 @@ export async function createInvocationCommandInTransaction(
         )
         .limit(1)
     : [];
+  let payloadJson = input.payloadJson;
+  if (
+    input.commandType === "resume" &&
+    payloadJson !== null &&
+    typeof payloadJson === "object" &&
+    !Array.isArray(payloadJson) &&
+    (payloadJson as Record<string, unknown>).resume_source === "user_pause"
+  ) {
+    const [invocation] = await tx
+      .select({ recoveryVersion: invocationTable.recoveryVersion })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, input.tenantId),
+          eq(invocationTable.id, input.invocationId),
+        ),
+      )
+      .limit(1);
+    const [attempt] = await tx
+      .select({
+        id: invocationAttemptTable.id,
+        resumeAnchor: invocationAttemptTable.resumeAnchor,
+        resumeAnchorDigest: invocationAttemptTable.resumeAnchorDigest,
+      })
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.invocationId, input.invocationId),
+        ),
+      )
+      .orderBy(desc(invocationAttemptTable.attemptNo))
+      .limit(1);
+    if (!invocation || !attempt) throw new Error("ResumePauseSourceMissing");
+    payloadJson = {
+      ...payloadJson,
+      pause_source_digest: protocolDigest({
+        attemptId: attempt.id,
+        recoveryVersion: invocation.recoveryVersion,
+        resumeAnchor: attempt.resumeAnchor,
+        resumeAnchorDigest: attempt.resumeAnchorDigest,
+      }),
+    };
+  }
   const id = input.commandId ?? randomUUID();
   await tx.insert(invocationCommandTable).values({
     id,
@@ -60,8 +106,8 @@ export async function createInvocationCommandInTransaction(
     commandType: input.commandType,
     commandState: "queued",
     idempotencyKey: input.idempotencyKey,
-    payloadJson: input.payloadJson,
-    payloadDigest: protocolDigest(input.payloadJson),
+    payloadJson,
+    payloadDigest: protocolDigest(payloadJson),
     targetOwnershipId: owner?.id ?? null,
     targetSessionId: session?.id ?? null,
     requestedByType: input.requestedByType,

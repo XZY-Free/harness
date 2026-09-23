@@ -25,6 +25,8 @@ import {
   type CommandRuntimeEndpointResolution,
   acceptResumeCommandPreparation,
   acknowledgeHistoricalResumeCommand,
+  closeStalePauseResumeCommand,
+  closeTerminalResumeCommandWithoutReceipt,
   dispatchCancelCommand,
   dispatchCheckpointCommand,
   dispatchResumeCommand,
@@ -310,6 +312,18 @@ async function dispatchCommand(params: {
       claimToken,
     });
     if (historical) return { dispatched: true, command: historical };
+    const closed = await closeTerminalResumeCommandWithoutReceipt({
+      tenantId: params.tenantId,
+      commandId: params.commandId,
+      claimToken,
+    });
+    if (closed) return { dispatched: true, command: closed };
+    const stale = await closeStalePauseResumeCommand({
+      tenantId: params.tenantId,
+      commandId: params.commandId,
+      claimToken,
+    });
+    if (stale) return { dispatched: true, command: stale };
   }
   // Resume 前置 capability 门控：effective capability（SessionBinding 冻结快照与
   // RuntimeRevision 发布事实的交集；session 缺省时回退发布事实，形状不可识别一律

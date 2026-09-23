@@ -30,6 +30,7 @@ import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import {
   executionBindingTable,
+  executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
 } from "@/lib/persistence/schema/executions";
@@ -40,6 +41,10 @@ import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resol
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
+import {
+  getRuntimeSessionBindingByOwnership,
+  getRuntimeSessionBindingsByInvocation,
+} from "@/lib/runtime/persistence/runtime-session-store";
 import {
   type RuntimeStartRequest,
   RuntimeStartRequestSchema,
@@ -75,6 +80,7 @@ async function startExternalRuntime(
   tenantId: string,
   runtimeRevisionId: string,
   runtimeCapabilities: unknown,
+  completeAfterRequests = 1,
 ): Promise<ExternalRuntimeFixture> {
   const requests: Array<{
     invocationId: string;
@@ -140,13 +146,17 @@ async function startExternalRuntime(
               capabilitiesDigest,
             },
           },
-          {
-            eventId: randomUUID(),
-            producerSequence: String(sequenceStart + 1),
-            type: "execution.completed",
-            schemaVersion: 1,
-            payload: { finishReason: "execution.completed" },
-          },
+          ...(requests.length >= completeAfterRequests
+            ? [
+                {
+                  eventId: randomUUID(),
+                  producerSequence: String(sequenceStart + 1),
+                  type: "execution.completed" as const,
+                  schemaVersion: 1,
+                  payload: { finishReason: "execution.completed" },
+                },
+              ]
+            : []),
         ],
       },
     });
@@ -234,6 +244,7 @@ describe("生产 continuation worker durable topology", () => {
         scenario.tenantId,
         runtimeRevisionId,
         runtimeCapabilitiesJson,
+        resolution === "approve" ? 2 : 1,
       );
       runtimes.push(runtime);
 
@@ -458,6 +469,90 @@ describe("生产 continuation worker durable topology", () => {
 
       // 完成 AgentCall 后的 resume_parent 也由同一个 Worker 消费，外部 Runtime 回传终态。
       await resumedWorker.pollOnce();
+      if (resolution === "approve") {
+        expect(runtime.requests).toHaveLength(1);
+        const firstOwner = await getActiveExecutionOwnership({
+          tenantId: scenario.tenantId,
+          invocationId: scenario.parentInvocationId,
+        });
+        if (!firstOwner) throw new Error("首次 External 续接没有当前 Owner");
+        const firstSession = await getRuntimeSessionBindingByOwnership(
+          scenario.tenantId,
+          firstOwner.id,
+        );
+        if (!firstSession) throw new Error("首次 External 续接没有 Session");
+        const secondAuthority = authorityIdentity({
+          invocationId: scenario.parentInvocationId,
+          runtimeRevisionId,
+          attemptId: firstOwner.attemptId,
+          ownershipId: firstOwner.id,
+          leaseEpoch: firstOwner.leaseEpoch,
+          sessionBindingId: firstSession.id,
+        });
+        const secondAction = {
+          ...action,
+          actionId: `${scenario.actionId}-second`,
+          stepNo: 2,
+        };
+        const secondStarted = await execute(secondAction, {
+          invocationId: scenario.parentInvocationId,
+          tenantId: scenario.tenantId,
+          threadId: scenario.threadId,
+          turnId: scenario.turnId,
+          actionDigest: `sha256:${"c".repeat(64)}`,
+          authority: secondAuthority,
+        });
+        expect(secondStarted.pending?.kind).toBe("agent_call");
+        await resumedWorker.pollOnce();
+        const secondRequests = await db
+          .select()
+          .from(userActionRequestTable)
+          .where(eq(userActionRequestTable.invocationId, scenario.parentInvocationId))
+          .orderBy(desc(userActionRequestTable.createdAt));
+        const secondRequest = secondRequests.find((row) => row.id !== request.id);
+        if (!secondRequest) throw new Error("第二个子调用没有产生正式 UserActionRequest");
+        const secondResponse = await resolveUserAction(
+          new Request(
+            `http://snow.test/api/threads/${scenario.threadId}/user-actions/${secondRequest.id}/resolve`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "idempotency-key": `resolve-second-${secondRequest.id}`,
+              },
+              body: JSON.stringify({ resolution: "approve" }),
+            },
+          ),
+          { params: Promise.resolve({ threadId: scenario.threadId, requestId: secondRequest.id }) },
+        );
+        expect(secondResponse.status).toBe(200);
+        await resumedWorker.pollOnce();
+        await resumedWorker.pollOnce();
+        const pendingContinuations = await db
+          .select({
+            state: controlPlaneEventDelivery.state,
+            error: controlPlaneEventDelivery.lastErrorSummary,
+          })
+          .from(controlPlaneEventDelivery)
+          .where(eq(controlPlaneEventDelivery.consumerName, "invocation_continuation"));
+        expect(runtime.requests, JSON.stringify(pendingContinuations)).toHaveLength(2);
+        const sessions = await getRuntimeSessionBindingsByInvocation(
+          scenario.tenantId,
+          scenario.parentInvocationId,
+        );
+        const secondSession = sessions.find((row) =>
+          row.sourceOperationKey.startsWith(`agent-call:${secondStarted.pending?.callId}:`),
+        );
+        expect(secondSession?.id).toBeTruthy();
+        expect(secondSession?.ownershipId).not.toBe(firstOwner.id);
+        expect(secondSession?.attemptId).toBe(firstOwner.attemptId);
+        const [retiredOwner] = await db
+          .select()
+          .from(executionOwnershipTable)
+          .where(eq(executionOwnershipTable.id, firstOwner.id));
+        expect(retiredOwner?.ownershipState).toBe("released");
+        expect(sessions.find((row) => row.id === firstSession.id)?.bindingState).toBe("lost");
+      }
       const [finalInvocation] = await db
         .select()
         .from(invocationTable)
@@ -468,7 +563,7 @@ describe("生产 continuation worker durable topology", () => {
         .where(eq(turnTable.id, scenario.turnId));
       expect(finalInvocation?.executionState).toBe("completed");
       expect(finalTurn?.turnState).toBe("completed");
-      expect(runtime.requests).toHaveLength(1);
+      expect(runtime.requests).toHaveLength(resolution === "approve" ? 2 : 1);
 
       // A05-T08：真实对端**只**收到一个恢复意图，而且这个意图的身份/水位/环境全部取自
       // 持久冻结事实（ExecutionBinding + Attempt 的恢复锚点），不是调用方自拼资源。
@@ -541,14 +636,14 @@ describe("生产 continuation worker durable topology", () => {
         createdAt: new Date(),
       });
       await resumedWorker.pollOnce();
-      expect(scenario.provider.captured).toHaveLength(2);
-      expect(runtime.requests).toHaveLength(1);
+      expect(scenario.provider.captured).toHaveLength(resolution === "approve" ? 4 : 2);
+      expect(runtime.requests).toHaveLength(resolution === "approve" ? 2 : 1);
       expect(
         await db
           .select()
           .from(userActionRequestTable)
           .where(eq(userActionRequestTable.invocationId, scenario.parentInvocationId)),
-      ).toHaveLength(1);
+      ).toHaveLength(resolution === "approve" ? 2 : 1);
     },
   );
 });

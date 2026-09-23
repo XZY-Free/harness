@@ -16,9 +16,11 @@ import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
 import {
   type ExecutionBinding,
   type ExecutionOwnership,
+  INVOCATION_TERMINAL_STATES,
   type Invocation,
   type InvocationCommand,
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationCommandTable,
   invocationTable,
 } from "@/lib/persistence/schema/executions";
@@ -64,7 +66,7 @@ import {
 import { getFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
 import { type RecoveryAnchor, computeRecoveryAnchorDigest } from "@/lib/workspace/recovery-anchor";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 export interface CommandRuntimeEndpointResolution {
   runtimeEndpoint: string;
@@ -449,6 +451,185 @@ export async function acknowledgeHistoricalResumeCommand(input: {
     response: receipt,
     events: [],
   };
+}
+
+/**
+ * 原来源已随 Invocation 终结，但没有可验证的 Transport ACK。保留明确的无回执
+ * 结论；execution.started/terminal 只能证明执行发生，不能据此伪造 accepted=true。
+ */
+export async function closeTerminalResumeCommandWithoutReceipt(input: {
+  tenantId: string;
+  commandId: string;
+  claimToken: string;
+}): Promise<CommandDispatchResult | null> {
+  const context = await loadCommand(input.tenantId, input.commandId);
+  if (context.command.commandType !== "resume") return null;
+  return db.transaction(async (tx) => {
+    const [invocation] = await tx
+      .select({ executionState: invocationTable.executionState })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, input.tenantId),
+          eq(invocationTable.id, context.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!invocation || !INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) return null;
+    const [command] = await tx
+      .select()
+      .from(invocationCommandTable)
+      .where(
+        and(
+          eq(invocationCommandTable.tenantId, input.tenantId),
+          eq(invocationCommandTable.id, input.commandId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!command || command.commandState !== "dispatched") return null;
+    const now = new Date();
+    assertCommandClaimHeld(command, input.claimToken, input.commandId, now);
+    const sourceOperationKey = `command:${input.commandId}`;
+    const session = await getRuntimeSessionBindingBySourceOperation(
+      input.tenantId,
+      { invocationId: context.invocation.id, intentType: "resume", sourceOperationKey },
+      tx,
+    );
+    if (session) {
+      const source = assertExecutionSourceSnapshot(session.sourceRequestJson);
+      if (
+        session.sourceRequestDigest !== executionSourceDigest(source) ||
+        source.sourceOperationKey !== sourceOperationKey ||
+        source.sourceRef !== sourceOperationKey ||
+        source.invocationId !== context.invocation.id ||
+        source.attemptId !== session.attemptId
+      ) {
+        throw new Error("RuntimeSessionMismatch");
+      }
+      if (session.transportAcknowledgement) return null;
+    }
+    await tx
+      .update(invocationCommandTable)
+      .set({
+        commandState: "failed",
+        lastErrorCode: "SourceClosedWithoutReceipt",
+        receiptJson: { code: "SourceClosedWithoutReceipt" },
+        completedAt: now,
+        nextDispatchAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+        updatedAt: now,
+        versionNo: command.versionNo + 1,
+      })
+      .where(eq(invocationCommandTable.id, input.commandId));
+    return {
+      commandId: input.commandId,
+      commandState: "failed" as const,
+      errorCode: "SourceClosedWithoutReceipt",
+      events: [],
+    };
+  });
+}
+
+/** 已接受的用户暂停命令从未登记来源，当前暂停已换轮时在原领取下明确失效。 */
+export async function closeStalePauseResumeCommand(input: {
+  tenantId: string;
+  commandId: string;
+  claimToken: string;
+}): Promise<CommandDispatchResult | null> {
+  const context = await loadCommand(input.tenantId, input.commandId);
+  if (context.command.commandType !== "resume") return null;
+  return db.transaction(async (tx) => {
+    const [invocation] = await tx
+      .select({ recoveryVersion: invocationTable.recoveryVersion })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, input.tenantId),
+          eq(invocationTable.id, context.invocation.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!invocation) return null;
+    const [attempt] = await tx
+      .select({
+        id: invocationAttemptTable.id,
+        resumeAnchor: invocationAttemptTable.resumeAnchor,
+        resumeAnchorDigest: invocationAttemptTable.resumeAnchorDigest,
+      })
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.tenantId, input.tenantId),
+          eq(invocationAttemptTable.invocationId, context.invocation.id),
+        ),
+      )
+      .orderBy(desc(invocationAttemptTable.attemptNo))
+      .for("update")
+      .limit(1);
+    if (!attempt) return null;
+    const sourceOperationKey = `command:${input.commandId}`;
+    const sourceSession = await getRuntimeSessionBindingBySourceOperation(
+      input.tenantId,
+      { invocationId: context.invocation.id, intentType: "resume", sourceOperationKey },
+      tx,
+    );
+    if (sourceSession) return null;
+    const [command] = await tx
+      .select()
+      .from(invocationCommandTable)
+      .where(
+        and(
+          eq(invocationCommandTable.tenantId, input.tenantId),
+          eq(invocationCommandTable.id, input.commandId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!command || command.commandState !== "dispatched") return null;
+    const payload = command.payloadJson;
+    if (
+      payload === null ||
+      typeof payload !== "object" ||
+      Array.isArray(payload) ||
+      (payload as Record<string, unknown>).resume_source !== "user_pause"
+    )
+      return null;
+    if (command.payloadDigest !== protocolDigest(payload)) throw new Error("StartIntentConflict");
+    const acceptedPauseDigest = (payload as Record<string, unknown>).pause_source_digest;
+    const currentPauseDigest = protocolDigest({
+      attemptId: attempt.id,
+      recoveryVersion: invocation.recoveryVersion,
+      resumeAnchor: attempt.resumeAnchor,
+      resumeAnchorDigest: attempt.resumeAnchorDigest,
+    });
+    if (acceptedPauseDigest === currentPauseDigest) return null;
+    const now = new Date();
+    assertCommandClaimHeld(command, input.claimToken, input.commandId, now);
+    await tx
+      .update(invocationCommandTable)
+      .set({
+        commandState: "failed",
+        lastErrorCode: "ResumePauseSourceSuperseded",
+        receiptJson: { code: "ResumePauseSourceSuperseded" },
+        completedAt: now,
+        nextDispatchAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+        updatedAt: now,
+        versionNo: command.versionNo + 1,
+      })
+      .where(eq(invocationCommandTable.id, input.commandId));
+    return {
+      commandId: input.commandId,
+      commandState: "failed" as const,
+      errorCode: "ResumePauseSourceSuperseded",
+      events: [],
+    };
+  });
 }
 
 async function acknowledge(

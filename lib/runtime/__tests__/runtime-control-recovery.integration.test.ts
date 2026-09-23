@@ -68,7 +68,10 @@ import {
   resumeRuntimeInvocation,
 } from "@/lib/runtime/application/runtime-resume";
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
-import { setCommandGatewayHostedApplicationServiceForTest } from "@/lib/runtime/command-dispatch-gateway";
+import {
+  dispatchResumeCommandToRuntime,
+  setCommandGatewayHostedApplicationServiceForTest,
+} from "@/lib/runtime/command-dispatch-gateway";
 import { dispatchCancelCommand, dispatchResumeCommand } from "@/lib/runtime/command-dispatcher";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
@@ -730,6 +733,292 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     expect(retry.commandState).toBe("acknowledged");
     expect(ackOnlyRuntime.calls.resumeInvocation).toHaveLength(1);
     expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocationId)).toHaveLength(2);
+  });
+
+  it("F3 / START.C04：started 已接纳但无 ACK 的终态 Resume 命令由正式网关收口", async () => {
+    const fixture = await seedInvocationWithPublishedRevision();
+    const { tenantId, invocation, binding, attempt } = fixture;
+    const initial = await acquireTestRuntimeAuthority({
+      tenantId,
+      invocationId: invocation.id,
+      attemptId: attempt.id,
+      runtimeRevisionId: binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: fixture.runtimeCapabilitiesJson,
+      activationEvidence: { kind: "f3-initial", invocationId: invocation.id },
+    });
+    const initialRequest = { kind: "f3-initial", invocationId: invocation.id };
+    await applyRuntimeSessionDispatchForTest(tenantId, initial.session.id, {
+      bindingState: "dispatching",
+      semanticRequestJson: initialRequest,
+      semanticRequestDigest: protocolDigest(initialRequest),
+    });
+    await ingressRuntimeEvents({
+      tenantId,
+      invocationId: invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: initial.authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: "1",
+            type: "execution.started",
+            schemaVersion: 1,
+            payload: {
+              intentKey: initial.session.startIntentKey,
+              semanticRequestDigest: protocolDigest(initialRequest),
+              remoteSessionRef: "f3-initial-session",
+              remoteExecutionRef: "f3-initial-execution",
+              capabilitiesDigest: fixture.capabilitiesDigest,
+            },
+          },
+        ],
+      },
+    });
+    await ingressRuntimeEvents({
+      tenantId,
+      invocationId: invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: initial.authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: "2",
+            type: "execution.suspended",
+            schemaVersion: 1,
+            payload: { reason: "waiting_user", resumeAnchorDigest: DIGEST },
+          },
+        ],
+      },
+    });
+    const commandId = await freezeCommand({
+      tenantId,
+      invocationId: invocation.id,
+      commandType: "resume",
+      payloadJson: { resume_source: "user_action_resolution" },
+    });
+    const observed: AuthorityIdentity[] = [];
+    const runtime = createMockRuntimeClient({
+      resumeInvocation: async (request) => {
+        const authority = request.request.authority;
+        observed.push(authority);
+        await ingressRuntimeEvents({
+          tenantId,
+          invocationId: invocation.id,
+          batch: {
+            protocolVersion: 3,
+            authority,
+            events: [
+              {
+                eventId: randomUUID(),
+                producerSequence: "3",
+                type: "execution.started",
+                schemaVersion: 1,
+                payload: {
+                  intentKey: `start:${authority.ownershipId}`,
+                  semanticRequestDigest: request.request.semanticRequestDigest,
+                  remoteSessionRef: "f3-resume-session",
+                  remoteExecutionRef: "f3-resume-execution",
+                  capabilitiesDigest: fixture.capabilitiesDigest,
+                },
+              },
+            ],
+          },
+        });
+        throw new Error("HTTP ACK lost after execution.started");
+      },
+    });
+    await expect(
+      resumeRuntimeInvocation({
+        tenantId,
+        invocation: (await getInvocationById(tenantId, invocation.id)) ?? invocation,
+        binding,
+        attempt,
+        sourceOperationKey: `command:${commandId}`,
+        anchor: `invocation:${invocation.id}:recovery:0`,
+        anchorDigest: DIGEST,
+        runtimeClient: runtime,
+        runtimeEndpoint: endpointResolution().runtimeEndpoint,
+        auth: endpointResolution().auth,
+        callbackEndpoints: endpointResolution().callbackEndpoints,
+      }),
+    ).rejects.toBeDefined();
+    expect(observed).toHaveLength(1);
+    await ingressRuntimeEvents({
+      tenantId,
+      invocationId: invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: observed[0]!,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: "4",
+            type: "execution.completed",
+            schemaVersion: 1,
+            payload: { finish_reason: "execution.completed" },
+          },
+        ],
+      },
+    });
+    const before = await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id);
+    const outcome = await dispatchResumeCommandToRuntime({ tenantId, commandId });
+    const [command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, commandId));
+    expect(outcome).toMatchObject({
+      dispatched: true,
+      command: { commandState: "failed", errorCode: "SourceClosedWithoutReceipt" },
+    });
+    expect(command?.lastErrorCode).toBe("SourceClosedWithoutReceipt");
+    expect(command?.receiptJson).toEqual({ code: "SourceClosedWithoutReceipt" });
+    expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id)).toHaveLength(
+      before.length,
+    );
+    expect(runtime.calls.resumeInvocation).toHaveLength(1);
+  });
+
+  it("F1 / START.C01：P1 未登记的旧 Resume 命令不能认领 P2 暂停", async () => {
+    const fixture = await seedInvocationWithPublishedRevision();
+    const { tenantId, invocation, binding, attempt } = fixture;
+    const initial = await acquireTestRuntimeAuthority({
+      tenantId,
+      invocationId: invocation.id,
+      attemptId: attempt.id,
+      runtimeRevisionId: binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: fixture.runtimeCapabilitiesJson,
+      activationEvidence: { kind: "f1-initial", invocationId: invocation.id },
+    });
+    const initialRequest = { kind: "f1-initial", invocationId: invocation.id };
+    await applyRuntimeSessionDispatchForTest(tenantId, initial.session.id, {
+      bindingState: "dispatching",
+      semanticRequestJson: initialRequest,
+      semanticRequestDigest: protocolDigest(initialRequest),
+    });
+    await ingressRuntimeEvents({
+      tenantId,
+      invocationId: invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: initial.authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: "1",
+            type: "execution.started",
+            schemaVersion: 1,
+            payload: {
+              intentKey: initial.session.startIntentKey,
+              semanticRequestDigest: protocolDigest(initialRequest),
+              remoteSessionRef: "f1-initial-session",
+              remoteExecutionRef: "f1-initial-execution",
+              capabilitiesDigest: fixture.capabilitiesDigest,
+            },
+          },
+          {
+            eventId: randomUUID(),
+            producerSequence: "2",
+            type: "execution.suspended",
+            schemaVersion: 1,
+            payload: { reason: "pause-1", resumeAnchorDigest: DIGEST },
+          },
+        ],
+      },
+    });
+    const payloadJson = { resume_source: "user_pause", resume_payload: { source: "user_pause" } };
+    const fast = await freezeCommand({
+      tenantId,
+      invocationId: invocation.id,
+      commandType: "resume",
+      payloadJson,
+    });
+    const slow = await freezeCommand({
+      tenantId,
+      invocationId: invocation.id,
+      commandType: "resume",
+      payloadJson,
+    });
+    const current = (await getInvocationById(tenantId, invocation.id)) ?? invocation;
+    const runtime = cannedRuntimeClient(fixture.capabilitiesDigest);
+    const resume = (commandId: string) =>
+      resumeRuntimeInvocation({
+        tenantId,
+        invocation: current,
+        binding,
+        attempt,
+        sourceOperationKey: `command:${commandId}`,
+        anchor: `invocation:${invocation.id}:recovery:${current.recoveryVersion}`,
+        anchorDigest: DIGEST,
+        runtimeClient: runtime,
+        runtimeEndpoint: endpointResolution().runtimeEndpoint,
+        auth: endpointResolution().auth,
+        callbackEndpoints: endpointResolution().callbackEndpoints,
+      });
+    const fastResult = await resume(fast);
+    const fastSession = await getRuntimeSessionBindingById(
+      tenantId,
+      fastResult.authority.sessionBindingId,
+    );
+    if (!fastSession) throw new Error("快命令 Session 未持久化");
+    await ingressRuntimeEvents({
+      tenantId,
+      invocationId: invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: fastResult.authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: "3",
+            type: "execution.started",
+            schemaVersion: 1,
+            payload: {
+              intentKey: fastSession.startIntentKey,
+              semanticRequestDigest: fastSession.semanticRequestDigest,
+              remoteSessionRef: `mock-session:${fastResult.authority.ownershipId}`,
+              remoteExecutionRef: `mock-execution:${fastResult.authority.ownershipId}`,
+              capabilitiesDigest: fixture.capabilitiesDigest,
+            },
+          },
+          {
+            eventId: randomUUID(),
+            producerSequence: "4",
+            type: "execution.suspended",
+            schemaVersion: 1,
+            payload: { reason: "pause-2", resumeAnchorDigest: DIGEST },
+          },
+        ],
+      },
+    });
+    const before = await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id);
+    await expect(resume(slow)).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id)).toHaveLength(
+      before.length,
+    );
+    expect(await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id })).toBeNull();
+    const staleOutcome = await dispatchResumeCommandToRuntime({ tenantId, commandId: slow });
+    expect(staleOutcome).toMatchObject({
+      dispatched: true,
+      command: { commandState: "failed", errorCode: "ResumePauseSourceSuperseded" },
+    });
+    const [staleCommand] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, slow));
+    expect(staleCommand?.lastErrorCode).toBe("ResumePauseSourceSuperseded");
+    const fresh = await freezeCommand({
+      tenantId,
+      invocationId: invocation.id,
+      commandType: "resume",
+      payloadJson,
+    });
+    const freshResult = await resume(fresh);
+    expect(freshResult.authority.ownershipId).not.toBe(fastResult.authority.ownershipId);
+    expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id)).toHaveLength(
+      before.length + 1,
+    );
   });
 
   it("CONTROL-03: request_user_input 真实 Loop → 用户输入 → Resume：只使用正式 Event 类型、持久暂停、新 generation、正确继续", async () => {

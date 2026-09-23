@@ -2,7 +2,10 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
-import { getEnvironmentLeaseByAttempt } from "@/lib/environment/environment-lease-store";
+import {
+  getEnvironmentLeaseByAttempt,
+  registerEnvironmentLeaseCleanupForAttemptInTransaction,
+} from "@/lib/environment/environment-lease-store";
 import {
   assertExecutionSourceSnapshot,
   executionSourceDigest,
@@ -387,6 +390,31 @@ export async function failAttemptAndInvokeRecoveryAuthority(params: {
         errorCode: params.errorCode,
         errorSummary: params.errorSummary,
       });
+      if (params.workIdentity.kind === "preparation") {
+        const [activeOwner] = await tx
+          .select({ id: executionOwnershipTable.id })
+          .from(executionOwnershipTable)
+          .where(
+            and(
+              eq(executionOwnershipTable.tenantId, params.tenantId),
+              eq(executionOwnershipTable.invocationId, params.invocation.id),
+              eq(executionOwnershipTable.ownershipState, "active"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!activeOwner) {
+          // Prepared 的实例可能已经真实存在，而 O/S 尚未建立。准备 claim 与 Attempt
+          // 失败在同一事务内核对后，给该 Attempt 的 Lease 登记持久退役义务。
+          await registerEnvironmentLeaseCleanupForAttemptInTransaction(tx, {
+            tenantId: params.tenantId,
+            invocationId: params.invocation.id,
+            attemptId: params.attempt.id,
+            errorCode: params.errorCode,
+            now: params.now,
+          });
+        }
+      }
     }
     return originOwner
       ? {

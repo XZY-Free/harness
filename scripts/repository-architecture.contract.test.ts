@@ -47,9 +47,17 @@ const NAMING_GUARD_EXCEPTION_PREFIXES = [
   "docs/topic02/nexharness-topic02-repair/", // 专题02 完整修复工程包：正文必须写出"不得保留 V11/V3 式生产命名"这一清理目标本身
   "lib/architecture/", // Canonical Naming Guard 测试（负向断言必须持有禁止字符串）
 ];
+const FROZEN_HISTORICAL_NAMING_FILES = new Set([
+  "docs/topic02/专题02固定关闭检查表/固定检查表.md",
+  "docs/topic02/专题02固定关闭检查表/固定检查表.json",
+  "docs/topic02/专题02固定关闭检查表/sources/原专题02基础验收矩阵.json",
+]);
 
 function isDocException(path: string): boolean {
-  return NAMING_GUARD_EXCEPTION_PREFIXES.some((prefix) => path.startsWith(prefix));
+  return (
+    FROZEN_HISTORICAL_NAMING_FILES.has(path) ||
+    NAMING_GUARD_EXCEPTION_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
 }
 
 function sourceFiles(path: string): string[] {

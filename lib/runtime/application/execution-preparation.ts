@@ -26,6 +26,7 @@ import {
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { markRuntimeSessionLostByOwnershipInTransaction } from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { and, desc, eq } from "drizzle-orm";
 
@@ -212,6 +213,25 @@ export async function acceptExecutionPreparation(input: {
       ) {
         throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 命令不存在或已失效");
       }
+      const acceptedPayload = command.payloadJson;
+      if (
+        acceptedPayload !== null &&
+        typeof acceptedPayload === "object" &&
+        !Array.isArray(acceptedPayload) &&
+        (acceptedPayload as Record<string, unknown>).resume_source === "user_pause"
+      ) {
+        const acceptedPauseDigest = (acceptedPayload as Record<string, unknown>)
+          .pause_source_digest;
+        const currentPauseDigest = protocolDigest({
+          attemptId: attempt.id,
+          recoveryVersion: invocation.recoveryVersion,
+          resumeAnchor: attempt.resumeAnchor,
+          resumeAnchorDigest: attempt.resumeAnchorDigest,
+        });
+        if (acceptedPauseDigest !== currentPauseDigest) {
+          throw new ExecutionAuthorityError("NotCurrentExecutor", "Resume 命令不属于当前暂停前驱");
+        }
+      }
       const healthyOwner = ownerships.find(
         (owner) => owner.ownershipState === "active" && owner.leaseExpiresAt > databaseNow,
       );
@@ -359,6 +379,44 @@ export async function acceptExecutionPreparation(input: {
       now,
     });
     if (!claimed.claim) return { disposition: "busy" };
+
+    if (input.request.sourceKind === "continuation" && !samePersistedSource) {
+      const currentOwner = ownerships.find((row) => row.ownershipState === "active");
+      if (currentOwner) {
+        const currentSession = sessions.find((row) => row.ownershipId === currentOwner.id);
+        if (
+          currentOwner.leaseExpiresAt <= now ||
+          currentOwner.attemptId !== attempt.id ||
+          !currentSession ||
+          currentSession.bindingState === "closed" ||
+          currentSession.bindingState === "lost"
+        ) {
+          throw new ExecutionAuthorityError(
+            "NotCurrentExecutor",
+            "Continuation 的前驱执行权已失效",
+          );
+        }
+        if (currentSession.sourceOperationKey !== source.sourceOperationKey) {
+          // External 的子结果要求一次真实 Resume。领取新来源之后、改 Lease 之前，
+          // 在同一根锁事务中退休旧 O/S；后续 Start 只会为该来源取得新代际。
+          await tx
+            .update(executionOwnershipTable)
+            .set({
+              ownershipState: "released",
+              releasedAt: now,
+              reasonCode: "continuation_redispatch",
+              versionNo: currentOwner.versionNo + 1,
+              updatedAt: now,
+            })
+            .where(eq(executionOwnershipTable.id, currentOwner.id));
+          await markRuntimeSessionLostByOwnershipInTransaction(
+            tx,
+            input.request.tenantId,
+            currentOwner.id,
+          );
+        }
+      }
+    }
 
     if (input.environmentReprepare && !samePersistedSource) {
       await beginEnvironmentLeaseReprepareInTransaction(tx, {

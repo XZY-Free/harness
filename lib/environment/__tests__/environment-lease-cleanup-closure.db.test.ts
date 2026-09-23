@@ -79,6 +79,7 @@ import {
   removeContainer,
 } from "@/lib/runtime/container/docker-cli";
 import { claimRuntimeSessionSupervisorInTransaction } from "@/lib/runtime/persistence/runtime-session-store";
+import { failAttemptAndInvokeRecoveryAuthority } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -505,6 +506,73 @@ describe("A08 环境资源终态清理与回收闭环", () => {
     expect(retried.state).toBe("released");
     expect((await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId))?.leaseState).toBe("released");
     expect(await inspectContainer(seeded.containerName)).toBeNull();
+  }, 60_000);
+
+  it("F4 / ENV.C04：Prepared 无 Owner 复验普通失败后由原工作身份登记真实清理", async () => {
+    const fixture = await makeFixture();
+    const seeded = await seedPreparedRuntimeAttempt({
+      environmentDefinitionRevisionId: fixture.revision.id,
+    });
+    const claim = await attemptPreparationClaimForTest(seeded.attempt.id);
+    const lease = await fixture.provisioner.provision({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocation.id,
+      attemptId: seeded.attempt.id,
+      revisionId: fixture.revision.id,
+      revision: fixture.revision,
+      workspaceBindingId: seeded.workspace.id,
+      workspaceRoot: fixture.workspaceRoot,
+      preparationClaim: claim,
+    });
+    const workerRef = (lease.preparedEvidence as { instance?: { workerRef?: string } } | null)
+      ?.instance?.workerRef;
+    if (!workerRef) throw new Error("Prepared 证据缺少真实实例");
+    expect(await inspectContainer(workerRef)).not.toBeNull();
+    expect(
+      await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.invocationId, seeded.invocation.id)),
+    ).toHaveLength(0);
+    const failingBackend: EnvironmentInstanceBackend = {
+      ...fixture.backend,
+      async inspect() {
+        throw new Error("prepared instance inspect failed");
+      },
+    };
+    const failingProvisioner = createEnvironmentProvisioner({ backend: failingBackend });
+    await expect(
+      failingProvisioner.provision({
+        tenantId: TENANT_ID,
+        invocationId: seeded.invocation.id,
+        attemptId: seeded.attempt.id,
+        revisionId: fixture.revision.id,
+        revision: fixture.revision,
+        workspaceBindingId: seeded.workspace.id,
+        workspaceRoot: fixture.workspaceRoot,
+        preparationClaim: claim,
+      }),
+    ).rejects.toThrow("prepared instance inspect failed");
+    await failAttemptAndInvokeRecoveryAuthority({
+      tenantId: TENANT_ID,
+      attempt: seeded.attempt,
+      invocation: seeded.invocation,
+      errorCode: "EnvironmentComplianceFailed",
+      errorSummary: "prepared instance inspect failed",
+      now: new Date(),
+      workIdentity: { kind: "preparation", claim },
+    });
+    const pending = await getEnvironmentLeaseById(TENANT_ID, lease.id);
+    expect(pending?.leaseState).toBe("releasing");
+    expect(pending?.releasedAt).toBeNull();
+    expect(await inspectContainer(workerRef)).not.toBeNull();
+    const swept = await runDueEnvironmentLeaseCleanups({
+      backend: fixture.backend,
+      owner: "f4-cleanup",
+    });
+    expect(swept.scanned).toBe(1);
+    expect((await getEnvironmentLeaseById(TENANT_ID, lease.id))?.leaseState).toBe("released");
+    expect(await inspectContainer(workerRef)).toBeNull();
   }, 60_000);
 
   it("A08-02: Owner 失权接管出口登记旧 Lease 的清理，而不是写成 lost", async () => {
