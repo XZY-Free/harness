@@ -26,6 +26,7 @@ import {
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { InvocationAttemptStateConflictError } from "@/lib/runtime/errors";
 import { markRuntimeSessionLostByOwnershipInTransaction } from "@/lib/runtime/persistence/runtime-session-store";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { and, desc, eq } from "drizzle-orm";
@@ -85,6 +86,23 @@ export async function acceptExecutionPreparation(input: {
       .for("update")
       .limit(1);
     if (!attempt) throw new ExecutionAuthorityError("AttemptMismatch", "Attempt 不属于 Invocation");
+    // 外部 IO 带回的领取身份必须仍是本次来源的当前 claim。否则下面的同源 Session
+    // 重放分支可能直接返回 dispatch，让已失权的旧 Worker 借继任者的 Session 继续发送。
+    if (input.claimId !== undefined) {
+      const databaseNow = await getAuthorityDatabaseTime(tx);
+      if (
+        attempt.preparationClaimId !== input.claimId ||
+        attempt.preparationIntentKey !== input.request.sourceOperationKey ||
+        !attempt.preparationLeaseExpiresAt ||
+        attempt.preparationLeaseExpiresAt <= databaseNow
+      ) {
+        throw new InvocationAttemptStateConflictError(
+          attempt.id,
+          attempt.attemptState,
+          "PreparationClaimSuperseded",
+        );
+      }
+    }
 
     // I → A 后按 O → S 锁序读出全部代际。来源历史不按 latest Attempt 猜测。
     const ownerships = await tx

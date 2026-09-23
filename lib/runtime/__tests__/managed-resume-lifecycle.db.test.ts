@@ -2793,4 +2793,56 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
       (await getRuntimeSessionBindingById(fixture.tenantId, generation.session.id))?.bindingState,
     ).toBe("prepared");
   });
+
+  it("R1-b: 旧准备 claim 不得沿继任者已建的 Session 继续派发", async () => {
+    const fixture = await seedClaimFixture();
+    const first = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    if (!first.claim) throw new Error("W1 未取得准备 claim");
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+    const second = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    if (!second.claim) throw new Error("W2 未接管准备 claim");
+    const evidence = { kind: "r1-b-successor", attemptId: fixture.attempt.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: fixture.attempt.id,
+        evidence,
+        digest: protocolDigest(evidence),
+        preparationClaim: second.claim!,
+      }),
+    );
+    const generation = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    });
+    const before = await readPreparationSlot(fixture.tenantId, fixture.attempt.id);
+    await expect(
+      acceptExecutionPreparation({
+        request: executionSourceRequestForStart({
+          tenantId: fixture.tenantId,
+          invocation: fixture.invocation,
+          binding: fixture.binding,
+          attempt: fixture.attempt,
+          sourceOperationKey: `invocation:${fixture.invocation.id}`,
+        }),
+        claimId: first.claim.claimId,
+      }),
+    ).rejects.toThrow("PreparationClaimSuperseded");
+    expect(await readPreparationSlot(fixture.tenantId, fixture.attempt.id)).toEqual(before);
+    expect(
+      (
+        await getActiveExecutionOwnership({
+          tenantId: fixture.tenantId,
+          invocationId: fixture.invocation.id,
+        })
+      )?.id,
+    ).toBe(generation.ownership.id);
+    expect(
+      (await getRuntimeSessionBindingById(fixture.tenantId, generation.session.id))?.bindingState,
+    ).toBe("prepared");
+  });
 });
