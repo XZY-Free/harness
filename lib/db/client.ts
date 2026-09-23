@@ -24,7 +24,8 @@ const poolOptions: mysql.PoolOptions = {
   queueLimit: Number.parseInt(process.env.SNOW_DB_QUEUE_LIMIT ?? "100", 10),
   // BIGINT 的 DB→driver 边界必须保留十进制原文；默认 Number 会在 2^53 后舍入。
   supportBigNumbers: true,
-  bigNumberStrings: true,
+  // 安全整数仍按 Number 返回（COUNT(*) 等旧调用方依赖此类型）；超出安全范围才返回字符串。
+  bigNumberStrings: false,
 };
 
 const globalForDb = globalThis as unknown as {

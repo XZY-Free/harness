@@ -717,7 +717,7 @@ export async function renewHostedExecutionLeaseInTransaction(
     session.invocationId !== authority.invocationId ||
     session.attemptId !== authority.attemptId ||
     session.ownershipId !== owner.id ||
-    session.leaseEpoch !== authority.leaseEpoch ||
+    session.leaseEpoch !== preciseLeaseEpoch(authority.leaseEpoch) ||
     session.runtimeRevisionId !== authority.runtimeRevisionId
   ) {
     return denied("not_current_executor");

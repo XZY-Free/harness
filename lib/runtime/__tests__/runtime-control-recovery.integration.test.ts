@@ -1572,7 +1572,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
       state: "started",
       authorityRef: "tool-call:slow-child",
     });
-    expect(snapshot.nextProducerSequence).toBe(4);
+    expect(snapshot.nextProducerSequence).toBe("4");
 
     // ── 子结果稍后从**已死亡的旧代际**返回：不得冒用过期 Owner 落库 ──
     const completedAt = Date.now();
@@ -1610,7 +1610,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
     expect((await readOwner(gen2.owner.id))?.ownershipState).toBe("active");
     const afterLate = await readInvocation(tenantId, invocationId);
     expect(afterLate?.executionState).toBe("running");
-    expect(afterLate?.lastProducerSequence).toBe(3);
+    expect(afterLate?.lastProducerSequence).toBe(3n);
     const completedRows = await db
       .select({ id: runtimeEventIngressTable.id })
       .from(runtimeEventIngressTable)

@@ -223,7 +223,7 @@ describe("Invocation continuation execution ownership", () => {
     );
     const reclaimed = await acquire("worker-b", successorAttempt.id);
 
-    expect(first.ownership.leaseEpoch).toBe(1);
+    expect(first.ownership.leaseEpoch).toBe(1n);
     expect(reclaimed.ownership.leaseEpoch).not.toBe(first.ownership.leaseEpoch);
     const rows = await db
       .select()
@@ -231,8 +231,8 @@ describe("Invocation continuation execution ownership", () => {
       .where(eq(executionOwnershipTable.invocationId, "invocation-lease"))
       .orderBy(executionOwnershipTable.leaseEpoch);
     expect(rows.map((row) => [row.leaseEpoch, row.ownershipState])).toEqual([
-      [1, "lost"],
-      [2, "active"],
+      [1n, "lost"],
+      [2n, "active"],
     ]);
   });
 });
