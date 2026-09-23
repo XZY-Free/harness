@@ -94,8 +94,8 @@ async function main(): Promise<void> {
   const { MySqlContainer } = await import("@testcontainers/mysql");
   const distDir = ".next-fresh-db";
   let app: ChildProcess | null = null;
-  console.log("[fresh-db] 启动空 MySQL 8");
-  const container = await new MySqlContainer("mysql:8.0")
+  console.log("[fresh-db] 启动空 MySQL 8.4");
+  const container = await new MySqlContainer("mysql:8.4")
     .withDatabase("snow_fresh")
     .withRootPassword("test")
     .withCommand([
@@ -120,6 +120,7 @@ async function main(): Promise<void> {
     };
 
     await run("migrate", ["db:migrate"], env);
+    await run("migrate-replay", ["db:migrate"], env);
     await run("seed", ["db:seed"], env);
 
     const connection = await mysql.createConnection(connectionString);
@@ -219,7 +220,7 @@ async function main(): Promise<void> {
     app.stderr?.on("data", (chunk) => process.stderr.write(chunk));
     const status = await waitForBoot(origin, app);
     console.log(`[fresh-db] boot HTTP ${status}`);
-    console.log("[fresh-db] PASS migrate -> seed -> boot");
+    console.log("[fresh-db] PASS migrate twice -> seed -> boot");
   } finally {
     await stopChild(app);
     await container.stop();
