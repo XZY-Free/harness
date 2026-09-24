@@ -47,6 +47,7 @@ import {
   createMockRuntimeClient,
   defaultRuntimeCapabilities,
 } from "@/lib/runtime/runtime-client";
+import { runPublicationConformanceSuite } from "@/lib/runtime/runtime-conformance-runner";
 import {
   type AuthorityIdentity,
   type RuntimeCapabilities,
@@ -54,6 +55,7 @@ import {
   RuntimeStartRequestSchema,
   protocolDigest,
 } from "@/lib/runtime/runtime-protocol";
+import { createHttpRuntimeConformanceAdapterForTest } from "@/lib/runtime/test-support/http-runtime-conformance-adapter";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -85,7 +87,7 @@ class DurableReferenceRuntime {
     [];
   callbackBeforeResponse = false;
   dropNextStartResponse = false;
-  readonly capabilities = defaultRuntimeCapabilities();
+  readonly capabilities: RuntimeCapabilities;
   // External start capability 一致性：回执摘要必须等于发布事实 manifest 摘要
   //（与生产 runtime-start.ts 的 computeCapabilityManifestDigest 同源）。
   readonly capabilitiesDigest: string;
@@ -93,7 +95,15 @@ class DurableReferenceRuntime {
   constructor(
     private readonly tenantId: string,
     runtimeRevisionId?: string,
+    heartbeat = true,
   ) {
+    const defaultCapabilities = defaultRuntimeCapabilities();
+    this.capabilities = heartbeat
+      ? defaultCapabilities
+      : ({
+          ...defaultCapabilities,
+          features: { ...defaultCapabilities.features, heartbeat: false },
+        } as unknown as RuntimeCapabilities);
     this.capabilitiesDigest = runtimeRevisionId
       ? computeCapabilityManifestDigest({
           runtimeRevisionId,
@@ -696,13 +706,39 @@ describe("Runtime Start / Resume durable recovery", () => {
     });
   });
 
-  it("START-10/START-11: runtimes missing heartbeat and old protocol requests fail closed before publication or transport side effects", async () => {
+  it("START-10: a durable external runtime without heartbeat fails HTTP conformance before publication", async () => {
     const missingHeartbeat = {
       ...defaultRuntimeCapabilities(),
       features: { ...defaultRuntimeCapabilities().features, heartbeat: false },
     } as unknown as RuntimeCapabilities;
     expect(() => validateRuntimeProtocolCapabilities(missingHeartbeat)).toThrow();
 
+    const fixture = await seedStartFixture();
+    runtime = new DurableReferenceRuntime(
+      fixture.tenantId,
+      fixture.binding.runtimeRevisionId,
+      false,
+    );
+    await runtime.start();
+    const results = await runPublicationConformanceSuite({
+      tenantId: fixture.tenantId,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      runtimeAdapter: createHttpRuntimeConformanceAdapterForTest({
+        transport: createHttpRuntimeClient(),
+        endpoint: runtime.endpoint,
+        auth: { mode: "none" },
+      }),
+    });
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((result) => !result.passed)).toBe(true);
+    expect(results.every((result) => result.reason?.includes("capability probe failed"))).toBe(
+      true,
+    );
+    expect(runtime.requests).toHaveLength(0);
+    expect((await runtime.store()).starts).toEqual({});
+  });
+
+  it("START-11: old protocol request is refused by the HTTP client before reaching the runtime", async () => {
     const fixture = await seedStartFixture();
     runtime = new DurableReferenceRuntime(fixture.tenantId, fixture.binding.runtimeRevisionId);
     await runtime.start();
