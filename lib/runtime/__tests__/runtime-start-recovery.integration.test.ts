@@ -5,10 +5,12 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { POST as runtimeEventsPOST } from "@/app/runtime/invocations/[invocationId]/events/route";
+import { POST as runtimeHeartbeatPOST } from "@/app/runtime/invocations/[invocationId]/heartbeat/route";
 import { db } from "@/lib/db/client";
+import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
-import type { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
 import {
   createAttempt,
   getAttemptById,
@@ -18,7 +20,6 @@ import {
   acquireExecutionOwnership,
   getActiveExecutionOwnership,
   getAuthorityDatabaseTime,
-  renewExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   attemptPreparationClaimForTest,
@@ -27,8 +28,13 @@ import {
 import { seedPreparedRuntimeAttempt } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { decodeWorkloadToken } from "@/lib/identity/workload-token";
-import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  executionOwnershipTable,
+  invocationTable,
+  runtimeEventIngressTable,
+} from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { resumeRuntimeInvocation } from "@/lib/runtime/application/runtime-resume";
@@ -51,6 +57,7 @@ import { runPublicationConformanceSuite } from "@/lib/runtime/runtime-conformanc
 import {
   type AuthorityIdentity,
   type RuntimeCapabilities,
+  type RuntimeEvent,
   type RuntimeStartRequest,
   RuntimeStartRequestSchema,
   protocolDigest,
@@ -85,6 +92,7 @@ class DurableReferenceRuntime {
   private endpointValue: string | null = null;
   readonly requests: Array<{ idempotencyKey: string; request: RuntimeStartRequest; path: string }> =
     [];
+  readonly startedEvents: RuntimeEvent[] = [];
   callbackBeforeResponse = false;
   dropNextStartResponse = false;
   readonly capabilities: RuntimeCapabilities;
@@ -201,27 +209,27 @@ class DurableReferenceRuntime {
     if (this.callbackBeforeResponse && !accepted.startedCallbackDelivered) {
       accepted.startedCallbackDelivered = true;
       await this.writeStore(store);
+      const startedEvent: RuntimeEvent = {
+        eventId: randomUUID(),
+        producerSequence: requestBody.producerSequenceStart,
+        type: "execution.started",
+        schemaVersion: 1,
+        payload: {
+          intentKey: idempotencyKey,
+          semanticRequestDigest: requestBody.semanticRequestDigest,
+          remoteSessionRef: accepted.remoteSessionRef,
+          remoteExecutionRef: accepted.remoteExecutionRef,
+          capabilitiesDigest: this.capabilitiesDigest,
+        },
+      };
+      this.startedEvents.push(startedEvent);
       await ingressRuntimeEvents({
         tenantId: this.tenantId,
         invocationId: requestBody.authority.invocationId,
         batch: {
           protocolVersion: 3,
           authority: requestBody.authority,
-          events: [
-            {
-              eventId: randomUUID(),
-              producerSequence: requestBody.producerSequenceStart,
-              type: "execution.started",
-              schemaVersion: 1,
-              payload: {
-                intentKey: idempotencyKey,
-                semanticRequestDigest: requestBody.semanticRequestDigest,
-                remoteSessionRef: accepted.remoteSessionRef,
-                remoteExecutionRef: accepted.remoteExecutionRef,
-                capabilitiesDigest: this.capabilitiesDigest,
-              },
-            },
-          ],
+          events: [startedEvent],
         },
       });
     }
@@ -525,7 +533,7 @@ describe("Runtime Start / Resume durable recovery", () => {
     expect(Object.keys((await runtime.store()).starts)).toEqual([`start:${owner?.id}`]);
   });
 
-  it("START-06: an epoch-one start receipt does not renew after a newer ownership generation takes over", async () => {
+  it("START-06: delayed epoch-one started receipt cannot authorize heartbeat or a new user action", async () => {
     const fixture = await seedStartFixture();
     runtime = new DurableReferenceRuntime(fixture.tenantId, fixture.binding.runtimeRevisionId);
     runtime.callbackBeforeResponse = true;
@@ -551,7 +559,7 @@ describe("Runtime Start / Resume durable recovery", () => {
         digest: protocolDigest(evidence),
       }),
     );
-    await acquireExecutionOwnership({
+    const successor = await acquireExecutionOwnership({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
       attemptId: replacementAttempt.id,
@@ -559,18 +567,101 @@ describe("Runtime Start / Resume durable recovery", () => {
       acquiredByType: "service",
       acquiredById: "reference-takeover",
     });
+    const currentBefore = await getActiveExecutionOwnership({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+    });
+    expect(currentBefore?.id).toBe(successor.ownership.id);
+    const oldToken = runtime.requests[0]?.request.credentials.runtimeToken;
+    const originalStarted = runtime.startedEvents[0];
+    if (!oldToken || !originalStarted) throw new Error("旧 Runtime 缺少启动凭据或 started 事件");
+    const ledgerBefore = await db
+      .select()
+      .from(runtimeEventIngressTable)
+      .where(eq(runtimeEventIngressTable.invocationId, fixture.invocation.id));
+    const delayedReceipt = await runtimeEventsPOST(
+      buildApiRequest({
+        audience: "runtime",
+        method: "POST",
+        path: `/invocations/${fixture.invocation.id}/events`,
+        idempotencyKey: randomUUID(),
+        token: oldToken,
+        body: { protocolVersion: 3, authority: first.authority, events: [originalStarted] },
+      }),
+      { params: Promise.resolve({ invocationId: fixture.invocation.id }) },
+    );
+    expect(delayedReceipt.status).toBe(200);
+    expect(await delayedReceipt.json()).toMatchObject({
+      replayedEventIds: [originalStarted.eventId],
+    });
 
-    await expect(
-      renewExecutionOwnership({
+    const heartbeat = await runtimeHeartbeatPOST(
+      buildApiRequest({
+        audience: "runtime",
+        method: "POST",
+        path: `/invocations/${fixture.invocation.id}/heartbeat`,
+        idempotencyKey: randomUUID(),
+        token: oldToken,
+        body: {
+          protocolVersion: 3,
+          authority: first.authority,
+          heartbeatId: randomUUID(),
+          runtimeState: "running",
+          lastObservedProducerSequence: "1",
+          requestCredentialRefresh: true,
+        },
+      }),
+      { params: Promise.resolve({ invocationId: fixture.invocation.id }) },
+    );
+    expect(heartbeat.status).toBe(403);
+    expect(await heartbeat.json()).toMatchObject({
+      error: { code: "ACCESS_DENIED", details: { code: "NotCurrentExecutor" } },
+    });
+    const userAction = await runtimeEventsPOST(
+      buildApiRequest({
+        audience: "runtime",
+        method: "POST",
+        path: `/invocations/${fixture.invocation.id}/events`,
+        idempotencyKey: randomUUID(),
+        token: oldToken,
+        body: {
+          protocolVersion: 3,
+          authority: first.authority,
+          events: [
+            {
+              eventId: randomUUID(),
+              producerSequence: "2",
+              type: "user-action",
+              schemaVersion: 1,
+              payload: { harnessActionId: randomUUID() },
+            },
+          ],
+        },
+      }),
+      { params: Promise.resolve({ invocationId: fixture.invocation.id }) },
+    );
+    expect(userAction.status).toBe(403);
+    expect(await userAction.json()).toMatchObject({
+      error: { code: "ACCESS_DENIED", details: { code: "NotCurrentExecutor" } },
+    });
+    expect(
+      await db
+        .select()
+        .from(runtimeEventIngressTable)
+        .where(eq(runtimeEventIngressTable.invocationId, fixture.invocation.id)),
+    ).toEqual(ledgerBefore);
+    expect(
+      await db
+        .select()
+        .from(userActionRequestTable)
+        .where(eq(userActionRequestTable.invocationId, fixture.invocation.id)),
+    ).toHaveLength(0);
+    expect(
+      await getActiveExecutionOwnership({
         tenantId: fixture.tenantId,
         invocationId: fixture.invocation.id,
-        ownershipId: first.authority.ownershipId,
-        attemptId: first.authority.attemptId,
-        leaseEpoch: Number(first.authority.leaseEpoch),
       }),
-    ).rejects.toMatchObject({
-      code: "NotCurrentExecutor",
-    } satisfies Partial<ExecutionAuthorityError>);
+    ).toEqual(currentBefore);
   });
 
   it("START-08/START-09: resume uses a new generation and preserves the first remote references when a late response conflicts", async () => {
