@@ -11,7 +11,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -90,11 +90,15 @@ import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import { HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
 import { verifyCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import { getRuntimeSessionBindingsByInvocation } from "@/lib/runtime/persistence/runtime-session-store";
-import { failAttemptAndInvokeRecoveryAuthority } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
+import {
+  dispatchQueuedInvocationAttempt,
+  failAttemptAndInvokeRecoveryAuthority,
+} from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import { DISPATCH_STUCK_GRACE_MS } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
 import {
   requireExecutionBinding,
+  resolveBoundExecutionResources,
   resolveRuntimeTransportFromBinding,
 } from "@/lib/runtime/retry/runtime-transport-from-binding";
 import {
@@ -2331,6 +2335,187 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
       child.kill();
       await child.exited;
       await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3e_before_writer"));
+      await removeTestContainerForTurn(context.tenantId, turn.id);
+    }
+  }, 120_000);
+
+  it("R3-f: 同源第二名真实激活后第一名普通失败迟到不关闭当前资源", async () => {
+    const { context, broker, probe } = await seedManagedWriterEntryContext("r3f");
+    const turn = await acceptTurnOnly(context, "r3f-same-source", "请读取工作区并回答");
+    const graph = await dispatchInvocationForTurn({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      executionSubject: {
+        tenantId: context.tenantId,
+        subjectType: "user",
+        subjectId: context.ownerId,
+      },
+    });
+    if (!graph.invocation || !graph.attempt) throw new Error("初次执行图缺失");
+    const invocation = graph.invocation;
+    const attempt = graph.attempt;
+    // 图建立入口已经领取了首份准备 claim；模拟该入口退出后再开始两次同源投递。
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(invocationAttemptTable.id, attempt.id));
+    const binding = await requireExecutionBinding(context.tenantId, invocation.id);
+    const transport = await resolveRuntimeTransportFromBinding({
+      tenantId: context.tenantId,
+      binding,
+    });
+    const resources = await resolveBoundExecutionResources({
+      tenantId: context.tenantId,
+      binding,
+      purpose: "thread",
+    });
+    let signalFirstClaim!: () => void;
+    let releaseFirstFailure!: () => void;
+    const firstClaimed = new Promise<void>((resolve) => {
+      signalFirstClaim = resolve;
+    });
+    const firstMayFail = new Promise<void>((resolve) => {
+      releaseFirstFailure = resolve;
+    });
+    let signalSecondTransport!: () => void;
+    let releaseSecondTransport!: () => void;
+    const secondAtTransport = new Promise<void>((resolve) => {
+      signalSecondTransport = resolve;
+    });
+    const secondMayFinish = new Promise<void>((resolve) => {
+      releaseSecondTransport = resolve;
+    });
+    let firstTransportCalls = 0;
+    const endpoint = async () => ({
+      runtimeEndpoint: transport.runtimeEndpoint,
+      auth: transport.auth,
+      callbackEndpoints: buildGatewayEndpoints({
+        external: !transport.hosted,
+        invocationId: invocation.id,
+      }),
+      ...resources,
+    });
+    const first = dispatchQueuedInvocationAttempt({
+      tenantId: context.tenantId,
+      attemptId: attempt.id,
+      runtimeClient: new Proxy(transport.runtimeClient, {
+        get(target, key) {
+          if (key === "startInvocation") {
+            return () => {
+              firstTransportCalls += 1;
+              throw new Error("旧工作不得发送新 Transport");
+            };
+          }
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+      runtimeEndpointResolver: async () => {
+        signalFirstClaim();
+        await firstMayFail;
+        throw new Error("LateOrdinaryResolverIoError");
+      },
+    });
+    void first.catch(() => undefined);
+    try {
+      await Promise.race([
+        firstClaimed,
+        first.then((result) => {
+          throw new Error(`第一名在取得 claim 前退出：${result.status}`);
+        }),
+      ]);
+      const [firstSlot] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      expect(firstSlot?.preparationClaimId).toBeTruthy();
+      await db
+        .update(invocationAttemptTable)
+        .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1_000) })
+        .where(eq(invocationAttemptTable.id, attempt.id));
+      const second = dispatchQueuedInvocationAttempt({
+        tenantId: context.tenantId,
+        attemptId: attempt.id,
+        runtimeClient: new Proxy(transport.runtimeClient, {
+          get(target, key) {
+            if (key === "startInvocation") {
+              return async (...args: unknown[]) => {
+                signalSecondTransport();
+                await secondMayFinish;
+                return Reflect.apply(target.startInvocation, target, args);
+              };
+            }
+            const value = Reflect.get(target, key);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }),
+        runtimeEndpointResolver: endpoint,
+      });
+      void second.catch(() => undefined);
+      await Promise.race([
+        secondAtTransport,
+        second.then((result) => {
+          throw new Error(`继任者在 Transport 前退出：${result.status}`);
+        }),
+      ]);
+      const [owner] = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.invocationId, invocation.id))
+        .limit(1);
+      const [session] = await getRuntimeSessionBindingsByInvocation(
+        context.tenantId,
+        invocation.id,
+      );
+      const [writer] = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.tenantId, context.tenantId))
+        .limit(1);
+      const lease = await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempt.id);
+      if (!owner || !session || !writer || !lease) throw new Error("继任执行资源未建立");
+      expect(owner.ownershipState).toBe("active");
+      expect(session.bindingState).toBe("dispatching");
+      expect(writer.lockState).toBe("active");
+      expect(lease.readinessState).toBe("ready");
+      const physicalWriter = await broker.getWriter(probe.scopeDigest, writer.writerGeneration);
+      expect(physicalWriter).toMatchObject({
+        grantRef: writer.backendGrantRef,
+      });
+      if (!physicalWriter) throw new Error("物理 Writer grant 缺失");
+      const activeRootBefore = await stat(physicalWriter.root);
+      const operationId = (lease.resourceManifest as { operationId?: string }).operationId;
+      if (!operationId) throw new Error("容器 operation 缺失");
+      const containerBefore = await inspectContainer(managedContainerName(operationId));
+      expect(containerBefore).not.toBeNull();
+      releaseFirstFailure();
+      await expect(first).rejects.toThrow("PreparationClaimSuperseded");
+      expect(firstTransportCalls).toBe(0);
+      const [ownerAfter] = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.id, owner.id))
+        .limit(1);
+      const [sessionAfter] = await getRuntimeSessionBindingsByInvocation(
+        context.tenantId,
+        invocation.id,
+      );
+      const [writerAfter] = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.id, writer.id))
+        .limit(1);
+      expect(ownerAfter?.ownershipState).toBe("active");
+      expect(sessionAfter?.bindingState).toBe("dispatching");
+      expect(writerAfter?.backendGrantRef).toBe(writer.backendGrantRef);
+      expect((await stat(physicalWriter.root)).ino).toBe(activeRootBefore.ino);
+      expect((await inspectContainer(managedContainerName(operationId)))?.Id).toBe(
+        containerBefore?.Id,
+      );
+      releaseSecondTransport();
+      expect((await second).status).toBe("started");
+      expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+      expect(await listAttemptsForInvocation(context.tenantId, invocation.id)).toHaveLength(1);
+    } finally {
+      releaseFirstFailure();
+      releaseSecondTransport();
       await removeTestContainerForTurn(context.tenantId, turn.id);
     }
   }, 120_000);
