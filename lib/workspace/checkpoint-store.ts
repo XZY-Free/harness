@@ -23,6 +23,26 @@ export async function getFilesystemCheckpoint(
   return row ?? null;
 }
 
+export async function getFilesystemCheckpointByIntent(
+  tenantId: string,
+  invocationId: string,
+  checkpointIntentId: string,
+  executor: DbOrTx = db,
+): Promise<FilesystemCheckpoint | null> {
+  const [row] = await executor
+    .select()
+    .from(filesystemCheckpointTable)
+    .where(
+      and(
+        eq(filesystemCheckpointTable.tenantId, tenantId),
+        eq(filesystemCheckpointTable.invocationId, invocationId),
+        eq(filesystemCheckpointTable.checkpointIntentId, checkpointIntentId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function listFilesystemCheckpoints(
   tenantId: string,
   invocationId: string,

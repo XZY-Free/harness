@@ -63,7 +63,10 @@ import {
   confirmCheckpointRuntimeRelease,
   recordCheckpointReleaseFailure,
 } from "@/lib/workspace/checkpoint-release";
-import { getFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
+import {
+  getFilesystemCheckpoint,
+  getFilesystemCheckpointByIntent,
+} from "@/lib/workspace/checkpoint-store";
 import { type RecoveryAnchor, computeRecoveryAnchorDigest } from "@/lib/workspace/recovery-anchor";
 import type { WorkspaceExecutionResources } from "@/lib/workspace/workspace-backend";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -1071,6 +1074,26 @@ async function dispatchFilesystemCheckpoint(input: {
     checkpointId?: unknown;
     release?: unknown;
   } | null;
+  if (freshInvocation?.checkpointIntentId !== payload.checkpointIntentId) {
+    // 两条释放腿确认后 Gate 会清除当前 intent；后来还可能已有下一次安全点。
+    // 命令 ACK 丢失时，按冻结 intent 回读已提交对象，只返回历史回执，绝不重发旧
+    // release 或请求新安全点，否则旧命令会碰到当前 Gate 并把合法快照误判为失败。
+    const historical = await getFilesystemCheckpointByIntent(
+      input.tenantId,
+      input.context.invocation.id,
+      payload.checkpointIntentId,
+    );
+    if (!historical) throw new Error("CheckpointStale");
+    return {
+      checkpoint: {
+        checkpointId: historical.id,
+        manifestRef: historical.manifestRef,
+        manifestDigest: historical.manifestDigest,
+        contentRootDigest: historical.contentRootDigest,
+      },
+      replayed: true,
+    };
+  }
   if (
     freshInvocation?.checkpointIntentId === payload.checkpointIntentId &&
     typeof preparedEvidence?.checkpointId === "string"

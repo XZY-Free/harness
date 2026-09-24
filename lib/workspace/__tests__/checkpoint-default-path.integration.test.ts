@@ -1043,6 +1043,89 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(owner?.id).toBe(ctx.ownershipId);
   });
 
+  it("R5-f: 旧意图释放后新安全点成功，已提交新命令重投不重复建对象且写入恢复", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "first checkpoint", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    const first = await runDefaultCheckpoint(ctx);
+    expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "second checkpoint", "utf8");
+    const second = await takeRecoverablePauseCheckpoint({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+      requestedById: "test-service",
+    });
+    expect(second.dispatched).toBe(true);
+    expect(second.checkpointIntentId).not.toBe(first.checkpoint.checkpointIntentId);
+    const pending = await readGate(ctx.invocationId);
+    const secondEvidence = pending?.checkpointPreparedEvidence as { checkpointId?: string } | null;
+    expect(secondEvidence?.checkpointId).toBeTruthy();
+    expect(secondEvidence?.checkpointId).not.toBe(first.checkpointId);
+    expect(pending?.checkpointGate).toBe("open");
+    expect(ctx.stub.safePointRequests).toHaveLength(2);
+    expect(ctx.stub.releaseRequests).toHaveLength(2);
+
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "queued",
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+        nextDispatchAt: new Date(0),
+        completedAt: null,
+        receiptJson: null,
+        lastErrorCode: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(invocationCommandTable.id, second.commandId!));
+    const replay = await retryDispatchedCommandToRuntime({
+      tenantId: TENANT_ID,
+      commandId: second.commandId!,
+    });
+    expect(replay.dispatched).toBe(true);
+    if (!replay.dispatched) throw new Error("新 Checkpoint 命令重投失败");
+    expect(replay.command.response).toMatchObject({
+      checkpoint: { checkpointId: secondEvidence?.checkpointId },
+      replayed: true,
+    });
+    expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+    expect(ctx.stub.safePointRequests).toHaveLength(2);
+    expect(ctx.stub.releaseRequests).toHaveLength(2);
+    const checkpoints = await db
+      .select({ id: filesystemCheckpointTable.id })
+      .from(filesystemCheckpointTable)
+      .where(eq(filesystemCheckpointTable.invocationId, ctx.invocationId));
+    expect(new Set(checkpoints.map((row) => row.id))).toEqual(
+      new Set([first.checkpointId, secondEvidence?.checkpointId]),
+    );
+
+    const [owner] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, ctx.ownershipId))
+      .limit(1);
+    if (!owner?.workspaceWriterGeneration) throw new Error("Writer generation 缺失");
+    const remote = createRemoteWorkspaceHost(rpc!.url);
+    const grant = await remote.getWriter(ctx.scopeDigest, owner.workspaceWriterGeneration);
+    if (!grant) throw new Error("Writer grant 缺失");
+    await remote.executeManagedFileOperation({
+      identity: {
+        tenantId: TENANT_ID,
+        scopeDigest: grant.scopeDigest,
+        writerGeneration: grant.writerGeneration,
+        invocationId: grant.invocationId,
+        attemptId: grant.attemptId,
+        ownershipId: grant.ownershipId,
+        operationId: grant.operationId,
+      },
+      operation: { kind: "write", path: "after-second-checkpoint.txt", content: "writable" },
+    });
+    expect(await readFile(path.join(grant.root, "after-second-checkpoint.txt"), "utf8")).toBe(
+      "writable",
+    );
+  });
+
   it("A06-02: runtime-start 用恢复目录激活 Writer —— 候选运行区在受管根内、内容真实恢复", async () => {
     const ctx = await setupDefaultPathContext();
     await writeFile(path.join(ctx.writerRoot, "state.txt"), "restore me", "utf8");
