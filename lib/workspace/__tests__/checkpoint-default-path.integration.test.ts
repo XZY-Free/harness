@@ -40,6 +40,7 @@ import {
 import { activateEnvironmentLease } from "@/lib/environment/environment-lease-store";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
 import {
   assertExecutionSourceSnapshot,
   executionSourceDigest,
@@ -82,6 +83,7 @@ import {
   dispatchResumeCommandToRuntime,
   retryDispatchedCommandToRuntime,
 } from "@/lib/runtime/command-dispatch-gateway";
+import { acceptResumeCommandPreparation } from "@/lib/runtime/command-dispatcher";
 import {
   dockerInfo,
   inspectImage,
@@ -89,6 +91,7 @@ import {
   removeContainer,
 } from "@/lib/runtime/container/docker-cli";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
+import { claimInvocationCommandDispatch } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
 import { createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
 import {
@@ -2121,6 +2124,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     options: {
       actionId?: string;
       authority?: DefaultPathContext["authority"];
+      afterSuspended?: () => Promise<void>;
     } = {},
   ) {
     const actionId = options.actionId ?? "a06-resume-input";
@@ -2134,6 +2138,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       { authority: currentAuthority },
     );
     const paused = await readInvocationFacts(ctx.invocationId);
+    await options.afterSuspended?.();
     const resolved = await submitResolution(uar.id);
     const gateway = await dispatchResumeCommandToRuntime({
       tenantId: TENANT_ID,
@@ -2242,6 +2247,242 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(await readFile(path.join(second.expectedRoot, "live.txt"), "utf8")).toBe(
       "live-after-resume",
     );
+  });
+
+  it("N04-T1/R4-a: 第一轮已接受的慢命令跨第二轮晚到，不改受管 Lease、Writer 和文件", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "first-checkpoint", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    let slowCommandId: string | null = null;
+    const first = await runPauseResumeChain(ctx, {
+      actionId: "r4a-first-pause",
+      afterSuspended: async () => {
+        // C1-A 在 P1 仍为当前暂停时通过正式命令接受入口冻结来源，随后暂不投递。
+        slowCommandId = await db.transaction((tx) =>
+          createInvocationCommandInTransaction(tx, {
+            tenantId: TENANT_ID,
+            invocationId: ctx.invocationId,
+            commandType: "resume",
+            idempotencyKey: `r4a-slow:${randomUUID()}`,
+            payloadJson: {
+              resume_source: "user_pause",
+              resume_payload: { source: "user_pause" },
+            },
+            requestedByType: "user",
+            requestedById: "test-user",
+          }),
+        );
+      },
+    });
+    if (!slowCommandId) throw new Error("C1-A 未被正式接受");
+    const [slowAccepted] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, slowCommandId))
+      .limit(1);
+    expect(slowAccepted?.commandState).toBe("queued");
+    expect(
+      (slowAccepted?.payloadJson as { pause_source_digest?: string }).pause_source_digest,
+    ).toMatch(/^sha256:/);
+
+    await writeFile(path.join(first.expectedRoot, "state.txt"), "second-checkpoint", "utf8");
+    const second = await runPauseResumeChain(ctx, {
+      actionId: "r4a-second-pause",
+      authority: first.resumeRequest.authority,
+    });
+    await writeFile(path.join(second.expectedRoot, "live.txt"), "second-live", "utf8");
+    const ownerBefore = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    const sessionsBefore = await readSessions(ctx);
+    const leaseBefore = await db
+      .select()
+      .from(environmentLeaseTable)
+      .where(eq(environmentLeaseTable.invocationId, ctx.invocationId));
+    const attemptBefore = await readAttemptFacts(ctx.attemptId);
+    expect(
+      (slowAccepted?.payloadJson as { pause_source_digest: string }).pause_source_digest,
+    ).not.toBe(
+      protocolDigest({
+        attemptId: attemptBefore.id,
+        recoveryVersion: second.running.recoveryVersion,
+        resumeAnchor: attemptBefore.resumeAnchor,
+        resumeAnchorDigest: attemptBefore.resumeAnchorDigest,
+      }),
+    );
+    const restoredBefore = await readRestoredRunRoots(
+      path.join(await realpath(ctx.writerRoot), ".snow-runs", ctx.attemptId),
+    );
+    const resumeRequestsBefore = ctx.stub.resumeRequests.length;
+
+    const late = await dispatchResumeCommandToRuntime({
+      tenantId: TENANT_ID,
+      commandId: slowCommandId,
+      actorId: "test-service",
+      correlationId: "r4a-late-c1a",
+    });
+    expect(late).toMatchObject({
+      dispatched: true,
+      command: { commandState: "failed", errorCode: "ResumePauseSourceSuperseded" },
+    });
+    expect(await readCommandOutcome(slowCommandId)).toContain("ResumePauseSourceSuperseded");
+    expect(ctx.stub.resumeRequests).toHaveLength(resumeRequestsBefore);
+    expect(await readSessions(ctx)).toEqual(sessionsBefore);
+    expect(
+      await db
+        .select()
+        .from(environmentLeaseTable)
+        .where(eq(environmentLeaseTable.invocationId, ctx.invocationId)),
+    ).toEqual(leaseBefore);
+    expect(await readAttemptFacts(ctx.attemptId)).toEqual(attemptBefore);
+    expect(
+      (await getActiveExecutionOwnership({ tenantId: TENANT_ID, invocationId: ctx.invocationId }))
+        ?.id,
+    ).toBe(ownerBefore?.id);
+    expect(
+      await readRestoredRunRoots(
+        path.join(await realpath(ctx.writerRoot), ".snow-runs", ctx.attemptId),
+      ),
+    ).toEqual(restoredBefore);
+    expect(await readFile(path.join(second.expectedRoot, "state.txt"), "utf8")).toBe(
+      "second-checkpoint",
+    );
+    expect(await readFile(path.join(second.expectedRoot, "live.txt"), "utf8")).toBe("second-live");
+  });
+
+  it("R4-b: 两种来源先后都在 Invocation 根锁内裁决，落败者不能重置 Lease", async () => {
+    for (const firstLabel of ["W1", "W2"] as const) {
+      const ctx = await setupDefaultPathContext();
+      await writeFile(path.join(ctx.writerRoot, "state.txt"), `r4b-${firstLabel}`, "utf8");
+      await ingestRuntimeBatch(ctx, [resumeInputPayload(`r4b-${firstLabel}`)]);
+      const checkpoint = await runDefaultCheckpoint(ctx);
+      await ingestRuntimeBatch(ctx, [
+        suspendedEvent(checkpoint.checkpointId, checkpoint.checkpoint.recoveryAnchorDigest),
+      ]);
+      const [leaseBefore] = await db
+        .select()
+        .from(environmentLeaseTable)
+        .where(eq(environmentLeaseTable.attemptId, ctx.attemptId))
+        .limit(1);
+      if (!leaseBefore) throw new Error("R4-b 缺少真实环境 Lease");
+      const commands = new Map<string, string>();
+      for (const label of ["W1", "W2"] as const) {
+        const commandId = await db.transaction((tx) =>
+          createInvocationCommandInTransaction(tx, {
+            tenantId: TENANT_ID,
+            invocationId: ctx.invocationId,
+            commandType: "resume",
+            idempotencyKey: `r4b:${firstLabel}:${label}:${randomUUID()}`,
+            payloadJson: {
+              resume_source: "user_pause",
+              resume_payload: { source: "user_pause" },
+            },
+            requestedByType: "user",
+            requestedById: "test-user",
+          }),
+        );
+        commands.set(label, commandId);
+        const claimed = await claimInvocationCommandDispatch({
+          commandId,
+          leaseOwner: `r4b-${label}-${randomUUID()}`,
+          leaseDurationMs: 30_000,
+          now: new Date(),
+          allowImmediateQueued: true,
+        });
+        expect(claimed?.command.commandState).toBe("dispatched");
+      }
+
+      let rootLocked!: () => void;
+      const locked = new Promise<void>((resolve) => {
+        rootLocked = resolve;
+      });
+      let releaseRoot!: () => void;
+      const release = new Promise<void>((resolve) => {
+        releaseRoot = resolve;
+      });
+      const holder = db.transaction(async (tx) => {
+        await tx
+          .select({ id: invocationTable.id })
+          .from(invocationTable)
+          .where(eq(invocationTable.id, ctx.invocationId))
+          .for("update");
+        rootLocked();
+        await release;
+      });
+      try {
+        await locked;
+        const firstId = commands.get(firstLabel)!;
+        const secondId = commands.get(firstLabel === "W1" ? "W2" : "W1")!;
+        let firstSettled = false;
+        let secondSettled = false;
+        const first = acceptResumeCommandPreparation({
+          tenantId: TENANT_ID,
+          commandId: firstId,
+        }).then(
+          (claim) => {
+            firstSettled = true;
+            return { claim, error: null };
+          },
+          (error: unknown) => {
+            firstSettled = true;
+            return { claim: null, error };
+          },
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const second = acceptResumeCommandPreparation({
+          tenantId: TENANT_ID,
+          commandId: secondId,
+        }).then(
+          (claim) => {
+            secondSettled = true;
+            return { claim, error: null };
+          },
+          (error: unknown) => {
+            secondSettled = true;
+            return { claim: null, error };
+          },
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (firstSettled) throw new Error(`首个 TX-A 提前结束：${String((await first).error)}`);
+        if (secondSettled) throw new Error(`第二个 TX-A 提前结束：${String((await second).error)}`);
+        expect(firstSettled).toBe(false);
+        expect(secondSettled).toBe(false);
+        // 两个 TX-A 都在 I 上等待，不能先拿 Lease 行锁形成 I←Lease 的反向等待。
+        await db.transaction(async (tx) => {
+          const [freeLease] = await tx
+            .select({ id: environmentLeaseTable.id })
+            .from(environmentLeaseTable)
+            .where(eq(environmentLeaseTable.id, leaseBefore.id))
+            .for("update")
+            .limit(1);
+          expect(freeLease?.id).toBe(leaseBefore.id);
+        });
+        releaseRoot();
+        await holder;
+        const firstOutcome = await first;
+        const secondOutcome = await second;
+        expect(firstOutcome.error).toBeNull();
+        expect(firstOutcome.claim?.intentKey).toBe(`command:${firstId}`);
+        expect(secondOutcome.claim).toBeNull();
+        expect(String(secondOutcome.error)).toMatch(/AttemptPreparationBusy|NotCurrentExecutor/);
+        const attemptAfter = await readAttemptFacts(ctx.attemptId);
+        const [leaseAfter] = await db
+          .select()
+          .from(environmentLeaseTable)
+          .where(eq(environmentLeaseTable.id, leaseBefore.id))
+          .limit(1);
+        expect(attemptAfter.preparationIntentKey).toBe(`command:${firstId}`);
+        expect(leaseAfter?.versionNo).toBe(leaseBefore.versionNo + 1);
+        expect(leaseAfter?.readinessState).toBe("preparing");
+        expect(
+          (leaseAfter?.resourceManifest as { recoveryAnchorDigest?: string }).recoveryAnchorDigest,
+        ).toBe(checkpoint.checkpoint.recoveryAnchorDigest);
+      } finally {
+        releaseRoot();
+        await holder;
+      }
+    }
   });
 
   it("R4-d: C2 已运行时正式 Worker 按 C1 冻结来源回读旧 ACK 而不触碰当前文件", async () => {
