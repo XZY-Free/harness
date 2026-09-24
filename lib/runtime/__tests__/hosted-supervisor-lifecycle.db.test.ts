@@ -1567,10 +1567,48 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
       }),
     ]);
     const historical = await db
-      .select({ reasonCode: executionOwnershipTable.reasonCode })
+      .select()
       .from(executionOwnershipTable)
       .where(eq(executionOwnershipTable.invocationId, invocation.id));
     expect(historical.filter((row) => row.reasonCode === "supervisor_handoff")).toHaveLength(10);
+
+    const service = hostedService({
+      leaseMs: 2_000,
+      pendingWaitLimitMs: 400,
+      loopWindowMs: 30_000,
+    });
+    const rounds = [];
+    for (let index = 0; index < 3; index += 1) {
+      rounds.push(
+        await runDueUndispatchedIntentRecoveries({
+          now: new Date(),
+          batchSize: 1,
+          dependencies: { hostedApplicationService: service },
+        }),
+      );
+    }
+    expect(rounds.map((round) => round.handoffs.recovered)).toEqual([1, 0, 0]);
+    const successor = await getActiveExecutionOwnership({
+      tenantId: ctx.tenantId,
+      invocationId: invocation.id,
+    });
+    expect(successor?.leaseEpoch).toBe(current.ownership.leaseEpoch + 1n);
+    if (!successor) throw new Error("正式 lane 未建立继任 Owner");
+    const successorSession = await getRuntimeSessionBindingByOwnership(ctx.tenantId, successor.id);
+    if (!successorSession) throw new Error("正式 lane 未建立继任 Session");
+    await waitForFact(
+      async () =>
+        (await sessionOf(ctx.tenantId, successorSession.id)).supervisorReleasedAt !== null,
+      "继任 Hosted 运行结束并释放 Supervisor",
+    );
+    const after = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.invocationId, invocation.id));
+    expect(after).toHaveLength(historical.length + 1);
+    for (const row of historical) {
+      expect(after.find((candidate) => candidate.id === row.id)).toEqual(row);
+    }
   }, 120_000);
 
   it("A03-T08: 执行期限由领取时冻结，不随重新进入 Loop 重置", async () => {
