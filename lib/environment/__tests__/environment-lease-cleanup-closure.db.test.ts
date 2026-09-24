@@ -16,7 +16,7 @@
  * 若本机没有 docker 或候选镜像，`makeFixture` 直接抛错——这些用例**不允许静默跳过**。
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { db } from "@/lib/db/client";
@@ -44,6 +44,7 @@ import {
   runEnvironmentLeaseCleanup,
 } from "@/lib/environment/environment-provisioner";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
+import { spawnEnvironmentCleanupCrashProcess } from "@/lib/environment/test-support/environment-cleanup-crash-process";
 import {
   ATTEMPT_PREPARATION_LEASE_MS,
   claimAttemptPreparation,
@@ -81,6 +82,7 @@ import {
 import { claimRuntimeSessionSupervisorInTransaction } from "@/lib/runtime/persistence/runtime-session-store";
 import { failAttemptAndInvokeRecoveryAuthority } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -128,6 +130,7 @@ interface ManagedFixture {
   backend: EnvironmentInstanceBackend;
   provisioner: ReturnType<typeof createEnvironmentProvisioner>;
   workspaceRoot: string;
+  controlRoot: string;
   revision: EnvironmentDefinitionRevision;
   /**
    * 真实建出「容器 + Prepared Lease + 已激活 Writer 的 Current Ownership」。
@@ -223,6 +226,7 @@ async function makeFixture(): Promise<ManagedFixture> {
     backend,
     provisioner,
     workspaceRoot,
+    controlRoot,
     revision,
     async seedManagedAuthority() {
       const seeded = await seedPreparedRuntimeAttempt({
@@ -342,6 +346,97 @@ describe("A08 环境资源终态清理与回收闭环", () => {
     expect(released?.releasedAt).not.toBeNull();
     expect(await inspectContainer(seeded.containerName)).toBeNull();
   }, 60_000);
+
+  it("WORKSPACE-10: Lease 清理进程在物理释放后崩溃，正式 Worker 幂等续做且不清共享与快照文件", async () => {
+    const fixture = await makeFixture();
+    const seeded = await fixture.seedManagedAuthority();
+    const sharedFile = path.join(fixture.workspaceRoot, "shared-owner.txt");
+    await writeFile(sharedFile, "shared content", "utf8");
+    const snapshot = new FileSnapshotStorage(
+      path.join(path.dirname(fixture.workspaceRoot), "snapshots"),
+    );
+    const requirements = {
+      checkpointPolicy: {
+        chunkBytes: 4_194_304,
+        maxTotalBytes: "1048576",
+        maxEntries: 100,
+      },
+      filesystemSemantics: {
+        kind: "desktop",
+        caseSensitive: true,
+        symlinks: true,
+        permissions: true,
+        hardlinks: false,
+        specialFiles: false,
+        xattrsAcl: false,
+        mtime: "preserved",
+      },
+    } as const;
+    const committedSnapshot = await snapshot.writeSnapshot(
+      fixture.workspaceRoot,
+      `cleanup-checkpoint:${seeded.leaseId}`,
+      requirements,
+    );
+    await scheduleEnvironmentLeaseCleanup({
+      tenantId: TENANT_ID,
+      leaseId: seeded.leaseId,
+      errorCode: "WorkspaceCleanupProcessCrash",
+      immediate: true,
+    });
+    const before = await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId);
+    expect(before?.leaseState).toBe("releasing");
+    const manifest = before?.resourceManifest as { operationId?: string; resources?: unknown[] };
+    expect(manifest.operationId).toBeTruthy();
+    expect(manifest.resources?.length).toBeGreaterThan(0);
+
+    const crashed = spawnEnvironmentCleanupCrashProcess({
+      tenantId: TENANT_ID,
+      leaseId: seeded.leaseId,
+      controlRoot: fixture.controlRoot,
+    });
+    try {
+      const barrier = await crashed.released;
+      expect(barrier.receipt).toMatchObject({ released: true });
+      expect(await inspectContainer(seeded.containerName)).toBeNull();
+      const inFlight = await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId);
+      expect(inFlight?.leaseState).toBe("releasing");
+      expect(inFlight?.releasedAt).toBeNull();
+      expect(inFlight?.cleanupLeaseOwner).toMatch(/^cleanup-crash:/);
+      crashed.kill();
+      expect((await crashed.exited).signal).toBe("SIGKILL");
+
+      const dueAt = new Date((inFlight?.cleanupLeaseExpiresAt?.getTime() ?? 0) + 1);
+      const resumed = await runDueEnvironmentLeaseCleanups({
+        backend: fixture.backend,
+        owner: "cleanup-worker:after-real-crash",
+        now: dueAt,
+      });
+      expect(resumed.released).toBe(1);
+      const finalLease = await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId);
+      expect(finalLease?.leaseState).toBe("released");
+      expect(finalLease?.releasedAt).not.toBeNull();
+      expect(await inspectContainer(seeded.containerName)).toBeNull();
+      await expect(readFile(sharedFile, "utf8")).resolves.toBe("shared content");
+      const preservedManifest = await snapshot.readManifest(
+        committedSnapshot.receipt.manifestRef,
+        committedSnapshot.receipt.manifestDigest,
+        requirements,
+      );
+      expect(preservedManifest.manifestDigest).toBe(committedSnapshot.manifest.manifestDigest);
+      const restored = path.join(path.dirname(fixture.workspaceRoot), "restored-checkpoint");
+      await snapshot.restoreSnapshot(
+        preservedManifest,
+        restored,
+        `cleanup-restore:${seeded.leaseId}`,
+      );
+      await expect(readFile(path.join(restored, "shared-owner.txt"), "utf8")).resolves.toBe(
+        "shared content",
+      );
+    } finally {
+      crashed.kill();
+      await crashed.exited;
+    }
+  }, 120_000);
 
   it("N07-T1/N07-T3: MANAGED 主动交接登记旧 Lease，释放失败及进程退出后由原 Worker 真实重试", async () => {
     const fixture = await makeFixture();
