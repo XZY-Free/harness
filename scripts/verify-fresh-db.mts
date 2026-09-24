@@ -218,6 +218,12 @@ async function main(): Promise<void> {
       await connection.end();
     }
 
+    await run(
+      "canonical-seed-thread-job-flow",
+      ["exec", "tsx", "scripts/verify-fresh-db-flow.mts"],
+      env,
+    );
+
     const port = await reservePort();
     const origin = `http://127.0.0.1:${port}`;
     console.log(`[fresh-db] boot ${origin}`);
@@ -230,7 +236,7 @@ async function main(): Promise<void> {
     app.stderr?.on("data", (chunk) => process.stderr.write(chunk));
     const status = await waitForBoot(origin, app);
     console.log(`[fresh-db] boot HTTP ${status}`);
-    console.log("[fresh-db] PASS migrate twice -> seed -> boot");
+    console.log("[fresh-db] PASS migrate twice -> seed -> Thread/Job flow -> boot");
   } finally {
     await stopChild(app);
     await container.stop();
