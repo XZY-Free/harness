@@ -41,6 +41,10 @@ import { activateEnvironmentLease } from "@/lib/environment/environment-lease-st
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
 import {
+  assertExecutionSourceSnapshot,
+  executionSourceRequestOf,
+} from "@/lib/executions/domain/preparation-source";
+import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
@@ -2109,6 +2113,94 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       )?.id,
     ).toBe(ownerBefore?.id);
     expect(await readFile(path.join(second.expectedRoot, "live.txt"), "utf8")).toBe("c2-live-data");
+  });
+
+  it("R4-c: 同 Attempt 的 C1/K1 与 C2/K2 各丢一次 ACK 后按各自冻结来源恢复", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "checkpoint-k1", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    ctx.stub.dropNextResumeResponse();
+    const first = await runPauseResumeChain(ctx, { actionId: "r4c-c1" });
+    expect(first.gateway.dispatched && first.gateway.command.commandState).toBe("dispatched");
+    await waitForDispatchDue(first.resolved.resumeCommand.id);
+    expect((await createRuntimeDispatchRetryWorker().tick()).commands).toBeGreaterThanOrEqual(1);
+    const [c1Command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, first.resolved.resumeCommand.id))
+      .limit(1);
+    expect(c1Command?.commandState).toBe("acknowledged");
+    expect(c1Command?.receiptJson).toEqual(
+      (await readSessions(ctx)).find((row) => row.id === first.resumedSession.id)
+        ?.transportAcknowledgement,
+    );
+    expect(await readSessions(ctx)).toHaveLength(2);
+    expect(
+      (await getActiveExecutionOwnership({ tenantId: TENANT_ID, invocationId: ctx.invocationId }))
+        ?.id,
+    ).toBe(first.resumedSession.ownershipId);
+    expect(await readFile(path.join(first.expectedRoot, "state.txt"), "utf8")).toBe(
+      "checkpoint-k1",
+    );
+
+    await writeFile(path.join(first.expectedRoot, "state.txt"), "checkpoint-k2", "utf8");
+    ctx.stub.dropNextResumeResponse();
+    const second = await runPauseResumeChain(ctx, {
+      actionId: "r4c-c2",
+      authority: first.resumeRequest.authority,
+    });
+    expect(second.gateway.dispatched && second.gateway.command.commandState).toBe("dispatched");
+    await waitForDispatchDue(second.resolved.resumeCommand.id);
+    expect((await createRuntimeDispatchRetryWorker().tick()).commands).toBeGreaterThanOrEqual(1);
+    const [c2Command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, second.resolved.resumeCommand.id))
+      .limit(1);
+    expect(c2Command?.commandState).toBe("acknowledged");
+    expect(c2Command?.receiptJson).toEqual(
+      (await readSessions(ctx)).find((row) => row.id === second.resumedSession.id)
+        ?.transportAcknowledgement,
+    );
+    expect(await readSessions(ctx)).toHaveLength(3);
+    expect(
+      (await getActiveExecutionOwnership({ tenantId: TENANT_ID, invocationId: ctx.invocationId }))
+        ?.id,
+    ).toBe(second.resumedSession.ownershipId);
+    expect(first.resumeRequest.authority.attemptId).toBe(ctx.attemptId);
+    expect(second.resumeRequest.authority.attemptId).toBe(ctx.attemptId);
+    expect(first.checkpoint.checkpointId).not.toBe(second.checkpoint.checkpointId);
+    expect(first.resumedSession.id).not.toBe(second.resumedSession.id);
+    expect(first.resumedSession.ownershipId).not.toBe(second.resumedSession.ownershipId);
+    expect(await readFile(path.join(second.expectedRoot, "state.txt"), "utf8")).toBe(
+      "checkpoint-k2",
+    );
+    expect(ctx.stub.resumeIdempotencyKeys).toEqual([
+      `start:${first.resumedSession.ownershipId}`,
+      `start:${first.resumedSession.ownershipId}`,
+      `start:${second.resumedSession.ownershipId}`,
+      `start:${second.resumedSession.ownershipId}`,
+    ]);
+    const beforeConflict = await readSessions(ctx);
+    const c1Source = assertExecutionSourceSnapshot(first.resumedSession.sourceRequestJson);
+    if (c1Source.recovery.kind !== "resume") throw new Error("C1 来源缺少恢复锚点");
+    await expect(
+      acceptExecutionPreparation({
+        request: {
+          ...executionSourceRequestOf(c1Source),
+          recovery: {
+            ...c1Source.recovery,
+            anchorDigest: protocolDigest({ altered: "r4c" }),
+          },
+        },
+      }),
+    ).rejects.toThrow("StartIntentConflict");
+    expect((await readSessions(ctx)).map((row) => row.id)).toEqual(
+      beforeConflict.map((row) => row.id),
+    );
+    expect(await readFile(path.join(second.expectedRoot, "state.txt"), "utf8")).toBe(
+      "checkpoint-k2",
+    );
   });
 
   it("A06-T06: 暂停后的新回复在恢复后**只被采用一次**，采用时内容水位真实前进", async () => {
