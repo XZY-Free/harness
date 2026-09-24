@@ -608,8 +608,9 @@ export function createContainerEnvironmentBackend(
       }
       const resolvedImage = await inspectImage(spec.container.image);
       if (!resolvedImage) {
-        throw new EnvironmentComplianceError(
+        throw new EnvironmentInstanceOperationError(
           `executionTarget.image 在受管 Host 上不存在：${spec.container.image}（必须先固定镜像 digest）`,
+          "create",
         );
       }
       const pinnedOk =
@@ -773,8 +774,9 @@ export function createHostAgentEnvironmentBackend(
     try {
       buffer = await readFile(target.artifactRef);
     } catch {
-      throw new EnvironmentComplianceError(
+      throw new EnvironmentInstanceOperationError(
         `受管 Agent 制品不存在：${target.artifactRef}（host_agent 必须固定受管制品）`,
+        "create",
       );
     }
     const digest = `sha256:${createHash("sha256").update(buffer).digest("hex")}`;

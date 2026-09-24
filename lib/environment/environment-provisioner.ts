@@ -427,9 +427,12 @@ async function provisionWithBackend(input: {
     }).catch(() => undefined);
     throw error instanceof EnvironmentComplianceError
       ? error
-      : new EnvironmentComplianceError(
-          error instanceof Error ? error.message : "Environment 实例化失败",
-        );
+      : error instanceof EnvironmentInstanceOperationError
+        ? error
+        : new EnvironmentInstanceOperationError(
+            error instanceof Error ? error.message : "Environment 实例化失败",
+            "create",
+          );
   }
   const expiresAt = new Date(input.now.getTime() + ENVIRONMENT_PREPARED_TTL_MS);
   try {

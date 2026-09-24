@@ -1,6 +1,7 @@
 /** Dispatches one durable InvocationAttempt using its frozen execution facts. */
 import { db } from "@/lib/db/client";
 import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
+import { EnvironmentInstanceOperationError } from "@/lib/environment/environment-errors";
 import {
   getEnvironmentLeaseByAttempt,
   registerEnvironmentLeaseCleanupForAttemptInTransaction,
@@ -50,6 +51,7 @@ import {
   lockClaimedSessionInTransaction,
   recordAttemptDispatchTransientFailure,
 } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { scheduleEnvironmentProvisionRetry } from "@/lib/runtime/retry/environment-provision-retry";
 import type { TransientDispatchErrorCode } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import { isTransientRuntimeError } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
@@ -103,6 +105,13 @@ export type DispatchQueuedAttemptResult =
       attempt: InvocationAttempt;
       skipReason: TransientDispatchErrorCode;
     }
+  | {
+      status: "provision_retry_scheduled";
+      attempt: InvocationAttempt;
+      successorAttemptId: string;
+      nextPreparationAt: Date;
+    }
+  | { status: "superseded"; attempt: InvocationAttempt }
   | { status: "terminal_failed"; attempt: InvocationAttempt; errorCode: string };
 
 export async function dispatchQueuedInvocationAttempt(
@@ -237,9 +246,34 @@ export async function dispatchQueuedInvocationAttempt(
     const failure = error instanceof RuntimeStartTransportError ? error.originalError : error;
     const dispatchIdentity =
       error instanceof RuntimeStartTransportError ? error.dispatchIdentity : (params.claim ?? null);
+    let provisionRetryExhausted = false;
+    if (
+      failure instanceof EnvironmentInstanceOperationError &&
+      preparationClaim &&
+      !dispatchIdentity
+    ) {
+      const retry = await scheduleEnvironmentProvisionRetry({
+        claim: preparationClaim,
+        errorSummary: failure.message,
+        now: params.now ?? new Date(),
+      });
+      if (retry.status === "scheduled") {
+        return {
+          status: "provision_retry_scheduled",
+          attempt: (await getAttemptById(attempt.id)) ?? attempt,
+          successorAttemptId: retry.successorAttemptId,
+          nextPreparationAt: retry.nextPreparationAt,
+        };
+      }
+      if (retry.status === "superseded") {
+        return { status: "superseded", attempt: (await getAttemptById(attempt.id)) ?? attempt };
+      }
+      provisionRetryExhausted = true;
+    }
     if (!(failure instanceof RuntimeHttpClientError) || !isTransientRuntimeError(failure)) {
-      const errorCode =
-        failure instanceof RuntimeHttpClientError
+      const errorCode = provisionRetryExhausted
+        ? "EnvironmentProvisionRetryExhausted"
+        : failure instanceof RuntimeHttpClientError
           ? (failure.runtimeErrorCode ?? failure.stableCode)
           : failure instanceof Error
             ? failure.name

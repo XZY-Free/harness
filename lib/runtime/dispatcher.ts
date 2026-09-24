@@ -4,6 +4,7 @@ import { aiConfig } from "@/lib/config";
 import { allocateEventSequences } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
+import { EnvironmentInstanceOperationError } from "@/lib/environment/environment-errors";
 import type { EnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import { recordEnvironmentSelectionFirstApplied } from "@/lib/environment/environment-selection";
 import {
@@ -52,7 +53,9 @@ import {
   type RuntimeRouteResolution,
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
+import { failAttemptAndInvokeRecoveryAuthority } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import { recordAttemptDispatchTransientFailure } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { scheduleEnvironmentProvisionRetry } from "@/lib/runtime/retry/environment-provision-retry";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { CallbackEndpoints, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
 import {
@@ -83,7 +86,7 @@ export interface RuntimeDispatchResult {
   sessionBinding?: RuntimeSessionBinding;
   sessionBindingCreated: boolean;
   skipped?: boolean;
-  skipReason?: "runtime_network_unavailable" | "runtime_unavailable";
+  skipReason?: "runtime_network_unavailable" | "runtime_unavailable" | "environment_unavailable";
 }
 
 export interface DispatchResult {
@@ -300,21 +303,65 @@ export async function dispatchInvocationForTurn(params: {
   // BOUND 且服务端为 Writer 时组合层已解析出真实执行资源；解析不出即 WorkspaceNotReady，
   // 不会退化成一个"引用真实 Workspace 却没有 Writer"的 Binding。
   const workspaceResources: WorkspaceExecutionResources | undefined = resources.workspace;
-  const environmentLease =
-    environmentRevision && resolvedEnvironmentProvisioner
-      ? await resolvedEnvironmentProvisioner.provision({
-          tenantId: params.tenantId,
-          invocationId: invocation.id,
-          attemptId: attempt.id,
-          // 只从 Binding 冻结的 Revision 读取执行语义（R07 §1）。
-          revisionId: environmentRevision.id,
-          revision: environmentRevision,
-          workspaceBindingId,
-          workspaceRoot: workspaceResources?.root ?? null,
-          recoveryAnchorDigest: null,
-          preparationClaim: preparation.claim,
-        })
-      : null;
+  let environmentLease: Awaited<ReturnType<EnvironmentProvisioner["provision"]>> | null = null;
+  try {
+    environmentLease =
+      environmentRevision && resolvedEnvironmentProvisioner
+        ? await resolvedEnvironmentProvisioner.provision({
+            tenantId: params.tenantId,
+            invocationId: invocation.id,
+            attemptId: attempt.id,
+            // 只从 Binding 冻结的 Revision 读取执行语义（R07 §1）。
+            revisionId: environmentRevision.id,
+            revision: environmentRevision,
+            workspaceBindingId,
+            workspaceRoot: workspaceResources?.root ?? null,
+            recoveryAnchorDigest: null,
+            preparationClaim: preparation.claim,
+          })
+        : null;
+  } catch (error) {
+    if (!(error instanceof EnvironmentInstanceOperationError)) throw error;
+    const transition = await transitionTurnToQueued({
+      threadId: thread.id,
+      turn,
+      invocationId: invocation.id,
+      actorType,
+      actorId: params.actorId ?? null,
+      correlationId: params.correlationId ?? null,
+    });
+    const retry = await scheduleEnvironmentProvisionRetry({
+      claim: preparation.claim,
+      errorSummary: error.message,
+      now: new Date(),
+    });
+    if (retry.status === "exhausted") {
+      await failAttemptAndInvokeRecoveryAuthority({
+        tenantId: params.tenantId,
+        invocation,
+        attempt,
+        errorCode: "EnvironmentProvisionRetryExhausted",
+        errorSummary: error.message,
+        now: new Date(),
+        workIdentity: { kind: "preparation", claim: preparation.claim },
+      });
+    }
+    return {
+      dispatched: true,
+      invocation: (await getInvocationById(params.tenantId, invocation.id)) ?? invocation,
+      binding,
+      routeResolution: plan.routeResolution,
+      attempt,
+      turn: (await getTurnById(params.tenantId, params.turnId)) ?? transition.turn,
+      invocationQueuedEvent: invocationResult.event,
+      turnQueuedEvent: transition.event,
+      runtimeDispatch: {
+        sessionBindingCreated: false,
+        skipped: true,
+        skipReason: "environment_unavailable",
+      },
+    };
+  }
   const transition = await transitionTurnToQueued({
     threadId: thread.id,
     turn,

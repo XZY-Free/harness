@@ -596,6 +596,7 @@ export async function claimUndispatchedInvocation(
       .orderBy(asc(invocationAttemptTable.attemptNo));
     const queued = attempts.find((attempt) => attempt.attemptState === "queued");
     if (!queued && attempts.length > 0) return null;
+    if (queued?.nextPreparationAt && queued.nextPreparationAt > now) return null;
     await tx
       .update(invocationTable)
       .set({ updatedAt: now, versionNo: row.versionNo + 1 })

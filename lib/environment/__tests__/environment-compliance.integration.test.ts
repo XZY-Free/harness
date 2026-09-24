@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -56,7 +57,12 @@ import {
   runDueEnvironmentLeaseCleanups,
 } from "@/lib/environment/environment-provisioner";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
-import { createAttempt } from "@/lib/executions/persistence/attempt-store";
+import { assertExecutionSourceSnapshot } from "@/lib/executions/domain/preparation-source";
+import {
+  createAttempt,
+  getAttemptById,
+  updateAttemptState,
+} from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
@@ -67,6 +73,7 @@ import {
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import type { EnvironmentDefinitionRevision } from "@/lib/persistence/schema/environment-definition-revision";
+import { invocationAttemptTable } from "@/lib/persistence/schema/executions";
 import { acceptExecutionPreparation } from "@/lib/runtime/application/execution-preparation";
 import { executionSourceRequestForStart } from "@/lib/runtime/application/runtime-start";
 import {
@@ -76,7 +83,17 @@ import {
   listContainersByLabel,
   removeContainer,
 } from "@/lib/runtime/container/docker-cli";
+import { transitionTurnToQueued } from "@/lib/runtime/dispatcher";
+import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
+import { dispatchQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
+import { scheduleEnvironmentProvisionRetry } from "@/lib/runtime/retry/environment-provision-retry";
+import {
+  resolveBoundExecutionResources,
+  resolveRuntimeTransportFromBinding,
+} from "@/lib/runtime/retry/runtime-transport-from-binding";
+import { runDueUndispatchedIntentRecoveries } from "@/lib/runtime/retry/undispatched-intent-lane";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = DEFAULT_TENANT_ID;
@@ -749,7 +766,7 @@ describe("R07 真实 Environment 实例化与合规", () => {
         revision: rAbsent as EnvironmentDefinitionRevision,
         candidate: absentCandidate,
       }),
-    ).rejects.toBeInstanceOf(EnvironmentComplianceError);
+    ).rejects.toBeInstanceOf(EnvironmentInstanceOperationError);
 
     const absentLease = await getEnvironmentLeaseByAttempt(
       TENANT_ID,
@@ -772,6 +789,140 @@ describe("R07 真实 Environment 实例化与合规", () => {
     // 没有回退去实例化 Default R2。
     expect(await listContainersByLabel(REVISION_LABEL, r2.id)).toEqual([]);
   });
+
+  it("ENV-07: 正式半程 Worker 对缺失受管目标只按冻结 R1 重试三次并终态", async () => {
+    const fixture = await makeFixture();
+    const missingArtifact = path.join(fixture.controlRoot, `missing-env07-${randomUUID()}`);
+    const { definitionId, revision: r1 } = await fixture.createManagedRevision({
+      filesystemPolicyJson: {},
+      networkPolicyJson: { mode: "open" },
+      resourceLimitsJson: {},
+      requiredCapabilities: {},
+      executionTarget: {
+        kind: "host_agent",
+        artifactRef: missingArtifact,
+        artifactDigest: `sha256:${"a".repeat(64)}`,
+        agentCommand: ["/bin/true"],
+      },
+    });
+    const candidate = await fixture.seedCandidate(r1.id);
+    const r2 = await createEnvironmentRevision(TENANT_ID, definitionId, fixture.revisionInput());
+    expect((await getEnvironmentDefinitionById(TENANT_ID, definitionId))?.currentRevisionId).toBe(
+      r2.id,
+    );
+    // 夹具自带的 prepared Attempt 只提供完整 Invocation/Binding/Turn 外键；正式故障从
+    // 新的 pending Attempt 开始，由调度与 Worker 自己创建后续两次候选。
+    await db.transaction((tx) =>
+      updateAttemptState(tx, candidate.attemptId, "failed", {
+        preparationState: "failed",
+        errorCode: "fixture_replaced",
+      }),
+    );
+    const firstAttempt = await createAttempt({
+      tenantId: TENANT_ID,
+      invocationId: candidate.invocationId,
+    });
+    const invocation = await getInvocationById(TENANT_ID, candidate.invocationId);
+    const binding = await getExecutionBindingByInvocation(TENANT_ID, candidate.invocationId);
+    const turn = invocation?.turnId ? await getTurnById(TENANT_ID, invocation.turnId) : null;
+    if (!invocation || !binding || !turn) throw new Error("ENV-07 缺少正式执行事实");
+    await transitionTurnToQueued({
+      threadId: turn.threadId,
+      turn,
+      invocationId: invocation.id,
+      actorType: "service",
+      actorId: "test-service",
+    });
+    const transport = await resolveRuntimeTransportFromBinding({ tenantId: TENANT_ID, binding });
+    const resources = await resolveBoundExecutionResources({
+      tenantId: TENANT_ID,
+      binding,
+      purpose: "thread",
+    });
+    const first = await dispatchQueuedInvocationAttempt({
+      tenantId: TENANT_ID,
+      attemptId: firstAttempt.id,
+      runtimeClient: transport.runtimeClient,
+      runtimeEndpointResolver: async () => ({
+        runtimeEndpoint: transport.runtimeEndpoint,
+        auth: transport.auth,
+        callbackEndpoints: buildGatewayEndpoints({
+          external: !transport.hosted,
+          invocationId: invocation.id,
+        }),
+        ...resources,
+      }),
+    });
+    const firstFailure = await getAttemptById(firstAttempt.id);
+    expect(first.status, `${firstFailure?.errorCode}: ${firstFailure?.errorSummary}`).toBe(
+      "provision_retry_scheduled",
+    );
+    expect(firstFailure?.attemptState).toBe("failed");
+    expect((await getInvocationById(TENANT_ID, invocation.id))?.executionState).toBe("queued");
+    if (
+      !firstFailure?.preparationIntentKey ||
+      !firstFailure.preparationRequestDigest ||
+      !firstFailure.preparationClaimId ||
+      !firstFailure.preparationSourceJson
+    ) {
+      throw new Error("ENV-07 旧准备身份缺失");
+    }
+    expect(
+      await scheduleEnvironmentProvisionRetry({
+        claim: {
+          tenantId: TENANT_ID,
+          invocationId: invocation.id,
+          attemptId: firstAttempt.id,
+          intentKey: firstFailure.preparationIntentKey,
+          requestDigest: firstFailure.preparationRequestDigest,
+          claimId: firstFailure.preparationClaimId,
+          source: assertExecutionSourceSnapshot(firstFailure.preparationSourceJson),
+        },
+        errorSummary: "迟到的旧 create 失败",
+        now: new Date(),
+      }),
+    ).toMatchObject({ status: "superseded" });
+
+    const tooEarly = await runDueUndispatchedIntentRecoveries({
+      now: new Date(Date.now() + 10_000),
+    });
+    expect(tooEarly.invocations.recovered).toBe(0);
+    const firstDue = new Date(Date.now() + 31_000);
+    const competing = await Promise.all([
+      runDueUndispatchedIntentRecoveries({ now: firstDue }),
+      runDueUndispatchedIntentRecoveries({ now: firstDue }),
+    ]);
+    expect(competing.reduce((total, result) => total + result.invocations.recovered, 0)).toBe(1);
+    expect(
+      (
+        await db
+          .select()
+          .from(invocationAttemptTable)
+          .where(eq(invocationAttemptTable.invocationId, invocation.id))
+      ).filter((row) => row.id !== candidate.attemptId),
+    ).toHaveLength(3);
+    expect((await getInvocationById(TENANT_ID, invocation.id))?.executionState).toBe("queued");
+    const secondDue = new Date(Date.now() + 62_000);
+    expect(
+      (await runDueUndispatchedIntentRecoveries({ now: secondDue })).invocations.recovered,
+    ).toBe(1);
+    const attempts = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.invocationId, invocation.id))
+      .orderBy(invocationAttemptTable.attemptNo);
+    const retries = attempts.filter((row) => row.id !== candidate.attemptId);
+    expect(retries).toHaveLength(3);
+    expect(retries.map((row) => row.attemptState)).toEqual(["failed", "failed", "failed"]);
+    expect(retries.at(-1)?.errorCode).toBe("EnvironmentProvisionRetryExhausted");
+    expect((await getInvocationById(TENANT_ID, invocation.id))?.executionState).toBe("lost");
+    for (const attempt of retries) {
+      const lease = await getEnvironmentLeaseByAttempt(TENANT_ID, invocation.id, attempt.id);
+      expect(lease?.environmentDefinitionRevisionId).toBe(r1.id);
+      expect(lease?.readinessState).not.toBe("prepared");
+    }
+    expect(await listContainersByLabel(REVISION_LABEL, r2.id)).toEqual([]);
+  }, 120_000);
 
   it("ENV-06: Provision 过程中 Crash + 清理第一次失败 → 归属可回读、Worker 重试真实清理，不泄漏也不误删他人资源", async () => {
     const fixture = await makeFixture();

@@ -1141,6 +1141,61 @@ async function waitForInvocationForTurn(
 // ─── ENTRY-01 ───────────────────────────────────────────────
 
 describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）", () => {
+  it("ENV-07-inline: 真实 Thread API 初次实例化目标不可用时留下持久恢复候选", async () => {
+    const context = await seedEntryContext("env07-inline");
+    const badDefinition = await createEnvironmentDefinition({
+      tenantId: context.tenantId,
+      environmentKey: `env07-inline-${randomUUID()}`,
+      displayName: "不可用的受管环境",
+      revision: {
+        ...managedRevisionInput(),
+        executionTarget: {
+          kind: "container",
+          image: `snowharness/missing-env07-${randomUUID()}:fixed`,
+          imageDigest: `sha256:${"a".repeat(64)}`,
+          entrypoint: ["/bin/sh"],
+          args: ["-c", "sleep 5"],
+        },
+      },
+    });
+    await db
+      .update(threadTable)
+      .set({ defaultEnvironmentDefinitionId: badDefinition.id })
+      .where(eq(threadTable.id, context.threadId));
+    const response = await postTurn(context.threadId, "env07-inline-turn", "请开始执行");
+    expect(response.status).toBe(201);
+    const accepted = (await response.json()) as { turn: { id: string } };
+    const invocation = await waitForInvocationForTurn(context.tenantId, accepted.turn.id);
+    const deadline = Date.now() + 10_000;
+    let attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+    while (attempts.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+    }
+    const binding = await getExecutionBindingByInvocation(context.tenantId, invocation.id);
+    expect(binding?.environmentDefinitionRevisionId).toBe(badDefinition.currentRevisionId);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]?.attemptState).toBe("failed");
+    expect(attempts[1]).toMatchObject({
+      attemptState: "queued",
+      retryReasonCode: "environment_provision_retry",
+    });
+    expect((await getTurnById(context.tenantId, accepted.turn.id))?.turnState).toBe("queued");
+    expect(
+      (await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempts[0]!.id))
+        ?.environmentDefinitionRevisionId,
+    ).toBe(badDefinition.currentRevisionId);
+    expect(await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id)).toEqual(
+      [],
+    );
+    expect(
+      await getActiveExecutionOwnership({
+        tenantId: context.tenantId,
+        invocationId: invocation.id,
+      }),
+    ).toBeNull();
+  });
+
   it("ENTRY-01: 真实 Thread API 使用 MANAGED Environment + HOST_AFFINE Workspace，不注入测试 Resolver", async () => {
     const context = await seedEntryContext("entry01");
     // 前置事实：Thread 的 Workspace 事实由真实解析器解析（不是测试注入的 Resolver）。
