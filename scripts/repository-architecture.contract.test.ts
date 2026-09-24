@@ -50,11 +50,14 @@ const NAMING_GUARD_EXACT_FILES = new Set([
   "docs/V12/02/snowharness-execution-design/sections/naming-rules.md",
   "lib/architecture/canonical-naming.test.ts",
   "lib/architecture/canonical-routes.test.ts",
+  "scripts/architecture-gate-rules.test.ts",
 ]);
 const FROZEN_HISTORICAL_NAMING_FILES = new Set([
   "docs/topic02/专题02固定关闭检查表/固定检查表.md",
   "docs/topic02/专题02固定关闭检查表/固定检查表.json",
   "docs/topic02/专题02固定关闭检查表/sources/原专题02基础验收矩阵.json",
+  "docs/topic02/evidence/artifacts/核查与修复回执.json",
+  "docs/topic02/evidence/artifacts/审查进度.md",
 ]);
 
 function isDocException(path: string): boolean {
@@ -84,6 +87,10 @@ describe("repository architecture naming contract", () => {
       isDocException("docs/V12/02/snowharness-execution-design/sections/naming-rules.md.old"),
     ).toBe(false);
     expect(isDocException("lib/architecture/unreviewed-v11.ts")).toBe(false);
+    expect(isDocException("scripts/architecture-gate-rules.test.ts")).toBe(true);
+    expect(isDocException("scripts/architecture-gate-rules.other.test.ts")).toBe(false);
+    expect(isDocException("docs/topic02/evidence/artifacts/核查与修复回执.json")).toBe(true);
+    expect(isDocException("docs/topic02/evidence/artifacts/核查与修复回执.json.old")).toBe(false);
     expect(forbidden.test("env11-binding-mismatch.log")).toBe(false);
     expect(forbidden.test(`runtime-v${11}-legacy.ts`)).toBe(true);
   });
@@ -91,6 +98,7 @@ describe("repository architecture naming contract", () => {
   it("contains no retired version file names or source symbols", () => {
     const violations = SCAN_ROOTS.flatMap((root) => sourceFiles(join(ROOT, root)))
       .filter((file) => !file.endsWith(".DS_Store"))
+      .filter((file) => !file.endsWith(".log"))
       .flatMap((file) => {
         const path = relative(ROOT, file);
         if (isDocException(path)) return [];

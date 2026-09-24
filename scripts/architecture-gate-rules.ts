@@ -1,3 +1,7 @@
+import {
+  FORBIDDEN_ENV_FLAG_KEYS,
+  FORBIDDEN_ENV_FLAG_PREFIXES,
+} from "@/lib/runtime/runtime-settings";
 /**
  * Architecture Gate 的 deprecated/legacy 检查纯规则模块。
  *
@@ -42,6 +46,76 @@ export function collectCanonicalNamingViolations(documents: readonly SourceDocum
     visit(sourceFile);
   }
   return [...violations];
+}
+
+function isArchitectureFlag(key: string): boolean {
+  return (
+    (FORBIDDEN_ENV_FLAG_KEYS as readonly string[]).includes(key) ||
+    FORBIDDEN_ENV_FLAG_PREFIXES.some((prefix) => key.startsWith(prefix))
+  );
+}
+
+/** CLEAN-06：检查生产配置及声明的标识符，不把运行时黑名单中的字符串当违规。 */
+export function collectArchitectureFlagViolations(documents: readonly SourceDocument[]): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (
+      !INTERNAL_SOURCE_PATH.test(document.path) ||
+      /\.test\.[cm]?[jt]sx?$/.test(document.path) ||
+      !/\.[cm]?[jt]sx?$/.test(document.path)
+    ) {
+      continue;
+    }
+    const configFile = /(?:^|\/)(?:config|env|runtime-settings)(?:[./-]|$)/.test(document.path);
+    const sourceFile = ts.createSourceFile(
+      document.path,
+      document.source,
+      ts.ScriptTarget.Latest,
+      true,
+      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    function visit(node: ts.Node): void {
+      const processEnv =
+        ts.isIdentifier(node) &&
+        ts.isPropertyAccessExpression(node.parent) &&
+        ts.isPropertyAccessExpression(node.parent.expression) &&
+        node.parent.expression.expression.getText(sourceFile) === "process" &&
+        node.parent.expression.name.text === "env";
+      const configDeclaration =
+        ts.isIdentifier(node) &&
+        configFile &&
+        (ts.isPropertySignature(node.parent) ||
+          ts.isPropertyAssignment(node.parent) ||
+          ts.isVariableDeclaration(node.parent));
+      if (
+        (ts.isIdentifier(node) &&
+          isArchitectureFlag(node.text) &&
+          (processEnv || configDeclaration)) ||
+        (ts.isStringLiteral(node) &&
+          isArchitectureFlag(node.text) &&
+          (ts.isElementAccessExpression(node.parent) ||
+            (configFile &&
+              (ts.isPropertyAssignment(node.parent) || ts.isPropertySignature(node.parent)))))
+      ) {
+        violations.add(document.path);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
+  return [...violations];
+}
+
+/** CLEAN-07：正式脚本入口与 CI 不得调用专题阶段脚本名。 */
+export function collectLegacyScriptViolations(documents: readonly SourceDocument[]): string[] {
+  return documents
+    .filter(
+      (document) =>
+        document.path === "package.json" ||
+        /^\.github\/workflows\/[^/]+\.ya?ml$/.test(document.path),
+    )
+    .filter((document) => /\btopic01:|(?:scripts\/)?topic-01-[A-Za-z0-9_-]+/.test(document.source))
+    .map((document) => document.path);
 }
 
 /** Agent/Runtime/Route Authority 及其正式消费者。 */

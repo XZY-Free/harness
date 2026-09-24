@@ -11,11 +11,13 @@ import {
   checkExternalRuntimeTransportGate,
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
+  collectArchitectureFlagViolations,
   collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
+  collectLegacyScriptViolations,
   collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
@@ -137,6 +139,28 @@ describe("Topic02 canonical naming injections", () => {
         ),
       ]),
     ).toEqual(["lib/runtime/old-client.ts", "lib/executions/compat.ts", "lib/runtime/protocol.ts"]);
+  });
+});
+
+describe("Topic02 configuration and script injections", () => {
+  it("CLEAN-06: stage flag in config AST or environment declaration is rejected; lease TTL remains valid", () => {
+    expect(
+      collectArchitectureFlagViolations([
+        doc("lib/config.ts", "export const enabled = process.env.ENABLE_V3_RUNTIME;"),
+        doc("lib/env.d.ts", "interface ProcessEnv { ENABLE_V3_RUNTIME?: string }"),
+        doc("lib/runtime/lease.ts", "export const leaseTtlMs = 90000;"),
+      ]),
+    ).toEqual(["lib/config.ts", "lib/env.d.ts"]);
+  });
+
+  it("CLEAN-07: retired package scripts and CI calls report exact files", () => {
+    expect(
+      collectLegacyScriptViolations([
+        doc("package.json", '{"scripts":{"topic01:verify":"tsx scripts/topic-01-verify.ts"}}'),
+        doc(".github/workflows/ci.yml", "run: pnpm topic01:acceptance"),
+        doc(".github/workflows/current.yml", "run: pnpm schema:verify && pnpm acceptance"),
+      ]),
+    ).toEqual(["package.json", ".github/workflows/ci.yml"]);
   });
 });
 

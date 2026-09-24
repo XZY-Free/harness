@@ -16,11 +16,13 @@ import {
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
   checkWorkerProductionTopologyGate,
+  collectArchitectureFlagViolations,
   collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
+  collectLegacyScriptViolations,
   collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
@@ -183,6 +185,8 @@ function checkExternalRuntimeTransport(): void {
 const RETIRED_NAMING_EXCEPTIONS = [
   /^docs\/V12\/02\/snowharness-execution-design\/(?:source-manifest\.json|engineering-design\.md|test-matrix\.json|sections\/(?:naming-inventory|residual-removal|cleanliness-checklist|test-matrix|naming-rules)\.md)$/,
   /^docs\/topic02\/专题02固定关闭检查表\/(?:固定检查表\.md|固定检查表\.json|sources\/原专题02基础验收矩阵\.json)$/,
+  // 当前阶段回执记录禁用路径的注入反例，按具体证据文件放行，不放行生产源码。
+  /^docs\/topic02\/evidence\/artifacts\/(?:核查与修复回执\.json|审查进度\.md)$/,
   /\.test\.tsx?$/,
 ];
 
@@ -211,6 +215,22 @@ function checkCanonicalNaming(): void {
     return;
   }
   pass("生产架构版本路径与兼容 Symbol 归零");
+}
+
+function checkConfigurationAndScriptNames(): void {
+  const flags = collectArchitectureFlagViolations(productionDocuments());
+  if (flags.length > 0) fail(`生产配置存在阶段 Feature Flag：${flags.join(", ")}`);
+  else pass("生产配置无阶段 Feature Flag");
+
+  const scriptFiles = [
+    "package.json",
+    ...filesUnder(resolve(ROOT, ".github/workflows")).map((file) => relative(ROOT, file)),
+  ];
+  const scripts = collectLegacyScriptViolations(
+    scriptFiles.map((path) => ({ path, source: readFileSync(resolve(ROOT, path), "utf8") })),
+  );
+  if (scripts.length > 0) fail(`正式脚本或 CI 仍调用专题阶段脚本：${scripts.join(", ")}`);
+  else pass("正式脚本与 CI 使用职责名称");
 }
 
 function checkAbsent(paths: readonly string[], title: string): void {
@@ -360,6 +380,7 @@ function main(): void {
   checkSchemaAuthority();
   checkRetiredNaming();
   checkCanonicalNaming();
+  checkConfigurationAndScriptNames();
   checkAbsent(
     [
       "app/api/chat/route.ts",
