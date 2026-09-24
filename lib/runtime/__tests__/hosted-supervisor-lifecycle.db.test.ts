@@ -39,6 +39,7 @@ import {
   acquireTestRuntimeAuthority,
   createPreparedTakeoverAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
+import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import {
   type RuntimeSessionBinding,
   executionOwnershipTable,
@@ -47,6 +48,7 @@ import {
   runtimeEventIngressTable,
   runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
+import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { runDueExpiredOwnerRecoveries } from "@/lib/runtime/application/authority-recovery-lane";
 import { authorizeRuntimeAction } from "@/lib/runtime/application/authorize-runtime-action";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
@@ -64,6 +66,7 @@ import {
   releaseRuntimeSessionSupervisorInTransaction,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import { dispatchQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
+import * as boundResources from "@/lib/runtime/retry/runtime-transport-from-binding";
 import {
   runDueUndispatchedIntentRecoveries,
   scanSupervisorHandoffs,
@@ -1265,6 +1268,262 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
         "harness.action.started",
       ),
     ).toBe(1);
+  }, 120_000);
+
+  it("R1-b: 交接 Worker 的旧解析成功晚到时不能借新 Session 再发送", async () => {
+    const { ctx, invocation, gen } = await seedActiveGenerationWithInFlightChild();
+    const tenantId = ctx.tenantId;
+    const supervisor = await spawnSupervisorProcess(
+      supervisorProcessConfig({
+        tenantId,
+        invocationId: invocation.id,
+        authority: gen.authority,
+        leaseMs: 2_000,
+        pendingWaitLimitMs: 600,
+        loopWindowMs: 30_000,
+      }),
+    );
+    expect((await reportOf(supervisor)).actionExecutions).toBeGreaterThanOrEqual(1);
+    expect((await ownerRow(tenantId, gen.ownership.id)).ownershipState).toBe("released");
+
+    let firstArrived!: () => void;
+    const firstAtDispatch = new Promise<void>((resolve) => {
+      firstArrived = resolve;
+    });
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let secondAtTransport!: () => void;
+    const secondAtSend = new Promise<void>((resolve) => {
+      secondAtTransport = resolve;
+    });
+    let releaseSecond!: () => void;
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const counters = { decisions: 0, actions: 0 };
+    const handoffService = hostedService({
+      leaseMs: 2_000,
+      pendingWaitLimitMs: 400,
+      loopWindowMs: 30_000,
+      counters,
+    });
+    let firstClaimId: string | null = null;
+    let secondClaimId: string | null = null;
+    const firstRun = runDueUndispatchedIntentRecoveries({
+      now: new Date(),
+      dependencies: {
+        hostedApplicationService: handoffService,
+        dispatchAttempt: async (input) => {
+          firstClaimId = input.preparationClaim?.claimId ?? null;
+          firstArrived();
+          await firstGate;
+          return dispatchQueuedInvocationAttempt(input);
+        },
+      },
+    });
+    await firstAtDispatch;
+    if (!firstClaimId) throw new Error("W1 未携带准备 claim");
+    const [preparing] = await db
+      .select({ expiresAt: invocationAttemptTable.preparationLeaseExpiresAt })
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.invocationId, invocation.id),
+          eq(invocationAttemptTable.preparationClaimId, firstClaimId),
+        ),
+      )
+      .limit(1);
+    if (!preparing?.expiresAt) throw new Error("W1 的准备租期未落库");
+    const databaseNow = await getAuthorityDatabaseTime(db);
+    await sleep(Math.max(0, preparing.expiresAt.getTime() - databaseNow.getTime() + 500));
+    // 第二消费者在真实 DB 租期越过后用独立事务领取同一准备槽；它走到真实 Session 冻结事务之后，
+    // 只在末端 Transport IO 等待，保持 Prepared/dispatching 的竞争窗口。
+    const secondRun = runDueUndispatchedIntentRecoveries({
+      now: new Date(),
+      dependencies: {
+        hostedApplicationService: handoffService,
+        dispatchAttempt: (input) => {
+          secondClaimId = input.preparationClaim?.claimId ?? null;
+          const runtimeClient = new Proxy(input.runtimeClient, {
+            get(target, property, receiver) {
+              const value = Reflect.get(target, property, receiver);
+              if (property === "startInvocation") {
+                return async (...args: unknown[]) => {
+                  secondAtTransport();
+                  await secondGate;
+                  return (value as (...params: unknown[]) => Promise<unknown>).apply(target, args);
+                };
+              }
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+          return dispatchQueuedInvocationAttempt({ ...input, runtimeClient });
+        },
+      },
+    });
+    await secondAtSend;
+    expect(firstClaimId).not.toBeNull();
+    expect(secondClaimId).not.toBeNull();
+    expect(secondClaimId).not.toBe(firstClaimId);
+    const current = await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id });
+    expect(current?.id).not.toBe(gen.ownership.id);
+    const frozenSession = await getRuntimeSessionBindingByOwnership(tenantId, current?.id ?? "");
+    expect(frozenSession?.bindingState).toBe("dispatching");
+    const before = await db
+      .select()
+      .from(runtimeSessionBindingTable)
+      .where(eq(runtimeSessionBindingTable.invocationId, invocation.id));
+
+    releaseFirst();
+    const stale = await firstRun;
+    expect(stale.handoffs.skipped).toBe(1);
+    expect(counters.actions).toBe(0);
+    expect((await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id }))?.id).toBe(
+      current?.id,
+    );
+    expect(
+      await db
+        .select()
+        .from(runtimeSessionBindingTable)
+        .where(eq(runtimeSessionBindingTable.invocationId, invocation.id)),
+    ).toEqual(before);
+
+    releaseSecond();
+    expect((await secondRun).handoffs.recovered).toBe(1);
+    await waitForFact(async () => counters.actions >= 1, "继任者继续原在途子调用");
+    expect((await ownerRow(tenantId, gen.ownership.id)).ownershipState).toBe("released");
+  }, 120_000);
+
+  it("R1-a: 交接 Worker 的旧资源解析普通失败晚到不写坏继任代际", async () => {
+    const { ctx, invocation, gen } = await seedActiveGenerationWithInFlightChild();
+    const tenantId = ctx.tenantId;
+    const supervisor = await spawnSupervisorProcess(
+      supervisorProcessConfig({
+        tenantId,
+        invocationId: invocation.id,
+        authority: gen.authority,
+        leaseMs: 2_000,
+        pendingWaitLimitMs: 600,
+        loopWindowMs: 30_000,
+      }),
+    );
+    expect((await reportOf(supervisor)).actionExecutions).toBeGreaterThanOrEqual(1);
+    expect((await ownerRow(tenantId, gen.ownership.id)).ownershipState).toBe("released");
+
+    const realResolve = boundResources.resolveBoundExecutionResources;
+    let firstAtResolution!: () => void;
+    const resolutionReached = new Promise<void>((resolve) => {
+      firstAtResolution = resolve;
+    });
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let resolutions = 0;
+    vi.spyOn(boundResources, "resolveBoundExecutionResources").mockImplementation(async (input) => {
+      const resources = await realResolve(input);
+      resolutions += 1;
+      if (resolutions === 1) {
+        firstAtResolution();
+        await firstGate;
+        throw new Error("r1-a-ordinary-resource-error");
+      }
+      return resources;
+    });
+    const counters = { decisions: 0, actions: 0 };
+    const handoffService = hostedService({
+      leaseMs: 2_000,
+      pendingWaitLimitMs: 400,
+      loopWindowMs: 30_000,
+      counters,
+    });
+    const firstRun = runDueUndispatchedIntentRecoveries({
+      now: new Date(),
+      dependencies: { hostedApplicationService: handoffService },
+    });
+    await resolutionReached;
+    const [preparing] = await db
+      .select({
+        claimId: invocationAttemptTable.preparationClaimId,
+        expiresAt: invocationAttemptTable.preparationLeaseExpiresAt,
+      })
+      .from(invocationAttemptTable)
+      .where(
+        and(
+          eq(invocationAttemptTable.invocationId, invocation.id),
+          eq(invocationAttemptTable.retryReasonCode, "supervisor_handoff"),
+        ),
+      )
+      .limit(1);
+    if (!preparing?.claimId || !preparing.expiresAt) throw new Error("W1 准备身份未落库");
+    const databaseNow = await getAuthorityDatabaseTime(db);
+    await sleep(Math.max(0, preparing.expiresAt.getTime() - databaseNow.getTime() + 500));
+
+    const second = await runDueUndispatchedIntentRecoveries({
+      now: new Date(),
+      dependencies: { hostedApplicationService: handoffService },
+    });
+    expect(second.handoffs.recovered).toBe(1);
+    await waitForFact(async () => counters.actions >= 1, "W2 已接管且继续在途子调用");
+    const successor = await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id });
+    if (!successor) throw new Error("W2 未建立继任 Owner");
+    const successorSession = await getRuntimeSessionBindingByOwnership(tenantId, successor.id);
+    if (!successorSession) throw new Error("W2 未建立继任 Session");
+    const [claimed] = await db
+      .select({
+        claimId: invocationAttemptTable.preparationClaimId,
+        state: invocationAttemptTable.attemptState,
+      })
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, successor.attemptId));
+    expect(claimed?.claimId).not.toBe(preparing.claimId);
+    const beforeEvents = await countAllIngressEvents(tenantId, invocation.id);
+    const leasesBefore = await db
+      .select({ id: environmentLeaseTable.id })
+      .from(environmentLeaseTable)
+      .where(eq(environmentLeaseTable.invocationId, invocation.id));
+    const writersBefore = await db
+      .select({ id: workspaceWriteLock.id })
+      .from(workspaceWriteLock)
+      .where(eq(workspaceWriteLock.holderInvocationId, invocation.id));
+    expect(leasesBefore).toEqual([]);
+    expect(writersBefore).toEqual([]);
+
+    releaseFirst();
+    expect((await firstRun).handoffs.skipped).toBe(1);
+    expect(resolutions).toBe(2);
+    expect((await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id }))?.id).toBe(
+      successor.id,
+    );
+    expect((await getRuntimeSessionBindingByOwnership(tenantId, successor.id))?.id).toBe(
+      successorSession.id,
+    );
+    expect((await getRuntimeSessionBindingByOwnership(tenantId, successor.id))?.bindingState).toBe(
+      successorSession.bindingState,
+    );
+    expect(
+      (
+        await db
+          .select({ state: invocationAttemptTable.attemptState })
+          .from(invocationAttemptTable)
+          .where(eq(invocationAttemptTable.id, successor.attemptId))
+      )[0]?.state,
+    ).toBe(claimed?.state);
+    expect(await countAllIngressEvents(tenantId, invocation.id)).toBe(beforeEvents);
+    expect(
+      await db
+        .select({ id: environmentLeaseTable.id })
+        .from(environmentLeaseTable)
+        .where(eq(environmentLeaseTable.invocationId, invocation.id)),
+    ).toEqual(leasesBefore);
+    expect(
+      await db
+        .select({ id: workspaceWriteLock.id })
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.holderInvocationId, invocation.id)),
+    ).toEqual(writersBefore);
   }, 120_000);
 
   it("N01-T1: 超过扫描批次的已消费 handoff 历史不会遮住当前真实待办", async () => {
