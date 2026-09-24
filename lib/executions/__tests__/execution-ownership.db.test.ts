@@ -1030,7 +1030,12 @@ describe("ExecutionOwnership database fencing", () => {
         acquiredById: "bypass-insert",
         versionNo: 1,
       }),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({
+      cause: {
+        code: "ER_DUP_ENTRY",
+        sqlMessage: expect.stringContaining("ExecutionOwnership_tenant_invocation_active_slot_uq"),
+      },
+    });
     await closeExecutionOwnership({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
