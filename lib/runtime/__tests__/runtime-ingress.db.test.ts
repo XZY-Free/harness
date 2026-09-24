@@ -8,7 +8,7 @@ import {
 } from "@/lib/conversations/read-model-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn, getTurnsByThread } from "@/lib/conversations/turn-queries";
-import { db } from "@/lib/db/client";
+import { db, openMigrationConnection } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -524,6 +524,119 @@ describe("RuntimeEventIngress database fencing", () => {
       acceptedOwnershipId: acceptedFirst.acquired.ownership.id,
       producerSequence: 2n,
     });
+  });
+
+  it("INGRESS-02: Callback 持有根锁时 Takeover 等待，旧事件先提交后继任不抹除", async () => {
+    const runtime = await createActiveRuntime();
+    const event = progressEvent("2");
+    const gate = `t02_i02_gate_${randomUUID().slice(0, 12)}`;
+    const marker = `t02_i02_mark_${randomUUID().slice(0, 12)}`;
+    const trigger = "topic02_ingress02_callback_gate";
+    const control = await openMigrationConnection();
+    try {
+      await control.query("SELECT GET_LOCK(?, 0)", [gate]);
+      await db.execute(
+        sql.raw(
+          `CREATE TRIGGER ${trigger} BEFORE INSERT ON RuntimeEventIngress FOR EACH ROW BEGIN DO GET_LOCK('${marker}', 30); DO GET_LOCK('${gate}', 30); DO RELEASE_LOCK('${gate}'); DO RELEASE_LOCK('${marker}'); END`,
+        ),
+      );
+      const callback = ingressBatch(runtime, [event]);
+      try {
+        let reached = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const [rows] = await control.query("SELECT IS_USED_LOCK(?) AS owner", [marker]);
+          if ((rows as unknown as Array<{ owner: number | null }>)[0]?.owner != null) {
+            reached = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(reached).toBe(true);
+        const takeover = replaceCurrentOwner(runtime);
+        expect(
+          await Promise.race([
+            takeover.then(
+              () => "acquired",
+              () => "rejected",
+            ),
+            new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+          ]),
+        ).toBe("waiting");
+        await control.query("SELECT RELEASE_LOCK(?)", [gate]);
+        const receipt = await callback;
+        const successor = await takeover;
+        expect(receipt.receipts[0]?.eventId).toBe(event.eventId);
+        expect(successor.ownership.leaseEpoch).toBe(runtime.acquired.ownership.leaseEpoch + 1n);
+        const ledger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+        expect(ledger.find((row) => row.producerEventId === event.eventId)).toMatchObject({
+          acceptedOwnershipId: runtime.acquired.ownership.id,
+          producerSequence: 2n,
+        });
+      } finally {
+        await control.query("SELECT RELEASE_LOCK(?)", [gate]);
+        await callback.catch(() => undefined);
+      }
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger}`));
+      control.release();
+    }
+  });
+
+  it("INGRESS-02: Takeover 持有根锁时 Callback 等待，旧事件被拒且零写入", async () => {
+    const runtime = await createActiveRuntime();
+    const event = progressEvent("2");
+    const beforeLedger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const gate = `t02_i02_gate_${randomUUID().slice(0, 12)}`;
+    const marker = `t02_i02_mark_${randomUUID().slice(0, 12)}`;
+    const trigger = "topic02_ingress02_takeover_gate";
+    const control = await openMigrationConnection();
+    try {
+      await control.query("SELECT GET_LOCK(?, 0)", [gate]);
+      await db.execute(
+        sql.raw(
+          `CREATE TRIGGER ${trigger} BEFORE UPDATE ON ExecutionOwnership FOR EACH ROW BEGIN IF OLD.ownershipState = 'active' AND NEW.ownershipState = 'lost' THEN DO GET_LOCK('${marker}', 30); DO GET_LOCK('${gate}', 30); DO RELEASE_LOCK('${gate}'); DO RELEASE_LOCK('${marker}'); END IF; END`,
+        ),
+      );
+      const takeover = replaceCurrentOwner(runtime);
+      try {
+        let reached = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const [rows] = await control.query("SELECT IS_USED_LOCK(?) AS owner", [marker]);
+          if ((rows as unknown as Array<{ owner: number | null }>)[0]?.owner != null) {
+            reached = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(reached).toBe(true);
+        const callback = ingressBatch(runtime, [event]);
+        const rejectedCallback = expect(callback).rejects.toMatchObject({
+          code: "NotCurrentExecutor",
+        });
+        expect(
+          await Promise.race([
+            callback.then(
+              () => "accepted",
+              () => "rejected",
+            ),
+            new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+          ]),
+        ).toBe("waiting");
+        await control.query("SELECT RELEASE_LOCK(?)", [gate]);
+        const successor = await takeover;
+        await rejectedCallback;
+        expect(successor.ownership.leaseEpoch).toBe(runtime.acquired.ownership.leaseEpoch + 1n);
+        expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+          beforeLedger,
+        );
+      } finally {
+        await control.query("SELECT RELEASE_LOCK(?)", [gate]);
+        await takeover.catch(() => undefined);
+      }
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger}`));
+      control.release();
+    }
   });
 
   it("INGRESS-05/INGRESS-08/INGRESS-09: exact replay returns the original receipt, but payload conflicts and gaps fail closed", async () => {
