@@ -8,6 +8,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
+import { issueContextHandle, resolveContextHandle } from "@/lib/context/context-handle";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { transitionInvocation } from "@/lib/executions/application/transition-invocation";
@@ -596,6 +597,85 @@ describe("Thread-independent Job runtime integration", () => {
     const worker = createProductionWorkerRole("job-worker");
     await worker.pollOnce();
     expect((await getJobById(TENANT_ID, fixture.job.id))?.jobState).toBe("completed");
+  });
+
+  it("JOB-01: 未接纳的纯 Job 经正式双 Worker 链初次执行并完成", async () => {
+    await seedJobRuntimeAuthority();
+    const ownerId = await ensureDefaultTenantOwner();
+    const { job } = await createJob({
+      tenantId: TENANT_ID,
+      agentId: null,
+      jobType: "batch",
+      triggerRef: `trigger:${randomUUID()}`,
+      creationKey: `creation:${randomUUID()}`,
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
+      inputJson: { task: "complete the initial Job dispatch" },
+      createdBy: ownerId,
+    });
+    expect(job.threadId).toBeNull();
+    expect(
+      await db.select().from(invocationTable).where(eq(invocationTable.jobId, job.id)),
+    ).toEqual([]);
+
+    // 正式 Job Worker 从持久 queued Job 建立唯一 Invocation/Binding。
+    const jobWorker = createProductionWorkerRole("job-worker");
+    const admission = await jobWorker.pollOnce();
+    expect(admission).toMatchObject({ admittedJobs: 1 });
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(and(eq(invocationTable.tenantId, TENANT_ID), eq(invocationTable.jobId, job.id)));
+    expect(invocation?.subjectType).toBe("job");
+    expect(invocation?.threadId).toBeNull();
+    expect(invocation?.turnId).toBeNull();
+    expect(invocation?.inputDigest).toBe(job.inputHash);
+    const binding = await getExecutionBindingByInvocation(TENANT_ID, invocation!.id);
+    expect(binding).not.toBeNull();
+
+    const context = await resolveContextHandle(
+      await issueContextHandle({ tenantId: TENANT_ID, invocationId: invocation!.id }),
+      { tenantId: TENANT_ID, invocationId: invocation!.id },
+    );
+    expect(context.subject).toMatchObject({ type: "job", jobId: job.id, inputHash: job.inputHash });
+
+    // 正式持久初次调度 lane 从 queued Invocation 建立 Attempt/Owner/Session 并执行 Hosted Runtime。
+    const due = new Date(Date.now() + DISPATCH_STUCK_GRACE_MS + 1_000);
+    const service = createConfiguredHostedRuntimeApplicationService({
+      ...createDirectResponsePorts(() => "initial Job dispatch completed"),
+      modelRef: "test-managed-model",
+    });
+    const dispatched = await runDueUndispatchedIntentRecoveries({
+      now: due,
+      dependencies: { hostedApplicationService: service },
+    });
+    expect(dispatched.invocations.recovered).toBe(1);
+    await expect
+      .poll(
+        async () =>
+          (
+            await db
+              .select({ state: invocationTable.executionState })
+              .from(invocationTable)
+              .where(eq(invocationTable.id, invocation!.id))
+              .limit(1)
+          )[0]?.state,
+        { interval: 50, timeout: 10_000 },
+      )
+      .toBe("completed");
+    expect(
+      await db
+        .select()
+        .from(invocationAttemptTable)
+        .where(eq(invocationAttemptTable.invocationId, invocation!.id)),
+    ).toHaveLength(1);
+    expect(await getRuntimeSessionBindingsByInvocation(TENANT_ID, invocation!.id)).toHaveLength(1);
+    const terminal = await jobWorker.pollOnce();
+    expect(terminal).toMatchObject({ commandsConsumed: 1 });
+    expect((await getJobById(TENANT_ID, job.id))?.jobState).toBe("completed");
+    expect(await db.select().from(threadTable).where(eq(threadTable.tenantId, TENANT_ID))).toEqual(
+      [],
+    );
+    expect(await db.select().from(turnTable)).toEqual([]);
   });
 
   it("JOB-REG-02: two racing scheduler deliveries return the identical frozen Invocation and Binding", async () => {
