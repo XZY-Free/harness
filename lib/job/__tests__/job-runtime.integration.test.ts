@@ -56,7 +56,9 @@ import {
 import { jobCommandTable, jobEventTable, jobTable } from "@/lib/persistence/schema/job";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
+import { redispatchRuntimeInvocation } from "@/lib/runtime/application/runtime-redispatch";
 import { createConfiguredHostedRuntimeApplicationService } from "@/lib/runtime/application/runtime-resume";
+import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { createDirectResponsePorts } from "@/lib/runtime/harness-loop/test-ports";
 import { getRuntimeSessionBindingsByInvocation } from "@/lib/runtime/persistence/runtime-session-store";
@@ -65,7 +67,7 @@ import {
   runDueUndispatchedIntentRecoveries,
   scanUndispatchedInvocations,
 } from "@/lib/runtime/retry/undispatched-intent-lane";
-import { createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
+import { createHttpRuntimeClient, createMockRuntimeClient } from "@/lib/runtime/runtime-client";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import {
   type RuntimeStartRequest,
@@ -1016,6 +1018,86 @@ describe("Thread-independent Job runtime integration", () => {
       .from(invocationTable)
       .where(eq(invocationTable.jobId, fixture.job.id));
     expect(invocations).toHaveLength(1);
+  });
+
+  it("JOB-06: 原实例执行权过期后同 Job 重调度建立新 Attempt 与 Owner", async () => {
+    const runtime = await seedJobRuntimeAuthority();
+    const fixture = await seedJobFixture({ runtime });
+    const { computeCapabilityManifestDigest } = await import(
+      "@/lib/routes/domain/route-resolution-policy"
+    );
+    const capabilityDigest = computeCapabilityManifestDigest({
+      runtimeRevisionId: runtime.runtimeRevisionId,
+      runtimeCapabilities: runtime.capabilities,
+    });
+    const client = createMockRuntimeClient({
+      startInvocation: async (request) => startResponseStub(request, capabilityDigest),
+    });
+    const attempt1 = await createAttempt({
+      tenantId: TENANT_ID,
+      invocationId: fixture.invocation.id,
+    });
+    const first = await startRuntimeInvocation({
+      tenantId: TENANT_ID,
+      sourceOperationKey: `invocation:${fixture.invocation.id}`,
+      invocation: fixture.invocation,
+      attempt: attempt1,
+      binding: fixture.binding,
+      runtimeClient: client,
+      runtimeEndpoint: "http://127.0.0.1/stub",
+      auth: { mode: "none" },
+      callbackEndpoints,
+    });
+    const [firstOwner] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, first.authority.ownershipId));
+    if (!firstOwner) throw new Error("首次执行权未持久化");
+    await db
+      .update(executionOwnershipTable)
+      .set({
+        leaseExpiresAt: new Date(firstOwner.acquiredAt.getTime() + 1),
+        lastHeartbeatAt: firstOwner.acquiredAt,
+      })
+      .where(eq(executionOwnershipTable.id, first.authority.ownershipId));
+
+    const second = await redispatchRuntimeInvocation({
+      tenantId: TENANT_ID,
+      invocationId: fixture.invocation.id,
+      retryReasonCode: "instance_lost",
+      runtimeClient: client,
+      runtimeEndpoint: "http://127.0.0.1/stub",
+      auth: { mode: "none" },
+      callbackEndpoints,
+    });
+    expect(second.redispatched).toBe(true);
+    expect(second.attempt.id).not.toBe(attempt1.id);
+    expect(second.attempt.attemptNo).toBe(attempt1.attemptNo + 1);
+    const owners = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.invocationId, fixture.invocation.id));
+    expect(owners).toHaveLength(2);
+    expect(owners.find((row) => row.id === first.authority.ownershipId)?.ownershipState).toBe(
+      "lost",
+    );
+    const nextOwner = owners.find((row) => row.attemptId === second.attempt.id);
+    expect(nextOwner?.ownershipState).toBe("active");
+    expect(nextOwner?.leaseEpoch).toBeGreaterThan(BigInt(first.authority.leaseEpoch));
+    expect(client.calls.startInvocation.map((request) => request.idempotencyKey)).toEqual([
+      `start:${first.authority.ownershipId}`,
+      `start:${nextOwner?.id}`,
+    ]);
+    expect(
+      await db.select().from(invocationTable).where(eq(invocationTable.jobId, fixture.job.id)),
+    ).toHaveLength(1);
+    const [frozenBinding] = await db
+      .select()
+      .from(executionBindingTable)
+      .where(eq(executionBindingTable.invocationId, fixture.invocation.id));
+    expect(frozenBinding?.invocationId).toBe(fixture.invocation.id);
+    expect(frozenBinding?.configHash).toBe(fixture.binding.configHash);
+    expect((await getJobById(TENANT_ID, fixture.job.id))?.id).toBe(fixture.job.id);
   });
 
   it("JOB-REG-07: terminal and Job bridge are one transaction — a crash rolls both back", async () => {
