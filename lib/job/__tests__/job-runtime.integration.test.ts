@@ -32,10 +32,11 @@ import {
   ALL_SUCCESS_COMPLETION_POLICY,
   UNKNOWN_EFFECT_HANDLING,
 } from "@/lib/job/completion-policy";
-import { admitQueuedJob } from "@/lib/job/job-admission";
+import { admitQueuedJob, resolveJobBindingCommand } from "@/lib/job/job-admission";
 import { consumeJobCommand } from "@/lib/job/job-command-consumer";
 import { createCancelCommand, createRetryCommand } from "@/lib/job/job-command-queries";
 import { processRetryCommand } from "@/lib/job/job-control-queries";
+import { createJobInvocation } from "@/lib/job/job-execution";
 import { createJob, getJobById } from "@/lib/job/job-queries";
 import {
   admitJobStep,
@@ -80,6 +81,7 @@ import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/s
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
 import { seedRuntimeRouteAuthority } from "@/lib/test-support/seed-runtime-route-authority";
 import { createProductionWorkerRole } from "@/lib/workers/production-worker-role";
+import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -731,6 +733,54 @@ describe("Thread-independent Job runtime integration", () => {
       .where(eq(executionBindingTable.invocationId, fixture.invocation.id));
     expect(bindings).toHaveLength(1);
     expect(bindings[0]?.configHash).toBe(fixture.binding.configHash);
+  });
+
+  it("ENV-11: 正式 Binding Authority 拒绝无平台环境搭配平台 Workspace", async () => {
+    await seedJobRuntimeAuthority();
+    const ownerId = await ensureDefaultTenantOwner();
+    const logical = await createWorkspace({
+      tenantId: TENANT_ID,
+      workspaceKey: `env11-${randomUUID()}`,
+      displayName: "ENV-11 managed workspace",
+    });
+    const managed = await createWorkspaceBinding({
+      tenantId: TENANT_ID,
+      workspaceId: logical.id,
+      continuityMode: "SHARED_DURABLE",
+      bindingType: "cloud",
+      locationRef: `managed://env11-${randomUUID()}`,
+      storageScopeDigest: protocolDigest({ scope: "env11" }),
+      backendKind: "managed_host",
+      hostIdentity: "env11-host",
+      storageIdentity: "env11-storage",
+      accessMode: "read_write",
+      contractDigest: protocolDigest({ contract: "env11" }),
+      createdBy: ownerId,
+    });
+    const { job } = await createJob({
+      tenantId: TENANT_ID,
+      agentId: null,
+      jobType: "batch",
+      triggerRef: `trigger:${randomUUID()}`,
+      creationKey: `creation:${randomUUID()}`,
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
+      inputJson: { task: "reject mismatched environment and workspace" },
+      createdBy: ownerId,
+    });
+    const resolved = await resolveJobBindingCommand({ tenantId: TENANT_ID, job, thread: null });
+    if (!resolved.resolved) throw new Error("正式 Binding 候选未解析");
+    expect(resolved.binding.environmentMode).toBe("NO_PLATFORM_ENVIRONMENT");
+    await expect(
+      createJobInvocation({
+        tenantId: TENANT_ID,
+        jobId: job.id,
+        binding: { ...resolved.binding, workspaceBindingId: managed.id },
+        capabilityCatalog: resolved.capabilityCatalog,
+      }),
+    ).rejects.toThrow("EnvironmentWorkspaceMismatch");
+    expect(
+      await db.select().from(invocationTable).where(eq(invocationTable.jobId, job.id)),
+    ).toEqual([]);
   });
 
   it("JOB-REG-03: the same creationKey with a different input hash conflicts and never overwrites the input", async () => {

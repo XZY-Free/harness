@@ -44,6 +44,7 @@ import {
 import { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/permission";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
+import { workspaceBinding } from "@/lib/persistence/schema/workspace";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import {
   publicationRecord,
@@ -114,6 +115,26 @@ export async function createExecutionBindingInTransaction(
     .where(eq(executionBindingTable.invocationId, input.invocationId))
     .limit(1);
   if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
+
+  // ENV-11：调度器会为无平台环境选择 NO_PLATFORM_WORKSPACE，但共享的 Binding Authority
+  // 也必须拒绝直接提交的混合候选。WorkspaceBinding 是不可变合同，事务内按同租户读取即可。
+  const [workspace] = await tx
+    .select({ continuityMode: workspaceBinding.continuityMode })
+    .from(workspaceBinding)
+    .where(
+      and(
+        eq(workspaceBinding.tenantId, input.tenantId),
+        eq(workspaceBinding.id, input.workspaceBindingId),
+      ),
+    )
+    .limit(1);
+  if (!workspace) throw evidenceError("WorkspaceBindingMissing");
+  if (
+    input.environmentMode === "NO_PLATFORM_ENVIRONMENT" &&
+    workspace.continuityMode !== "NO_PLATFORM_WORKSPACE"
+  ) {
+    throw evidenceError("EnvironmentWorkspaceMismatch");
+  }
 
   // 2. /: 统一资格校验（tx 必须传入，复用 Store 事务）
   const evidence = input.controlPlaneEvidence;
