@@ -8,15 +8,18 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import {
+  chmod,
   link,
   lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  readlink,
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -206,6 +209,10 @@ describe("Snapshot storage (R09 §5/§6/§7)", () => {
     await writeFile(path.join(source, "a.txt"), "alpha", "utf8");
     await mkdir(path.join(source, "sub"), { recursive: true });
     await writeFile(path.join(source, "sub", "b.txt"), "beta", "utf8");
+    await chmod(path.join(source, "sub", "b.txt"), 0o640);
+    const preservedMtime = new Date("2020-01-02T03:04:05.000Z");
+    await utimes(path.join(source, "sub", "b.txt"), preservedMtime, preservedMtime);
+    await symlink("sub/b.txt", path.join(source, "b-link"));
     const storage = new FileSnapshotStorage(storageRoot);
     const { manifest } = await storage.writeSnapshot(source, "op-1", requirements());
     const destination = path.join(root, "candidate");
@@ -222,6 +229,14 @@ describe("Snapshot storage (R09 §5/§6/§7)", () => {
     }
     await walk("");
     expect(actualPaths.sort()).toEqual(expectedPaths);
+    expect(await readFile(path.join(destination, "a.txt"), "utf8")).toBe("alpha");
+    expect(await readFile(path.join(destination, "sub", "b.txt"), "utf8")).toBe("beta");
+    expect(await readlink(path.join(destination, "b-link"))).toBe("sub/b.txt");
+    const restoredFile = await lstat(path.join(destination, "sub", "b.txt"));
+    const manifestFile = manifest.entries.find((entry) => entry.path === "sub/b.txt");
+    if (!manifestFile) throw new Error("正常恢复的文件未列入 manifest");
+    expect(restoredFile.mode & 0o777).toBe(manifestFile.mode & 0o777);
+    expect(Math.abs(restoredFile.mtimeMs - manifestFile.mtimeMs)).toBeLessThan(1_000);
     // 控制状态在树外，不污染恢复内容。
     expect(await lstat(`${destination}.staging`).catch(() => null)).toBeNull();
     const state = JSON.parse(await readFile(`${destination}.restore-state.json`, "utf8")) as {
