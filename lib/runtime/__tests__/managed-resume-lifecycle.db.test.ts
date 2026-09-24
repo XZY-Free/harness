@@ -786,6 +786,13 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     expect(pausedLease?.readinessState).toBe("preparing");
     expect(pausedLease?.activationOwnershipId).toBeNull();
 
+    // 正常用户暂停期间运行生产环境回收 Worker：可复用 Lease 不应成为交接清理任务。
+    const pausedSweep = await runEnvironmentCleanupOnce();
+    expect(pausedSweep.scanned).toBe(0);
+    expect((await getEnvironmentLeaseById(ctx.tenantId, leaseBefore.id))?.leaseState).toBe(
+      "active",
+    );
+
     // 真实容器实例身份（resume 之后必须复用同一份实例，而不是"重新建一个"）。
     const operationId = (leaseBefore.resourceManifest as Record<string, unknown>)
       .operationId as string;
