@@ -7,6 +7,9 @@
  * - 其余用例一律用 `JOB-REG-nn`（补充回归），不得占用验收编号。
  */
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { issueContextHandle, resolveContextHandle } from "@/lib/context/context-handle";
 import { db } from "@/lib/db/client";
@@ -62,8 +65,13 @@ import {
   runDueUndispatchedIntentRecoveries,
   scanUndispatchedInvocations,
 } from "@/lib/runtime/retry/undispatched-intent-lane";
+import { createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
-import type { RuntimeStartRequest, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
+import {
+  type RuntimeStartRequest,
+  RuntimeStartRequestSchema,
+  type RuntimeStartResponse,
+} from "@/lib/runtime/runtime-protocol";
 import { canonicalizeJson, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
@@ -881,6 +889,107 @@ describe("Thread-independent Job runtime integration", () => {
     expect(retryAgain.sessionBindingId).toBe(retry.sessionBindingId);
     expect(retryAgain.authority.ownershipId).toBe(retry.authority.ownershipId);
     expect(retryAgain.authority.leaseEpoch).toBe(retry.authority.leaseEpoch);
+  });
+
+  it("JOB-05: 真实 HTTP 503 后重投复用 Job 执行身份与 StartKey", async () => {
+    const { RuntimeStartTransportError, startRuntimeInvocation } = await import(
+      "@/lib/runtime/application/runtime-start"
+    );
+    const runtime = await seedJobRuntimeAuthority();
+    const fixture = await seedJobFixture({ runtime });
+    const attempt = await createAttempt({
+      tenantId: TENANT_ID,
+      invocationId: fixture.invocation.id,
+    });
+    const { computeCapabilityManifestDigest } = await import(
+      "@/lib/routes/domain/route-resolution-policy"
+    );
+    const publishedDigest = computeCapabilityManifestDigest({
+      runtimeRevisionId: runtime.runtimeRevisionId,
+      runtimeCapabilities: runtime.capabilities,
+    });
+    const requests: Array<{ key: string; body: RuntimeStartRequest }> = [];
+    let accepted: RuntimeStartResponse | null = null;
+    const server = createServer((request, response) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const body = RuntimeStartRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString()));
+        requests.push({ key: String(request.headers["idempotency-key"]), body });
+        response.setHeader("content-type", "application/json");
+        if (requests.length === 1) {
+          response.writeHead(503);
+          response.end(JSON.stringify({ error: { code: "RUNTIME_UNAVAILABLE", message: "busy" } }));
+          return;
+        }
+        accepted ??= startResponseStub({ request: body }, publishedDigest);
+        response.writeHead(202);
+        response.end(JSON.stringify(accepted));
+      })().catch((error) => {
+        response.writeHead(500);
+        response.end(
+          JSON.stringify({ error: { code: "TEST_SERVER_ERROR", message: String(error) } }),
+        );
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address() as AddressInfo;
+    try {
+      const startInput = {
+        tenantId: TENANT_ID,
+        sourceOperationKey: `invocation:${fixture.invocation.id}`,
+        invocation: fixture.invocation,
+        attempt,
+        binding: fixture.binding,
+        runtimeClient: createHttpRuntimeClient(),
+        runtimeEndpoint: `http://127.0.0.1:${address.port}`,
+        auth: { mode: "none" } as const,
+        callbackEndpoints,
+      };
+      let claim: InstanceType<typeof RuntimeStartTransportError>["dispatchIdentity"] | null = null;
+      try {
+        await startRuntimeInvocation(startInput);
+      } catch (error) {
+        expect(error).toBeInstanceOf(RuntimeStartTransportError);
+        expect(
+          (error as InstanceType<typeof RuntimeStartTransportError>).originalError,
+        ).toMatchObject({ kind: "http", httpStatus: 503, retryable: true });
+        claim = (error as InstanceType<typeof RuntimeStartTransportError>).dispatchIdentity;
+      }
+      if (!claim) throw new Error("预期首次真实 HTTP 503");
+      const retried = await startRuntimeInvocation({ ...startInput, sessionDispatchClaim: claim });
+      expect(retried.response.accepted).toBe(true);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]?.key).toBe(requests[1]?.key);
+      expect(requests[0]?.body.semanticRequestDigest).toBe(requests[1]?.body.semanticRequestDigest);
+      expect(requests[0]?.key).toBe(`start:${retried.authority.ownershipId}`);
+      expect(retried.authority.attemptId).toBe(attempt.id);
+      const sessions = await getRuntimeSessionBindingsByInvocation(
+        TENANT_ID,
+        fixture.invocation.id,
+      );
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.id).toBe(retried.sessionBindingId);
+      expect(sessions[0]?.ownershipId).toBe(retried.authority.ownershipId);
+      expect(
+        await db
+          .select()
+          .from(invocationAttemptTable)
+          .where(eq(invocationAttemptTable.invocationId, fixture.invocation.id)),
+      ).toHaveLength(1);
+      expect(
+        await db
+          .select()
+          .from(executionOwnershipTable)
+          .where(eq(executionOwnershipTable.invocationId, fixture.invocation.id)),
+      ).toHaveLength(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("JOB-REG-06: redispatch keeps Job, Invocation and Binding frozen while creating a new Attempt and Owner", async () => {
