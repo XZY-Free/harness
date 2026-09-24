@@ -1435,7 +1435,7 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it("CHECKPOINT-REG-02: a crash before the immutable commit leaves no formal checkpoint and a recoverable gate", async () => {
+  it("CHECKPOINT-02: 候选 manifest 真实上传后提交前进程崩溃，维护安全解冻且无正式对象", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "checkpointed bytes", "utf8");
@@ -1447,37 +1447,91 @@ describe("FilesystemCheckpoint integration", () => {
         requestedByType: "service",
         requestedById: "test-service",
       });
-      // 模拟“上传成功但 commit 前进程崩溃”：候选证据已持久，但事务未提交。
-      await db
-        .update(invocationTable)
-        .set({
-          checkpointPreparedEvidence: {
-            receipt: {
-              manifestRef: "manifests/orphan.json",
-              manifestDigest: protocolDigest({ orphan: true }),
-              contentRootDigest: protocolDigest({ orphan: true }),
-              fileCount: 1,
-              totalBytes: 17,
-              chunks: [],
-            },
-            orphanCandidate: true,
-          },
-        })
-        .where(eq(invocationTable.id, ctx.invocationId));
-      expect(await countCheckpoints(ctx.invocationId)).toBe(0);
-      // 崩溃后 gate 停在 quiescing，恢复线程能通过 intentId 定位候选证据。
+      const marker = path.join(temporaryRoot, "uploaded-receipt.json");
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          path.join(process.cwd(), "lib/workspace/test-support/checkpoint-upload-crash-child.mts"),
+          TENANT_ID,
+          ctx.invocationId,
+          ctx.ownershipId,
+          requested.checkpointIntentId,
+          ctx.hostRoot,
+          ctx.managedRoot,
+          ctx.storageRoot,
+          marker,
+        ],
+        { cwd: process.cwd(), stdio: "ignore" },
+      );
+      try {
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          if (
+            await stat(marker).then(
+              () => true,
+              () => false,
+            )
+          )
+            break;
+          if (
+            await stat(`${marker}.error`).then(
+              () => true,
+              () => false,
+            )
+          ) {
+            throw new Error(await readFile(`${marker}.error`, "utf8"));
+          }
+          if (child.exitCode !== null)
+            throw new Error(`Checkpoint 子进程提前退出: ${child.exitCode}`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        const receipt = JSON.parse(await readFile(marker, "utf8")) as {
+          manifestRef: string;
+          manifestDigest: string;
+        };
+        const manifest = await new FileSnapshotStorage(ctx.storageRoot).readManifest(
+          receipt.manifestRef,
+          receipt.manifestDigest,
+        );
+        expect(manifest.entries.some((entry) => entry.path === "state.txt")).toBe(true);
+        expect(await countCheckpoints(ctx.invocationId)).toBe(0);
+        const exited = once(child, "exit");
+        child.kill("SIGKILL");
+        await exited;
+        expect(child.signalCode).toBe("SIGKILL");
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          const exited = once(child, "exit");
+          child.kill("SIGKILL");
+          await exited;
+        }
+      }
+      // 上传完成但尚未提交，DB 只能保留 frozen 意图，不能出现正式 Checkpoint。
       const stalled = await readGate(ctx.invocationId);
-      expect(stalled?.checkpointGate).toBe("quiescing");
+      expect(stalled?.checkpointGate).toBe("frozen");
       expect(stalled?.checkpointIntentId).toBe(requested.checkpointIntentId);
-      expect(stalled?.checkpointPreparedEvidence).toMatchObject({ orphanCandidate: true });
-      // 独立收尾 worker 续做：受控放弃候选，gate 回到 open，不生成正式 Checkpoint。
-      await abandonFilesystemCheckpoint({
-        tenantId: TENANT_ID,
-        invocationId: ctx.invocationId,
-        ownershipId: ctx.ownershipId,
-        checkpointIntentId: requested.checkpointIntentId,
-        reasonCode: "CheckpointStale",
+      expect(await countCheckpoints(ctx.invocationId)).toBe(0);
+      const freezeFile = path.join(
+        ctx.hostRoot,
+        ".snow",
+        "grants",
+        (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
+        "freeze.json",
+      );
+      await expect(stat(freezeFile)).resolves.toBeTruthy();
+      // 原执行进程已死，只运行正式维护 lane 收口冻结屏障与 Gate。
+      const restartedBackend = createWorkspaceBackend(
+        createWorkspaceHostBroker({ root: ctx.hostRoot, managedRoot: ctx.managedRoot }),
+      );
+      const maintenance = await runCheckpointMaintenanceLane({
+        now: new Date(Date.now() + 300_000),
+        graceMs: 0,
+        resolveBackend: async () => restartedBackend,
+        releaseRuntime: async () => undefined,
       });
+      expect(maintenance.stuckGates.abandoned).toBe(1);
+      expect(maintenance.releases.gateOpened).toBe(1);
       const recovered = await readGate(ctx.invocationId);
       expect(recovered?.checkpointGate).toBe("open");
       expect(recovered?.checkpointIntentId).toBeNull();
@@ -1485,6 +1539,7 @@ describe("FilesystemCheckpoint integration", () => {
         failureCode: "CheckpointStale",
       });
       expect(await countCheckpoints(ctx.invocationId)).toBe(0);
+      await expect(stat(freezeFile)).rejects.toThrow();
       // 收尾后同一 Ownership 可重新发起安全点（不凭空恢复，需重新走全流程）。
       const retry = await requestFilesystemCheckpoint({
         tenantId: TENANT_ID,
