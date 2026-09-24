@@ -144,7 +144,7 @@ import {
   getWorkspaceById,
   resolveDeclaredWorkspaceBinding,
 } from "@/lib/workspace/workspace-queries";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -1118,7 +1118,8 @@ async function listAttemptsForInvocation(tenantId: string, invocationId: string)
         eq(invocationAttemptTable.tenantId, tenantId),
         eq(invocationAttemptTable.invocationId, invocationId),
       ),
-    );
+    )
+    .orderBy(asc(invocationAttemptTable.attemptNo));
 }
 
 /**

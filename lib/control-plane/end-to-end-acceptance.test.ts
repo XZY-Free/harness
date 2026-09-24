@@ -134,6 +134,7 @@ import {
   installTrustedHostedControlPlaneEvidenceForTest,
   trustedHostedRunnerSigningIdentityForTest,
 } from "@/lib/test-support/trusted-hosted-control-plane-evidence";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -641,6 +642,7 @@ async function createBindingFromResolved(params: {
     params.tenantId,
     params.resolution.policyRevisionId,
   );
+  const workspaceBinding = await createNoPlatformWorkspaceBinding(params.tenantId, DEFAULT_USER_ID);
   return createCreateExecutionBinding({ store: mysqlExecutionBindingStore })({
     ...testCapabilityCatalogBindingFields(params.invocationId),
     invocationId: params.invocationId,
@@ -650,7 +652,7 @@ async function createBindingFromResolved(params: {
     modelProvider: "doubao",
     modelId: "doubao-pro",
     modelRevisionRef: null,
-    workspaceBindingId: randomUUID(),
+    workspaceBindingId: workspaceBinding.id,
     policyRevisionId: bindingGovernance.policyRevisionId,
     policyRulesDigest: bindingGovernance.policyRulesDigest,
     governanceConfigRevisionId: bindingGovernance.governanceConfigRevisionId,

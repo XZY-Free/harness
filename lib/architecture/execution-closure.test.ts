@@ -710,10 +710,8 @@ describe("GATE-04 旧 Route / 别名 / 默认 db 写事务 / NO 降级 / 生产�
 
     // 已退役模块依赖（含别名 export-from）必须被拦下。
     //
-    // 说明符按段拼接：`collectRetiredModuleDependencyViolations` 按**字面量**扫描
-    // 全部源码（含测试，这是有意的），因此本文件自身不得出现完整的退役说明符字面量，
-    // 否则会把自己变成一处真实残留。
-    const retiredSpecifier = ["@/lib", "runtime", "a2a", "event-batch-sink"].join("/");
+    // 说明符按段拼接，避免本文件自身成为被审的退役模块导入。
+    const retiredSpecifier = ["@/lib", "runtime", "transport", "a2a-transport"].join("/");
     const aliasedLegacy: SourceDocument = {
       path: "lib/runtime/legacy-consumer.ts",
       source: `export { run } from "${retiredSpecifier}";`,

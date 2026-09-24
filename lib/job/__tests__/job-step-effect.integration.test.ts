@@ -579,7 +579,7 @@ describe("T32 Job step Effect 多态 owner", () => {
     );
     if (!readmit.ok) {
       expect(readmit.error).toBeInstanceOf(Error);
-      expect((readmit.error as Error).name).toBe("IngressAuthorityMismatchError");
+      expect((readmit.error as Error).name).toBe("EventAuthorityConflictError");
     } else {
       expect(readmit.value.ownerRef).toBe(admission.ownerRef);
       expect(readmit.value.replayed).toBe(true);
