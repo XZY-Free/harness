@@ -135,12 +135,16 @@ const RETIRED_MODULE_PATH =
   /^(?:lib\/runtime\/(?:.*\/)?a2a[^/]*|lib\/routes\/application\/(?:upsert|disable)-deployment-route|app\/api\/v1\/agents(?:\/route)?|lib\/agents\/(?:hosted-agent-publication|hosted-agent-route)[^/]*)$/;
 
 function resolvesToRetiredModule(importer: string, specifier: string): boolean {
-  const path = specifier.startsWith("@/")
+  const path = resolveInternalModulePath(importer, specifier);
+  return RETIRED_MODULE_PATH.test(path.replace(/\.(?:[cm]?[jt]sx?)$/, ""));
+}
+
+function resolveInternalModulePath(importer: string, specifier: string): string {
+  return specifier.startsWith("@/")
     ? specifier.slice(2)
     : specifier.startsWith(".")
       ? posix.normalize(posix.join(posix.dirname(importer), specifier))
       : specifier;
-  return RETIRED_MODULE_PATH.test(path.replace(/\.(?:[cm]?[jt]sx?)$/, ""));
 }
 
 const RETIRED_AGENT_EXECUTION_PATTERN =
@@ -179,46 +183,72 @@ export function collectRetiredModuleDependencyViolations(
     ) {
       continue;
     }
-    if (!/\.[cm]?[jt]sx?$/.test(document.path)) continue;
-    const sourceFile = ts.createSourceFile(
-      document.path,
-      document.source,
-      ts.ScriptTarget.Latest,
-      true,
-      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
-    function visit(node: ts.Node): void {
-      let specifier: string | undefined;
-      if (
-        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
-        node.moduleSpecifier &&
-        ts.isStringLiteralLike(node.moduleSpecifier)
-      ) {
-        specifier = node.moduleSpecifier.text;
-      } else if (
-        ts.isImportEqualsDeclaration(node) &&
-        ts.isExternalModuleReference(node.moduleReference) &&
-        node.moduleReference.expression &&
-        ts.isStringLiteralLike(node.moduleReference.expression)
-      ) {
-        specifier = node.moduleReference.expression.text;
-      } else if (
-        ts.isCallExpression(node) &&
-        node.arguments[0] &&
-        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
-        ts.isStringLiteralLike(node.arguments[0])
-      ) {
-        specifier = node.arguments[0].text;
-      }
-      if (specifier && resolvesToRetiredModule(document.path, specifier)) {
+    for (const specifier of moduleSpecifiers(document)) {
+      if (resolvesToRetiredModule(document.path, specifier)) {
         violations.add(document.path);
       }
-      ts.forEachChild(node, visit);
     }
-    visit(sourceFile);
   }
   return [...violations];
+}
+
+/** CLEAN-09：正式执行链不能引用测试夹具或无校验的 Binding 构造器。 */
+export function collectProductionTestSupportViolations(
+  documents: readonly SourceDocument[],
+): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!/^(?:app|components|desktop|lib|scripts)\//.test(document.path)) continue;
+    if (document.path === "scripts/e2e-bootstrap.ts") continue;
+    if (/(?:^|\/)(?:test-support|test|__tests__)\//.test(document.path)) continue;
+    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    for (const specifier of moduleSpecifiers(document)) {
+      const path = resolveInternalModulePath(document.path, specifier);
+      if (/(?:^|\/)test-support\//.test(path) || /create-unverified-execution-binding/.test(path)) {
+        violations.add(document.path);
+      }
+    }
+  }
+  return [...violations];
+}
+
+function moduleSpecifiers(document: SourceDocument): string[] {
+  if (!/\.[cm]?[jt]sx?$/.test(document.path)) return [];
+  const sourceFile = ts.createSourceFile(
+    document.path,
+    document.source,
+    ts.ScriptTarget.Latest,
+    true,
+    document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const specifiers: string[] = [];
+  function visit(node: ts.Node): void {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      specifiers.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      node.moduleReference.expression &&
+      ts.isStringLiteralLike(node.moduleReference.expression)
+    ) {
+      specifiers.push(node.moduleReference.expression.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.arguments[0] &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+      ts.isStringLiteralLike(node.arguments[0])
+    ) {
+      specifiers.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return specifiers;
 }
 
 /** 返回重新引入旧 Required-Agent 执行桥、符号或幂等前缀的源码。 */

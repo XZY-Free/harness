@@ -18,6 +18,7 @@ import {
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
   collectLegacyScriptViolations,
+  collectProductionTestSupportViolations,
   collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
@@ -174,6 +175,30 @@ describe("Topic02 retired module dependency injections", () => {
         doc("lib/runtime/valid.ts", 'import { client } from "./runtime-client";'),
       ]),
     ).toEqual(["lib/runtime/current.ts", "lib/runtime/current-2.ts", "lib/routes/index.ts"]);
+  });
+});
+
+describe("Topic02 production dependency boundary", () => {
+  it("CLEAN-09: production imports of test support and unverified Binding helpers fail", () => {
+    expect(
+      collectProductionTestSupportViolations([
+        doc("app/runtime/probe/route.ts", 'import "@/lib/runtime/test-support/fake-runtime";'),
+        doc(
+          "lib/runtime/worker.ts",
+          'await import("../executions/test-support/create-unverified-execution-binding");',
+        ),
+        doc("scripts/workers/entry.ts", 'export * from "@/lib/test-support/fixture";'),
+        doc("scripts/production-wiring.ts", 'require("@/lib/test-support/fixture");'),
+        doc("lib/runtime/test-support/helper.ts", 'import "@/lib/test-support/fixture";'),
+        doc("scripts/e2e-bootstrap.ts", 'import "@/lib/test-support/fixture";'),
+        doc("lib/runtime/worker.test.ts", 'import "@/lib/test-support/fixture";'),
+      ]),
+    ).toEqual([
+      "app/runtime/probe/route.ts",
+      "lib/runtime/worker.ts",
+      "scripts/workers/entry.ts",
+      "scripts/production-wiring.ts",
+    ]);
   });
 });
 

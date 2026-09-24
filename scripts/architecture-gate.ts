@@ -23,6 +23,7 @@ import {
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
   collectLegacyScriptViolations,
+  collectProductionTestSupportViolations,
   collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
@@ -233,6 +234,12 @@ function checkConfigurationAndScriptNames(): void {
   else pass("正式脚本与 CI 使用职责名称");
 }
 
+function checkProductionTestSupportBoundary(): void {
+  const violations = collectProductionTestSupportViolations(productionDocuments());
+  if (violations.length > 0) fail(`正式执行链依赖测试支撑模块：${violations.join(", ")}`);
+  else pass("正式执行链未依赖测试支撑模块");
+}
+
 function checkAbsent(paths: readonly string[], title: string): void {
   const residual = paths.filter((path) => existsSync(resolve(ROOT, path)));
   if (residual.length > 0) {
@@ -381,6 +388,7 @@ function main(): void {
   checkRetiredNaming();
   checkCanonicalNaming();
   checkConfigurationAndScriptNames();
+  checkProductionTestSupportBoundary();
   checkAbsent(
     [
       "app/api/chat/route.ts",
