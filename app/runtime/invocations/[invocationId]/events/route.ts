@@ -47,10 +47,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const result = await ingressRuntimeEvents({
       tenantId: claims.tenantId,
       invocationId,
+      credentialJti: claims.jti,
       batch: parsed.data,
     });
     return apiSuccess(result, { headers: { [REQUEST_ID_HEADER]: requestId } });
   } catch (error) {
+    const authResponse = runtimeAuthErrorResponse(error, requestId);
+    if (authResponse) return authResponse;
     const response = await ingressErrorToResponse(error, requestId);
     if (response) return response;
     throw error;

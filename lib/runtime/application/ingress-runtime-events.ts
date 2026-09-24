@@ -20,6 +20,8 @@ import {
 import { requireCurrentExecutionAuthority } from "@/lib/executions/application/require-current-execution-authority";
 import type { ExecutionOperationKind } from "@/lib/executions/application/require-current-execution-authority";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
+import { WorkloadTokenError } from "@/lib/identity/workload-token";
+import { isTokenRevoked } from "@/lib/identity/workload-token-revocation-queries";
 import { createUserActionRequest } from "@/lib/permission/user-action-queries";
 import { threadItemTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
@@ -124,6 +126,8 @@ export class IngressCandidateTypeUnsupportedError extends Error {
 export interface IngressRuntimeEventsInput {
   tenantId: string;
   invocationId: string;
+  /** Route 已认证的 JTI；必须在 Invocation 根锁内再次核对撤销状态。 */
+  credentialJti?: string;
   batch: unknown;
   receivedAt?: Date;
 }
@@ -1260,6 +1264,9 @@ export async function ingressRuntimeEvents(
   const now = input.receivedAt ?? new Date();
   const result = await db.transaction(async (tx) => {
     const invocation = await lockInvocation(tx, input.tenantId, input.invocationId);
+    if (input.credentialJti && (await isTokenRevoked(input.tenantId, input.credentialJti, tx))) {
+      throw new WorkloadTokenError("token_revoked", "Workload Token 已被撤销");
+    }
     const newEvents: Array<{ event: RuntimeEvent; payloadHash: string }> = [];
     const receipts: EventReceipt[] = [];
     const replayedEventIds: string[] = [];

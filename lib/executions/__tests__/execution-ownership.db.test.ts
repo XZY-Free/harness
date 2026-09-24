@@ -40,19 +40,23 @@ import {
 import {
   isTokenRevoked,
   revokeWorkloadToken,
+  revokeWorkloadTokenInTransaction,
 } from "@/lib/identity/workload-token-revocation-queries";
 import { threadEventTable } from "@/lib/persistence/schema/conversation";
 import {
   executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
+  runtimeEventIngressTable,
 } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { handleRuntimeHeartbeat } from "@/lib/runtime/application/runtime-heartbeat";
 import { resolveRuntimePrincipal } from "@/lib/runtime/route-helpers";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -1090,6 +1094,209 @@ describe("ExecutionOwnership database fencing", () => {
       invocationId: fixture.invocation.id,
     });
     expect(active?.id).toBe(first.ownership.id);
+  });
+
+  it("FENCE-16: 认证检查已过但撤销先提交时，Ingress 根事务拒绝旧 JTI 新事件", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const [revision] = await db
+      .select({ runtimeCapabilitiesJson: runtimeRevisionTable.runtimeCapabilitiesJson })
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.id, fixture.binding.runtimeRevisionId))
+      .limit(1);
+    expect(revision).toBeDefined();
+    const first = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: revision?.runtimeCapabilitiesJson,
+      activationEvidence: { kind: "fence16-activation" },
+    });
+    const semanticRequestJson = { kind: "fence16-start", invocationId: fixture.invocation.id };
+    const semanticRequestDigest = protocolDigest(semanticRequestJson);
+    await applyRuntimeSessionDispatchForTest(fixture.tenantId, first.session.id, {
+      bindingState: "dispatching",
+      semanticRequestJson,
+      semanticRequestDigest,
+    });
+    const token = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      attemptId: fixture.attempt.id,
+      ownershipId: first.ownership.id,
+      leaseEpoch: String(first.ownership.leaseEpoch),
+      sessionBindingId: first.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    // 对应 Route 已完成 resolveRuntimePrincipal，却尚未进入 Ingress 根锁事务的窗口。
+    const checkedClaims = await resolveRuntimePrincipal(
+      new Headers({ authorization: `Bearer ${token}` }),
+      fixture.invocation.id,
+    );
+    await revokeWorkloadToken({
+      tenantId: fixture.tenantId,
+      jti: checkedClaims.jti,
+      invocationId: fixture.invocation.id,
+      revokedBy: "test-security",
+      reasonCode: "fence16-auth-before-revoke",
+      tokenExpiresAt: new Date(Date.now() + 60_000),
+      actor: { tenantId: fixture.tenantId, actorType: "user", actorId: "test-admin" },
+    });
+    await expect(
+      ingressRuntimeEvents({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        credentialJti: checkedClaims.jti,
+        batch: {
+          protocolVersion: 3,
+          authority: first.authority,
+          events: [
+            {
+              eventId: randomUUID(),
+              producerSequence: "1",
+              type: "execution.started",
+              schemaVersion: 1,
+              payload: {
+                intentKey: first.session.startIntentKey,
+                semanticRequestDigest,
+                remoteSessionRef: "fence16-session",
+                remoteExecutionRef: "fence16-execution",
+                capabilitiesDigest: expectedCapabilityManifestDigest({
+                  runtimeRevisionId: fixture.binding.runtimeRevisionId,
+                  runtimeCapabilitiesJson: revision?.runtimeCapabilitiesJson,
+                }),
+              },
+            },
+          ],
+        },
+      } as Parameters<typeof ingressRuntimeEvents>[0]),
+    ).rejects.toMatchObject({ code: "token_revoked" });
+    expect(
+      await db
+        .select({ id: runtimeEventIngressTable.id })
+        .from(runtimeEventIngressTable)
+        .where(eq(runtimeEventIngressTable.invocationId, fixture.invocation.id)),
+    ).toHaveLength(0);
+  });
+
+  it("FENCE-16: 撤销事务占据根锁时，并发 Event 等待提交后拒绝", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const [revision] = await db
+      .select({ runtimeCapabilitiesJson: runtimeRevisionTable.runtimeCapabilitiesJson })
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.id, fixture.binding.runtimeRevisionId))
+      .limit(1);
+    if (!revision) throw new Error("RuntimeRevision 缺失");
+    const first = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: revision.runtimeCapabilitiesJson,
+      activationEvidence: { kind: "fence16-overlap" },
+    });
+    const semanticRequestJson = { kind: "fence16-overlap", invocationId: fixture.invocation.id };
+    const semanticRequestDigest = protocolDigest(semanticRequestJson);
+    await applyRuntimeSessionDispatchForTest(fixture.tenantId, first.session.id, {
+      bindingState: "dispatching",
+      semanticRequestJson,
+      semanticRequestDigest,
+    });
+    const token = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      attemptId: fixture.attempt.id,
+      ownershipId: first.ownership.id,
+      leaseEpoch: String(first.ownership.leaseEpoch),
+      sessionBindingId: first.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    const checkedClaims = await resolveRuntimePrincipal(
+      new Headers({ authorization: `Bearer ${token}` }),
+      fixture.invocation.id,
+    );
+    let releaseRevoke!: () => void;
+    const revokeGate = new Promise<void>((resolve) => {
+      releaseRevoke = resolve;
+    });
+    let revokeReady!: () => void;
+    const revokeInsideTx = new Promise<void>((resolve) => {
+      revokeReady = resolve;
+    });
+    const revokeTx = db.transaction(async (tx) => {
+      await revokeWorkloadTokenInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        jti: checkedClaims.jti,
+        invocationId: fixture.invocation.id,
+        revokedBy: "test-security",
+        reasonCode: "fence16-overlap",
+        tokenExpiresAt: new Date(Date.now() + 60_000),
+        actor: { tenantId: fixture.tenantId, actorType: "user", actorId: "test-admin" },
+      });
+      revokeReady();
+      await revokeGate;
+    });
+    try {
+      await revokeInsideTx;
+      const ingress = ingressRuntimeEvents({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        credentialJti: checkedClaims.jti,
+        batch: {
+          protocolVersion: 3,
+          authority: first.authority,
+          events: [
+            {
+              eventId: randomUUID(),
+              producerSequence: "1",
+              type: "execution.started",
+              schemaVersion: 1,
+              payload: {
+                intentKey: first.session.startIntentKey,
+                semanticRequestDigest,
+                remoteSessionRef: "fence16-overlap-session",
+                remoteExecutionRef: "fence16-overlap-execution",
+                capabilitiesDigest: expectedCapabilityManifestDigest({
+                  runtimeRevisionId: fixture.binding.runtimeRevisionId,
+                  runtimeCapabilitiesJson: revision.runtimeCapabilitiesJson,
+                }),
+              },
+            },
+          ],
+        },
+      });
+      const rejectedIngress = expect(ingress).rejects.toMatchObject({ code: "token_revoked" });
+      // 根锁仍由撤销事务持有；Event 必须等待，不能在未提交时越过撤销检查。
+      expect(
+        await Promise.race([
+          ingress.then(
+            () => "accepted",
+            () => "rejected",
+          ),
+          new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+        ]),
+      ).toBe("waiting");
+      releaseRevoke();
+      await revokeTx;
+      await rejectedIngress;
+      expect(
+        await db
+          .select({ id: runtimeEventIngressTable.id })
+          .from(runtimeEventIngressTable)
+          .where(eq(runtimeEventIngressTable.invocationId, fixture.invocation.id)),
+      ).toHaveLength(0);
+    } finally {
+      releaseRevoke();
+      await revokeTx;
+    }
   });
 
   it("FENCE-17: 终态 Invocation 不可 Acquire，不复活代际也不推进 epoch", async () => {
