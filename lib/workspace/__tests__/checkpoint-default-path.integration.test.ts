@@ -954,6 +954,12 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(replay.dispatched).toBe(true);
     if (!replay.dispatched) throw new Error("Checkpoint 重投未被正式网关接纳");
     expect(replay.command.commandState).toBe("acknowledged");
+    expect(replay.command.response).toMatchObject({
+      checkpoint: {
+        checkpointId: evidence?.checkpointId,
+      },
+      replayed: true,
+    });
     expect(ctx.stub.safePointRequests).toHaveLength(1);
     expect(ctx.stub.releaseRequests.length).toBeGreaterThanOrEqual(2);
     expect(new Set(ctx.stub.releaseRequests.map((request) => request.checkpointIntentId))).toEqual(
