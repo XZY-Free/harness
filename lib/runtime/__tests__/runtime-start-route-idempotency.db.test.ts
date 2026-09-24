@@ -330,6 +330,47 @@ describe("A04：Runtime HTTP Start 幂等键与重放前置条件（真实 Route
     expect(session?.semanticRequestDigest).toBe(request.semanticRequestDigest);
   }, 60_000);
 
+  it("R2-d: Token 与 trace 轮换后同源 Start 仍回读原 Session 和语义摘要", async () => {
+    const { tenantId, gen, request } = await seedStartable();
+    const first = await startRuntimeInvocationPOST(
+      buildRouteRequest({ tenantId, authority: gen.authority, body: request }),
+    );
+    expect(first.status).toBe(202);
+    const firstBody = (await first.json()) as {
+      remoteSessionRef: string;
+      remoteExecutionRef: string;
+      semanticRequestDigest: string;
+    };
+    const rotated: RuntimeStartRequest = {
+      ...request,
+      credentials: {
+        runtimeToken: `runtime-token-rotated-${randomUUID()}`,
+        gatewayToken: `gateway-token-rotated-${randomUUID()}`,
+        expiresAt: Date.now() + 120_000,
+      },
+      traceContext: { traceId: randomUUID(), spanId: randomUUID() },
+    };
+    expect(computeSemanticRequestDigest(rotated)).toBe(request.semanticRequestDigest);
+    const replay = await startRuntimeInvocationPOST(
+      buildRouteRequest({ tenantId, authority: gen.authority, body: rotated }),
+    );
+    expect(replay.status).toBe(202);
+    expect(await replay.json()).toMatchObject({
+      remoteSessionRef: firstBody.remoteSessionRef,
+      remoteExecutionRef: firstBody.remoteExecutionRef,
+      semanticRequestDigest: firstBody.semanticRequestDigest,
+    });
+    const session = await getRuntimeSessionBindingByStartIntent(
+      tenantId,
+      `start:${gen.ownership.id}`,
+    );
+    expect(session?.id).toBe(gen.session.id);
+    expect(session?.semanticRequestDigest).toBe(request.semanticRequestDigest);
+    expect(
+      await getRuntimeSessionBindingsByInvocation(tenantId, gen.authority.invocationId),
+    ).toHaveLength(1);
+  }, 60_000);
+
   it("RUNTIME-START-04: 旧代际的新启动仍被拒绝，且不得影响当前代际的 Session", async () => {
     const { tenantId, fixture, revision, gen } = await seedStartable();
 

@@ -2254,6 +2254,10 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     await writeFile(path.join(ctx.writerRoot, "state.txt"), "first-checkpoint", "utf8");
     await assertCheckpointGateFacts(ctx);
     let slowCommandId: string | null = null;
+    const frozen = {
+      request: null as ReturnType<typeof executionSourceRequestForStart> | null,
+      anchorDigest: null as string | null,
+    };
     const first = await runPauseResumeChain(ctx, {
       actionId: "r4a-first-pause",
       afterSuspended: async () => {
@@ -2272,9 +2276,35 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
             requestedById: "test-user",
           }),
         );
+        const [binding] = await db
+          .select()
+          .from(executionBindingTable)
+          .where(eq(executionBindingTable.invocationId, ctx.invocationId))
+          .limit(1);
+        const attempt = await readAttemptFacts(ctx.attemptId);
+        if (!binding || !attempt.filesystemCheckpointId || !attempt.resumeAnchorDigest) {
+          throw new Error("C1-A 缺少正式暂停来源");
+        }
+        frozen.request = executionSourceRequestForStart({
+          tenantId: TENANT_ID,
+          invocation: await readInvocationFacts(ctx.invocationId),
+          binding,
+          attempt,
+          sourceOperationKey: `command:${slowCommandId}`,
+          intentType: "resume",
+          recovery: {
+            kind: "resume",
+            anchor: `checkpoint:${attempt.filesystemCheckpointId}`,
+            anchorDigest: attempt.resumeAnchorDigest,
+            checkpointId: attempt.filesystemCheckpointId,
+          },
+        });
+        frozen.anchorDigest = attempt.resumeAnchorDigest;
       },
     });
-    if (!slowCommandId) throw new Error("C1-A 未被正式接受");
+    if (!slowCommandId || !frozen.request || !frozen.anchorDigest) {
+      throw new Error("C1-A 未被正式接受和冻结");
+    }
     const [slowAccepted] = await db
       .select()
       .from(invocationCommandTable)
@@ -2315,6 +2345,17 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       path.join(await realpath(ctx.writerRoot), ".snow-runs", ctx.attemptId),
     );
     const resumeRequestsBefore = ctx.stub.resumeRequests.length;
+
+    // C1-A 的只读请求在 P1 已冻结；现在从写事务 TX-A 正式进入，必须在 Lease reset 前复核。
+    await expect(
+      acceptExecutionPreparation({
+        request: frozen.request,
+        environmentReprepare: {
+          leaseId: leaseBefore[0]!.id,
+          recoveryAnchorDigest: frozen.anchorDigest,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
 
     const late = await dispatchResumeCommandToRuntime({
       tenantId: TENANT_ID,

@@ -1426,8 +1426,13 @@ describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => 
       const resources = await realResolve(input);
       resolutions += 1;
       if (resolutions === 1) {
-        firstAtResolution();
-        await firstGate;
+        // W1 在真实 MySQL 连接上停于资源解析边界；W2 的领取/准备事务必须由
+        // 另一连接完成，不能退化成同一连接上顺序执行的两个函数调用。
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`SELECT CONNECTION_ID()`);
+          firstAtResolution();
+          await firstGate;
+        });
         throw new Error("r1-a-ordinary-resource-error");
       }
       return resources;
