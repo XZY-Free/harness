@@ -31,6 +31,8 @@ import type { AuditActor } from "@/lib/identity/audit";
 import { registerDevice, revokeDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
+import { createJob } from "@/lib/job/job-queries";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import {
   invocationAttemptTable,
@@ -59,7 +61,9 @@ import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { getRuntimeSessionBindingsByInvocation } from "@/lib/runtime/persistence/runtime-session-store";
+import { DISPATCH_STUCK_GRACE_MS } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
+import { runDueUndispatchedIntentRecoveries } from "@/lib/runtime/retry/undispatched-intent-lane";
 import { createHttpRuntimeConformanceAdapterForTest } from "@/lib/runtime/test-support/http-runtime-conformance-adapter";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
@@ -67,6 +71,7 @@ import {
   publishExternalRuntimeRevisionForTest,
   publishRuntimeRevisionForTest,
 } from "@/lib/test-support/publish-runtime-revision-for-test";
+import { createProductionWorkerRole } from "@/lib/workers/production-worker-role";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { and, desc, eq } from "drizzle-orm";
@@ -186,6 +191,7 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
   let startFailureStatus: number | null = null;
   let disconnectNextAcceptedStart = false;
   let suppressExecutionStarted = false;
+  let observeStart: ((request: ExternalRequest) => Promise<void>) | null = null;
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -240,6 +246,8 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
         return;
       }
       const idempotencyKey = String(request.headers["idempotency-key"] ?? "");
+      const received = requests.at(-1);
+      if (received && observeStart) await observeStart(received);
       acceptedStartKeys.add(idempotencyKey);
       if (disconnectNextAcceptedStart) {
         disconnectNextAcceptedStart = false;
@@ -307,6 +315,9 @@ async function startExternalRuntimeServer(capabilities = EXTERNAL_CAPABILITIES) 
   return {
     endpoint: `http://127.0.0.1:${address.port}`,
     requests,
+    setStartObserver(observer: ((request: ExternalRequest) => Promise<void>) | null) {
+      observeStart = observer;
+    },
     setStartFailureStatus(status: number | null) {
       startFailureStatus = status;
     },
@@ -642,6 +653,68 @@ async function createExternalResumeCommand(params: {
 }
 
 describe("dispatchEmployeeTurn", () => {
+  it("FENCE-01: 正式 Job 消费者首次派发 External Runtime 时先建立唯一 Owner/Session", async () => {
+    const { server, tenantId, ownerId, turn } = await seedReadyExternalEmployeeTurn("fence01-job");
+    await db.delete(turnTable).where(eq(turnTable.id, turn.id));
+    const observedAtExternalStart: Array<{
+      ownerId: string | null;
+      sessionIds: string[];
+    }> = [];
+    server.setStartObserver(async (request) => {
+      const authority = request.body?.authority as { invocationId?: string } | undefined;
+      const invocationId = authority?.invocationId;
+      if (!invocationId) return;
+      const owner = await getActiveExecutionOwnership({ tenantId, invocationId });
+      const sessions = await getRuntimeSessionBindingsByInvocation(tenantId, invocationId);
+      observedAtExternalStart.push({
+        ownerId: owner?.id ?? null,
+        sessionIds: sessions.map((s) => s.id),
+      });
+    });
+    const { job } = await createJob({
+      tenantId,
+      agentId: null,
+      jobType: "knowledge_build",
+      triggerRef: `fence01:${randomUUID()}`,
+      creationKey: `fence01:${randomUUID()}`,
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
+      inputJson: { task: "external job initial dispatch" },
+      createdBy: ownerId,
+    });
+    const worker = createProductionWorkerRole("job-worker");
+    const admission = (await worker.pollOnce()) as { admittedJobs: number };
+    expect(admission.admittedJobs).toBe(1);
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.jobId, job.id));
+    expect(invocation?.subjectType).toBe("job");
+    expect(invocation?.threadId).toBeNull();
+    expect(invocation?.turnId).toBeNull();
+    if (!invocation) throw new Error("Job 消费者未创建 Invocation");
+    expect(await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id })).toBeNull();
+    expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id)).toEqual([]);
+    expect(server.requests).toHaveLength(0);
+
+    const due = new Date(Date.now() + DISPATCH_STUCK_GRACE_MS + 1_000);
+    const dispatched = await runDueUndispatchedIntentRecoveries({ now: due });
+    expect(dispatched.invocations.recovered).toBe(1);
+    const owner = await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id });
+    const sessions = await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id);
+    expect(owner).not.toBeNull();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.ownershipId).toBe(owner?.id);
+    expect(server.requests).toHaveLength(1);
+    expect(observedAtExternalStart).toEqual([
+      { ownerId: owner?.id, sessionIds: [sessions[0]?.id] },
+    ]);
+    expect(server.requests[0]?.body?.authority).toMatchObject({
+      invocationId: invocation.id,
+      ownershipId: owner?.id,
+      sessionBindingId: sessions[0]?.id,
+    });
+  });
+
   it.each([false, true])(
     "桌面绑定冻结；设备撤销只禁用命令，不阻断基础聊天（revoked=%s）",
     async (revoked) => {
