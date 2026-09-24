@@ -2383,6 +2383,7 @@
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/runtime/thread-generation-queries.ts",
         "lib/workspace/checkpoint-producer.ts",
@@ -2453,6 +2454,7 @@
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/runtime/thread-generation-queries.ts",
         "lib/workspace/checkpoint-producer.ts",
@@ -2946,6 +2948,7 @@
         "lib/executions/persistence/invocation-store.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts"
@@ -2981,6 +2984,7 @@
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
         "lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/runtime/thread-generation-queries.ts",
         "lib/workspace/checkpoint-producer.ts",
@@ -3041,6 +3045,7 @@
         "lib/executions/persistence/invocation-store.ts",
         "lib/job/job-execution.ts",
         "lib/runtime/application/ingress-runtime-events.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts",
@@ -3074,6 +3079,7 @@
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/harness-loop/coordinate-agent-input-required.ts",
         "lib/runtime/retry/dispatch-persisted-queued-invocation-attempt.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/runtime/thread-generation-queries.ts",
         "lib/workspace/checkpoint-producer.ts",
@@ -3100,6 +3106,7 @@
         "lib/runtime/application/runtime-resume.ts",
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts"
       ],
       "productionReaders": [
@@ -3115,6 +3122,7 @@
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/workspace-write-lock-queries.ts"
@@ -3162,6 +3170,7 @@
         "lib/runtime/application/runtime-resume.ts",
         "lib/runtime/application/runtime-start.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/executions/application/close-invocation-terminal.ts",
         "lib/executions/application/create-invocation-command.ts",
@@ -3175,6 +3184,7 @@
         "lib/runtime/command-dispatcher.ts",
         "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/workspace-write-lock-queries.ts",
@@ -5199,6 +5209,7 @@
         "lib/runtime/persistence/runtime-session-store.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts"
@@ -5262,6 +5273,7 @@
         "lib/runtime/persistence/runtime-session-store.ts",
         "lib/runtime/recovery-queries.ts",
         "lib/runtime/retry/dispatch-retry-queries.ts",
+        "lib/runtime/retry/environment-provision-retry.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/workspace/checkpoint-producer.ts",
         "lib/workspace/checkpoint-release.ts",
@@ -5565,7 +5577,8 @@
         "lib/permission/user-action-expiry-queries.ts",
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/dispatcher.ts",
-        "lib/runtime/retry/undispatched-intent-lane.ts"
+        "lib/runtime/retry/undispatched-intent-lane.ts",
+        "scripts/verify-fresh-db-flow.mts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -5627,6 +5640,7 @@
         "lib/runtime/application/runtime-recovery.ts",
         "lib/runtime/dispatcher.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
+        "scripts/verify-fresh-db-flow.mts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
@@ -6264,7 +6278,8 @@
         "lib/runtime/dispatcher.ts",
         "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
-        "lib/runtime/thread-generation-queries.ts"
+        "lib/runtime/thread-generation-queries.ts",
+        "scripts/verify-fresh-db-flow.mts"
       ],
       "lifecycle": "由领域服务创建和转换状态，并按领域保留策略清理",
       "authorityKind": "canonical-entity",
@@ -6326,6 +6341,7 @@
         "lib/runtime/employee-turn-dispatcher.ts",
         "lib/runtime/retry/undispatched-intent-lane.ts",
         "lib/runtime/thread-generation-queries.ts",
+        "scripts/verify-fresh-db-flow.mts",
         "drizzle/0000_initial_schema.sql"
       ],
       "notes": "writer/reader 每次从当前生产源码重新扫描；不读取或合并历史 inventory"
