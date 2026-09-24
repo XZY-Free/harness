@@ -62,6 +62,7 @@ import {
   type CheckpointReleaseRecoveryReport,
   confirmCheckpointBackendRelease,
   confirmCheckpointRuntimeRelease,
+  recordCheckpointReleaseFailure,
   recoverPendingCheckpointReleases,
   runCheckpointMaintenanceLane,
 } from "@/lib/workspace/checkpoint-release";
@@ -1661,6 +1662,53 @@ describe("FilesystemCheckpoint integration", () => {
       expect(maintenance.releases.gateOpened).toBe(1);
       expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
       await expect(stat(frozenFile)).rejects.toThrow();
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("N06-T8: 新 Gate 已推进后，旧 release 成功和失败回执都不能改写新意图", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      await writeFile(path.join(ctx.writerRoot, "state.txt"), "old release", "utf8");
+      const first = await ctx.commitWithoutRuntimeRelease();
+      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
+      await confirmCheckpointRuntimeRelease({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        checkpointIntentId: first.checkpointIntentId,
+      });
+      expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+      const next = await requestFilesystemCheckpoint({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        ownershipId: ctx.ownershipId,
+        declarations: ctx.declarations(),
+        requestedByType: "service",
+        requestedById: "test-service",
+      });
+      expect(next.checkpointIntentId).not.toBe(first.checkpointIntentId);
+      const beforeLate = await readGate(ctx.invocationId);
+      expect(beforeLate?.checkpointGate).toBe("quiescing");
+      expect(beforeLate?.checkpointIntentId).toBe(next.checkpointIntentId);
+
+      await expect(
+        confirmCheckpointRuntimeRelease({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          checkpointIntentId: first.checkpointIntentId,
+        }),
+      ).rejects.toThrow("CheckpointStale");
+      await expect(
+        recordCheckpointReleaseFailure({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          checkpointIntentId: first.checkpointIntentId,
+          reasonCode: "LateOldReleaseFailure",
+        }),
+      ).rejects.toThrow("CheckpointStale");
+      expect(await readGate(ctx.invocationId)).toEqual(beforeLate);
+      expect(await countCheckpoints(ctx.invocationId)).toBe(1);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
