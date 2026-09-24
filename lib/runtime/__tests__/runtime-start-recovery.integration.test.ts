@@ -641,7 +641,15 @@ describe("Runtime Start / Resume durable recovery", () => {
     );
     const resumedSession = sessions.find((session) => session.id !== initial.sessionBindingId);
     expect(resumedSession).toMatchObject({ intentType: "resume", bindingState: "dispatching" });
+    expect(resumed.authority.attemptId).toBe(initial.authority.attemptId);
+    expect(resumed.authority.ownershipId).not.toBe(initial.authority.ownershipId);
+    expect(resumed.authority.leaseEpoch).not.toBe(initial.authority.leaseEpoch);
+    expect(resumed.authority.sessionBindingId).not.toBe(initial.sessionBindingId);
     expect(runtime.requests.filter((entry) => entry.path.endsWith("/resume"))).toHaveLength(2);
+    const startKeys = new Set(runtime.requests.map((entry) => entry.idempotencyKey));
+    expect(startKeys).toEqual(
+      new Set([`start:${initial.authority.ownershipId}`, `start:${resumed.authority.ownershipId}`]),
+    );
     expect(
       (await runtime.store()).starts[`start:${resumed.authority.ownershipId}`]?.executionCount,
     ).toBe(1);
