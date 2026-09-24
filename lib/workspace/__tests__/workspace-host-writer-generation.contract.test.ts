@@ -1353,8 +1353,19 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
       anchorDigest: ANCHOR_DIGEST,
     });
     await expect(
+      fixture.broker.freeze({
+        grant,
+        checkpointIntentId: firstIntent,
+        anchorDigest: `sha256:${"c".repeat(64)}`,
+      }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    await expect(
+      fixture.broker.releaseFreeze({ ...first, writerGeneration: first.writerGeneration + 1 }),
+    ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    await expect(
       fixture.broker.releaseFreeze({ ...first, anchorDigest: `sha256:${"c".repeat(64)}` }),
     ).rejects.toThrow(WorkspaceWriterNotFencedError);
+    expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(true);
     await fixture.broker.releaseFreeze(first);
     await expect(fixture.broker.releaseFreeze(first)).resolves.toBeUndefined();
 
@@ -1365,6 +1376,13 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
       anchorDigest: `sha256:${"d".repeat(64)}`,
     });
     expect(second.checkpointIntentId).toBe(secondIntent);
+    await expect(
+      fixture.broker.freeze({
+        grant,
+        checkpointIntentId: firstIntent,
+        anchorDigest: ANCHOR_DIGEST,
+      }),
+    ).rejects.toThrow("CheckpointIntentRetired");
     expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(true);
     await fixture.broker.releaseFreeze(second);
     expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
