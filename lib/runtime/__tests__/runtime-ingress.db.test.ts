@@ -505,6 +505,19 @@ describe("RuntimeEventIngress database fencing", () => {
 
   it("INGRESS-05/INGRESS-08/INGRESS-09: exact replay returns the original receipt, but payload conflicts and gaps fail closed", async () => {
     const runtime = await createActiveRuntime();
+    const oldToken = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      runtimeRevisionId: runtime.fixture.binding.runtimeRevisionId,
+      attemptId: runtime.fixture.attempt.id,
+      ownershipId: runtime.acquired.ownership.id,
+      leaseEpoch: String(runtime.acquired.ownership.leaseEpoch),
+      sessionBindingId: runtime.acquired.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
     const event = progressEvent("2");
     const first = await ingressRuntimeEvents({
       tenantId: runtime.fixture.tenantId,
@@ -512,6 +525,47 @@ describe("RuntimeEventIngress database fencing", () => {
       batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [event] },
     });
     await replaceCurrentOwner(runtime);
+    const ledgerBeforeReplay = await readLedger(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const countersBeforeReplay = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const mappingBeforeReplay = await readProductMappingCounts(
+      runtime.fixture.tenantId,
+      runtime.fixture.threadId,
+    );
+    const routeReplay = await ingestRuntimeEventsPOST(
+      buildApiRequest({
+        audience: "runtime",
+        method: "POST",
+        path: `/invocations/${runtime.fixture.invocation.id}/events`,
+        idempotencyKey: randomUUID(),
+        token: oldToken,
+        body: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [event],
+        },
+      }),
+      { params: Promise.resolve({ invocationId: runtime.fixture.invocation.id }) },
+    );
+    expect(routeReplay.status).toBe(200);
+    expect(await routeReplay.json()).toMatchObject({
+      replayedEventIds: [event.eventId],
+      receipts: first.receipts,
+    });
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      ledgerBeforeReplay,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(countersBeforeReplay);
+    expect(
+      await readProductMappingCounts(runtime.fixture.tenantId, runtime.fixture.threadId),
+    ).toEqual(mappingBeforeReplay);
     const replay = await ingressRuntimeEvents({
       tenantId: runtime.fixture.tenantId,
       invocationId: runtime.fixture.invocation.id,
