@@ -74,6 +74,7 @@ import {
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { workspace, workspaceBinding } from "@/lib/persistence/schema/workspace";
+import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { getIngressByInvocation } from "@/lib/runtime/application/ingress-runtime-events";
 import {
   inspectContainer,
@@ -119,6 +120,7 @@ import {
   resolveWorkspaceBindingId,
 } from "@/lib/workspace/desktop-workspace-queries";
 import { computeWorkspaceContractDigest } from "@/lib/workspace/workspace-contract";
+import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import {
   createWorkspace,
   createWorkspaceBinding,
@@ -895,6 +897,12 @@ async function seedServerSideWorkspace(input: {
   tenantId: string;
   ownerId: string;
   suffix: string;
+  managedHost?: {
+    root: string;
+    scopeDigest: string;
+    storageIdentity: string;
+    hostIdentity: string;
+  };
 }): Promise<{ workspaceId: string; bindingId: string }> {
   const logical = await createWorkspace({
     tenantId: input.tenantId,
@@ -902,12 +910,14 @@ async function seedServerSideWorkspace(input: {
     displayName: "ENTRY 端侧托管 Workspace",
     ownerUserId: input.ownerId,
   });
-  const storageScopeDigest = `sha256:${input.suffix
-    .padEnd(64, "5")
-    .slice(0, 64)
-    .replace(/[^0-9a-f]/g, "b")}`;
-  const storageIdentity = storageScopeDigest;
-  const hostIdentity = `host-${input.suffix}`;
+  const storageScopeDigest =
+    input.managedHost?.scopeDigest ??
+    `sha256:${input.suffix
+      .padEnd(64, "5")
+      .slice(0, 64)
+      .replace(/[^0-9a-f]/g, "b")}`;
+  const storageIdentity = input.managedHost?.storageIdentity ?? storageScopeDigest;
+  const hostIdentity = input.managedHost?.hostIdentity ?? `host-${input.suffix}`;
   const backendKind = "managed_host";
   const filesystemSemantics = {
     kind: "managed",
@@ -935,7 +945,7 @@ async function seedServerSideWorkspace(input: {
     continuityMode: "SHARED_DURABLE",
     bindingType: "cloud",
     deviceId: null,
-    locationRef: `managed://entry-${input.suffix}`,
+    locationRef: input.managedHost?.root ?? `managed://entry-${input.suffix}`,
     storageScopeDigest,
     backendKind,
     hostIdentity,
@@ -952,6 +962,22 @@ async function seedServerSideWorkspace(input: {
     .set({ defaultBindingId: binding.id, updatedAt: new Date() })
     .where(and(eq(workspace.tenantId, input.tenantId), eq(workspace.id, logical.id)));
   return { workspaceId: logical.id, bindingId: binding.id };
+}
+
+async function seedManagedWriterEntryContext(suffix: string) {
+  const context = await seedEntryContext(suffix);
+  const hostRoot = await temporaryRoot(`${suffix}-workspace-host-`);
+  const broker = createWorkspaceHostBroker({ root: hostRoot });
+  const probe = await broker.probeIdentity();
+  process.env.SNOWHARNESS_WORKSPACE_HOST_ROOT = hostRoot;
+  const managed = await seedServerSideWorkspace({
+    tenantId: context.tenantId,
+    ownerId: context.ownerId,
+    suffix,
+    managedHost: { root: hostRoot, ...probe },
+  });
+  await pointThreadAtWorkspace(context.tenantId, context.threadId, managed.workspaceId);
+  return { context, hostRoot, broker, probe, managed };
 }
 
 /** 把 Thread 声明的 Workspace 指到指定逻辑 Workspace（Thread 设置的正式字段）。 */
@@ -1725,6 +1751,269 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
     } finally {
       child.kill();
       await child.exited;
+    }
+  }, 120_000);
+
+  it("R3-a: O/S activating 提交后进程死亡，正式 Session Worker 激活原 Writer 与 Lease 再派发", async () => {
+    const { context, broker, probe } = await seedManagedWriterEntryContext("r3a");
+    const turn = await acceptTurnOnly(context, "r3a-crash", "请读取工作区并回答");
+    // 真实 Start 先提交 O/S；随后首代 W 预留的 SQL 在测试库内暂停，
+    // 因而 SIGKILL 不会触发 Start 的 catch/补偿，也不会伪造 ready 或 grant。
+    await db.execute(
+      sql.raw(
+        "CREATE TRIGGER topic02_r3a_before_writer BEFORE INSERT ON WorkspaceWriteLock FOR EACH ROW DO SLEEP(60)",
+      ),
+    );
+    const child = spawnInitialDispatchCrashProcess({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      ownerId: context.ownerId,
+      stage: "before_writer",
+    });
+    try {
+      let invocation: Awaited<ReturnType<typeof listInvocationsForTurn>>[number] | undefined;
+      let owner: typeof executionOwnershipTable.$inferSelect | undefined;
+      let session:
+        | Awaited<ReturnType<typeof getRuntimeSessionBindingsByInvocation>>[number]
+        | undefined;
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
+        [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+        if (invocation) {
+          [owner] = await db
+            .select()
+            .from(executionOwnershipTable)
+            .where(eq(executionOwnershipTable.invocationId, invocation.id))
+            .limit(1);
+          [session] = await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id);
+        }
+        if (owner?.executionPhase === "activating" && session) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!invocation || !owner || !session || owner.executionPhase !== "activating") {
+        throw new Error(
+          `子进程未提交 activating O/S：${JSON.stringify({
+            invocation: invocation?.executionState,
+            attempt: invocation
+              ? (await listAttemptsForInvocation(context.tenantId, invocation.id)).map((row) => ({
+                  preparation: row.preparationState,
+                  state: row.attemptState,
+                }))
+              : null,
+            lease: invocation
+              ? await Promise.all(
+                  (await listAttemptsForInvocation(context.tenantId, invocation.id)).map(
+                    async (row) =>
+                      (await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, row.id))
+                        ?.readinessState ?? null,
+                  ),
+                )
+              : null,
+            owner: owner?.executionPhase,
+            session: session?.bindingState,
+            stderr: child.stderr(),
+          })}`,
+        );
+      }
+      const [attempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      if (!attempt) throw new Error("Attempt 缺失");
+      const lease = await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempt.id);
+      expect(lease?.readinessState).toBe("prepared");
+      expect(owner.leaseExpiresAt.getTime()).toBeGreaterThan(Date.now() + 30_000);
+      expect(session.bindingState).toBe("prepared");
+      expect(
+        await db
+          .select()
+          .from(workspaceWriteLock)
+          .where(eq(workspaceWriteLock.tenantId, context.tenantId)),
+      ).toHaveLength(0);
+      expect(await broker.getWriter(probe.scopeDigest, 1)).toBeNull();
+      child.kill();
+      expect((await child.exited).signal).toBe("SIGKILL");
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3a_before_writer"));
+      if (!attempt.preparationLeaseExpiresAt)
+        throw new Error("activating Attempt 缺少准备领取租期");
+      const dueAt = Math.max(
+        attempt.preparationLeaseExpiresAt.getTime(),
+        session.updatedAt.getTime() + DISPATCH_STUCK_GRACE_MS,
+      );
+      const databaseNow = await getAuthorityDatabaseTime(db);
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, dueAt - databaseNow.getTime() + 1_000)),
+      );
+      expect(owner.leaseExpiresAt.getTime()).toBeGreaterThan(
+        (await getAuthorityDatabaseTime(db)).getTime(),
+      );
+      const worker = createRuntimeDispatchRetryWorker();
+      expect((await worker.tick()).attempts).toBe(1);
+      const [continuedOwner] = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.id, owner.id))
+        .limit(1);
+      const [continuedSession] = await getRuntimeSessionBindingsByInvocation(
+        context.tenantId,
+        invocation.id,
+      );
+      const [writer] = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.tenantId, context.tenantId))
+        .limit(1);
+      if (continuedOwner?.executionPhase === "activating") {
+        const [failedAttempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+        throw new Error(
+          `Session Worker 未完成激活：${JSON.stringify({
+            attempt: failedAttempt?.attemptState,
+            error: failedAttempt?.errorCode,
+            summary: failedAttempt?.errorSummary,
+            session: continuedSession?.bindingState,
+            dispatchError: continuedSession?.lastErrorCode,
+            lease: (await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempt.id))
+              ?.readinessState,
+            writer: writer?.lockState,
+          })}`,
+        );
+      }
+      expect(continuedOwner?.id).toBe(owner.id);
+      expect(continuedSession?.id).toBe(session.id);
+      expect(continuedSession?.startIntentKey).toBe(session.startIntentKey);
+      expect(writer?.holderOwnershipId).toBe(owner.id);
+      expect(writer?.backendGrantRef).toBeTruthy();
+      expect(writer?.writerGeneration).toBe(1);
+      expect(await broker.getWriter(probe.scopeDigest, 1)).toMatchObject({
+        grantRef: writer?.backendGrantRef,
+        writerGeneration: 1,
+      });
+      expect(
+        (continuedOwner?.activationEvidence as { environment?: { readinessState?: string } })
+          ?.environment?.readinessState,
+      ).toBe("ready");
+      expect(
+        (continuedOwner?.activationEvidence as { workspace?: { grantRef?: string } })?.workspace
+          ?.grantRef,
+      ).toBe(writer?.backendGrantRef);
+      expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+      expect(
+        await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id),
+      ).toHaveLength(1);
+    } finally {
+      child.kill();
+      await child.exited;
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3a_before_writer"));
+      await removeTestContainerForTurn(context.tenantId, turn.id);
+    }
+  }, 120_000);
+
+  it("R3-b: Broker 已给物理 grant 而 W 确认事务未提交，正式 Worker 用原 operation 收口", async () => {
+    const { context, broker, probe } = await seedManagedWriterEntryContext("r3b");
+    const turn = await acceptTurnOnly(context, "r3b-crash", "请读取工作区并回答");
+    // W 的 reserved 行已经提交，Broker 随后真实授予 grant；只阻塞 W→active 的确认 SQL。
+    await db.execute(
+      sql.raw(
+        "CREATE TRIGGER topic02_r3b_before_writer_commit BEFORE UPDATE ON WorkspaceWriteLock FOR EACH ROW DO SLEEP(IF(NEW.lockState = 'active' AND OLD.lockState = 'reserved', 60, 0))",
+      ),
+    );
+    const child = spawnInitialDispatchCrashProcess({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      ownerId: context.ownerId,
+      stage: "before_writer_commit",
+    });
+    try {
+      let invocation: Awaited<ReturnType<typeof listInvocationsForTurn>>[number] | undefined;
+      let owner: typeof executionOwnershipTable.$inferSelect | undefined;
+      let session:
+        | Awaited<ReturnType<typeof getRuntimeSessionBindingsByInvocation>>[number]
+        | undefined;
+      let reserved: typeof workspaceWriteLock.$inferSelect | undefined;
+      let physical: Awaited<ReturnType<typeof broker.getWriter>> = null;
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
+        [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+        if (invocation) {
+          [owner] = await db
+            .select()
+            .from(executionOwnershipTable)
+            .where(eq(executionOwnershipTable.invocationId, invocation.id))
+            .limit(1);
+          [session] = await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id);
+          [reserved] = await db
+            .select()
+            .from(workspaceWriteLock)
+            .where(eq(workspaceWriteLock.tenantId, context.tenantId))
+            .limit(1);
+          if (reserved)
+            physical = await broker.getWriter(probe.scopeDigest, reserved.writerGeneration);
+        }
+        if (owner?.executionPhase === "activating" && session && reserved && physical) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!invocation || !owner || !session || !reserved || !physical) {
+        throw new Error(`Broker 未在 W 确认前给出物理 grant：${child.stderr()}`);
+      }
+      const [attempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      if (!attempt?.preparationLeaseExpiresAt)
+        throw new Error("activating Attempt 缺少准备领取租期");
+      expect(owner.executionPhase).toBe("activating");
+      expect(reserved.lockState).toBe("reserved");
+      expect(reserved.backendGrantRef).toBeNull();
+      expect(physical.writerGeneration).toBe(reserved.writerGeneration);
+      expect(physical.grantRef).toBeTruthy();
+      expect(
+        (await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempt.id))
+          ?.readinessState,
+      ).toBe("prepared");
+      child.kill();
+      expect((await child.exited).signal).toBe("SIGKILL");
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3b_before_writer_commit"));
+
+      const dueAt = Math.max(
+        attempt.preparationLeaseExpiresAt.getTime(),
+        session.updatedAt.getTime() + DISPATCH_STUCK_GRACE_MS,
+      );
+      const databaseNow = await getAuthorityDatabaseTime(db);
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, dueAt - databaseNow.getTime() + 1_000)),
+      );
+      expect(owner.leaseExpiresAt.getTime()).toBeGreaterThan(
+        (await getAuthorityDatabaseTime(db)).getTime(),
+      );
+      expect((await createRuntimeDispatchRetryWorker().tick()).attempts).toBe(1);
+      const [continuedOwner] = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.id, owner.id))
+        .limit(1);
+      const [continuedSession] = await getRuntimeSessionBindingsByInvocation(
+        context.tenantId,
+        invocation.id,
+      );
+      const [confirmed] = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.id, reserved.id))
+        .limit(1);
+      expect(continuedOwner?.executionPhase).not.toBe("activating");
+      expect(continuedSession?.id).toBe(session.id);
+      expect(confirmed?.writerGeneration).toBe(reserved.writerGeneration);
+      expect(confirmed?.backendOperationId).toBe(reserved.backendOperationId);
+      expect(confirmed?.backendGrantRef).toBe(physical.grantRef);
+      expect(await broker.getWriter(probe.scopeDigest, reserved.writerGeneration)).toMatchObject({
+        grantRef: physical.grantRef,
+        writerGeneration: physical.writerGeneration,
+        root: physical.root,
+      });
+      expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+      expect(
+        await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id),
+      ).toHaveLength(1);
+      expect(await db.select().from(workspaceWriteLock)).toHaveLength(1);
+    } finally {
+      child.kill();
+      await child.exited;
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3b_before_writer_commit"));
+      await removeTestContainerForTurn(context.tenantId, turn.id);
     }
   }, 120_000);
 

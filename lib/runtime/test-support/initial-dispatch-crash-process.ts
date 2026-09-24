@@ -1,10 +1,15 @@
-/** R2 崩溃窗口夹具：真实初次 dispatcher 在已提交边界等待，由父测试 SIGKILL。 */
+/** R2/R3 崩溃窗口夹具：真实初次 dispatcher 在已提交边界等待，由父测试 SIGKILL。 */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ENTRY_FLAG = "--initial-dispatch-crash-entry";
 
-export type InitialDispatchCrashStage = "after_claim" | "after_lease_prepared" | "before_owner";
+export type InitialDispatchCrashStage =
+  | "after_claim"
+  | "after_lease_prepared"
+  | "before_owner"
+  | "before_writer"
+  | "before_writer_commit";
 
 export interface InitialDispatchCrashConfig {
   tenantId: string;
@@ -40,7 +45,7 @@ async function runEntry(config: InitialDispatchCrashConfig): Promise<void> {
       return new Promise<never>(() => undefined);
     },
   };
-  // 这两个模式只控制末端解析或在 DB 触发器前等待；初次执行图、准备 claim、
+  // 这些模式只控制末端解析或在 DB 触发器前等待；初次执行图、准备 claim、
   // Environment 和 Attempt 的写入仍由 dispatchInvocationForTurn / startRuntimeInvocation 完成。
   const runtimeClient = {} as Parameters<typeof dispatchInvocationForTurn>[0]["runtimeClient"];
   await dispatchInvocationForTurn({
@@ -54,7 +59,10 @@ async function runEntry(config: InitialDispatchCrashConfig): Promise<void> {
     ...(config.stage === "after_lease_prepared"
       ? { environmentProvisioner: blockedProvisioner }
       : { runtimeClient }),
-    ...(config.stage === "after_claim" || config.stage === "before_owner"
+    ...(config.stage === "after_claim" ||
+    config.stage === "before_owner" ||
+    config.stage === "before_writer" ||
+    config.stage === "before_writer_commit"
       ? {
           runtimeEndpointResolver: async (binding) => {
             if (config.stage === "after_claim") {
