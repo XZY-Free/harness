@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
   chmod,
   mkdir,
@@ -77,7 +78,10 @@ import {
 import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
 import { createWorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { computeWorkspaceContractDigest } from "@/lib/workspace/workspace-contract";
-import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
+import {
+  createRemoteWorkspaceHost,
+  createWorkspaceHostBroker,
+} from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import {
   activatePreparedWorkspaceWriter,
@@ -1511,11 +1515,58 @@ describe("FilesystemCheckpoint integration", () => {
         .update(invocationTable)
         .set({ checkpointPreparedEvidence: { freezeIntent } })
         .where(eq(invocationTable.id, ctx.invocationId));
-      await ctx.backend.host.freeze({
-        grant,
-        checkpointIntentId: requested.checkpointIntentId,
-        anchorDigest: requested.anchorDigest,
-      });
+      // Broker 必须真在另一个进程：物理 freeze 完成但控制面回执尚未落库时杀死它。
+      const barrierRoot = path.join(temporaryRoot, "n06-t5-broker-barrier");
+      await mkdir(barrierRoot, { recursive: true });
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          path.join(process.cwd(), "lib/workspace/test-support/delayed-freeze-rpc-child.mts"),
+          ctx.hostRoot,
+          ctx.managedRoot,
+          barrierRoot,
+        ],
+        { cwd: process.cwd(), stdio: "ignore" },
+      );
+      const waitForFile = async (file: string) => {
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          if (
+            await stat(file).then(
+              () => true,
+              () => false,
+            )
+          )
+            return;
+          if (child.exitCode !== null) throw new Error(`Broker 子进程提前退出: ${child.exitCode}`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error(`Broker 子进程等待超时: ${file}`);
+      };
+      try {
+        const readyPath = path.join(barrierRoot, "ready");
+        await waitForFile(readyPath);
+        const remote = createRemoteWorkspaceHost(await readFile(readyPath, "utf8"));
+        const freezing = remote.freeze({
+          grant,
+          checkpointIntentId: requested.checkpointIntentId,
+          anchorDigest: requested.anchorDigest,
+        });
+        await waitForFile(path.join(barrierRoot, "entered"));
+        await writeFile(path.join(barrierRoot, "release"), "release", "utf8");
+        await freezing;
+        const exited = once(child, "exit");
+        child.kill("SIGKILL");
+        await exited;
+        expect(child.signalCode).toBe("SIGKILL");
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          const exited = once(child, "exit");
+          child.kill("SIGKILL");
+          await exited;
+        }
+      }
       const freezeFile = path.join(
         ctx.hostRoot,
         ".snow",
