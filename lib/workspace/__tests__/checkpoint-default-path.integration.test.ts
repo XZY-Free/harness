@@ -2192,6 +2192,84 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(await readFile(path.join(activeRoot, "live.txt"), "utf8")).toBe("changed-after-started");
   });
 
+  it("F3 / R3-d: ACK 真丢且执行已终态时正式 Command Worker 明确无回执收口", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "terminal-no-ack", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    await ingestRuntimeBatch(ctx, [resumeInputPayload()]);
+    const uar = await requireUar(ctx);
+    const checkpoint = await runDefaultCheckpoint(ctx);
+    await ingestRuntimeBatch(ctx, [
+      suspendedEvent(checkpoint.checkpointId, checkpoint.checkpoint.recoveryAnchorDigest),
+    ]);
+    const resolved = await submitResolution(uar.id);
+    ctx.stub.dropNextResumeResponse();
+    const first = await dispatchResumeCommandToRuntime({
+      tenantId: TENANT_ID,
+      commandId: resolved.resumeCommand.id,
+      actorId: "test-service",
+      correlationId: uar.id,
+    });
+    expect(first.dispatched && first.command.commandState).toBe("dispatched");
+    const request = ctx.stub.resumeRequests.at(-1);
+    const resumedSession = (await readSessions(ctx)).at(-1);
+    if (!request || !resumedSession) throw new Error("Resume 物理请求或 Session 缺失");
+    await ingestRuntimeBatch(
+      ctx,
+      [
+        {
+          type: "execution.started",
+          payload: {
+            intentKey: resumedSession.startIntentKey,
+            semanticRequestDigest: resumedSession.semanticRequestDigest,
+            remoteSessionRef: `stub-session:${request.authority.sessionBindingId}`,
+            remoteExecutionRef: `stub-execution:${request.authority.ownershipId}`,
+            capabilitiesDigest: expectedCapabilityManifestDigest({
+              runtimeRevisionId: ctx.runtimeRevisionId,
+              runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+            }),
+          },
+        },
+      ],
+      { authority: request.authority },
+    );
+    await ingestRuntimeBatch(
+      ctx,
+      [{ type: "execution.completed", payload: { finish_reason: "execution.completed" } }],
+      { authority: request.authority },
+    );
+    expect((await readInvocationFacts(ctx.invocationId)).executionState).toBe("completed");
+    const sessionsBefore = await readSessions(ctx);
+    expect(sessionsBefore.at(-1)?.transportAcknowledgement).toBeNull();
+    const leasesBefore = await db
+      .select()
+      .from(environmentLeaseTable)
+      .where(eq(environmentLeaseTable.invocationId, ctx.invocationId));
+    await waitForDispatchDue(resolved.resumeCommand.id);
+    expect((await createRuntimeDispatchRetryWorker().tick()).commands).toBeGreaterThanOrEqual(1);
+    const [command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, resolved.resumeCommand.id))
+      .limit(1);
+    expect(command?.commandState).toBe("failed");
+    expect(command?.lastErrorCode).toBe("SourceClosedWithoutReceipt");
+    expect(command?.receiptJson).toEqual({ code: "SourceClosedWithoutReceipt" });
+    expect(ctx.stub.resumeRequests).toHaveLength(1);
+    expect((await readSessions(ctx)).map((row) => row.id)).toEqual(
+      sessionsBefore.map((row) => row.id),
+    );
+    expect(
+      (
+        await db
+          .select()
+          .from(environmentLeaseTable)
+          .where(eq(environmentLeaseTable.invocationId, ctx.invocationId))
+      ).map((row) => row.id),
+    ).toEqual(leasesBefore.map((row) => row.id));
+    expect((await readInvocationFacts(ctx.invocationId)).executionState).toBe("completed");
+  });
+
   it("A06-T07: 文件恢复完成后确认丢失 —— 同 Resume 意图重投复用同一恢复操作，root/manifest 不漂移", async () => {
     const ctx = await setupDefaultPathContext();
     await writeFile(path.join(ctx.writerRoot, "state.txt"), "restore-once", "utf8");
