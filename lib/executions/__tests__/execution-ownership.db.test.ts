@@ -1228,7 +1228,7 @@ describe("ExecutionOwnership database fencing", () => {
     ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
   });
 
-  it("FENCE-14: heartbeat credential refresh mints a new jti on the same epoch, stale owners cannot refresh", async () => {
+  it("FENCE-03/FENCE-14: 过期 Owner 的有效凭据不得续租或刷新，健康 Owner 刷新保持代际", async () => {
     const fixture = await seedPreparedRuntimeAttempt();
     const first = await acquireTestRuntimeAuthority({
       tenantId: fixture.tenantId,
@@ -1313,6 +1313,43 @@ describe("ExecutionOwnership database fencing", () => {
       .update(executionOwnershipTable)
       .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
       .where(eq(executionOwnershipTable.id, first.ownership.id));
+    const expiredOwner = await getActiveExecutionOwnership({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+    });
+    const staleHeartbeat = await heartbeatPOST(
+      new Request(
+        `https://example.invalid/runtime/invocations/${fixture.invocation.id}/heartbeat`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${oldToken}`,
+            "content-type": "application/json",
+            "idempotency-key": randomUUID(),
+          },
+          body: JSON.stringify({
+            protocolVersion: 3,
+            authority: first.authority,
+            heartbeatId: randomUUID(),
+            runtimeState: "running",
+            lastObservedProducerSequence: "0",
+            requestCredentialRefresh: true,
+          }),
+        },
+      ),
+      { params: Promise.resolve({ invocationId: fixture.invocation.id }) },
+    );
+    expect(staleHeartbeat.status).toBe(403);
+    expect((await staleHeartbeat.json()).error).toMatchObject({
+      code: "ACCESS_DENIED",
+      details: { code: "OwnershipExpired" },
+    });
+    expect(
+      await getActiveExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+      }),
+    ).toEqual(expiredOwner);
     await expect(
       handleRuntimeHeartbeat({
         tenantId: fixture.tenantId,
