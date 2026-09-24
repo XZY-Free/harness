@@ -235,6 +235,10 @@ describe("Runtime action authority", () => {
         checkpointPreparedEvidence: { checkpointIntentId },
       })
       .where(eq(invocationTable.id, runtime.fixture.invocation.id));
+    const [beforeRejectedActions] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, runtime.fixture.invocation.id));
 
     await expect(
       applyToolCall({
@@ -251,6 +255,23 @@ describe("Runtime action authority", () => {
         schemaHash: digest({ schema: "checkpoint-gate" }),
         operationId: `checkpoint-gate:${randomUUID()}`,
         arguments: {},
+      }),
+    ).rejects.toMatchObject({ code: "CheckpointStale" });
+    const agentCandidate = agentBindingCandidate(randomUUID());
+    await expect(
+      mysqlAgentCallStore.finalizeAgentCall({
+        id: randomUUID(),
+        tenantId: runtime.fixture.tenantId,
+        parentInvocationId: runtime.fixture.invocation.id,
+        authority: runtime.acquired.authority,
+        agentId: agentCandidate.agentId,
+        sourceType: "harness_planned",
+        sourceRef: `checkpoint-gate-agent:${randomUUID()}`,
+        logicalCallKey: `checkpoint-gate-agent:${randomUUID()}`,
+        transportChannel: "gateway",
+        bindingCandidate: agentCandidate,
+        bindingHash: digest({ binding: "checkpoint-gate" }),
+        createdAt: new Date(),
       }),
     ).rejects.toMatchObject({ code: "CheckpointStale" });
     await expect(
@@ -285,5 +306,10 @@ describe("Runtime action authority", () => {
     expect(receipts).toHaveLength(1);
     expect(await db.select().from(toolCallTable)).toEqual([]);
     expect(await db.select().from(agentCallTable)).toEqual([]);
+    const [afterRejectedActions] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, runtime.fixture.invocation.id));
+    expect(afterRejectedActions).toEqual(beforeRejectedActions);
   });
 });
