@@ -136,12 +136,20 @@ async function main(): Promise<void> {
         throw new Error(`Fresh DB table manifest 不一致：actual=${tables.length}`);
       }
       const [columnRows] = await connection.query<mysql.RowDataPacket[]>(
-        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE " +
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE, COLUMN_DEFAULT " +
           "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() " +
-          "AND TABLE_NAME IN ('ExecutionBinding','AgentCall','AgentCallEventIngress','ControlPlaneEventDelivery')",
+          "AND TABLE_NAME IN ('Thread','ExecutionBinding','AgentCall','AgentCallEventIngress','ControlPlaneEventDelivery')",
       );
       const column = (tableName: string, columnName: string) =>
         columnRows.find((row) => row.TABLE_NAME === tableName && row.COLUMN_NAME === columnName);
+      const threadPermission = column("Thread", "toolPermissionMode");
+      if (
+        threadPermission?.IS_NULLABLE !== "NO" ||
+        threadPermission.COLUMN_TYPE !== "enum('auto','ask','full_access')" ||
+        threadPermission.COLUMN_DEFAULT !== "auto"
+      ) {
+        throw new Error("Fresh DB Thread.toolPermissionMode 必须由 0000 建立并默认 auto");
+      }
       for (const name of ["principalType", "principalId", "principalSource", "principalFrozenAt"]) {
         if (column("ExecutionBinding", name)?.IS_NULLABLE !== "NO") {
           throw new Error(`Fresh DB trusted subject 列缺失或可空：ExecutionBinding.${name}`);
