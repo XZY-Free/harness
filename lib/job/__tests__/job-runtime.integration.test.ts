@@ -6,7 +6,7 @@
  *   只有场景与 `mustAssert` 完全对应时才可使用该编号。
  * - 其余用例一律用 `JOB-REG-nn`（补充回归），不得占用验收编号。
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { issueContextHandle, resolveContextHandle } from "@/lib/context/context-handle";
 import { db } from "@/lib/db/client";
@@ -64,7 +64,7 @@ import {
 } from "@/lib/runtime/retry/undispatched-intent-lane";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 import type { RuntimeStartRequest, RuntimeStartResponse } from "@/lib/runtime/runtime-protocol";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { canonicalizeJson, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
 import { seedRuntimeRouteAuthority } from "@/lib/test-support/seed-runtime-route-authority";
@@ -73,6 +73,21 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000000";
+
+/** 重新签名测试凭据，以验证有合法签名但混入另一类主体字段时仍被正式读取入口拒绝。 */
+function signedContextWithExtraSubjectField(issued: string, field: string, value: string): string {
+  const [, header, payload] = issued.split(".");
+  if (!header || !payload) throw new Error("测试 ContextHandle 格式非法");
+  const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  parsed.subject[field] = value;
+  const changedPayload = Buffer.from(canonicalizeJson(parsed), "utf8").toString("base64url");
+  const secret =
+    process.env.SNOW_CONTEXT_HANDLE_SECRET?.trim() || "snow-context-handle-test-secret-32-bytes";
+  const mac = createHmac("sha256", secret)
+    .update(`snowharness.context\0${header}.${changedPayload}`, "utf8")
+    .digest("base64url");
+  return `ch.${header}.${changedPayload}.${mac}`;
+}
 
 // CallbackEndpoints 的合法形状（与 runtime-start-recovery 测试一致）：
 // 空对象会在 buildRuntimeStartRequestForInvocation 的 zod 校验处提前抛错，无法到达 transport。
@@ -1115,10 +1130,14 @@ describe("Thread-independent Job runtime integration", () => {
     );
     const fixture = await seedJobFixture();
     // Job Handle：subject.type=job，携带 jobId / inputHash，不携带 Thread 字段。
-    const jobHandle = await resolveContextHandle(
-      await issueContextHandle({ tenantId: TENANT_ID, invocationId: fixture.invocation.id }),
-      { tenantId: TENANT_ID, invocationId: fixture.invocation.id },
-    );
+    const jobToken = await issueContextHandle({
+      tenantId: TENANT_ID,
+      invocationId: fixture.invocation.id,
+    });
+    const jobHandle = await resolveContextHandle(jobToken, {
+      tenantId: TENANT_ID,
+      invocationId: fixture.invocation.id,
+    });
     expect(jobHandle.subject.type).toBe("job");
     if (jobHandle.subject.type === "job") {
       expect(jobHandle.subject.jobId).toBe(fixture.job.id);
@@ -1131,15 +1150,33 @@ describe("Thread-independent Job runtime integration", () => {
     )
       .seedPreparedRuntimeAttempt()
       .then((r) => ({ threadId: r.threadId, invocationId: r.invocation.id }));
-    const threadHandle = await resolveContextHandle(
-      await issueContextHandle({ tenantId: TENANT_ID, invocationId: threadInvocationId }),
-      { tenantId: TENANT_ID, invocationId: threadInvocationId },
-    );
+    const threadToken = await issueContextHandle({
+      tenantId: TENANT_ID,
+      invocationId: threadInvocationId,
+    });
+    const threadHandle = await resolveContextHandle(threadToken, {
+      tenantId: TENANT_ID,
+      invocationId: threadInvocationId,
+    });
     expect(threadHandle.subject.type).toBe("thread");
     if (threadHandle.subject.type === "thread") {
       expect(threadHandle.subject.threadId).toBe(threadId);
       expect("jobId" in threadHandle.subject).toBe(false);
     }
+
+    // 这两枚凭据的签名均有效；正式读取仍必须按判别分支严格拒绝混入字段。
+    await expect(
+      resolveContextHandle(signedContextWithExtraSubjectField(jobToken, "threadId", threadId), {
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+      }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    await expect(
+      resolveContextHandle(
+        signedContextWithExtraSubjectField(threadToken, "jobId", fixture.job.id),
+        { tenantId: TENANT_ID, invocationId: threadInvocationId },
+      ),
+    ).rejects.toMatchObject({ code: "invalid" });
   });
 
   it("JOB-02: Runtime Event Batch 含 completed 后，真实 Job 消费者按最后提交的 Invocation 版本收口", async () => {
