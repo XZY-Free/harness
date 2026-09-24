@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { POST as heartbeatPOST } from "@/app/runtime/invocations/[invocationId]/heartbeat/route";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -31,7 +32,11 @@ import {
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
-import { decodeWorkloadToken, issueWorkloadToken } from "@/lib/identity/workload-token";
+import {
+  decodeWorkloadToken,
+  issueWorkloadToken,
+  signWorkloadTokenPayload,
+} from "@/lib/identity/workload-token";
 import {
   isTokenRevoked,
   revokeWorkloadToken,
@@ -979,6 +984,44 @@ describe("ExecutionOwnership database fencing", () => {
     expect(newClaims.jti).not.toBe(oldJti);
     expect(newClaims.leaseEpoch).toBe(String(first.ownership.leaseEpoch));
     expect(newClaims.sessionBindingId).toBe(first.session.id);
+    const beforeExpiredCredential = await getActiveExecutionOwnership({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+    });
+    const expiredToken = signWorkloadTokenPayload({
+      ...decodeWorkloadToken(oldToken),
+      issuedAt: Date.now() - 120_000,
+      expiresAt: Date.now() - 60_000,
+    });
+    const expiredResponse = await heartbeatPOST(
+      new Request(
+        `https://example.invalid/runtime/invocations/${fixture.invocation.id}/heartbeat`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${expiredToken}`,
+            "content-type": "application/json",
+            "idempotency-key": randomUUID(),
+          },
+          body: JSON.stringify({
+            protocolVersion: 3,
+            authority: first.authority,
+            heartbeatId: randomUUID(),
+            runtimeState: "running",
+            lastObservedProducerSequence: "0",
+            requestCredentialRefresh: true,
+          }),
+        },
+      ),
+      { params: Promise.resolve({ invocationId: fixture.invocation.id }) },
+    );
+    expect(expiredResponse.status).toBe(401);
+    expect(
+      await getActiveExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+      }),
+    ).toEqual(beforeExpiredCredential);
     // 过期 Owner 不能借 Heartbeat 续发凭据。
     // 过期/超时必须对齐**生产判定所用的权威时钟**（DB `CURRENT_TIMESTAMP(6)`）：
     // 客户端 `Date.now()` 比 DB 快毫秒级，只留 1ms 余量并不能表达该状态。
