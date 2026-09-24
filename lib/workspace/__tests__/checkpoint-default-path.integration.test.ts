@@ -2038,6 +2038,79 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     );
   });
 
+  it("R4-d: C2 已运行时正式 Worker 按 C1 冻结来源回读旧 ACK 而不触碰当前文件", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "c1-checkpoint", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    const first = await runPauseResumeChain(ctx, { actionId: "r4d-c1" });
+    await writeFile(path.join(first.expectedRoot, "state.txt"), "c2-checkpoint", "utf8");
+    const second = await runPauseResumeChain(ctx, {
+      actionId: "r4d-c2",
+      authority: first.resumeRequest.authority,
+    });
+    expect(second.checkpoint.checkpointId).not.toBe(first.checkpoint.checkpointId);
+    expect(second.resumedSession.id).not.toBe(first.resumedSession.id);
+    expect(second.resumedSession.sourceRequestJson).not.toEqual(
+      first.resumedSession.sourceRequestJson,
+    );
+    await writeFile(path.join(second.expectedRoot, "live.txt"), "c2-live-data", "utf8");
+    const ownerBefore = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    const sessionsBefore = await readSessions(ctx);
+    const leasesBefore = await db
+      .select()
+      .from(environmentLeaseTable)
+      .where(eq(environmentLeaseTable.invocationId, ctx.invocationId));
+    const requestsBefore = ctx.stub.resumeRequests.length;
+    // C1 的命令尾部 ACK 提交丢失，但原 C1 Session 已持久保存真正的 Transport 回执。
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "dispatched",
+        receiptJson: null,
+        completedAt: null,
+        nextDispatchAt: new Date(Date.now() - 1_000),
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+      })
+      .where(eq(invocationCommandTable.id, first.resolved.resumeCommand.id));
+    expect((await createRuntimeDispatchRetryWorker().tick()).commands).toBeGreaterThanOrEqual(1);
+    const [historical] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, first.resolved.resumeCommand.id))
+      .limit(1);
+    expect(historical?.commandState).toBe("acknowledged");
+    expect(historical?.receiptJson).toEqual(first.resumedSession.transportAcknowledgement);
+    expect(
+      (await readSessions(ctx)).find((row) => row.id === first.resumedSession.id)
+        ?.sourceRequestJson,
+    ).toEqual(first.resumedSession.sourceRequestJson);
+    expect(ctx.stub.resumeRequests).toHaveLength(requestsBefore);
+    expect((await readSessions(ctx)).map((row) => row.id)).toEqual(
+      sessionsBefore.map((row) => row.id),
+    );
+    expect(
+      (
+        await db
+          .select()
+          .from(environmentLeaseTable)
+          .where(eq(environmentLeaseTable.invocationId, ctx.invocationId))
+      ).map((row) => row.id),
+    ).toEqual(leasesBefore.map((row) => row.id));
+    expect(
+      (
+        await getActiveExecutionOwnership({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+        })
+      )?.id,
+    ).toBe(ownerBefore?.id);
+    expect(await readFile(path.join(second.expectedRoot, "live.txt"), "utf8")).toBe("c2-live-data");
+  });
+
   it("A06-T06: 暂停后的新回复在恢复后**只被采用一次**，采用时内容水位真实前进", async () => {
     const ctx = await setupDefaultPathContext();
     await writeFile(path.join(ctx.writerRoot, "state.txt"), "reply-once", "utf8");
