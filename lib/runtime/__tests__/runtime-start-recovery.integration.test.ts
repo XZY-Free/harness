@@ -95,6 +95,7 @@ class DurableReferenceRuntime {
   readonly startedEvents: RuntimeEvent[] = [];
   callbackBeforeResponse = false;
   dropNextStartResponse = false;
+  nextResponseRefs: { remoteSessionRef: string; remoteExecutionRef: string } | null = null;
   readonly capabilities: RuntimeCapabilities;
   // External start capability 一致性：回执摘要必须等于发布事实 manifest 摘要
   //（与生产 runtime-start.ts 的 computeCapabilityManifestDigest 同源）。
@@ -238,13 +239,15 @@ class DurableReferenceRuntime {
       response.destroy();
       return;
     }
+    const responseRefs = this.nextResponseRefs;
+    this.nextResponseRefs = null;
     return this.reply(response, 202, {
       protocolVersion: 3,
       authority: requestBody.authority,
       semanticRequestDigest: accepted.semanticRequestDigest,
       accepted: true,
-      remoteSessionRef: accepted.remoteSessionRef,
-      remoteExecutionRef: accepted.remoteExecutionRef,
+      remoteSessionRef: responseRefs?.remoteSessionRef ?? accepted.remoteSessionRef,
+      remoteExecutionRef: responseRefs?.remoteExecutionRef ?? accepted.remoteExecutionRef,
       capabilitiesDigest: this.capabilitiesDigest,
       acceptedAt: Date.now(),
     });
@@ -755,18 +758,10 @@ describe("Runtime Start / Resume durable recovery", () => {
       (await runtime.store()).starts[`start:${resumed.authority.ownershipId}`]?.executionCount,
     ).toBe(1);
 
-    const conflicting = createMockRuntimeClient({
-      resumeInvocation: async (request) => ({
-        protocolVersion: 3,
-        authority: request.request.authority,
-        semanticRequestDigest: request.request.semanticRequestDigest,
-        accepted: true,
-        remoteSessionRef: "conflicting-session",
-        remoteExecutionRef: "conflicting-execution",
-        capabilitiesDigest: runtime!.capabilitiesDigest,
-        acceptedAt: Date.now(),
-      }),
-    });
+    runtime.nextResponseRefs = {
+      remoteSessionRef: "conflicting-session",
+      remoteExecutionRef: "conflicting-execution",
+    };
     await expect(
       startRuntimeInvocation({
         tenantId: fixture.tenantId,
@@ -779,7 +774,7 @@ describe("Runtime Start / Resume durable recovery", () => {
         )[0]!,
         binding: fixture.binding,
         attempt: fixture.attempt,
-        runtimeClient: conflicting,
+        runtimeClient: createHttpRuntimeClient(),
         runtimeEndpoint: runtime.endpoint,
         auth: { mode: "none" },
         callbackEndpoints,
@@ -794,6 +789,12 @@ describe("Runtime Start / Resume durable recovery", () => {
     expect(preserved).toMatchObject({
       remoteSessionRef: resumed.remoteSessionRef,
       remoteExecutionRef: resumed.remoteExecutionRef,
+    });
+    expect(runtime.requests.filter((entry) => entry.path.endsWith("/resume"))).toHaveLength(3);
+    expect((await runtime.store()).starts[`start:${resumed.authority.ownershipId}`]).toMatchObject({
+      remoteSessionRef: resumed.remoteSessionRef,
+      remoteExecutionRef: resumed.remoteExecutionRef,
+      executionCount: 1,
     });
   });
 
