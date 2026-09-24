@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 /**
  * Snapshot content_manifest 格式与完整性（R09 §5）。
  *
@@ -122,6 +123,97 @@ export function assertSupportedFilesystemSemantics(profile: FilesystemSemantics)
     throw new SnapshotManifestError(
       "本实现要求 profile 声明 symlinks（否则 symlink 会被静默丢失）",
     );
+}
+
+/**
+ * Node 的 stat 不暴露 xattr/ACL。快照无法保存这些元数据，扫描前必须在真实文件树上
+ * 核查，探测工具缺失或失败时同样拒绝，不能把“未检测”当作“没有”。探测命令只流式读取
+ * 名称/ACL 行，既不记录属性值，也不把文件名放入错误信息。
+ */
+async function assertNoUnsupportedMetadata(root: string): Promise<void> {
+  if (process.platform === "darwin") {
+    await runMetadataProbe(
+      "xattr",
+      ["-r", "-s", root],
+      (line) => {
+        if (!line.trim()) return false;
+        // macOS 给新建文件自动附加的系统来源标记不承载工作区内容/权限语义。
+        return !line.endsWith(": com.apple.provenance");
+      },
+      "xattr",
+    );
+    await runMetadataProbe("ls", ["-laeR", root], (line) => /^\s*\d+:\s/.test(line), "ACL");
+    return;
+  }
+  if (process.platform === "linux") {
+    await runMetadataProbe(
+      "getfattr",
+      ["-R", "-h", "-d", "-m", "-", "--", root],
+      (line) => line.trim().length > 0,
+      "xattr",
+    );
+    await runMetadataProbe(
+      "getfacl",
+      ["-R", "-c", "--", root],
+      (line) =>
+        /^user:[^:]+:/.test(line) ||
+        /^group:[^:]+:/.test(line) ||
+        /^default:/.test(line) ||
+        /^mask::/.test(line),
+      "ACL",
+    );
+    return;
+  }
+  throw new SnapshotManifestError("Snapshot 不支持当前平台的 xattr/ACL 核查");
+}
+
+function runMetadataProbe(
+  command: string,
+  args: string[],
+  unsupported: (line: string) => boolean,
+  kind: "xattr" | "ACL",
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, LC_ALL: "C" },
+    });
+    let pending = "";
+    let settled = false;
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      reject(new SnapshotManifestError(message));
+    };
+    const inspect = (line: string) => {
+      if (unsupported(line)) fail(`Snapshot 不支持 ${kind} 元数据`);
+    };
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      pending += chunk.toString("utf8");
+      for (;;) {
+        const newline = pending.indexOf("\n");
+        if (settled || newline < 0) break;
+        inspect(pending.slice(0, newline));
+        pending = pending.slice(newline + 1);
+      }
+      if (pending.length > 65_536) fail(`Snapshot ${kind} 核查输出行过长`);
+    });
+    // stderr 不写日志：探测器可能包含源路径；非零退出统一拒绝。
+    child.stderr.resume();
+    child.on("error", () => fail(`Snapshot ${kind} 核查工具不可用`));
+    child.on("close", (code) => {
+      if (settled) return;
+      if (pending) inspect(pending);
+      if (settled) return;
+      if (code !== 0) fail(`Snapshot ${kind} 核查失败`);
+      else {
+        settled = true;
+        resolve();
+      }
+    });
+  });
 }
 
 export function validateSnapshotPath(value: string): string {
@@ -315,6 +407,9 @@ export async function scanWorkspaceRoot(
     });
   }
   await visit("", root);
+  // 先由 lstat 拒绝 FIFO/device 等特殊文件，再运行递归元数据探测；macOS 的 xattr -r
+  // 遇到 FIFO 会阻塞，因此顺序也是安全与可用性的一部分。
+  await assertNoUnsupportedMetadata(root);
   entries.sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
   assertCaseCollisionFree(entries, profile);
   return {

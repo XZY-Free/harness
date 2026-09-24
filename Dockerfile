@@ -41,7 +41,7 @@ FROM node:24-alpine AS runner
 # chromium 依赖：QA gate 用 Playwright 跑确定性浏览器检查（console error / 白屏 / 404），
 # 需要 chromium 可执行文件。Alpine 用 system chromium（比 playwright 自带更小），
 # 通过 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH 指向。
-RUN apk add --no-cache git tini chromium nss freetype harfbuzz
+RUN apk add --no-cache git tini chromium nss freetype harfbuzz attr acl
 
 WORKDIR /app
 

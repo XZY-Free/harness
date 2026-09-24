@@ -11,7 +11,7 @@ COPY scripts/build-workspace-lock.mjs ./scripts/build-workspace-lock.mjs
 RUN SNOWHARNESS_NODE_GYP_PATH=/usr/local/lib/node_modules/node-gyp/bin/node-gyp.js pnpm build:workspace-lock
 
 FROM node:24-alpine AS worker
-RUN apk add --no-cache tini git libstdc++
+RUN apk add --no-cache tini git libstdc++ attr acl
 WORKDIR /app
 ENV NODE_ENV=production
 ENV WORKER_HEALTH_PORT=8080

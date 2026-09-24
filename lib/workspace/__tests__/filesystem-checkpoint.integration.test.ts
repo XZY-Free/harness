@@ -14,7 +14,7 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -2268,6 +2268,40 @@ describe("FilesystemCheckpoint integration", () => {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "CHECKPOINT-08: 源文件带实际 xattr 时生成快照必须拒绝，不能静默丢掉属性",
+    async () => {
+      try {
+        const ctx = await setupCheckpointFixture(temporaryRoot);
+        const source = path.join(ctx.writerRoot, "extended.txt");
+        await writeFile(source, "attribute matters", "utf8");
+        const marked = spawnSync("xattr", ["-w", "com.snowharness.checkpoint", "present", source]);
+        expect(marked.status).toBe(0);
+        await expect(ctx.commit()).rejects.toThrow(/不支持 xattr/);
+        expect(await countCheckpoints(ctx.invocationId)).toBe(0);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "CHECKPOINT-08: 源文件带实际 ACL 时生成快照必须拒绝，不能静默丢掉权限",
+    async () => {
+      try {
+        const ctx = await setupCheckpointFixture(temporaryRoot);
+        const source = path.join(ctx.writerRoot, "acl.txt");
+        await writeFile(source, "access matters", "utf8");
+        const marked = spawnSync("chmod", ["+a", `user:${userInfo().username} allow read`, source]);
+        expect(marked.status).toBe(0);
+        await expect(ctx.commit()).rejects.toThrow(/不支持 ACL/);
+        expect(await countCheckpoints(ctx.invocationId)).toBe(0);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("CHECKPOINT-REG-10: a superseded owner cannot commit a checkpoint and no formal row appears", async () => {
     try {
