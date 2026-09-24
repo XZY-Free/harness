@@ -29,6 +29,7 @@ import {
 } from "@/lib/identity/workload-token";
 import { isTokenRevoked } from "@/lib/identity/workload-token-revocation-queries";
 import {
+  EventAuthorityConflictError,
   EventPayloadHashConflictError,
   IngressAuthorityMismatchError,
   IngressInvocationNotFoundError,
@@ -147,6 +148,12 @@ export async function ingressErrorToResponse(
         expected_hash: error.expectedHash,
         actual_hash: error.actualHash,
       },
+    });
+  }
+  if (error instanceof EventAuthorityConflictError) {
+    return apiError("IDEMPOTENCY_CONFLICT", error.message, {
+      requestId,
+      details: { invocation_id: error.invocationId, producer_event_id: error.eventId },
     });
   }
   if (error instanceof ProducerSequenceGapError) {

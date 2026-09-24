@@ -464,7 +464,43 @@ describe("RuntimeEventIngress database fencing", () => {
           events: [event],
         },
       }),
-    ).rejects.toBeInstanceOf(IngressAuthorityMismatchError);
+    ).rejects.toMatchObject({ name: "EventAuthorityConflictError" });
+    const successorToken = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      runtimeRevisionId: runtime.fixture.binding.runtimeRevisionId,
+      attemptId: replacement.ownership.attemptId,
+      ownershipId: replacement.ownership.id,
+      leaseEpoch: String(replacement.ownership.leaseEpoch),
+      sessionBindingId: replacementSession.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    const claimed = await ingestRuntimeEventsPOST(
+      buildApiRequest({
+        audience: "runtime",
+        method: "POST",
+        path: `/invocations/${runtime.fixture.invocation.id}/events`,
+        idempotencyKey: randomUUID(),
+        token: successorToken,
+        body: {
+          protocolVersion: 3,
+          authority: {
+            ...runtime.acquired.authority,
+            attemptId: replacement.ownership.attemptId,
+            ownershipId: replacement.ownership.id,
+            leaseEpoch: String(replacement.ownership.leaseEpoch),
+            sessionBindingId: replacementSession.id,
+          },
+          events: [event],
+        },
+      }),
+      { params: Promise.resolve({ invocationId: runtime.fixture.invocation.id }) },
+    );
+    expect(claimed.status).toBe(409);
+    expect((await claimed.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
       ledgerBefore,
     );

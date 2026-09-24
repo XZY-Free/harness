@@ -87,6 +87,17 @@ export class IngressAuthorityMismatchError extends Error {
   }
 }
 
+/** 历史事件的接纳身份与本次重放身份不同；不得复用原回执。 */
+export class EventAuthorityConflictError extends Error {
+  constructor(
+    public readonly invocationId: string,
+    public readonly eventId: string,
+  ) {
+    super(`Runtime Event 历史接纳身份冲突：${invocationId}/${eventId}`);
+    this.name = "EventAuthorityConflictError";
+  }
+}
+
 export class EventPayloadHashConflictError extends Error {
   constructor(
     public readonly invocationId: string,
@@ -1300,7 +1311,7 @@ export async function ingressRuntimeEvents(
         }
         const receipt = receiptFromRow(row);
         if (!sameAuthority(receipt.acceptedAuthority, parsed.authority))
-          throw new IngressAuthorityMismatchError(input.invocationId);
+          throw new EventAuthorityConflictError(input.invocationId, event.eventId);
         receipts.push(receipt);
         replayedEventIds.push(event.eventId);
         continue;
