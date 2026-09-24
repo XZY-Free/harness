@@ -18,10 +18,12 @@ import {
 } from "@/lib/executions/persistence/attempt-store";
 import {
   acquireExecutionOwnership,
+  acquireExecutionOwnershipInTransaction,
   closeExecutionOwnership,
   getActiveExecutionOwnership,
   getAuthorityDatabaseTime,
   renewExecutionOwnership,
+  renewExecutionOwnershipInTransaction,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
@@ -500,6 +502,134 @@ describe("ExecutionOwnership database fencing", () => {
     expect(active?.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
     const stale = rows.find((r) => r.id === first.ownership.id);
     expect(stale?.ownershipState).toBe("lost");
+  });
+
+  it("FENCE-06: 两个独立事务重叠时 Renew/Takeover 严格按 Invocation 根锁串行", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const first = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    });
+    const candidateB = await prepareReplacementAttempt(fixture, "overlap-renew-first");
+    let releaseRenew!: () => void;
+    const renewGate = new Promise<void>((resolve) => {
+      releaseRenew = resolve;
+    });
+    let renewCommittedReady!: () => void;
+    const renewedInsideTx = new Promise<void>((resolve) => {
+      renewCommittedReady = resolve;
+    });
+    const renewTx = db.transaction(async (tx) => {
+      const owner = await renewExecutionOwnershipInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        ownershipId: first.ownership.id,
+        attemptId: fixture.attempt.id,
+        leaseEpoch: first.ownership.leaseEpoch,
+      });
+      renewCommittedReady();
+      await renewGate;
+      return owner;
+    });
+    try {
+      await renewedInsideTx;
+      let acquireStarted!: () => void;
+      const acquireEntered = new Promise<void>((resolve) => {
+        acquireStarted = resolve;
+      });
+      const acquireAfterRenew = db.transaction(async (tx) => {
+        acquireStarted();
+        return acquireExecutionOwnershipInTransaction(tx, {
+          tenantId: fixture.tenantId,
+          invocationId: fixture.invocation.id,
+          attemptId: candidateB.id,
+          runtimeRevisionId: fixture.binding.runtimeRevisionId,
+          acquiredByType: "service",
+          acquiredById: "overlap-renew-first",
+        });
+      });
+      const rejectedAcquire = expect(acquireAfterRenew).rejects.toMatchObject({
+        code: "HealthyOwnerExists",
+      });
+      await acquireEntered;
+      releaseRenew();
+      await renewTx;
+      await rejectedAcquire;
+    } finally {
+      releaseRenew();
+      await renewTx;
+    }
+    expect(
+      (
+        await getActiveExecutionOwnership({
+          tenantId: fixture.tenantId,
+          invocationId: fixture.invocation.id,
+        })
+      )?.id,
+    ).toBe(first.ownership.id);
+
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, first.ownership.id));
+    const candidateC = await prepareReplacementAttempt(fixture, "overlap-takeover-first");
+    let releaseTakeover!: () => void;
+    const takeoverGate = new Promise<void>((resolve) => {
+      releaseTakeover = resolve;
+    });
+    let takeoverReady!: () => void;
+    const takeoverInsideTx = new Promise<void>((resolve) => {
+      takeoverReady = resolve;
+    });
+    const takeoverTx = db.transaction(async (tx) => {
+      const result = await acquireExecutionOwnershipInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: candidateC.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "overlap-takeover-first",
+      });
+      takeoverReady();
+      await takeoverGate;
+      return result;
+    });
+    try {
+      await takeoverInsideTx;
+      let renewStarted!: () => void;
+      const renewEntered = new Promise<void>((resolve) => {
+        renewStarted = resolve;
+      });
+      const staleRenew = db.transaction(async (tx) => {
+        renewStarted();
+        return renewExecutionOwnershipInTransaction(tx, {
+          tenantId: fixture.tenantId,
+          invocationId: fixture.invocation.id,
+          ownershipId: first.ownership.id,
+          attemptId: fixture.attempt.id,
+          leaseEpoch: first.ownership.leaseEpoch,
+        });
+      });
+      const rejectedRenew = expect(staleRenew).rejects.toThrow();
+      await renewEntered;
+      releaseTakeover();
+      const successor = await takeoverTx;
+      await rejectedRenew;
+      expect(successor.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
+      expect(
+        (
+          await getActiveExecutionOwnership({
+            tenantId: fixture.tenantId,
+            invocationId: fixture.invocation.id,
+          })
+        )?.id,
+      ).toBe(successor.ownership.id);
+    } finally {
+      releaseTakeover();
+      await takeoverTx;
+    }
   });
 
   it("FENCE-07: racing release and takeover produce a single unique grant without resurrecting epochs", async () => {
