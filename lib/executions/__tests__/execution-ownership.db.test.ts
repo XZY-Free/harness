@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { POST as eventsPOST } from "@/app/runtime/invocations/[invocationId]/events/route";
 import { POST as heartbeatPOST } from "@/app/runtime/invocations/[invocationId]/heartbeat/route";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -1169,7 +1170,7 @@ describe("ExecutionOwnership database fencing", () => {
     expect(afterRejected?.executionPhase).toBe("dispatching");
   });
 
-  it("FENCE-13/FENCE-15: a valid unrevoked old-generation token authenticates but its writes are fenced", async () => {
+  it("FENCE-13/FENCE-15: 旧代际有效未撤销 Token 可认证但正式 Event Route 拒绝新写入", async () => {
     const fixture = await seedPreparedRuntimeAttempt();
     const first = await acquireTestRuntimeAuthority({
       tenantId: fixture.tenantId,
@@ -1211,6 +1212,41 @@ describe("ExecutionOwnership database fencing", () => {
     expect(await isTokenRevoked(fixture.tenantId, claims1.jti)).toBe(false);
     const authenticatedClaims = decodeWorkloadToken(token1);
     expect(authenticatedClaims.invocationId).toBe(fixture.invocation.id);
+    await expect(
+      resolveRuntimePrincipal(
+        new Headers({ authorization: `Bearer ${token1}` }),
+        fixture.invocation.id,
+      ),
+    ).resolves.toMatchObject({ jti: claims1.jti, ownershipId: first.ownership.id });
+    const staleResponse = await eventsPOST(
+      new Request(`https://example.invalid/runtime/invocations/${fixture.invocation.id}/events`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token1}`,
+          "content-type": "application/json",
+          "idempotency-key": randomUUID(),
+        },
+        body: JSON.stringify({
+          protocolVersion: 3,
+          authority: first.authority,
+          events: [
+            {
+              eventId: randomUUID(),
+              producerSequence: "1",
+              type: "progress",
+              schemaVersion: 1,
+              payload: { message: "stale-route" },
+            },
+          ],
+        }),
+      }),
+      { params: Promise.resolve({ invocationId: fixture.invocation.id }) },
+    );
+    expect(staleResponse.status).toBe(403);
+    expect((await staleResponse.json()).error).toMatchObject({
+      code: "ACCESS_DENIED",
+      details: { code: "NotCurrentExecutor" },
+    });
     // 但执行权层面对 epoch2 之后的旧 authority 写入全部拒绝——正确性不依赖撤销。
     await expect(
       ingressRuntimeEvents({
@@ -1231,6 +1267,12 @@ describe("ExecutionOwnership database fencing", () => {
         },
       }),
     ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    expect(
+      await db
+        .select({ id: runtimeEventIngressTable.id })
+        .from(runtimeEventIngressTable)
+        .where(eq(runtimeEventIngressTable.invocationId, fixture.invocation.id)),
+    ).toHaveLength(0);
   });
 
   it("FENCE-03/FENCE-14: 过期 Owner 的有效凭据不得续租或刷新，健康 Owner 刷新保持代际", async () => {
