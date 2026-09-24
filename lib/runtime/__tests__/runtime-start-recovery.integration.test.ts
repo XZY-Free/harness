@@ -21,6 +21,7 @@ import {
   getActiveExecutionOwnership,
   getAuthorityDatabaseTime,
 } from "@/lib/executions/persistence/execution-ownership-store";
+import { TEST_EXECUTION_BINDING_EVIDENCE } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import {
   attemptPreparationClaimForTest,
   markAttemptPreparedForTestInTransaction,
@@ -30,6 +31,7 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { decodeWorkloadToken } from "@/lib/identity/workload-token";
 import {
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationTable,
   runtimeEventIngressTable,
 } from "@/lib/persistence/schema/executions";
@@ -48,6 +50,8 @@ import {
   getRuntimeSessionBindingsByInvocation,
 } from "@/lib/runtime/persistence/runtime-session-store";
 import { validateRuntimeProtocolCapabilities } from "@/lib/runtime/protocol-conformance";
+import { DISPATCH_STUCK_GRACE_MS } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
 import {
   createHttpRuntimeClient,
   createMockRuntimeClient,
@@ -62,6 +66,7 @@ import {
   RuntimeStartRequestSchema,
   protocolDigest,
 } from "@/lib/runtime/runtime-protocol";
+import { spawnDurableStartCrashProcess } from "@/lib/runtime/test-support/durable-start-crash-process";
 import { createHttpRuntimeConformanceAdapterForTest } from "@/lib/runtime/test-support/http-runtime-conformance-adapter";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -96,6 +101,9 @@ class DurableReferenceRuntime {
   callbackBeforeResponse = false;
   dropNextStartResponse = false;
   nextResponseRefs: { remoteSessionRef: string; remoteExecutionRef: string } | null = null;
+  private holdNextStartResponse: Promise<void> | null = null;
+  private signalHeldStart: (() => void) | null = null;
+  private releaseHeldStart: (() => void) | null = null;
   readonly capabilities: RuntimeCapabilities;
   // External start capability 一致性：回执摘要必须等于发布事实 manifest 摘要
   //（与生产 runtime-start.ts 的 computeCapabilityManifestDigest 同源）。
@@ -158,6 +166,18 @@ class DurableReferenceRuntime {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { starts: {} };
       throw error;
     }
+  }
+
+  holdNextResponse(): Promise<void> {
+    this.holdNextStartResponse = new Promise<void>((resolve) => {
+      this.signalHeldStart = resolve;
+    });
+    return this.holdNextStartResponse;
+  }
+
+  releaseHeldResponse(): void {
+    this.releaseHeldStart?.();
+    this.releaseHeldStart = null;
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -239,6 +259,16 @@ class DurableReferenceRuntime {
       response.destroy();
       return;
     }
+    if (this.holdNextStartResponse) {
+      this.holdNextStartResponse = null;
+      this.signalHeldStart?.();
+      this.signalHeldStart = null;
+      await new Promise<void>((resolve) => {
+        this.releaseHeldStart = resolve;
+      });
+      response.destroy();
+      return;
+    }
     const responseRefs = this.nextResponseRefs;
     this.nextResponseRefs = null;
     return this.reply(response, 202, {
@@ -312,10 +342,15 @@ async function startFixture(
   });
 }
 
-async function seedStartFixture() {
+async function seedStartFixture(
+  options: {
+    runtimeRevisionId?: string;
+    runtimeEndpoint?: string;
+  } = {},
+) {
   const tenant = await ensureDefaultTenant();
   const runtimeId = randomUUID();
-  const runtimeRevisionId = randomUUID();
+  const runtimeRevisionId = options.runtimeRevisionId ?? randomUUID();
   const digest = protocolDigest({
     runtimeId,
     runtimeRevisionId,
@@ -342,7 +377,7 @@ async function seedStartFixture() {
     protocolContractDigest: digest,
     runtimeEvidenceKind: "external_endpoint",
     runtimeTargetDigest: digest,
-    endpointRef: "http://127.0.0.1/reference-runtime",
+    endpointRef: options.runtimeEndpoint ?? "http://127.0.0.1/reference-runtime",
     runtimeArtifactRef: null,
     artifactId: null,
     artifactDigest: null,
@@ -357,6 +392,15 @@ async function seedStartFixture() {
   return seedPreparedRuntimeAttempt({
     tenantId: tenant.id,
     runtimeRevisionId,
+    controlPlaneEvidence: {
+      ...TEST_EXECUTION_BINDING_EVIDENCE,
+      runtimeEvidenceKind: "external_endpoint",
+      runtimeArtifactId: null,
+      runtimeArtifactDigest: null,
+      runtimeAttestationIds: [],
+      runtimeTargetDigest: digest,
+      runtimeConfigDigest: digest,
+    },
     policyRevisionId: randomUUID(),
     governanceConfigRevisionId: randomUUID(),
   });
@@ -437,29 +481,103 @@ describe("Runtime Start / Resume durable recovery", () => {
     expect((await runtime.store()).starts[startKey]?.executionCount).toBe(1);
   });
 
-  it("START-03: response loss followed by worker restart replays the persisted session identity without another remote execution", async () => {
-    const fixture = await seedStartFixture();
-    runtime = new DurableReferenceRuntime(fixture.tenantId, fixture.binding.runtimeRevisionId);
+  it("START-03: platform process dies after remote durable acceptance and a new Worker replays the same session", async () => {
+    const tenant = await ensureDefaultTenant();
+    const runtimeRevisionId = randomUUID();
+    runtime = new DurableReferenceRuntime(tenant.id, runtimeRevisionId);
     await runtime.start();
-    runtime.dropNextStartResponse = true;
-
-    const failure = await startFixture(fixture, runtime.endpoint).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(failure).toBeInstanceOf(RuntimeStartTransportError);
-    if (!(failure instanceof RuntimeStartTransportError)) throw new Error("缺少原始派发身份");
-    const active = await getActiveExecutionOwnership({
+    const fixture = await seedStartFixture({
+      runtimeRevisionId,
+      runtimeEndpoint: runtime.endpoint,
+    });
+    const heldResponse = runtime.holdNextResponse();
+    const firstProcess = spawnDurableStartCrashProcess({
+      mode: "start",
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeEndpoint: runtime.endpoint,
     });
-    expect(active).not.toBeNull();
-    await runtime.restart();
-    const recovered = await startFixture(fixture, runtime.endpoint, failure.dispatchIdentity);
-    const startKey = `start:${recovered.authority.ownershipId}`;
-    expect((await runtime.store()).starts[startKey]).toMatchObject({ executionCount: 1 });
-    expect(runtime.requests.filter((entry) => entry.idempotencyKey === startKey)).toHaveLength(2);
-  });
+    let workerProcess: ReturnType<typeof spawnDurableStartCrashProcess> | null = null;
+    try {
+      await Promise.race([
+        heldResponse,
+        firstProcess.done.then(() => {
+          throw new Error("初次平台进程在远端持久接纳前完成");
+        }),
+      ]);
+      const [originalSession] = await getRuntimeSessionBindingsByInvocation(
+        fixture.tenantId,
+        fixture.invocation.id,
+      );
+      const originalOwner = await getActiveExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+      });
+      if (!originalSession || !originalOwner) throw new Error("远端接纳后原 O/S 缺失");
+      const startKey = originalSession.startIntentKey;
+      expect((await runtime.store()).starts[startKey]?.executionCount).toBe(1);
+      expect(originalSession.transportAcknowledgement).toBeNull();
+      firstProcess.kill();
+      expect((await firstProcess.exited).signal).toBe("SIGKILL");
+      runtime.releaseHeldResponse();
+      // 压缩旧进程留下的准备领取租期；Worker 的领取、同源续做仍走真实 MySQL 守卫。
+      await db
+        .update(invocationAttemptTable)
+        .set({ preparationLeaseExpiresAt: await getAuthorityDatabaseTime(db) })
+        .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+
+      const dueAtMs =
+        Math.max(
+          originalSession.updatedAt.getTime() + DISPATCH_STUCK_GRACE_MS,
+          originalSession.dispatchLeaseExpiresAt?.getTime() ?? 0,
+        ) + 1_000;
+      workerProcess = spawnDurableStartCrashProcess({ mode: "worker", dueAtMs });
+      const workerResult = await workerProcess.done;
+      expect(workerResult.attempts).toBe(1);
+      const [recoveredSession] = await getRuntimeSessionBindingsByInvocation(
+        fixture.tenantId,
+        fixture.invocation.id,
+      );
+      if (!recoveredSession?.transportAcknowledgement) {
+        throw new Error(
+          `正式 Worker 未完成 ACK：${JSON.stringify({
+            workerResult,
+            sessionState: recoveredSession?.bindingState,
+            lastErrorCode: recoveredSession?.lastErrorCode,
+            dispatchCount: recoveredSession?.dispatchCount,
+            attempt: await getAttemptById(fixture.attempt.id),
+            stderr: workerProcess.stderr(),
+          })}`,
+        );
+      }
+      expect(recoveredSession).toMatchObject({
+        id: originalSession.id,
+        ownershipId: originalOwner.id,
+        startIntentKey: startKey,
+        semanticRequestDigest: originalSession.semanticRequestDigest,
+        remoteSessionRef: `reference-session:${originalSession.id}`,
+        remoteExecutionRef: `reference-execution:${originalOwner.id}`,
+      });
+      expect(recoveredSession?.transportAcknowledgement).not.toBeNull();
+      expect((await runtime.store()).starts[startKey]?.executionCount).toBe(1);
+      expect(runtime.requests.filter((entry) => entry.idempotencyKey === startKey)).toHaveLength(2);
+      expect(
+        (
+          await getActiveExecutionOwnership({
+            tenantId: fixture.tenantId,
+            invocationId: fixture.invocation.id,
+          })
+        )?.id,
+      ).toBe(originalOwner.id);
+    } finally {
+      firstProcess.kill();
+      runtime.releaseHeldResponse();
+      workerProcess?.kill();
+      await firstProcess.exited;
+      if (workerProcess) await workerProcess.exited;
+    }
+  }, 60_000);
 
   it("START-04: execution.started may arrive before HTTP 202 without regressing the active SessionBinding", async () => {
     const fixture = await seedStartFixture();

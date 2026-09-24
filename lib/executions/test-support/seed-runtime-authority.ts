@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
+import type { ExecutionBindingControlPlaneEvidence } from "@/lib/executions/domain/execution-binding";
 import {
   type AttemptPreparationClaim,
   createAttempt,
@@ -179,6 +180,7 @@ export async function seedPreparedRuntimeAttempt(
     environmentDefinitionRevisionId?: string;
     policyRevisionId?: string;
     governanceConfigRevisionId?: string;
+    controlPlaneEvidence?: ExecutionBindingControlPlaneEvidence;
     /**
      * 复用一条**已经由产品路径建立**的 Thread/Turn（`createThread` +
      * `acceptUserMessageTurn`），而不是由本夹具直接 INSERT 三张表。
@@ -256,7 +258,7 @@ export async function seedPreparedRuntimeAttempt(
     environmentMode: input.environmentDefinitionRevisionId ? "MANAGED" : "NO_PLATFORM_ENVIRONMENT",
     policyRevisionId: input.policyRevisionId,
     governanceConfigRevisionId: input.governanceConfigRevisionId,
-    controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
+    controlPlaneEvidence: input.controlPlaneEvidence ?? TEST_EXECUTION_BINDING_EVIDENCE,
     projectionVersionNo: 1,
     executionSubject: { tenantId, subjectType: "user", subjectId: "test-user" },
   });
