@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const ENTRY_FLAG = "--durable-start-crash-entry";
 
 type StartConfig = {
-  mode: "start";
+  mode: "start" | "before_http";
   tenantId: string;
   invocationId: string;
   attemptId: string;
@@ -48,6 +48,22 @@ async function runEntry(config: Config): Promise<void> {
   ]);
   if (!invocation || !binding || !attempt) throw new Error("持久 Start 夹具缺少执行图");
   const preparationClaim = await attemptPreparationClaimForTest(attempt.id);
+  const transport = createHttpRuntimeClient();
+  const runtimeClient =
+    config.mode === "before_http"
+      ? new Proxy(transport, {
+          get(target, property) {
+            if (property === "startInvocation") {
+              return () => {
+                emit({ event: "barrier", stage: "before_http" });
+                return new Promise<never>(() => undefined);
+              };
+            }
+            const value = Reflect.get(target, property);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        })
+      : transport;
   await startRuntimeInvocation({
     tenantId: config.tenantId,
     invocation,
@@ -55,7 +71,7 @@ async function runEntry(config: Config): Promise<void> {
     attempt,
     sourceOperationKey: `invocation:${invocation.id}`,
     preparationClaim,
-    runtimeClient: createHttpRuntimeClient(),
+    runtimeClient,
     runtimeEndpoint: config.runtimeEndpoint,
     auth: { mode: "none" },
     callbackEndpoints: buildGatewayEndpoints({ external: true, invocationId: invocation.id }),
@@ -88,6 +104,13 @@ export function spawnDurableStartCrashProcess(config: Config) {
   let stdout = "";
   let doneResolve!: (value: Record<string, unknown>) => void;
   let doneReject!: (error: Error) => void;
+  let barrierResolve!: () => void;
+  let barrierReject!: (error: Error) => void;
+  const barrier = new Promise<void>((resolve, reject) => {
+    barrierResolve = resolve;
+    barrierReject = reject;
+  });
+  void barrier.catch(() => undefined);
   const done = new Promise<Record<string, unknown>>((resolve, reject) => {
     doneResolve = resolve;
     doneReject = reject;
@@ -98,7 +121,12 @@ export function spawnDurableStartCrashProcess(config: Config) {
     const lines = stdout.split("\n");
     stdout = lines.pop() ?? "";
     for (const line of lines) {
-      let event: { event?: string; message?: string; result?: Record<string, unknown> };
+      let event: {
+        event?: string;
+        stage?: string;
+        message?: string;
+        result?: Record<string, unknown>;
+      };
       try {
         event = JSON.parse(line) as typeof event;
       } catch {
@@ -106,6 +134,7 @@ export function spawnDurableStartCrashProcess(config: Config) {
       }
       if (event.event === "done") doneResolve(event.result ?? {});
       if (event.event === "error") doneReject(new Error(event.message ?? "子进程失败"));
+      if (event.event === "barrier" && event.stage === "before_http") barrierResolve();
     }
   });
   child.stderr?.on("data", (chunk: Buffer) => {
@@ -113,13 +142,18 @@ export function spawnDurableStartCrashProcess(config: Config) {
   });
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.once("exit", (code, signal) => {
-      if (code !== 0 && signal === null) doneReject(new Error(`子进程退出 ${code}: ${stderr}`));
+      if (code !== 0 && signal === null) {
+        const error = new Error(`子进程退出 ${code}: ${stderr}`);
+        doneReject(error);
+        barrierReject(error);
+      }
       resolve({ code, signal });
     });
   });
   return {
     pid: child.pid,
     done,
+    barrier,
     exited,
     kill: () => child.kill("SIGKILL"),
     stderr: () => stderr,

@@ -44,7 +44,6 @@ import {
   RuntimeStartTransportError,
   startRuntimeInvocation as startRuntimeInvocationProduction,
 } from "@/lib/runtime/application/runtime-start";
-import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import {
   getRuntimeSessionBindingById,
   getRuntimeSessionBindingsByInvocation,
@@ -52,11 +51,7 @@ import {
 import { validateRuntimeProtocolCapabilities } from "@/lib/runtime/protocol-conformance";
 import { DISPATCH_STUCK_GRACE_MS } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
-import {
-  createHttpRuntimeClient,
-  createMockRuntimeClient,
-  defaultRuntimeCapabilities,
-} from "@/lib/runtime/runtime-client";
+import { createHttpRuntimeClient, defaultRuntimeCapabilities } from "@/lib/runtime/runtime-client";
 import { runPublicationConformanceSuite } from "@/lib/runtime/runtime-conformance-runner";
 import {
   type AuthorityIdentity,
@@ -599,60 +594,112 @@ describe("Runtime Start / Resume durable recovery", () => {
     expect(invocation?.executionState).toBe("running");
   });
 
-  it("START-05: a transport failure after intent registration resumes delivery from the stored session rather than inventing a key", async () => {
-    const fixture = await seedStartFixture();
-    const unavailable = createMockRuntimeClient({
-      startInvocation: async () => {
-        throw new RuntimeHttpClientError(
-          "network",
-          "reference runtime temporarily unavailable",
-          undefined,
-          undefined,
-          {
-            dispatchPossiblyStarted: true,
-          },
-        );
-      },
-    });
-    const failure = await startRuntimeInvocation({
-      tenantId: fixture.tenantId,
-      invocation: fixture.invocation,
-      sourceOperationKey: `invocation:${fixture.invocation.id}`,
-      binding: fixture.binding,
-      attempt: fixture.attempt,
-      runtimeClient: unavailable,
-      runtimeEndpoint: "http://127.0.0.1:1",
-      auth: { mode: "none" },
-      callbackEndpoints,
-    }).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(failure).toBeInstanceOf(RuntimeStartTransportError);
-    if (!(failure instanceof RuntimeStartTransportError)) throw new Error("缺少原始派发身份");
-    const [owner] = await db
-      .select()
-      .from(executionOwnershipTable)
-      .where(
-        and(
-          eq(executionOwnershipTable.tenantId, fixture.tenantId),
-          eq(executionOwnershipTable.invocationId, fixture.invocation.id),
-        ),
-      );
-    expect(owner).toBeDefined();
-    const sessions = await getRuntimeSessionBindingsByInvocation(
-      fixture.tenantId,
-      fixture.invocation.id,
-    );
-    expect(sessions).toHaveLength(1);
-
-    runtime = new DurableReferenceRuntime(fixture.tenantId, fixture.binding.runtimeRevisionId);
+  it("START-05: platform crashes after takeover intent commit and a new Worker delivers its stored session", async () => {
+    const tenant = await ensureDefaultTenant();
+    const runtimeRevisionId = randomUUID();
+    runtime = new DurableReferenceRuntime(tenant.id, runtimeRevisionId);
     await runtime.start();
-    const recovered = await startFixture(fixture, runtime.endpoint, failure.dispatchIdentity);
-    expect(recovered.authority.ownershipId).toBe(owner?.id);
-    expect(recovered.sessionBindingId).toBe(sessions[0]?.id);
-    expect(Object.keys((await runtime.store()).starts)).toEqual([`start:${owner?.id}`]);
-  });
+    const fixture = await seedStartFixture({
+      runtimeRevisionId,
+      runtimeEndpoint: runtime.endpoint,
+    });
+    const first = await startFixture(fixture, runtime.endpoint);
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, first.authority.ownershipId));
+    const takeoverAttempt = await createAttempt({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      retryReasonCode: "infrastructure_replacement",
+    });
+    const evidence = { kind: "reference-takeover-start", attemptId: takeoverAttempt.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedForTestInTransaction(tx, {
+        attemptId: takeoverAttempt.id,
+        evidence,
+        digest: protocolDigest(evidence),
+      }),
+    );
+    const crashProcess = spawnDurableStartCrashProcess({
+      mode: "before_http",
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: takeoverAttempt.id,
+      runtimeEndpoint: runtime.endpoint,
+    });
+    let workerProcess: ReturnType<typeof spawnDurableStartCrashProcess> | null = null;
+    try {
+      await Promise.race([
+        crashProcess.barrier,
+        crashProcess.done.then(() => {
+          throw new Error("接管进程在 HTTP 前屏障前完成");
+        }),
+      ]);
+      const sessionsBefore = await getRuntimeSessionBindingsByInvocation(
+        fixture.tenantId,
+        fixture.invocation.id,
+      );
+      const takeoverSession = sessionsBefore.find((row) => row.id !== first.sessionBindingId);
+      const takeoverOwner = await getActiveExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+      });
+      if (!takeoverSession || !takeoverOwner) throw new Error("接管 O/S 尚未提交");
+      expect(takeoverOwner.attemptId).toBe(takeoverAttempt.id);
+      expect(takeoverSession.ownershipId).toBe(takeoverOwner.id);
+      expect(takeoverSession.transportAcknowledgement).toBeNull();
+      expect((await runtime.store()).starts[takeoverSession.startIntentKey]).toBeUndefined();
+      crashProcess.kill();
+      expect((await crashProcess.exited).signal).toBe("SIGKILL");
+      await db
+        .update(invocationAttemptTable)
+        .set({ preparationLeaseExpiresAt: await getAuthorityDatabaseTime(db) })
+        .where(eq(invocationAttemptTable.id, takeoverAttempt.id));
+      const dueAtMs =
+        Math.max(
+          takeoverSession.updatedAt.getTime() + DISPATCH_STUCK_GRACE_MS,
+          takeoverSession.dispatchLeaseExpiresAt?.getTime() ?? 0,
+        ) + 1_000;
+      workerProcess = spawnDurableStartCrashProcess({ mode: "worker", dueAtMs });
+      expect((await workerProcess.done).attempts).toBe(1);
+      const sessionsAfter = await getRuntimeSessionBindingsByInvocation(
+        fixture.tenantId,
+        fixture.invocation.id,
+      );
+      expect(sessionsAfter).toHaveLength(2);
+      expect(sessionsAfter.find((row) => row.id === first.sessionBindingId)?.bindingState).toBe(
+        "lost",
+      );
+      expect(sessionsAfter.find((row) => row.id === takeoverSession.id)).toMatchObject({
+        id: takeoverSession.id,
+        ownershipId: takeoverOwner.id,
+        startIntentKey: takeoverSession.startIntentKey,
+        semanticRequestDigest: takeoverSession.semanticRequestDigest,
+        remoteSessionRef: `reference-session:${takeoverSession.id}`,
+        remoteExecutionRef: `reference-execution:${takeoverOwner.id}`,
+      });
+      expect((await runtime.store()).starts[takeoverSession.startIntentKey]?.executionCount).toBe(
+        1,
+      );
+      expect(
+        runtime.requests.filter((entry) => entry.idempotencyKey === takeoverSession.startIntentKey),
+      ).toHaveLength(1);
+      expect(
+        (
+          await getActiveExecutionOwnership({
+            tenantId: fixture.tenantId,
+            invocationId: fixture.invocation.id,
+          })
+        )?.id,
+      ).toBe(takeoverOwner.id);
+    } finally {
+      crashProcess.kill();
+      workerProcess?.kill();
+      await crashProcess.exited;
+      if (workerProcess) await workerProcess.exited;
+    }
+  }, 60_000);
 
   it("START-06: delayed epoch-one started receipt cannot authorize heartbeat or a new user action", async () => {
     const fixture = await seedStartFixture();
