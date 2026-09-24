@@ -2610,12 +2610,12 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it("CHECKPOINT-REG-15: large files are chunked with per-chunk hash verification and restore byte-exact", async () => {
+  it("CHECKPOINT-12: 多块大文件流式创建恢复、逐块校验且超安全整数策略拒绝", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       const { createHash } = await import("node:crypto");
       const SNAPSHOT_CHUNK_BYTES = 4 * 1024 * 1024;
-      const totalBytes = SNAPSHOT_CHUNK_BYTES + 1024;
+      const totalBytes = 3 * SNAPSHOT_CHUNK_BYTES + 1024;
       const payload = Buffer.alloc(totalBytes);
       for (let offset = 0; offset < totalBytes; offset += 4096) {
         payload.write(`block-${offset}`, offset, "utf8");
@@ -2632,12 +2632,23 @@ describe("FilesystemCheckpoint integration", () => {
           ),
         );
       expect(row?.totalBytes).toBe(totalBytes);
+      expect(BigInt(row!.totalBytes)).toBe(BigInt(totalBytes));
+      expect(() =>
+        parseCheckpointPolicy({
+          ...checkpointPolicy,
+          maxTotalBytes: (BigInt(Number.MAX_SAFE_INTEGER) + 1n).toString(),
+        }),
+      ).toThrow(/超出安全整数范围/);
       const storage = new FileSnapshotStorage(ctx.storageRoot);
       const manifest = await storage.readManifest(row!.manifestRef, row!.manifestDigest);
       const bigEntry = manifest.entries.find((entry) => entry.path === "big.bin")!;
-      expect(bigEntry.chunks).toHaveLength(2);
-      expect(bigEntry.chunks![0]!.sizeBytes).toBe(SNAPSHOT_CHUNK_BYTES);
-      expect(bigEntry.chunks![1]!.sizeBytes).toBe(totalBytes - SNAPSHOT_CHUNK_BYTES);
+      expect(bigEntry.chunks).toHaveLength(4);
+      expect(bigEntry.chunks!.slice(0, 3).map((chunk) => chunk.sizeBytes)).toEqual([
+        SNAPSHOT_CHUNK_BYTES,
+        SNAPSHOT_CHUNK_BYTES,
+        SNAPSHOT_CHUNK_BYTES,
+      ]);
+      expect(bigEntry.chunks![3]!.sizeBytes).toBe(1024);
       for (const chunk of bigEntry.chunks ?? []) {
         const bytes = await readFile(
           path.join(ctx.storageRoot, "chunks", chunk.digest.slice("sha256:".length)),
