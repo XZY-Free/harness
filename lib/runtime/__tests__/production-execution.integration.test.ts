@@ -71,6 +71,7 @@ import { createJobInvocation } from "@/lib/job/job-execution";
 import { createJob } from "@/lib/job/job-queries";
 import { getPermissionDecisionsByToolCall } from "@/lib/permission/permission-queries";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { effectRecordTable } from "@/lib/persistence/schema/effect";
 import {
   executionBindingTable,
   executionOwnershipTable,
@@ -80,9 +81,11 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
+import { toolExecutionAttemptTable } from "@/lib/persistence/schema/tool-execution";
 import { workspace, workspaceBinding } from "@/lib/persistence/schema/workspace";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { getIngressByInvocation } from "@/lib/runtime/application/ingress-runtime-events";
+import { redispatchRuntimeInvocation } from "@/lib/runtime/application/runtime-redispatch";
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import {
   inspectContainer,
@@ -441,8 +444,22 @@ const modelStub = new ModelBoundaryStub();
 class ProviderBoundaryStub {
   private server: Server | null = null;
   private endpointValue: string | null = null;
+  private heldResponse: { received: () => void; release: Promise<void> } | null = null;
   readonly requests: Array<{ body: unknown; idempotencyKey: string | null }> = [];
   payload: unknown = { ok: true };
+
+  holdNextResponse(): { received: Promise<void>; release: () => void } {
+    let signalReceived!: () => void;
+    let release!: () => void;
+    const received = new Promise<void>((resolve) => {
+      signalReceived = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.heldResponse = { received: signalReceived, release: blocked };
+    return { received, release };
+  }
 
   get endpoint(): string {
     if (!this.endpointValue) throw new Error("provider stub 尚未启动");
@@ -462,6 +479,12 @@ class ProviderBoundaryStub {
               ? request.headers["idempotency-key"]
               : null,
         });
+        const held = this.heldResponse;
+        if (held) {
+          this.heldResponse = null;
+          held.received();
+          await held.release;
+        }
         response.writeHead(200, { "content-type": "application/json", "x-request-id": "stub-1" });
         response.end(JSON.stringify(this.payload));
       })();
@@ -754,6 +777,7 @@ async function seedWebhookTool(input: {
   tenantId: string;
   ownerId: string;
   suffix: string;
+  sideEffectMode?: "read" | "write";
 }): Promise<{ toolId: string; toolKey: string; schemaRevisionId: string }> {
   const connection = await createConnection({
     tenantId: input.tenantId,
@@ -805,11 +829,14 @@ async function seedWebhookTool(input: {
     },
     executionContractJson: {
       timeoutMs: 5_000,
-      idempotencySupport: "none",
-      sideEffectMode: "read",
+      idempotencySupport: input.sideEffectMode === "write" ? "header" : "none",
+      sideEffectMode: input.sideEffectMode ?? "read",
       verificationMode: "provider_response",
       responseLimits: { maxBytes: 65_536 },
-      providerOperationMetadata: { operation: "lookup" },
+      providerOperationMetadata:
+        input.sideEffectMode === "write"
+          ? { operation: "update", effectType: "update" }
+          : { operation: "lookup" },
     },
   });
   const published = await publishToolSchemaRevision({
@@ -1419,6 +1446,123 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
     expect(modelStub.finalResponseCount).toBe(1);
     // 第二次决策的提示里必须已经带上工具观测（否则"执行了工具"没有回流到模型）。
     expect(modelStub.decisionPrompts.at(-1)).toContain("external-lookup-service");
+  });
+
+  it("ACTION-03: 已接纳 Tool 在父 Owner 接管后完成，由继任 Loop 读取原结果", async () => {
+    const { seedDispatchableTurn } = await import("@/lib/test-support/seed-dispatchable-turn");
+    const context = await seedDispatchableTurn({ contentSuffix: "action03" });
+    await db.delete(turnTable).where(eq(turnTable.id, context.turnId));
+    await db
+      .update(threadTable)
+      .set({ toolPermissionMode: "full_access" })
+      .where(eq(threadTable.id, context.threadId));
+    const tool = await seedWebhookTool({
+      tenantId: context.tenantId,
+      ownerId: context.ownerId,
+      suffix: "action03",
+      sideEffectMode: "write",
+    });
+    providerStub.payload = { source: "late-tool-result", value: "after-takeover" };
+    modelStub.autoTool = { operationId: tool.toolKey, arguments: { topic: "late result" } };
+    modelStub.finalText = "已收到工具结果。";
+    const response = await postTurn(context.threadId, "action03", "调用工具后回答");
+    expect(response.status).toBe(201);
+    const accepted = (await response.json()) as { turn: { id: string } };
+    try {
+      const acceptedTurn = await getTurnById(context.tenantId, accepted.turn.id);
+      const invocationId = acceptedTurn?.latestInvocationId;
+      if (!invocationId) throw new Error("Tool 父 Invocation 缺失");
+      const queuedCall = await waitForQueuedToolCall(context.tenantId, invocationId);
+      const originalOwner = await getActiveExecutionOwnership({
+        tenantId: context.tenantId,
+        invocationId,
+      });
+      if (!originalOwner) throw new Error("Tool 接纳时父 Owner 缺失");
+      const held = providerStub.holdNextResponse();
+      const toolWorker = createToolExecutionWorker({ allowLoopbackHttp: true });
+      const completing = toolWorker.runOnce();
+      try {
+        await Promise.race([
+          held.received,
+          completing.then(() => {
+            throw new Error("Tool Worker 未向 Provider 派发已接纳调用");
+          }),
+        ]);
+        expect((await getToolCallByInvocation(context.tenantId, invocationId))?.callState).toBe(
+          "running",
+        );
+        const [effectBefore] = await db
+          .select()
+          .from(effectRecordTable)
+          .where(eq(effectRecordTable.ownerRef, queuedCall.id));
+        expect(effectBefore?.dispatchEvidence?.authority.ownershipId).toBe(originalOwner.id);
+        expect(effectBefore?.effectState).toBe("not_started");
+        await db
+          .update(executionOwnershipTable)
+          .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+          .where(eq(executionOwnershipTable.id, originalOwner.id));
+        const binding = await getExecutionBindingByInvocation(context.tenantId, invocationId);
+        if (!binding) throw new Error("Tool 父 ExecutionBinding 缺失");
+        const transport = await resolveRuntimeTransportFromBinding({
+          tenantId: context.tenantId,
+          binding,
+        });
+        const resources = await resolveBoundExecutionResources({
+          tenantId: context.tenantId,
+          binding,
+          purpose: "redispatch",
+        });
+        const redispatched = await redispatchRuntimeInvocation({
+          tenantId: context.tenantId,
+          invocationId,
+          retryReasonCode: "action03-parent-takeover",
+          runtimeClient: transport.runtimeClient,
+          runtimeEndpoint: transport.runtimeEndpoint,
+          auth: transport.auth,
+          callbackEndpoints: buildGatewayEndpoints({ external: false, invocationId }),
+          ...resources,
+        });
+        expect(redispatched.redispatched).toBe(true);
+        const successor = await getActiveExecutionOwnership({
+          tenantId: context.tenantId,
+          invocationId,
+        });
+        expect(successor?.id).not.toBe(originalOwner.id);
+        expect(successor?.leaseEpoch).toBeGreaterThan(originalOwner.leaseEpoch);
+        expect((await getToolCallByInvocation(context.tenantId, invocationId))?.id).toBe(
+          queuedCall.id,
+        );
+      } finally {
+        held.release();
+      }
+      expect(await completing).toBe("executed");
+      expect((await getToolCallByInvocation(context.tenantId, invocationId))?.callState).toBe(
+        "succeeded",
+      );
+      const effectsAfter = await db
+        .select()
+        .from(effectRecordTable)
+        .where(eq(effectRecordTable.ownerRef, queuedCall.id));
+      expect(effectsAfter).toHaveLength(1);
+      const [effectAfter] = effectsAfter;
+      expect(effectAfter?.effectState).toBe("confirmed_success");
+      expect(effectAfter?.dispatchEvidence?.authority.ownershipId).toBe(originalOwner.id);
+      const attempts = await db
+        .select()
+        .from(toolExecutionAttemptTable)
+        .where(eq(toolExecutionAttemptTable.toolCallId, queuedCall.id));
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.attemptState).toBe("succeeded");
+      await createProductionInvocationContinuationWorker(
+        `action03-continuation-${randomUUID()}`,
+      ).pollOnce();
+      expect((await waitForTurn(context.tenantId, accepted.turn.id)).turnState).toBe("completed");
+      expect(providerStub.requests).toHaveLength(1);
+      expect(providerStub.requests[0]?.idempotencyKey).toBe(`snow-tool:${queuedCall.id}`);
+      expect(modelStub.decisionPrompts.at(-1)).toContain("late-tool-result");
+    } finally {
+      await removeTestContainerForTurn(context.tenantId, accepted.turn.id);
+    }
   });
 
   // ─── ENTRY-03 ─────────────────────────────────────────────
