@@ -164,6 +164,19 @@ describe("Topic02 configuration and script injections", () => {
   });
 });
 
+describe("Topic02 retired module dependency injections", () => {
+  it("CLEAN-05: static, side-effect, dynamic and re-export imports resolve retired modules", () => {
+    expect(
+      collectRetiredModuleDependencyViolations([
+        doc("lib/runtime/current.ts", 'import "./transport/a2a-transport";'),
+        doc("lib/runtime/current-2.ts", 'await import("./transport/a2a-transport");'),
+        doc("lib/routes/index.ts", 'export * from "./application/upsert-deployment-route";'),
+        doc("lib/runtime/valid.ts", 'import { client } from "./runtime-client";'),
+      ]),
+    ).toEqual(["lib/runtime/current.ts", "lib/runtime/current-2.ts", "lib/routes/index.ts"]);
+  });
+});
+
 describe("checkExternalRuntimeTransportGate", () => {
   const compliant = (): SourceDocument[] => [
     doc(

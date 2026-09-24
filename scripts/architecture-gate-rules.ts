@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import {
   FORBIDDEN_ENV_FLAG_KEYS,
   FORBIDDEN_ENV_FLAG_PREFIXES,
@@ -130,11 +131,17 @@ const IMPLEMENTATION_HISTORY_PATTERN =
   /docs\/V(?:11|12)\/01|专题0?1|\bBatch\s*\d+\b|\bPhase\s*[A-Z0-9]+\b|\bStage\s*[A-Z0-9]+\b|阶段\s*[0-9一二三四五六七八九十]+|关口\s*\d+|\bS\d{2}-[CW]\d{2}\b|(?:^|[\s（(])0[0-7]\s*§\s*[0-9一二三四五六七八九十]+/im;
 
 /** 已物理删除的第二入口。测试可以写拒绝文本，但不能再依赖这些模块。 */
-const RETIRED_MODULE_SPECIFIER =
-  /(?:@\/|(?:\.\.\/)+)(?:lib\/runtime\/(?:.*\/)?a2a[^"']*|lib\/routes\/application\/(?:upsert|disable)-deployment-route|app\/api\/v1\/agents(?:\/route)?|lib\/agents\/(?:hosted-agent-publication|hosted-agent-route)[^"']*)/;
+const RETIRED_MODULE_PATH =
+  /^(?:lib\/runtime\/(?:.*\/)?a2a[^/]*|lib\/routes\/application\/(?:upsert|disable)-deployment-route|app\/api\/v1\/agents(?:\/route)?|lib\/agents\/(?:hosted-agent-publication|hosted-agent-route)[^/]*)$/;
 
-const MODULE_DEPENDENCY =
-  /(?:from\s*|require\(\s*|import\(\s*|export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s*)["']([^"']+)["']/g;
+function resolvesToRetiredModule(importer: string, specifier: string): boolean {
+  const path = specifier.startsWith("@/")
+    ? specifier.slice(2)
+    : specifier.startsWith(".")
+      ? posix.normalize(posix.join(posix.dirname(importer), specifier))
+      : specifier;
+  return RETIRED_MODULE_PATH.test(path.replace(/\.(?:[cm]?[jt]sx?)$/, ""));
+}
 
 const RETIRED_AGENT_EXECUTION_PATTERN =
   /\b(?:resolveRequiredAgentBinding|RequiredAgentUnavailableError|invokeRequiredAgent)\b|harness-required-agent|required-agent/;
@@ -159,7 +166,7 @@ export function collectImplementationHistoryViolations(
   return [...violations];
 }
 
-/** 返回仍 import/require/export 已删除第二入口的源码，包括测试与 test-support。 */
+/** CLEAN-05：AST 检查 import/require/export 已删除第二入口，包括测试与 test-support。 */
 export function collectRetiredModuleDependencyViolations(
   documents: readonly SourceDocument[],
 ): string[] {
@@ -172,10 +179,44 @@ export function collectRetiredModuleDependencyViolations(
     ) {
       continue;
     }
-    MODULE_DEPENDENCY.lastIndex = 0;
-    for (const match of document.source.matchAll(MODULE_DEPENDENCY)) {
-      if (RETIRED_MODULE_SPECIFIER.test(match[1] ?? "")) violations.add(document.path);
+    if (!/\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    const sourceFile = ts.createSourceFile(
+      document.path,
+      document.source,
+      ts.ScriptTarget.Latest,
+      true,
+      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    function visit(node: ts.Node): void {
+      let specifier: string | undefined;
+      if (
+        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+        node.moduleSpecifier &&
+        ts.isStringLiteralLike(node.moduleSpecifier)
+      ) {
+        specifier = node.moduleSpecifier.text;
+      } else if (
+        ts.isImportEqualsDeclaration(node) &&
+        ts.isExternalModuleReference(node.moduleReference) &&
+        node.moduleReference.expression &&
+        ts.isStringLiteralLike(node.moduleReference.expression)
+      ) {
+        specifier = node.moduleReference.expression.text;
+      } else if (
+        ts.isCallExpression(node) &&
+        node.arguments[0] &&
+        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+        ts.isStringLiteralLike(node.arguments[0])
+      ) {
+        specifier = node.arguments[0].text;
+      }
+      if (specifier && resolvesToRetiredModule(document.path, specifier)) {
+        violations.add(document.path);
+      }
+      ts.forEachChild(node, visit);
     }
+    visit(sourceFile);
   }
   return [...violations];
 }
