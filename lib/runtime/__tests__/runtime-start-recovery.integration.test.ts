@@ -26,6 +26,7 @@ import {
 } from "@/lib/executions/test-support/preparation-fixtures";
 import { seedPreparedRuntimeAttempt } from "@/lib/executions/test-support/seed-runtime-authority";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
+import { decodeWorkloadToken } from "@/lib/identity/workload-token";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
@@ -371,17 +372,36 @@ describe("Runtime Start / Resume durable recovery", () => {
 
     const first = await startFixture(fixture, runtime.endpoint);
     const repeated = await startFixture(fixture, runtime.endpoint);
+    const repeatedThird = await startFixture(fixture, runtime.endpoint);
+    const repeatedFourth = await startFixture(fixture, runtime.endpoint);
     expect(repeated.response).toMatchObject({
+      remoteSessionRef: first.response.remoteSessionRef,
+      remoteExecutionRef: first.response.remoteExecutionRef,
+      semanticRequestDigest: first.response.semanticRequestDigest,
+    });
+    expect(repeatedThird.response).toMatchObject({
+      remoteSessionRef: first.response.remoteSessionRef,
+      remoteExecutionRef: first.response.remoteExecutionRef,
+      semanticRequestDigest: first.response.semanticRequestDigest,
+    });
+    expect(repeatedFourth.response).toMatchObject({
       remoteSessionRef: first.response.remoteSessionRef,
       remoteExecutionRef: first.response.remoteExecutionRef,
       semanticRequestDigest: first.response.semanticRequestDigest,
     });
     const startKey = `start:${first.authority.ownershipId}`;
     expect((await runtime.store()).starts[startKey]?.executionCount).toBe(1);
-    expect(runtime.requests.filter((entry) => entry.idempotencyKey === startKey)).toHaveLength(2);
+    expect(runtime.requests.filter((entry) => entry.idempotencyKey === startKey)).toHaveLength(4);
     expect(new Set(runtime.requests.map((entry) => entry.request.semanticRequestDigest))).toEqual(
       new Set([first.response.semanticRequestDigest]),
     );
+    expect(
+      new Set(
+        runtime.requests.map(
+          (entry) => decodeWorkloadToken(entry.request.credentials.runtimeToken).jti,
+        ),
+      ).size,
+    ).toBe(4);
 
     const original = runtime.requests[0]?.request;
     expect(original).toBeDefined();
