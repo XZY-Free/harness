@@ -17,6 +17,7 @@ import { db } from "@/lib/db/client";
  */
 import {
   EnvironmentComplianceError,
+  EnvironmentInstanceMissingError,
   EnvironmentInstanceOperationError,
   EnvironmentPreparationClaimSupersededError,
 } from "@/lib/environment/environment-errors";
@@ -322,15 +323,30 @@ async function provisionWithBackend(input: {
   if (existing && isPreparedReadinessState(existing.readinessState)) {
     // 已备妥时先真实回读实例；ready 与未过期 prepared 保持原证据，
     // 过期 prepared 才在当前准备 claim 下对同一实例续写核验证据。
-    const facts = await input.backend.inspect(requestFor(input, lease, operationId, input.spec));
+    const oldEvidence = existing.preparedEvidence as { expiresAt?: unknown } | null;
+    const evidenceExpired =
+      typeof oldEvidence?.expiresAt === "string" &&
+      Date.parse(oldEvidence.expiresAt) <= input.now.getTime();
+    const request = requestFor(input, lease, operationId, input.spec);
+    let facts: EnvironmentInstanceFacts;
+    try {
+      facts = await input.backend.inspect(request);
+    } catch (error) {
+      if (
+        !(error instanceof EnvironmentInstanceMissingError) ||
+        existing.readinessState !== "prepared" ||
+        !evidenceExpired
+      ) {
+        throw error;
+      }
+      // 只有尚未激活的 Prepared 候选可以按稳定 operation 重建；先复核当前
+      // 准备 claim，旧 Worker 不得为继任者另建或覆盖资源。
+      await assertAttemptPreparationClaimHeld(input.preparationClaim);
+      facts = await input.backend.create(request);
+    }
     await assertAttemptPreparationClaimHeld(input.preparationClaim);
     assertPreparedInstanceMatches(lease, facts);
-    const oldEvidence = existing.preparedEvidence as { expiresAt?: unknown } | null;
-    if (
-      existing.readinessState === "prepared" &&
-      typeof oldEvidence?.expiresAt === "string" &&
-      Date.parse(oldEvidence.expiresAt) <= input.now.getTime()
-    ) {
+    if (existing.readinessState === "prepared" && evidenceExpired) {
       const evidence = buildEnvironmentPreparedEvidence({
         revisionId: input.spec.revisionId,
         semanticDigest: input.spec.semanticDigest,

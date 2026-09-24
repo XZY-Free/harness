@@ -40,14 +40,19 @@ import {
   createEnvironmentDefinition,
   getEnvironmentRevisionById,
 } from "@/lib/environment/environment-definition-store";
+import { managedContainerName } from "@/lib/environment/environment-instance-backend";
 import { getEnvironmentLeaseByAttempt } from "@/lib/environment/environment-lease-store";
+import { ENVIRONMENT_PREPARED_TTL_MS } from "@/lib/environment/environment-prepared-evidence";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
 import type { ExecutionBindingConfigInput } from "@/lib/executions/domain/execution-binding";
+import { assertExecutionSourceSnapshot } from "@/lib/executions/domain/preparation-source";
+import { assertAttemptPreparationClaimHeld } from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   closeExecutionOwnership,
   getActiveExecutionOwnership,
+  getAuthorityDatabaseTime,
   renewExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { createInvocation } from "@/lib/executions/persistence/invocation-store";
@@ -70,7 +75,11 @@ import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { workspace, workspaceBinding } from "@/lib/persistence/schema/workspace";
 import { getIngressByInvocation } from "@/lib/runtime/application/ingress-runtime-events";
-import { inspectImage } from "@/lib/runtime/container/docker-cli";
+import {
+  inspectContainer,
+  inspectImage,
+  removeContainer,
+} from "@/lib/runtime/container/docker-cli";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
@@ -104,6 +113,7 @@ import {
   protocolDigest,
   sha256DigestSchema,
 } from "@/lib/runtime/runtime-protocol";
+import { spawnInitialDispatchCrashProcess } from "@/lib/runtime/test-support/initial-dispatch-crash-process";
 import {
   ensureDesktopWorkspace,
   resolveWorkspaceBindingId,
@@ -675,9 +685,46 @@ async function waitForTurn(
     const turn = await getTurnById(tenantId, turnId);
     if (turn && ["completed", "failed", "cancelled"].includes(turn.turnState)) return turn;
     if (Date.now() > deadline) {
-      throw new Error(`Turn 未在 ${timeoutMs}ms 内到达终态（当前 ${turn?.turnState ?? "缺失"}）`);
+      const invocations = await listInvocationsForTurn(tenantId, turnId);
+      const latest = invocations.at(-1);
+      const owner = latest
+        ? await getActiveExecutionOwnership({ tenantId, invocationId: latest.id })
+        : null;
+      const attempts = latest ? await listAttemptsForInvocation(tenantId, latest.id) : [];
+      const sessions = latest
+        ? await getRuntimeSessionBindingsByInvocation(tenantId, latest.id)
+        : [];
+      throw new Error(
+        `Turn 未在 ${timeoutMs}ms 内到达终态：${JSON.stringify({
+          turn: turn?.turnState ?? "缺失",
+          invocation: latest?.executionState ?? null,
+          owner: owner ? { state: owner.ownershipState, phase: owner.executionPhase } : null,
+          attempts: attempts.map((row) => ({ state: row.attemptState, errorCode: row.errorCode })),
+          sessions: sessions.map((row) => ({
+            state: row.bindingState,
+            dispatchCount: row.dispatchCount,
+            errorCode: row.lastErrorCode,
+            nextDispatchAt: row.nextDispatchAt,
+          })),
+        })}`,
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+/** 测试结束只清理本 Turn 的真实容器；允许正式 Worker 已先行释放。 */
+async function removeTestContainerForTurn(tenantId: string, turnId: string): Promise<void> {
+  const invocations = await listInvocationsForTurn(tenantId, turnId);
+  for (const invocation of invocations) {
+    const attempts = await listAttemptsForInvocation(tenantId, invocation.id);
+    for (const attempt of attempts) {
+      const lease = await getEnvironmentLeaseByAttempt(tenantId, invocation.id, attempt.id);
+      const manifest = lease?.resourceManifest as { operationId?: unknown } | undefined;
+      if (typeof manifest?.operationId === "string") {
+        await removeContainer(managedContainerName(manifest.operationId));
+      }
+    }
   }
 }
 
@@ -1410,6 +1457,416 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
     expect(sessions[0]?.closedAt).not.toBeNull();
     expect(await listInvocationsForTurn(context.tenantId, preparationTurn.id)).toHaveLength(1);
   });
+
+  it("R2-a: 初次调度在准备 claim 后真实进程死亡，正式 Worker 在租期越过后复用唯一候选", async () => {
+    const context = await seedEntryContext("r2a");
+    const turn = await acceptTurnOnly(context, "r2a-crash", "请读取工作区并回答");
+    const child = spawnInitialDispatchCrashProcess({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      ownerId: context.ownerId,
+      stage: "after_claim",
+    });
+    try {
+      await child.barrier;
+      const [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+      if (!invocation) throw new Error("子进程未建立 Invocation");
+      const [before] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      if (
+        !before?.preparationClaimId ||
+        !before.preparationIntentKey ||
+        !before.preparationRequestDigest ||
+        !before.preparationSourceJson ||
+        !before.preparationLeaseExpiresAt
+      )
+        throw new Error("子进程未提交准备来源与 claim");
+      expect(before.preparationState).toBe("preparing");
+      expect(await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id)).toEqual(
+        [],
+      );
+      const oldClaim = {
+        tenantId: context.tenantId,
+        invocationId: invocation.id,
+        attemptId: before.id,
+        intentKey: before.preparationIntentKey,
+        requestDigest: before.preparationRequestDigest,
+        claimId: before.preparationClaimId,
+        source: assertExecutionSourceSnapshot(before.preparationSourceJson),
+      };
+      const leaseExpiresAt = before.preparationLeaseExpiresAt;
+      child.kill();
+      expect((await child.exited).signal).toBe("SIGKILL");
+      const databaseNow = await getAuthorityDatabaseTime(db);
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, leaseExpiresAt.getTime() - databaseNow.getTime() + 1_000)),
+      );
+      const recovered = await runDueUndispatchedIntentRecoveries({ now: new Date() });
+      expect(recovered.invocations.recovered).toBeGreaterThanOrEqual(1);
+      expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+      const attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.id).toBe(before.id);
+      expect(attempts[0]?.preparationRequestDigest).toBe(before.preparationRequestDigest);
+      expect(attempts[0]?.preparationSourceJson).toEqual(before.preparationSourceJson);
+      expect(attempts[0]?.preparationClaimId).not.toBe(before.preparationClaimId);
+      await expect(assertAttemptPreparationClaimHeld(oldClaim)).rejects.toThrow(
+        "PreparationClaimSuperseded",
+      );
+      expect(
+        await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id),
+      ).toHaveLength(1);
+    } finally {
+      child.kill();
+      await child.exited;
+      await removeTestContainerForTurn(context.tenantId, turn.id);
+    }
+  }, 120_000);
+
+  it("R2-b: 真实容器 Lease Prepared 后进程死亡，正式 Worker 回读同一资源并完成 Attempt", async () => {
+    const context = await seedEntryContext("r2b");
+    const turn = await acceptTurnOnly(context, "r2b-crash", "请读取工作区并回答");
+    const child = spawnInitialDispatchCrashProcess({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      ownerId: context.ownerId,
+      stage: "after_lease_prepared",
+    });
+    try {
+      await child.barrier;
+      const [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+      if (!invocation) throw new Error("子进程未建立 Invocation");
+      const [attempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      if (!attempt?.preparationLeaseExpiresAt) throw new Error("子进程未提交准备 claim");
+      const lease = await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempt.id);
+      if (!lease) throw new Error("子进程未提交 EnvironmentLease");
+      expect(attempt.preparationState).toBe("preparing");
+      expect(lease.readinessState).toBe("prepared");
+      expect(lease.preparedEvidence).not.toBeNull();
+      expect(await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id)).toEqual(
+        [],
+      );
+      const manifest = lease.resourceManifest as { operationId?: string };
+      if (!manifest.operationId) throw new Error("Prepared Lease 缺少 operationId");
+      const containerName = managedContainerName(manifest.operationId);
+      const physicalBefore = await inspectContainer(containerName);
+      expect(physicalBefore).not.toBeNull();
+      child.kill();
+      expect((await child.exited).signal).toBe("SIGKILL");
+      const databaseNow = await getAuthorityDatabaseTime(db);
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.max(0, attempt.preparationLeaseExpiresAt!.getTime() - databaseNow.getTime() + 1_000),
+        ),
+      );
+      const recovered = await runDueUndispatchedIntentRecoveries({ now: new Date() });
+      expect(recovered.invocations.recovered).toBeGreaterThanOrEqual(1);
+      expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+      const attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.id).toBe(attempt.id);
+      expect(attempts[0]?.preparationState).toBe("prepared");
+      const resumedLease = await getEnvironmentLeaseByAttempt(
+        context.tenantId,
+        invocation.id,
+        attempt.id,
+      );
+      expect(resumedLease?.id).toBe(lease.id);
+      expect((resumedLease?.resourceManifest as { operationId?: string }).operationId).toBe(
+        manifest.operationId,
+      );
+      const physicalAfter = await inspectContainer(containerName);
+      expect(physicalAfter?.Id).toBe(physicalBefore?.Id);
+      expect(
+        await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id),
+      ).toHaveLength(1);
+    } finally {
+      child.kill();
+      await child.exited;
+      await removeTestContainerForTurn(context.tenantId, turn.id);
+    }
+  }, 120_000);
+
+  it("R2-c: Attempt Prepared 已提交但尚无 Owner/Session 时进程死亡，正式 Worker 原地继续", async () => {
+    const context = await seedEntryContext("r2c");
+    const turn = await acceptTurnOnly(context, "r2c-crash", "请读取工作区并回答");
+    // 测试库的临时触发器只阻塞 O INSERT：让真实 dispatcher 自己提交 Prepared，
+    // 然后在下一事务被 SQL 挡住。父进程 SIGKILL 后删除触发器，恢复仍走正式 Worker。
+    await db.execute(
+      sql.raw(
+        "CREATE TRIGGER topic02_r2c_before_owner BEFORE INSERT ON ExecutionOwnership FOR EACH ROW DO SLEEP(60)",
+      ),
+    );
+    const child = spawnInitialDispatchCrashProcess({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      ownerId: context.ownerId,
+      stage: "before_owner",
+    });
+    try {
+      let invocation: Awaited<ReturnType<typeof listInvocationsForTurn>>[number] | undefined;
+      let attempt: Awaited<ReturnType<typeof listAttemptsForInvocation>>[number] | undefined;
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+        if (invocation)
+          [attempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+        if (attempt?.preparationState === "prepared") break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!invocation || !attempt || attempt.preparationState !== "prepared") {
+        throw new Error(`子进程未提交 Attempt Prepared：${child.stderr()}`);
+      }
+      const beforeDigest = attempt.preparationRequestDigest;
+      const beforeSource = attempt.preparationSourceJson;
+      const lease = await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempt.id);
+      expect(lease?.readinessState).toBe("prepared");
+      expect(
+        await db
+          .select()
+          .from(executionOwnershipTable)
+          .where(
+            and(
+              eq(executionOwnershipTable.tenantId, context.tenantId),
+              eq(executionOwnershipTable.invocationId, invocation.id),
+            ),
+          ),
+      ).toHaveLength(0);
+      expect(await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id)).toEqual(
+        [],
+      );
+      child.kill();
+      expect((await child.exited).signal).toBe("SIGKILL");
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r2c_before_owner"));
+      const databaseNow = await getAuthorityDatabaseTime(db);
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.max(
+            0,
+            invocation.updatedAt.getTime() +
+              DISPATCH_STUCK_GRACE_MS -
+              databaseNow.getTime() +
+              1_000,
+          ),
+        ),
+      );
+      const recovered = await runDueUndispatchedIntentRecoveries({ now: new Date() });
+      expect(recovered.invocations.recovered).toBeGreaterThanOrEqual(1);
+      expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+      const attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.preparationState).toBe("prepared");
+      expect(attempts[0]?.preparationRequestDigest).toBe(beforeDigest);
+      expect(attempts[0]?.preparationSourceJson).toEqual(beforeSource);
+      const owners = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(
+          and(
+            eq(executionOwnershipTable.tenantId, context.tenantId),
+            eq(executionOwnershipTable.invocationId, invocation.id),
+          ),
+        );
+      expect(owners).toHaveLength(1);
+      const sessions = await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.startedEventId).not.toBeNull();
+      expect(
+        (await getEnvironmentLeaseByAttempt(context.tenantId, invocation.id, attempt.id))?.id,
+      ).toBe(lease?.id);
+    } finally {
+      child.kill();
+      await child.exited;
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r2c_before_owner"));
+      await removeTestContainerForTurn(context.tenantId, turn.id);
+    }
+  }, 120_000);
+
+  it("R2-d: NO_PLATFORM 的准备进程死亡后按原来源接续且不伪造 Lease", async () => {
+    const { seedDispatchableTurn } = await import("@/lib/test-support/seed-dispatchable-turn");
+    const seed = await seedDispatchableTurn({ contentSuffix: "r2d" });
+    const child = spawnInitialDispatchCrashProcess({
+      tenantId: seed.tenantId,
+      turnId: seed.turnId,
+      ownerId: seed.ownerId,
+      stage: "after_claim",
+    });
+    try {
+      await child.barrier;
+      const [invocation] = await listInvocationsForTurn(seed.tenantId, seed.turnId);
+      if (!invocation) throw new Error("NO_PLATFORM 子进程未建立 Invocation");
+      const [before] = await listAttemptsForInvocation(seed.tenantId, invocation.id);
+      if (!before?.preparationLeaseExpiresAt) throw new Error("NO_PLATFORM 子进程未提交准备 claim");
+      const beforeDigest = before.preparationRequestDigest;
+      const beforeSource = before.preparationSourceJson;
+      expect(
+        await getEnvironmentLeaseByAttempt(seed.tenantId, invocation.id, before.id),
+      ).toBeNull();
+      child.kill();
+      expect((await child.exited).signal).toBe("SIGKILL");
+      const databaseNow = await getAuthorityDatabaseTime(db);
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.max(0, before.preparationLeaseExpiresAt!.getTime() - databaseNow.getTime() + 1_000),
+        ),
+      );
+      const recovered = await runDueUndispatchedIntentRecoveries({ now: new Date() });
+      expect(recovered.invocations.recovered).toBeGreaterThanOrEqual(1);
+      expect((await waitForTurn(seed.tenantId, seed.turnId)).turnState).toBe("completed");
+      const attempts = await listAttemptsForInvocation(seed.tenantId, invocation.id);
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.preparationRequestDigest).toBe(beforeDigest);
+      expect(attempts[0]?.preparationSourceJson).toEqual(beforeSource);
+      expect(
+        await getEnvironmentLeaseByAttempt(seed.tenantId, invocation.id, before.id),
+      ).toBeNull();
+    } finally {
+      child.kill();
+      await child.exited;
+    }
+  }, 120_000);
+
+  it(
+    "R2-e: Prepared 证据实际过期后，正式 Worker 真实回读原容器并以原 Revision 续写证据",
+    async () => {
+      const context = await seedEntryContext("r2e-existing");
+      const turn = await acceptTurnOnly(context, "r2e-existing", "请读取工作区并回答");
+      const child = spawnInitialDispatchCrashProcess({
+        tenantId: context.tenantId,
+        turnId: turn.id,
+        ownerId: context.ownerId,
+        stage: "after_lease_prepared",
+      });
+      try {
+        await child.barrier;
+        const [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+        if (!invocation) throw new Error("子进程未建立 Invocation");
+        const [attempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+        if (!attempt) throw new Error("子进程未建立 Attempt");
+        expect(attempt.preparationState).toBe("preparing");
+        expect(
+          (await getExecutionBindingByInvocation(context.tenantId, invocation.id))?.environmentMode,
+        ).toBe("MANAGED");
+        const lease = await getEnvironmentLeaseByAttempt(
+          context.tenantId,
+          invocation.id,
+          attempt.id,
+        );
+        if (!lease) throw new Error("子进程未提交 Prepared Lease");
+        const evidence = lease.preparedEvidence as { expiresAt?: string };
+        const manifest = lease.resourceManifest as { operationId?: string };
+        if (!evidence.expiresAt || !manifest.operationId) throw new Error("Prepared 证据不完整");
+        const containerName = managedContainerName(manifest.operationId);
+        const physicalBefore = await inspectContainer(containerName);
+        expect(physicalBefore).not.toBeNull();
+        child.kill();
+        expect((await child.exited).signal).toBe("SIGKILL");
+        const databaseNow = await getAuthorityDatabaseTime(db);
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            Math.max(0, Date.parse(evidence.expiresAt!) - databaseNow.getTime() + 1_000),
+          ),
+        );
+        const recovered = await runDueUndispatchedIntentRecoveries({ now: new Date() });
+        expect(recovered.invocations.recovered).toBeGreaterThanOrEqual(1);
+        expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+        const renewed = await getEnvironmentLeaseByAttempt(
+          context.tenantId,
+          invocation.id,
+          attempt.id,
+        );
+        expect(renewed?.id).toBe(lease.id);
+        expect(renewed?.environmentDefinitionRevisionId).toBe(context.environmentRevisionId);
+        expect(renewed?.preparedDigest).not.toBe(lease.preparedDigest);
+        expect(
+          Date.parse((renewed?.preparedEvidence as { expiresAt: string }).expiresAt),
+        ).toBeGreaterThan(Date.parse(evidence.expiresAt));
+        expect((await inspectContainer(containerName))?.Id).toBe(physicalBefore?.Id);
+        expect(await listAttemptsForInvocation(context.tenantId, invocation.id)).toHaveLength(1);
+      } finally {
+        child.kill();
+        await child.exited;
+        await removeTestContainerForTurn(context.tenantId, turn.id);
+      }
+    },
+    ENVIRONMENT_PREPARED_TTL_MS + 90_000,
+  );
+
+  it(
+    "R2-e: Prepared 证据过期且原容器丢失后，正式 Worker 以原 operation 幂等重建",
+    async () => {
+      const context = await seedEntryContext("r2e-missing");
+      const turn = await acceptTurnOnly(context, "r2e-missing", "请读取工作区并回答");
+      const child = spawnInitialDispatchCrashProcess({
+        tenantId: context.tenantId,
+        turnId: turn.id,
+        ownerId: context.ownerId,
+        stage: "after_lease_prepared",
+      });
+      try {
+        await child.barrier;
+        const [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+        if (!invocation) throw new Error("子进程未建立 Invocation");
+        const [attempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+        if (!attempt) throw new Error("子进程未建立 Attempt");
+        const lease = await getEnvironmentLeaseByAttempt(
+          context.tenantId,
+          invocation.id,
+          attempt.id,
+        );
+        if (!lease) throw new Error("子进程未提交 Prepared Lease");
+        const evidence = lease.preparedEvidence as { expiresAt?: string };
+        const manifest = lease.resourceManifest as { operationId?: string };
+        if (!evidence.expiresAt || !manifest.operationId) throw new Error("Prepared 证据不完整");
+        const evidenceExpiresAt = evidence.expiresAt;
+        const containerName = managedContainerName(manifest.operationId);
+        const physicalBefore = await inspectContainer(containerName);
+        expect(physicalBefore).not.toBeNull();
+        child.kill();
+        expect((await child.exited).signal).toBe("SIGKILL");
+        await removeContainer(containerName);
+        expect(await inspectContainer(containerName)).toBeNull();
+        const databaseNow = await getAuthorityDatabaseTime(db);
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            Math.max(0, Date.parse(evidenceExpiresAt) - databaseNow.getTime() + 1_000),
+          ),
+        );
+        const recovered = await runDueUndispatchedIntentRecoveries({ now: new Date() });
+        expect(recovered.invocations.recovered).toBeGreaterThanOrEqual(1);
+        expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+        const renewed = await getEnvironmentLeaseByAttempt(
+          context.tenantId,
+          invocation.id,
+          attempt.id,
+        );
+        expect(renewed?.id).toBe(lease.id);
+        expect(renewed?.environmentDefinitionRevisionId).toBe(context.environmentRevisionId);
+        expect((renewed?.resourceManifest as { operationId: string }).operationId).toBe(
+          manifest.operationId,
+        );
+        expect(renewed?.preparedDigest).not.toBe(lease.preparedDigest);
+        expect(
+          Date.parse((renewed?.preparedEvidence as { expiresAt: string }).expiresAt),
+        ).toBeGreaterThan(Date.parse(evidenceExpiresAt));
+        const physicalAfter = await inspectContainer(containerName);
+        expect(physicalAfter).not.toBeNull();
+        expect(physicalAfter?.Id).not.toBe(physicalBefore?.Id);
+        const attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+        expect(attempts).toHaveLength(1);
+        expect(attempts[0]?.preparationState).toBe("prepared");
+      } finally {
+        child.kill();
+        await child.exited;
+        await removeTestContainerForTurn(context.tenantId, turn.id);
+      }
+    },
+    ENVIRONMENT_PREPARED_TTL_MS + 90_000,
+  );
 
   // ─── ENTRY-05 ─────────────────────────────────────────────
 

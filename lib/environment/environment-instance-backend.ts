@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   EnvironmentComplianceError,
+  EnvironmentInstanceMissingError,
   EnvironmentInstanceOperationError,
 } from "@/lib/environment/environment-errors";
 import {
@@ -657,7 +658,7 @@ export function createContainerEnvironmentBackend(
 
     const inspected = await inspectContainer(name);
     if (!inspected) {
-      throw new EnvironmentInstanceOperationError(`受管容器创建后回读失败：${name}`, "inspect");
+      throw new EnvironmentInstanceMissingError(`受管容器不存在：${name}`);
     }
     const image = await inspectImage(spec.container.image);
     const imageId = image?.Id ?? inspected.Image;

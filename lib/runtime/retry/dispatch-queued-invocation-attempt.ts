@@ -1,5 +1,4 @@
 /** Dispatches one durable InvocationAttempt using its frozen execution facts. */
-import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
 import {
@@ -152,7 +151,7 @@ export async function dispatchQueuedInvocationAttempt(
         });
   const preparationDecision = await acceptExecutionPreparation({
     request: sourceRequest,
-    claimId: params.preparationClaim?.claimId ?? randomUUID(),
+    ...(params.preparationClaim ? { claimId: params.preparationClaim.claimId } : {}),
     now: params.now,
   });
   if (preparationDecision.disposition === "busy") throw new Error("AttemptPreparationBusy");

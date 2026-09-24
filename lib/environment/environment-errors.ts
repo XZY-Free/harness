@@ -62,3 +62,10 @@ export class EnvironmentInstanceOperationError extends Error {
     this.name = "EnvironmentInstanceOperationError";
   }
 }
+
+/** 已登记的实例在真实回读时不存在；允许未激活的 Prepared 候选按原 operation 重建。 */
+export class EnvironmentInstanceMissingError extends EnvironmentInstanceOperationError {
+  constructor(message: string) {
+    super(message, "inspect");
+  }
+}
