@@ -2209,6 +2209,41 @@ describe("A05：唯一决策表（来源意图与环境准备交接的逐行判�
       invocationId: invocation.id,
     });
 
+    // 已进入 running 后，新建另一条正式 Resume 命令不能借原暂停重新启动。
+    const newCommandId = await db.transaction((tx) =>
+      createInvocationCommandInTransaction(tx, {
+        tenantId,
+        invocationId: invocation.id,
+        commandType: "resume",
+        idempotencyKey: `running-resume:${randomUUID()}`,
+        payloadJson: { resume_source: "user_pause", resume_payload: { source: "user_pause" } },
+        requestedByType: "user",
+        requestedById: "test-user",
+      }),
+    );
+    const slotBeforeNewCommand = await readPreparationSlot(tenantId, attempt.id);
+    const requestsBeforeNewCommand = stub.requests.length;
+    await expect(
+      resumeRuntimeInvocation({
+        tenantId,
+        invocation,
+        binding,
+        attempt,
+        sourceOperationKey: `command:${newCommandId}`,
+        anchor: "a05-t04-original",
+        anchorDigest,
+        ...intentTransport(stub),
+      }),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    expect(await readPreparationSlot(tenantId, attempt.id)).toEqual(slotBeforeNewCommand);
+    expect(stub.requests).toHaveLength(requestsBeforeNewCommand);
+    expect(await getRuntimeSessionBindingsByInvocation(tenantId, invocation.id)).toEqual(
+      sessionsBefore,
+    );
+    expect(await getActiveExecutionOwnership({ tenantId, invocationId: invocation.id })).toEqual(
+      ownerBefore,
+    );
+
     // 保持来源键，替换语义输入（锚点）→ 必须拒绝。
     const changedAnchorDigest = protocolDigest({ anchor: "a05-t04-changed" });
     await expect(
