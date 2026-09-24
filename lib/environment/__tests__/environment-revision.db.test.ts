@@ -130,6 +130,10 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
       DEFAULT_TENANT_ID,
       definition.currentRevisionId!,
     );
+    const fixture = await seedPreparedRuntimeAttempt({
+      environmentDefinitionRevisionId: revision!.id,
+    });
+    expect(fixture.binding.environmentDefinitionRevisionId).toBe(revision?.id);
     const [raw] = await db
       .select()
       .from(environmentDefinitionTable)
@@ -171,9 +175,15 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
     expect(current?.currentRevisionId).toBe(winner.id);
     const revisions = await listEnvironmentRevisions(DEFAULT_TENANT_ID, definition.id);
     expect(revisions).toHaveLength(2);
-    // 胜出 Revision 的语义摘要与其输入一致，不产生混合 JSON。
-    expect(winner.networkPolicyJson).toBeDefined();
-    expect(winner.resourceLimitsJson).toBeDefined();
+    // 两组编辑各只改变一类字段；胜出 Revision 必须完整等于 A 或 B，不能混合。
+    const wonA = settled[0]?.status === "fulfilled";
+    expect(winner.networkPolicyJson).toEqual({ egress: wonA ? "allow_https" : "deny_all" });
+    expect(winner.resourceLimitsJson).toEqual(
+      wonA ? { cpu: 2, memoryMb: 2048 } : { cpu: 4, memoryMb: 4096 },
+    );
+    expect(revisions.find((revision) => revision.id === winner.id)?.semanticDigest).toBe(
+      winner.semanticDigest,
+    );
   });
 
   it("ENV-04: a binding pinned to R1 stays on R1 after the default advances to R2", async () => {
