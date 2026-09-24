@@ -30,7 +30,8 @@ export function createWorkspaceHostFromEnvironment(): WorkspaceHostBroker {
 export async function runWorkspaceHostProcess(): Promise<void> {
   const broker = createWorkspaceHostFromEnvironment();
   const port = Number.parseInt(process.env.SNOWHARNESS_WORKSPACE_HOST_PORT ?? "0", 10);
-  const serving = await listenWorkspaceHostRpc({ broker, port });
+  const hostname = process.env.SNOWHARNESS_WORKSPACE_HOST_BIND?.trim() || "127.0.0.1";
+  const serving = await listenWorkspaceHostRpc({ broker, port, hostname });
   process.stdout.write(`[workspace-host] listening ${serving.url}\n`);
   await new Promise<void>((resolve) => {
     process.once("SIGTERM", () => resolve());
