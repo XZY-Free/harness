@@ -1304,25 +1304,47 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     }
   }, 40_000);
 
-  it("R5-d 删屏障后回执前崩溃：releasing 可由重启 Broker 收敛为 released", async () => {
-    let failOnce = true;
-    const fixture = await setup({
-      async afterReleaseBarrierRemoved() {
-        if (!failOnce) return;
-        failOnce = false;
-        throw new Error("simulated-process-exit-after-unlink");
-      },
-    });
+  it("R5-d 删屏障后和 released 后回执前真实进程退出：原 tuple 均可续做", async () => {
+    const fixture = await setup();
     const grant = await activate(fixture);
+    const barrierRoot = await mkdtemp(path.join(tmpdir(), "r5-release-crash-"));
+    roots.push(barrierRoot);
+    const crashRelease = async (
+      mode: "after_unlink" | "after_release",
+      receipt: Awaited<ReturnType<typeof fixture.broker.freeze>>,
+    ) => {
+      const receiptPath = path.join(barrierRoot, `${mode}-receipt.json`);
+      const signalPath = path.join(barrierRoot, `${mode}-signal`);
+      await writeFile(receiptPath, JSON.stringify(receipt), "utf8");
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          path.join(process.cwd(), "lib/workspace/test-support/release-freeze-crash-child.mts"),
+          mode,
+          fixture.hostRoot,
+          fixture.writerRoot,
+          receiptPath,
+          signalPath,
+        ],
+        { cwd: process.cwd(), stdio: "ignore" },
+      );
+      childHandles.push(child);
+      await waitForFileExists(signalPath);
+      const exited = once(child, "exit");
+      child.kill("SIGKILL");
+      await exited;
+      expect(child.signalCode).toBe("SIGKILL");
+    };
+
     const intentId = "00000000-0000-4000-8000-0000000000f7";
     const receipt = await fixture.broker.freeze({
       grant,
       checkpointIntentId: intentId,
       anchorDigest: ANCHOR_DIGEST,
     });
-    await expect(fixture.broker.releaseFreeze(receipt)).rejects.toThrow(
-      "simulated-process-exit-after-unlink",
-    );
+    await crashRelease("after_unlink", receipt);
     expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
     const recordPath = path.join(
       fixture.controlRoot,
@@ -1337,10 +1359,51 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
       managedRoot: fixture.writerRoot,
     });
     await restarted.releaseFreeze(receipt);
-    expect(JSON.parse(await readFile(recordPath, "utf8"))).toMatchObject({ state: "released" });
+    expect(JSON.parse(await readFile(recordPath, "utf8"))).toMatchObject({
+      state: "released",
+      checkpointIntentId: intentId,
+      scopeDigest: receipt.scopeDigest,
+      writerGeneration: receipt.writerGeneration,
+      anchorDigest: receipt.anchorDigest,
+    });
     await expect(
       restarted.freeze({ grant, checkpointIntentId: intentId, anchorDigest: ANCHOR_DIGEST }),
     ).rejects.toThrow("CheckpointIntentRetired");
+
+    const secondIntent = "00000000-0000-4000-8000-0000000000fb";
+    const second = await restarted.freeze({
+      grant,
+      checkpointIntentId: secondIntent,
+      anchorDigest: ANCHOR_DIGEST,
+    });
+    await crashRelease("after_release", second);
+    const secondRecordPath = path.join(
+      fixture.controlRoot,
+      "safe-point-intents",
+      scopeComponent(grant.scopeDigest),
+      `${secondIntent}.json`,
+    );
+    expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
+    expect(JSON.parse(await readFile(secondRecordPath, "utf8"))).toMatchObject({
+      state: "released",
+      checkpointIntentId: secondIntent,
+      scopeDigest: second.scopeDigest,
+      writerGeneration: second.writerGeneration,
+      anchorDigest: second.anchorDigest,
+    });
+    const retryBroker = createWorkspaceHostBroker({
+      root: fixture.hostRoot,
+      managedRoot: fixture.writerRoot,
+    });
+    await retryBroker.releaseFreeze(second);
+    expect(JSON.parse(await readFile(secondRecordPath, "utf8"))).toMatchObject({
+      state: "released",
+      checkpointIntentId: secondIntent,
+      scopeDigest: second.scopeDigest,
+      writerGeneration: second.writerGeneration,
+      anchorDigest: second.anchorDigest,
+    });
+    expect(await pathExists(path.join(fixture.grantsRoot, "freeze.json"))).toBe(false);
   });
 
   it("R5-e/R5-f 同意图 tuple 冲突拒绝，重复释放幂等，不同新意图可正常冻结", async () => {
