@@ -2017,6 +2017,155 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
     }
   }, 120_000);
 
+  it.each([
+    ["before_request_freeze", "请求冻结前"],
+    ["after_request_freeze", "请求已冻结但 HTTP 未发送"],
+  ] as const)(
+    "R3-c: %s（%s）进程死亡后正式 Session Worker 沿用激活资源与稳定 Start 键",
+    async (stage, _label) => {
+      const suffix = stage === "before_request_freeze" ? "r3c1" : "r3c2";
+      const { context, broker, probe } = await seedManagedWriterEntryContext(suffix);
+      const turn = await acceptTurnOnly(context, `${suffix}-crash`, "请读取工作区并回答");
+      if (stage === "before_request_freeze") {
+        await db.execute(
+          sql.raw(
+            "CREATE TRIGGER topic02_r3c_before_freeze BEFORE UPDATE ON RuntimeSessionBinding FOR EACH ROW DO SLEEP(IF(NEW.semanticRequestDigest IS NOT NULL AND OLD.semanticRequestDigest IS NULL, 60, 0))",
+          ),
+        );
+      }
+      const child = spawnInitialDispatchCrashProcess({
+        tenantId: context.tenantId,
+        turnId: turn.id,
+        ownerId: context.ownerId,
+        stage,
+      });
+      try {
+        if (stage === "after_request_freeze") await child.barrier;
+        let invocation: Awaited<ReturnType<typeof listInvocationsForTurn>>[number] | undefined;
+        let owner: typeof executionOwnershipTable.$inferSelect | undefined;
+        let session:
+          | Awaited<ReturnType<typeof getRuntimeSessionBindingsByInvocation>>[number]
+          | undefined;
+        let writer: typeof workspaceWriteLock.$inferSelect | undefined;
+        const deadline = Date.now() + 25_000;
+        while (Date.now() < deadline) {
+          [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+          if (invocation) {
+            [owner] = await db
+              .select()
+              .from(executionOwnershipTable)
+              .where(eq(executionOwnershipTable.invocationId, invocation.id))
+              .limit(1);
+            [session] = await getRuntimeSessionBindingsByInvocation(
+              context.tenantId,
+              invocation.id,
+            );
+            [writer] = await db
+              .select()
+              .from(workspaceWriteLock)
+              .where(eq(workspaceWriteLock.tenantId, context.tenantId))
+              .limit(1);
+          }
+          if (owner?.executionPhase === "dispatching" && session && writer?.lockState === "active")
+            break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (!invocation || !owner || !session || !writer) {
+          throw new Error(`请求冻结窗口未形成：${child.stderr()}`);
+        }
+        const [attempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+        if (!attempt) throw new Error("Attempt 缺失");
+        const lease = await getEnvironmentLeaseByAttempt(
+          context.tenantId,
+          invocation.id,
+          attempt.id,
+        );
+        if (!lease) throw new Error("EnvironmentLease 缺失");
+        const manifest = lease.resourceManifest as { operationId?: string };
+        if (!manifest.operationId) throw new Error("Lease 缺少容器 operation");
+        const originalContainer = await inspectContainer(
+          managedContainerName(manifest.operationId),
+        );
+        expect(originalContainer).not.toBeNull();
+        expect(owner.executionPhase).toBe("dispatching");
+        expect(lease.readinessState).toBe("ready");
+        expect(writer.lockState).toBe("active");
+        const originalGrant = await broker.getWriter(probe.scopeDigest, writer.writerGeneration);
+        expect(originalGrant?.grantRef).toBe(writer.backendGrantRef);
+        if (stage === "before_request_freeze") {
+          expect(session.semanticRequestDigest).toBeNull();
+        } else {
+          expect(session.semanticRequestDigest).toBeTruthy();
+          expect(session.semanticRequestJson).toBeTruthy();
+        }
+        child.kill();
+        expect((await child.exited).signal).toBe("SIGKILL");
+        await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3c_before_freeze"));
+        const dueAt = Math.max(
+          session.updatedAt.getTime() + DISPATCH_STUCK_GRACE_MS,
+          session.dispatchLeaseExpiresAt?.getTime() ?? 0,
+        );
+        const databaseNow = await getAuthorityDatabaseTime(db);
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.max(0, dueAt - databaseNow.getTime() + 1_000)),
+        );
+        expect(owner.leaseExpiresAt.getTime()).toBeGreaterThan(
+          (await getAuthorityDatabaseTime(db)).getTime(),
+        );
+        expect((await createRuntimeDispatchRetryWorker().tick()).attempts).toBe(1);
+        const [continuedOwner] = await db
+          .select()
+          .from(executionOwnershipTable)
+          .where(eq(executionOwnershipTable.id, owner.id))
+          .limit(1);
+        const [continuedSession] = await getRuntimeSessionBindingsByInvocation(
+          context.tenantId,
+          invocation.id,
+        );
+        const [continuedWriter] = await db
+          .select()
+          .from(workspaceWriteLock)
+          .where(eq(workspaceWriteLock.id, writer.id))
+          .limit(1);
+        const continuedLease = await getEnvironmentLeaseByAttempt(
+          context.tenantId,
+          invocation.id,
+          attempt.id,
+        );
+        const continuedContainer = await inspectContainer(
+          managedContainerName(manifest.operationId),
+        );
+        expect(continuedOwner?.id).toBe(owner.id);
+        expect(continuedOwner?.activationDigest).toBe(owner.activationDigest);
+        expect(continuedSession?.id).toBe(session.id);
+        expect(continuedSession?.startIntentKey).toBe(session.startIntentKey);
+        expect(continuedSession?.semanticRequestDigest).toBeTruthy();
+        if (stage === "after_request_freeze") {
+          expect(continuedSession?.semanticRequestDigest).toBe(session.semanticRequestDigest);
+        }
+        expect(continuedWriter?.writerGeneration).toBe(writer.writerGeneration);
+        expect(continuedWriter?.backendGrantRef).toBe(writer.backendGrantRef);
+        expect(await broker.getWriter(probe.scopeDigest, writer.writerGeneration)).toMatchObject({
+          grantRef: originalGrant?.grantRef,
+          root: originalGrant?.root,
+        });
+        expect(continuedLease?.id).toBe(lease.id);
+        expect(continuedLease?.preparedDigest).toBe(lease.preparedDigest);
+        expect(continuedContainer?.Id).toBe(originalContainer?.Id);
+        expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+        expect(
+          await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id),
+        ).toHaveLength(1);
+      } finally {
+        child.kill();
+        await child.exited;
+        await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3c_before_freeze"));
+        await removeTestContainerForTurn(context.tenantId, turn.id);
+      }
+    },
+    120_000,
+  );
+
   it(
     "R2-e: Prepared 证据实际过期后，正式 Worker 真实回读原容器并以原 Revision 续写证据",
     async () => {

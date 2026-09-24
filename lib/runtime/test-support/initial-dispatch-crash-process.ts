@@ -9,7 +9,9 @@ export type InitialDispatchCrashStage =
   | "after_lease_prepared"
   | "before_owner"
   | "before_writer"
-  | "before_writer_commit";
+  | "before_writer_commit"
+  | "before_request_freeze"
+  | "after_request_freeze";
 
 export interface InitialDispatchCrashConfig {
   tenantId: string;
@@ -47,7 +49,14 @@ async function runEntry(config: InitialDispatchCrashConfig): Promise<void> {
   };
   // 这些模式只控制末端解析或在 DB 触发器前等待；初次执行图、准备 claim、
   // Environment 和 Attempt 的写入仍由 dispatchInvocationForTurn / startRuntimeInvocation 完成。
-  const runtimeClient = {} as Parameters<typeof dispatchInvocationForTurn>[0]["runtimeClient"];
+  const runtimeClient = (config.stage === "after_request_freeze"
+    ? {
+        async startInvocation() {
+          emit({ event: "barrier", stage: "after_request_freeze" });
+          return new Promise<never>(() => undefined);
+        },
+      }
+    : {}) as unknown as Parameters<typeof dispatchInvocationForTurn>[0]["runtimeClient"];
   await dispatchInvocationForTurn({
     tenantId: config.tenantId,
     turnId: config.turnId,
@@ -62,7 +71,9 @@ async function runEntry(config: InitialDispatchCrashConfig): Promise<void> {
     ...(config.stage === "after_claim" ||
     config.stage === "before_owner" ||
     config.stage === "before_writer" ||
-    config.stage === "before_writer_commit"
+    config.stage === "before_writer_commit" ||
+    config.stage === "before_request_freeze" ||
+    config.stage === "after_request_freeze"
       ? {
           runtimeEndpointResolver: async (binding) => {
             if (config.stage === "after_claim") {
