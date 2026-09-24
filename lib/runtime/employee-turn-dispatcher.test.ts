@@ -843,6 +843,23 @@ describe("dispatchEmployeeTurn", () => {
     vi.stubEnv("SNOW_CONTROL_PLANE_PUBLIC_URL", "https://platform.example.test/base/");
     const { server, tenantId, ownerId, thread, turn } =
       await seedReadyExternalEmployeeTurn("http-start");
+    const observedAtExternalStart: Array<{ ownerId: string | null; sessionIds: string[] }> = [];
+    server.setStartObserver(async (request) => {
+      const authority = request.body?.authority as { invocationId?: string } | undefined;
+      if (!authority?.invocationId) return;
+      const owner = await getActiveExecutionOwnership({
+        tenantId,
+        invocationId: authority.invocationId,
+      });
+      const sessions = await getRuntimeSessionBindingsByInvocation(
+        tenantId,
+        authority.invocationId,
+      );
+      observedAtExternalStart.push({
+        ownerId: owner?.id ?? null,
+        sessionIds: sessions.map((session) => session.id),
+      });
+    });
     const hostedDecision = vi.fn();
     const result = await dispatchEmployeeTurn({
       tenantId,
@@ -889,6 +906,11 @@ describe("dispatchEmployeeTurn", () => {
     });
     // V12：remote ref 由 Invocation 列迁移到 RuntimeSessionBinding。
     const [session] = await getRuntimeSessionBindingsByInvocation(tenantId, invocation?.id ?? "");
+    const owner = await getActiveExecutionOwnership({
+      tenantId,
+      invocationId: invocation?.id ?? "",
+    });
+    expect(observedAtExternalStart).toEqual([{ ownerId: owner?.id, sessionIds: [session?.id] }]);
     expect(session).toMatchObject({
       remoteSessionRef: `external-session:${invocation?.id}`,
       remoteExecutionRef: `external-execution:${invocation?.id}`,
@@ -1317,6 +1339,8 @@ describe("dispatchEmployeeTurn", () => {
     // A11：barrier 打开后才进入实时投递（此处不关心代际过滤，全部接受）。
     transientSubscription.release(() => true);
 
+    let observedOwnerBeforeUserTask = false;
+
     const dispatched = await dispatchEmployeeTurn({
       tenantId,
       threadId: thread.id,
@@ -1326,6 +1350,15 @@ describe("dispatchEmployeeTurn", () => {
       // 顶层恒为 base harness route；modelRef 作为 Thread 模型事实进入 Binding。
       decisionPort: {
         async decideNextAction() {
+          const runningTurn = await getTurnById(tenantId, turn.id);
+          const invocationId = runningTurn?.latestInvocationId;
+          if (!invocationId) throw new Error("Hosted Thread 用户任务前缺少 Invocation");
+          const owner = await getActiveExecutionOwnership({ tenantId, invocationId });
+          const sessions = await getRuntimeSessionBindingsByInvocation(tenantId, invocationId);
+          expect(owner).not.toBeNull();
+          expect(sessions).toHaveLength(1);
+          expect(sessions[0]?.ownershipId).toBe(owner?.id);
+          observedOwnerBeforeUserTask = true;
           return {
             actionId: "respond-1",
             stepNo: 1,
@@ -1355,6 +1388,7 @@ describe("dispatchEmployeeTurn", () => {
       .where(eq(executionBindingTable.invocationId, updatedTurn?.latestInvocationId ?? ""))
       .limit(1);
     expect(dispatched.dispatched).toBe(true);
+    expect(observedOwnerBeforeUserTask).toBe(true);
     expect(deltas).toEqual(["真实执行器", "回复：请确认已经接通"]);
     expect(updatedTurn?.turnState).toBe("completed");
     expect(binding?.modelId).toBe("test-model");

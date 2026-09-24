@@ -594,12 +594,41 @@ describe("Thread-independent Job runtime integration", () => {
 
   it("JOB-REG-13: 无 Thread Job 接纳后由持久消费者创建首次 Attempt 和 Session", async () => {
     const fixture = await seedJobFixture({ inputJson: { task: "run from job admission" } });
+    expect(
+      await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.invocationId, fixture.invocation.id)),
+    ).toEqual([]);
+    expect(await getRuntimeSessionBindingsByInvocation(TENANT_ID, fixture.invocation.id)).toEqual(
+      [],
+    );
     const due = new Date(Date.now() + DISPATCH_STUCK_GRACE_MS + 1_000);
     const candidates = await scanUndispatchedInvocations({ now: due, limit: 10 });
     expect(candidates.map((candidate) => candidate.invocationId)).toContain(fixture.invocation.id);
 
+    let observedOwnerBeforeUserTask: string | null = null;
     const service = createConfiguredHostedRuntimeApplicationService({
-      ...createDirectResponsePorts(() => "job consumer completed"),
+      ...createDirectResponsePorts(async () => {
+        const owners = await db
+          .select()
+          .from(executionOwnershipTable)
+          .where(
+            and(
+              eq(executionOwnershipTable.invocationId, fixture.invocation.id),
+              eq(executionOwnershipTable.ownershipState, "active"),
+            ),
+          );
+        const sessions = await getRuntimeSessionBindingsByInvocation(
+          TENANT_ID,
+          fixture.invocation.id,
+        );
+        expect(owners).toHaveLength(1);
+        expect(sessions).toHaveLength(1);
+        expect(sessions[0]?.ownershipId).toBe(owners[0]?.id);
+        observedOwnerBeforeUserTask = owners[0]?.id ?? null;
+        return "job consumer completed";
+      }),
       modelRef: "test-managed-model",
     });
     const summary = await runDueUndispatchedIntentRecoveries({
@@ -627,6 +656,7 @@ describe("Thread-independent Job runtime integration", () => {
         { interval: 50, timeout: 10_000 },
       )
       .toBe("completed");
+    expect(observedOwnerBeforeUserTask).not.toBeNull();
     const worker = createProductionWorkerRole("job-worker");
     await worker.pollOnce();
     expect((await getJobById(TENANT_ID, fixture.job.id))?.jobState).toBe("completed");
