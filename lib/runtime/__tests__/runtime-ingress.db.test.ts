@@ -378,6 +378,15 @@ describe("RuntimeEventIngress database fencing", () => {
       batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [event] },
     });
     const replacement = await replaceCurrentOwner(runtime);
+    const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const countersBefore = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const mappingBefore = await readProductMappingCounts(
+      runtime.fixture.tenantId,
+      runtime.fixture.threadId,
+    );
 
     await expect(
       ingressRuntimeEvents({
@@ -386,7 +395,34 @@ describe("RuntimeEventIngress database fencing", () => {
         batch: {
           protocolVersion: 3,
           authority: runtime.acquired.authority,
-          events: [progressEvent("3", randomUUID(), { resultRef: "old-response" })],
+          events: [
+            {
+              eventId: randomUUID(),
+              producerSequence: "3",
+              type: "response.completed",
+              schemaVersion: 1,
+              payload: { text: "old-response", item_type: "assistant_message" },
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+    await expect(
+      ingressRuntimeEvents({
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        batch: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [
+            {
+              eventId: randomUUID(),
+              producerSequence: "3",
+              type: "execution.completed",
+              schemaVersion: 1,
+              payload: { finish_reason: "execution.completed" },
+            },
+          ],
         },
       }),
     ).rejects.toMatchObject({ code: "NotCurrentExecutor" });
@@ -406,6 +442,15 @@ describe("RuntimeEventIngress database fencing", () => {
         },
       }),
     ).rejects.toBeInstanceOf(IngressAuthorityMismatchError);
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      ledgerBefore,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(countersBefore);
+    expect(
+      await readProductMappingCounts(runtime.fixture.tenantId, runtime.fixture.threadId),
+    ).toEqual(mappingBefore);
   });
 
   it("INGRESS-02: Callback 与 Takeover 并发时旧事件只可能先提交或被拒，不能跨换代写入", async () => {
