@@ -56,6 +56,7 @@ import { createInvocationCommandInTransaction } from "@/lib/executions/applicati
 import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
 import {
   claimAttemptPreparation,
+  claimAttemptPreparationInTransaction,
   getAttemptById,
   getLatestAttempt,
   markAttemptPreparedInTransaction,
@@ -2792,6 +2793,68 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
     expect(
       (await getRuntimeSessionBindingById(fixture.tenantId, generation.session.id))?.bindingState,
     ).toBe("prepared");
+  });
+
+  it("N02-T4 / R1-c: 新领取事务持有根锁时，旧失败提交必须等待并在换手后零写入", async () => {
+    const fixture = await seedClaimFixture();
+    const first = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+    if (!first.claim) throw new Error("W1 未取得准备 claim");
+    await db
+      .update(invocationAttemptTable)
+      .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+
+    let releaseW2!: () => void;
+    const holdW2 = new Promise<void>((resolve) => {
+      releaseW2 = resolve;
+    });
+    let reportW2!: (claim: NonNullable<typeof first.claim>) => void;
+    const w2Claimed = new Promise<NonNullable<typeof first.claim>>((resolve) => {
+      reportW2 = resolve;
+    });
+    const secondInput = preparationInput(fixture, randomUUID());
+    const secondTransaction = db.transaction(async (tx) => {
+      await tx
+        .select({ id: invocationTable.id })
+        .from(invocationTable)
+        .where(eq(invocationTable.id, fixture.invocation.id))
+        .for("update");
+      const second = await claimAttemptPreparationInTransaction(tx, secondInput);
+      if (!second.claim) throw new Error(`W2 未接管准备 claim：${second.disposition}`);
+      reportW2(second.claim);
+      await holdW2;
+      return second.claim;
+    });
+    try {
+      const secondClaim = await w2Claimed;
+      const oldFailure = failAttemptAndInvokeRecoveryAuthority({
+        tenantId: fixture.tenantId,
+        attempt: fixture.attempt,
+        invocation: fixture.invocation,
+        errorCode: "LatePlainIoError",
+        errorSummary: "W1 旧普通失败在 W2 事务期间提交",
+        now: new Date(),
+        workIdentity: { kind: "preparation", claim: first.claim },
+      });
+      const whileLocked = await Promise.race([
+        oldFailure.then(
+          () => "settled",
+          () => "settled",
+        ),
+        new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+      ]);
+      expect(whileLocked).toBe("waiting");
+      releaseW2();
+      expect((await secondTransaction).claimId).toBe(secondClaim.claimId);
+      await expect(oldFailure).rejects.toThrow("PreparationClaimSuperseded");
+      const after = await getAttemptById(fixture.attempt.id);
+      expect(after?.attemptState).not.toBe("failed");
+      expect(after?.preparationClaimId).toBe(secondClaim.claimId);
+      expect(after?.preparationState).toBe("preparing");
+    } finally {
+      releaseW2();
+      await secondTransaction;
+    }
   });
 
   it("R1-b: 旧准备 claim 不得沿继任者已建的 Session 继续派发", async () => {
