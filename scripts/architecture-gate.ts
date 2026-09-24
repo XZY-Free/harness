@@ -30,7 +30,7 @@ const RETIRED_VERSION = `v${11}`;
 const RETIRED_PATTERNS = [
   new RegExp(`/${RETIRED_VERSION}/`, "i"),
   new RegExp(`/${RETIRED_VERSION.toUpperCase()}/`),
-  new RegExp(`${RETIRED_VERSION}-`, "i"),
+  new RegExp(`(?:^|[^A-Za-z0-9])${RETIRED_VERSION}-`, "i"),
   new RegExp(`use${RETIRED_VERSION.toUpperCase()}`),
   new RegExp(`build${RETIRED_VERSION.toUpperCase()}`),
 ];
@@ -175,14 +175,12 @@ function checkExternalRuntimeTransport(): void {
  *    collectRetiredModuleDependencyViolations 单独把关，不放行真实 import）。
  *
  * 与 `scripts/repository-architecture.contract.test.ts` 的
- * `NAMING_GUARD_EXCEPTION_PREFIXES` 保持同一口径：专题02 收尾审查工程包的
+ * `NAMING_GUARD_EXACT_FILES` 保持同一口径：专题02 收尾审查工程包的
  * manifests 逐条收录改造前的原验收义务，必须写出已退役版本前缀本身。
- * 只按前缀精确匹配，不放行生产源码。
+ * 只按文件精确匹配，不放行生产源码。
  */
 const RETIRED_NAMING_EXCEPTIONS = [
-  /^docs\/V12\/02\/snowharness-execution-design\//,
-  /^docs\/topic02\/nexharness-topic02-closure\//,
-  /^docs\/topic02\/nexharness-topic02-repair\//,
+  /^docs\/V12\/02\/snowharness-execution-design\/(?:source-manifest\.json|engineering-design\.md|test-matrix\.json|sections\/(?:naming-inventory|residual-removal|cleanliness-checklist|test-matrix|naming-rules)\.md)$/,
   /^docs\/topic02\/专题02固定关闭检查表\/(?:固定检查表\.md|固定检查表\.json|sources\/原专题02基础验收矩阵\.json)$/,
   /\.test\.tsx?$/,
 ];

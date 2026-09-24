@@ -19,14 +19,14 @@ const forbidden = new RegExp(
   [
     `/${retiredVersion}/`,
     `/${retiredVersion.toUpperCase()}/`,
-    `${retiredVersion}-`,
+    `(?:^|[^A-Za-z0-9])${retiredVersion}-`,
     `use${retiredVersion.toUpperCase()}`,
     `build${retiredVersion.toUpperCase()}`,
   ].join("|"),
 );
 
 /**
- * 允许保留 v11/V11 等禁止字符串的路径前缀白名单。
+ * 允许保留退役命名原文的精确文件清单。
  *
  * 授权依据：
  * - sections/naming-inventory.md：文档可保留改造前证据引用；生产注释改成当前
@@ -39,14 +39,18 @@ const forbidden = new RegExp(
  * 精确白名单，不允许通配。生产代码路径（app/components/desktop/lib/scripts/
  * tests/e2e/ 的非 Guard 部分）不在此列，仍按 forbidden 正则严格扫描。
  */
-const NAMING_GUARD_EXCEPTION_PREFIXES = [
-  "docs/V12/", // 专题工程包与历史交接叙事（工程包正文引用 v11/v12 作为清理目标）
-  "docs/topic-01/", // Topic-01 历史归档（LIVE 生产 manifest 位于 evidence/，但历史叙述允许保留旧引用）
-  "docs/implementation/topic-01-", // Topic-01 历史实施笔记
-  "docs/topic02/nexharness-topic02-closure/", // 专题02 收尾审查工程包：manifests 收录原验收义务，需写出已退役版本前缀本身
-  "docs/topic02/nexharness-topic02-repair/", // 专题02 完整修复工程包：正文必须写出"不得保留 V11/V3 式生产命名"这一清理目标本身
-  "lib/architecture/", // Canonical Naming Guard 测试（负向断言必须持有禁止字符串）
-];
+const NAMING_GUARD_EXACT_FILES = new Set([
+  "docs/V12/02/snowharness-execution-design/source-manifest.json",
+  "docs/V12/02/snowharness-execution-design/engineering-design.md",
+  "docs/V12/02/snowharness-execution-design/test-matrix.json",
+  "docs/V12/02/snowharness-execution-design/sections/naming-inventory.md",
+  "docs/V12/02/snowharness-execution-design/sections/residual-removal.md",
+  "docs/V12/02/snowharness-execution-design/sections/cleanliness-checklist.md",
+  "docs/V12/02/snowharness-execution-design/sections/test-matrix.md",
+  "docs/V12/02/snowharness-execution-design/sections/naming-rules.md",
+  "lib/architecture/canonical-naming.test.ts",
+  "lib/architecture/canonical-routes.test.ts",
+]);
 const FROZEN_HISTORICAL_NAMING_FILES = new Set([
   "docs/topic02/专题02固定关闭检查表/固定检查表.md",
   "docs/topic02/专题02固定关闭检查表/固定检查表.json",
@@ -54,10 +58,7 @@ const FROZEN_HISTORICAL_NAMING_FILES = new Set([
 ]);
 
 function isDocException(path: string): boolean {
-  return (
-    FROZEN_HISTORICAL_NAMING_FILES.has(path) ||
-    NAMING_GUARD_EXCEPTION_PREFIXES.some((prefix) => path.startsWith(prefix))
-  );
+  return FROZEN_HISTORICAL_NAMING_FILES.has(path) || NAMING_GUARD_EXACT_FILES.has(path);
 }
 
 function sourceFiles(path: string): string[] {
@@ -72,6 +73,21 @@ function sourceFiles(path: string): string[] {
 }
 
 describe("repository architecture naming contract", () => {
+  it("CLEAN-08: exceptions do not exempt sibling files or filename suffixes", () => {
+    expect(
+      isDocException("docs/V12/02/snowharness-execution-design/sections/naming-rules.md"),
+    ).toBe(true);
+    expect(
+      isDocException("docs/V12/02/snowharness-execution-design/sections/unreviewed-v11.md"),
+    ).toBe(false);
+    expect(
+      isDocException("docs/V12/02/snowharness-execution-design/sections/naming-rules.md.old"),
+    ).toBe(false);
+    expect(isDocException("lib/architecture/unreviewed-v11.ts")).toBe(false);
+    expect(forbidden.test("env11-binding-mismatch.log")).toBe(false);
+    expect(forbidden.test(`runtime-v${11}-legacy.ts`)).toBe(true);
+  });
+
   it("contains no retired version file names or source symbols", () => {
     const violations = SCAN_ROOTS.flatMap((root) => sourceFiles(join(ROOT, root)))
       .filter((file) => !file.endsWith(".DS_Store"))
