@@ -54,6 +54,7 @@ const V1_PATH_EXCEPTIONS = new Set([
   "lib/architecture/canonical-routes.test.ts", // 本 Guard 自身
   "lib/architecture/canonical-naming.test.ts", // 姊妹 Guard
   "scripts/architecture-gate-rules.test.ts", // gate 规则负向测试 mock 路径
+  "e2e/smoke.spec.ts", // 真实路由冒烟测试断言旧地址必须不存在
   "scripts/repository-architecture.contract.test.ts", // 已含 v11 白名单
   "lib/artifacts/test-support/attempt-runtime-publication-with-attestation-without-trusted-run.ts", // DSSE predicateType
 ]);

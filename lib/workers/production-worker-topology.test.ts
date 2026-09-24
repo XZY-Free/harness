@@ -27,16 +27,36 @@ describe("canonical production worker topology", () => {
     const topology = loadYaml(read("deploy/production/compose.yaml")) as {
       services: Record<
         string,
-        { deploy?: { replicas?: number }; environment?: Record<string, string> }
+        {
+          deploy?: { replicas?: number };
+          environment?: Record<string, string>;
+          command?: string[];
+        }
       >;
     };
-    expect(Object.keys(topology.services).sort()).toEqual([...CANONICAL_PRODUCTION_ROLES].sort());
+    expect(Object.keys(topology.services).sort()).toEqual(
+      [...CANONICAL_PRODUCTION_ROLES, "workspace-host", "environment-lease-cleanup"].sort(),
+    );
     for (const role of CANONICAL_PRODUCTION_ROLES) {
       expect(topology.services[role]?.deploy?.replicas).toBeGreaterThan(0);
     }
     for (const role of DURABLE_WORKER_ROLES) {
       expect(topology.services[role]?.environment?.WORKER_ROLE).toBe(role);
     }
+    expect(topology.services["workspace-host"]?.deploy?.replicas).toBe(1);
+    expect(topology.services["environment-lease-cleanup"]?.deploy?.replicas).toBe(1);
+    expect(topology.services["workspace-host"]?.command).toContain(
+      "scripts/workers/workspace-host.ts",
+    );
+    expect(topology.services["environment-lease-cleanup"]?.command).toContain(
+      "scripts/workers/environment-lease-cleanup.ts",
+    );
+    expect(
+      topology.services["workspace-host"]?.environment?.SNOWHARNESS_WORKSPACE_HOST_ROOT,
+    ).toBeTruthy();
+    expect(
+      topology.services["environment-lease-cleanup"]?.environment?.WORKER_ROLE,
+    ).toBeUndefined();
     expect(read("docker/worker/Dockerfile")).toContain("scripts/workers/worker-entrypoint.ts");
     expect(read("package.json")).toContain('"worker:start"');
   });

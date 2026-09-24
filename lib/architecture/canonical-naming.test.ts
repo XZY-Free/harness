@@ -108,8 +108,10 @@ function walkSourceFiles(root: string): string[] {
 
 function readProductionSources(): Array<{ path: string; content: string }> {
   const SELF = "lib/architecture/canonical-naming.test.ts";
+  // 该规则的负向测试会故意写入被禁止的名称和环境变量。
+  const NEGATIVE_FIXTURE = "scripts/architecture-gate-rules.test.ts";
   return PRODUCTION_SCAN_ROOTS.flatMap(walkSourceFiles)
-    .filter((path) => !isDocException(path) && path !== SELF)
+    .filter((path) => !isDocException(path) && path !== SELF && path !== NEGATIVE_FIXTURE)
     .map((path) => ({ path, content: readFileSync(join(ROOT, path), "utf8") }));
 }
 
@@ -181,7 +183,7 @@ describe("Canonical Naming Guard (Foundation basics)", () => {
       /\bV11RuntimeClient\b/,
       /\bRuntimeHeartbeatV3\b/,
       /\bWorkloadTokenV3\b/,
-      /\bNewRuntimeService\b/,
+      // NewRuntimeService 是合法 InferInsertModel 记录类型；AST gate 才区分声明语义。
       /\bNewOwnershipMode\b/,
       /\bLegacyRuntime\b/,
     ];
