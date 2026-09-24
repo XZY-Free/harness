@@ -357,6 +357,8 @@ Artifact 保存 AI/Tool 最终生成文件的逻辑记录、Provider、内容引
 
 WorkspaceAttachment 与 Artifact 不是两套字节存储：当前部署只装配一个 `FileStorageProvider`。开源部署默认保存在 Thread Workspace，企业私有部署可以替换为 COS。两类记录分开是因为输入附件和输出产物的归属、授权及生命周期不同，不代表平台重复保存同一文件。PDF、Word、Excel 等在上传时只保存原始字节；解析由确实需要内容的 Agent 或业务能力按授权执行。
 
+无 Thread 的 Job reference 输入使用同一 Provider 的可选 `jobInput.store/read` 能力。默认实现按租户和内容摘要保存在工作区根目录的内部 Job 输入区；企业 COS Provider 可实现相同能力。未实现该能力的部署拒绝创建 reference Job，仍可使用行内输入。
+
 ## 7. 观测与治理领域
 
 ### 7.1 Trace

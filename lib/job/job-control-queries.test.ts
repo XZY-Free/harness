@@ -17,7 +17,10 @@
  * - Job 不复活：终态 Job 不能改回 queued
  */
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { workspaceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
@@ -31,6 +34,7 @@ import {
   processCancelCommand,
   processRetryCommand,
 } from "@/lib/job/job-control-queries";
+import { storeJobInputReference } from "@/lib/job/job-input-reference";
 import { createJob, getJobById, updateJobState } from "@/lib/job/job-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -78,7 +82,7 @@ async function createQueuedJob(tenantId: string, agentId: string, options?: { th
     triggerRef: "schedule-001",
     completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId: options?.threadId,
-    inputRef: "input://batch/001",
+    inputJson: { task: "batch-001" },
     idempotencyKey: `create-${randomUUID()}`,
   });
 }
@@ -214,7 +218,7 @@ describe("processRetryCommand", () => {
     expect(result.replacementJob?.jobState).toBe("queued");
     expect(result.replacementJob?.tenantId).toBe(fx.tenantId);
     expect(result.replacementJob?.agentId).toBe(fx.agentId);
-    expect(result.replacementJob?.inputRef).toBe("input://batch/001"); // reuseInput=true 默认
+    expect(result.replacementJob?.inputRef).toBeNull(); // inline 输入由 replacement 复用
     expect(result.command.commandState).toBe("acknowledged");
     expect(result.command.resultJson).toEqual({ replacementJobId: result.replacementJob?.id });
   });
@@ -317,6 +321,46 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("rejected_input");
     expect(result.command.commandState).toBe("rejected");
+    expect(result.command.lastErrorCode).toBe("JOB_INPUT_NO_LONGER_AVAILABLE");
+    expect(result.replacementJob).toBeNull();
+  });
+
+  it("reference 内容变化时默认校验拒绝 retry，不创建 replacement", async () => {
+    const fx = await seedFixture();
+    const { inputRef, inputHash } = await storeJobInputReference({
+      tenantId: fx.tenantId,
+      payload: { task: randomUUID() },
+    });
+    const { job } = await createJob({
+      tenantId: fx.tenantId,
+      agentId: fx.agentId,
+      jobType: "evaluation",
+      triggerRef: "schedule-001",
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
+      inputRef,
+      inputHash,
+    });
+    const running = await advanceToRunning(fx.tenantId, job.id, 1);
+    await advanceToCompleted(fx.tenantId, job.id, running.versionNo);
+    const cmd = await createRetryCommand({
+      tenantId: fx.tenantId,
+      jobId: job.id,
+      requestedBy: fx.ownerId,
+      idempotencyKey: `retry-${randomUUID()}`,
+    });
+    const root = isAbsolute(workspaceConfig.root)
+      ? workspaceConfig.root
+      : resolve(process.cwd(), workspaceConfig.root);
+    await writeFile(
+      join(root, ".snow", "job-inputs", fx.tenantId, inputHash.slice("sha256:".length)),
+      JSON.stringify({ task: "changed" }),
+    );
+
+    const result = await processRetryCommand({
+      tenantId: fx.tenantId,
+      commandId: cmd.command.id,
+    });
+    expect(result.outcome).toBe("rejected_input");
     expect(result.command.lastErrorCode).toBe("JOB_INPUT_NO_LONGER_AVAILABLE");
     expect(result.replacementJob).toBeNull();
   });

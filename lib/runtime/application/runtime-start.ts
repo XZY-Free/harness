@@ -33,6 +33,9 @@ import {
   lockInvocationRootIfExists,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
+import { assertJobInputDigestMatches } from "@/lib/job/job-input-digest";
+import { resolveJobInputReference } from "@/lib/job/job-input-reference";
+import { getJobById } from "@/lib/job/job-queries";
 import { environmentLeaseTable } from "@/lib/persistence/schema/environment";
 import type {
   ExecutionBinding,
@@ -293,6 +296,21 @@ export async function startRuntimeInvocation(
     input.invocation.inputDigest !== input.expectedInputDigest
   ) {
     throw new Error("InputDigestMismatch");
+  }
+  if (input.invocation.subjectType === "job") {
+    const job = input.invocation.jobId
+      ? await getJobById(input.tenantId, input.invocation.jobId)
+      : null;
+    if (!job) throw new Error("InputUnavailable");
+    assertJobInputDigestMatches({ job, invocationInputDigest: input.invocation.inputDigest });
+    if (job.inputKind === "reference") {
+      if (!job.inputRef) throw new Error("InputUnavailable");
+      await resolveJobInputReference({
+        tenantId: input.tenantId,
+        inputRef: job.inputRef,
+        inputHash: job.inputHash,
+      });
+    }
   }
   const declaredAttempt = await getAttemptById(input.attempt.id);
   if (!declaredAttempt || declaredAttempt.invocationId !== input.invocation.id) {

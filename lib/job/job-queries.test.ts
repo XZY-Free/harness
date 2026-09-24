@@ -113,7 +113,6 @@ async function createQueuedJob(
     triggerRef?: string;
     threadId?: string;
     replacesJobId?: string;
-    inputRef?: string;
     createdBy?: string;
     idempotencyKey?: string;
   },
@@ -126,7 +125,7 @@ async function createQueuedJob(
     completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId: options?.threadId,
     replacesJobId: options?.replacesJobId,
-    inputRef: options?.inputRef ?? "input://batch/001",
+    inputJson: { task: "batch-001" },
     createdBy: options?.createdBy,
     idempotencyKey: options?.idempotencyKey,
   });
@@ -165,7 +164,7 @@ describe("createJob 成功路径", () => {
     expect(result.job.completionPolicyJson).toMatchObject(ALL_SUCCESS_COMPLETION_POLICY);
     expect(result.job.replacesJobId).toBeNull();
     expect(result.job.threadId).toBeNull();
-    expect(result.job.inputRef).toBe("input://batch/001");
+    expect(result.job.inputRef).toBeNull();
     // A10：inputHash 由实际输入经 RFC 8785 规范化摘要推导，不再由调用方自报。
     expect(result.job.inputHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(result.job.lastEventSequence).toBe(1);
@@ -191,7 +190,7 @@ describe("createJob 成功路径", () => {
       thread_id: null,
       replaces_job_id: null,
       completion_policy: ALL_SUCCESS_COMPLETION_POLICY,
-      input_ref: "input://batch/001",
+      input_ref: null,
       input_hash: result.job.inputHash,
       created_by: null,
     });
@@ -218,7 +217,7 @@ describe("createJob 成功路径", () => {
       completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       threadId: "thread-001",
       replacesJobId: failed.id,
-      inputRef: "input://batch/001",
+      inputJson: { task: "batch-001" },
       createdBy: fx.ownerId,
       idempotencyKey: "replace-001",
     });

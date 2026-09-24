@@ -58,11 +58,15 @@ function validateExtension(extension: FileStorageExtension): void {
     provider.name.trim().length === 0 ||
     typeof provider.store !== "function" ||
     typeof provider.read !== "function" ||
-    typeof provider.delete !== "function"
+    typeof provider.delete !== "function" ||
+    (provider.jobInput !== undefined &&
+      (!provider.jobInput ||
+        typeof provider.jobInput.store !== "function" ||
+        typeof provider.jobInput.read !== "function"))
   ) {
     throw new FileStorageConfigurationError(
       "file_storage_invalid",
-      "文件存储扩展必须提供具名的 store/read/delete Provider",
+      "文件存储扩展必须提供具名的 store/read/delete Provider；jobInput 若提供也必须实现 store/read",
     );
   }
 }

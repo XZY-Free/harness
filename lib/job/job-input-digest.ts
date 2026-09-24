@@ -33,8 +33,8 @@ export interface JobInputDigestFacts {
  *
  * - **inline**：payload 就在 `inputJson` 行内，按与 `createJob` 完全相同的规范算法重算
  *   ——这是真正能发现"行内输入被改写"的路径。
- * - **reference**：定位符本身不含内容，创建方冻结的内容摘要就是 `inputHash`，无法从
- *   定位符推导；此时"复算"只能是它自己，完整性由调用方的交叉比对保证。
+ * - **reference**：定位符本身不含内容。这里仅核对 Job 与 Invocation 的冻结摘要；
+ *   创建、ContextHandle、Runtime 启动与 Hosted 读取还必须调用异步 Provider 读回内容复验。
  */
 export function computeJobInputDigestForJob(job: JobInputDigestFacts): string {
   if (job.inputKind === "inline") return computeJobInputDigest(job.inputJson);
@@ -47,7 +47,8 @@ export const JOB_INPUT_DIGEST_MISMATCH = "InputDigestMismatch";
 /**
  * 运行时复验：Job 的当前输入摘要必须同时等于冻结的 `inputHash` 与 `Invocation.inputDigest`。
  *
- * 三个事实（Job 行内/引用输入、Job 冻结摘要、Invocation 冻结摘要）任一不等即拒绝执行。
+ * inline 的行内输入、Job 冻结摘要、Invocation 冻结摘要任一不等即拒绝执行。
+ * reference 的真实内容必须另由 `resolveJobInputReference` 读取后核验。
  * 共享这条实现的目的：创建、重复接纳（creationKey 比对）与运行时复验必须是**同一个**
  * 规范化摘要，否则"合法输入经数据库 round-trip 被重排"会被误判为篡改（A10）。
  */

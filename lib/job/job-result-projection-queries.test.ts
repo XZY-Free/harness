@@ -92,7 +92,7 @@ async function createCompletedJob(tenantId: string, agentId: string, threadId: s
     triggerRef: "schedule-001",
     completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId,
-    inputRef: "input://batch/001",
+    inputJson: { task: "batch-001" },
     idempotencyKey: `create-${randomUUID()}`,
   });
 
@@ -330,7 +330,7 @@ describe("projectJobResultToThread 错误路径", () => {
       triggerRef: "schedule-001",
       completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       // threadId 缺失
-      inputRef: "input://batch/001",
+      inputJson: { task: "batch-001" },
       idempotencyKey: `create-${randomUUID()}`,
     });
 

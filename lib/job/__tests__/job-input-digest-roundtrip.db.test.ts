@@ -16,7 +16,7 @@
  * 4. JOB-DIGEST-04：运行时复验谓词（`assertJobInputDigestMatches`，Hosted
  *    `loadHostedExecutionSubject` 实际调用的那一个）在真实回读行上成立；
  *    行内输入被改写后必须拒绝。
- * 5. JOB-DIGEST-05：reference 输入的分支——内容摘要由创建方冻结，不经 JSON 规范化。
+ * 5. JOB-DIGEST-05：reference 输入的分支——创建时经文件 Provider 写入并读取实际内容。
  */
 import { randomUUID } from "node:crypto";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
@@ -31,6 +31,7 @@ import {
   assertJobInputDigestMatches,
   computeJobInputDigest,
 } from "@/lib/job/job-input-digest";
+import { resolveJobInputReference, storeJobInputReference } from "@/lib/job/job-input-reference";
 import { createJob } from "@/lib/job/job-queries";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { jobTable } from "@/lib/persistence/schema/job";
@@ -245,10 +246,12 @@ describe("A10：Job 输入摘要的 JSON 规范化稳定性（真实 MySQL round
     ).toThrow(JOB_INPUT_DIGEST_MISMATCH);
   }, 30_000);
 
-  it("JOB-DIGEST-05: reference 输入的内容摘要由创建方冻结，不经 JSON 规范化", async () => {
+  it("JOB-DIGEST-05: reference 输入的内容由文件 Provider 保存并按冻结摘要回读", async () => {
     const creationKey = `creation:${randomUUID()}`;
-    const inputRef = `object://job-input/${randomUUID()}`;
-    const frozenDigest = `sha256:${"a".repeat(64)}`;
+    const { inputRef, inputHash: frozenDigest } = await storeJobInputReference({
+      tenantId: TENANT_ID,
+      payload: { task: "reference", nested: { b: 2, a: 1 } },
+    });
     const { job } = await createJob({
       tenantId: TENANT_ID,
       agentId: null,
@@ -263,8 +266,14 @@ describe("A10：Job 输入摘要的 JSON 规范化稳定性（真实 MySQL round
     expect(row.inputKind).toBe("reference");
     expect(row.inputJson).toBeNull();
     expect(row.inputHash).toBe(frozenDigest);
+    expect(
+      await resolveJobInputReference({ tenantId: TENANT_ID, inputRef, inputHash: frozenDigest }),
+    ).toEqual({ task: "reference", nested: { a: 1, b: 2 } });
+    await expect(
+      resolveJobInputReference({ tenantId: randomUUID(), inputRef, inputHash: frozenDigest }),
+    ).rejects.toThrow("InputUnavailable");
 
-    // reference 分支的"复算"只能是冻结值本身 —— 定位符不含内容。
+    // 行内同步谓词只核对 Job/Invocation，真实文件读取由异步入口完成。
     expect(assertJobInputDigestMatches({ job: row, invocationInputDigest: frozenDigest })).toBe(
       frozenDigest,
     );

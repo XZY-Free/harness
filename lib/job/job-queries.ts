@@ -29,6 +29,7 @@ import { parseCompletionPolicy } from "@/lib/job/completion-policy";
 import { JobNotFoundError, JobStateConflictError, JobVersionConflictError } from "@/lib/job/errors";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
 import { computeJobInputDigest } from "@/lib/job/job-input-digest";
+import { resolveJobInputReference } from "@/lib/job/job-input-reference";
 import {
   type Job,
   type JobEvent,
@@ -78,7 +79,7 @@ export interface CreateJobParams {
   threadId?: string;
   /** retry 时指向原 Job；原 Job 状态/事件不被覆盖。 */
   replacesJobId?: string;
-  /** Job 输入引用（领域服务保证输入仍可访问）。 */
+  /** 当前部署 FileStorageProvider 签发的 Job 输入引用。 */
   inputRef?: string;
   inputJson?: unknown;
   inputKind?: JobInputKind;
@@ -166,8 +167,31 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
       "createJob: 只有 reference 输入可声明内容摘要；inline 输入的 inputHash 必须由 inputJson 推导",
     );
   }
-  const inputHash =
-    params.inputHash ?? computeJobInputDigest(inputKind === "inline" ? inputJson : params.inputRef);
+  if (inputKind === "reference" && !params.inputHash) {
+    throw new Error("createJob: reference input 必须提供内容摘要");
+  }
+  const inputHash = params.inputHash ?? computeJobInputDigest(inputJson);
+  if (inputKind === "reference") {
+    // 同一 creationKey 的冲突先按已冻结 Job 判定，避免被外部内容变化掩盖。
+    if (params.creationKey) {
+      const [existing] = await db
+        .select({ inputHash: jobTable.inputHash })
+        .from(jobTable)
+        .where(
+          and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.creationKey, params.creationKey)),
+        )
+        .limit(1);
+      if (existing && existing.inputHash !== inputHash) {
+        throw new JobCreationConflictError(params.creationKey);
+      }
+    }
+    if (!params.inputRef) throw new Error("InputUnavailable");
+    await resolveJobInputReference({
+      tenantId: params.tenantId,
+      inputRef: params.inputRef,
+      inputHash,
+    });
+  }
 
   const result = await db.transaction(async (tx) => {
     // creationKey 来自领域服务的正式业务触发身份（09 §8.2）；未提供时用 Job 自身 id

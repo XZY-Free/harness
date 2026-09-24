@@ -527,6 +527,8 @@ cancel 命令只先写 `job.cancel_requested`，不能提前修改为 cancelled�
 
 开源默认 Provider 把字节保存到 `SNOW_WORKSPACES_DIR/{thread_id}/.snow/files/{attachment|artifact}/{resource_id}/content`。`.snow` 是平台内部目录，不进入工作区文件列表、预览服务或 Git 交付。企业发行版在组合根替换为 COS Provider 后直接写 COS，不先写本地再上传。Gaia 附件上传属于 HR 请假提交中的下游业务动作，不是平台文件持久化 Provider。
 
+无 Thread 的 Job reference 输入使用同一 Provider 的可选 `jobInput.store/read` 能力，不伪造 Thread id。默认实现存于 `SNOW_WORKSPACES_DIR/.snow/job-inputs/{tenant_id}/{sha256}`，按租户隔离且同摘要只写一次。Job 保存 Provider 返回的 `inputRef` 与冻结 `inputHash`；创建、签发 ContextHandle、Runtime 启动和 Hosted 读取时都实际读回 JSON 内容并按 RFC 8785 重算摘要。企业 COS 实现可提供同一能力；未提供时 reference Job 入口拒绝，inline Job 不受影响。
+
 ### 7.1 `workspace`、`workspace_binding` 与 `workspace_attachment`
 
 | 表 | 核心字段 | 关键规则 |

@@ -7,6 +7,8 @@ import {
 import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { db } from "@/lib/db/client";
 import { getEnvironmentRevisionById } from "@/lib/environment/environment-definition-store";
+import { assertJobInputDigestMatches } from "@/lib/job/job-input-digest";
+import { resolveJobInputReference } from "@/lib/job/job-input-reference";
 import { getJobById } from "@/lib/job/job-queries";
 import { threadTable } from "@/lib/persistence/schema/conversation";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
@@ -199,6 +201,24 @@ async function loadPersistedContext(
       throw new ContextHandleError("binding_not_found", "Job Invocation 缺少 jobId");
     const job = await getJobById(tenantId, invocation.jobId);
     if (!job) throw new ContextHandleError("binding_not_found", "Job 不存在");
+    try {
+      assertJobInputDigestMatches({ job, invocationInputDigest: invocation.inputDigest });
+      if (job.inputKind === "reference") {
+        if (!job.inputRef) throw new Error("InputUnavailable");
+        await resolveJobInputReference({
+          tenantId,
+          inputRef: job.inputRef,
+          inputHash: job.inputHash,
+        });
+      }
+    } catch (error) {
+      throw new ContextHandleError(
+        "input_unavailable",
+        error instanceof Error && error.message === "InputDigestMismatch"
+          ? "InputDigestMismatch"
+          : "InputUnavailable",
+      );
+    }
     subject = {
       type: "job",
       jobId: job.id,

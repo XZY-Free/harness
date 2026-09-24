@@ -6,10 +6,13 @@
  *   只有场景与 `mustAssert` 完全对应时才可使用该编号。
  * - 其余用例一律用 `JOB-REG-nn`（补充回归），不得占用验收编号。
  */
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { isAbsolute, join, resolve } from "node:path";
+import { workspaceConfig } from "@/lib/config";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { issueContextHandle, resolveContextHandle } from "@/lib/context/context-handle";
 import { db, openMigrationConnection } from "@/lib/db/client";
@@ -37,6 +40,8 @@ import { consumeJobCommand } from "@/lib/job/job-command-consumer";
 import { createCancelCommand, createRetryCommand } from "@/lib/job/job-command-queries";
 import { processRetryCommand } from "@/lib/job/job-control-queries";
 import { createJobInvocation } from "@/lib/job/job-execution";
+import { computeJobInputDigest } from "@/lib/job/job-input-digest";
+import { storeJobInputReference } from "@/lib/job/job-input-reference";
 import { createJob, getJobById } from "@/lib/job/job-queries";
 import {
   admitJobStep,
@@ -1844,12 +1849,12 @@ describe("Thread-independent Job runtime integration", () => {
     const ownerId = await ensureDefaultTenantOwner();
     // reference 输入的 Job 同样需要真实 Route/Runtime 权威才能被接纳。
     await seedJobRuntimeAuthority();
-    const inputRef = `source://kb/${randomUUID()}`;
-    const originalContent = { task: "original reference content", revision: 1 };
-    const frozenDigest = `sha256:${createHash("sha256")
-      .update(JSON.stringify(originalContent))
-      .digest("hex")}`;
-    // reference 输入：content 摘要由创建方在创建时冻结，此后不得按当前内容漂移。
+    const originalContent = { task: "original reference content", revision: randomUUID() };
+    const { inputRef, inputHash: frozenDigest } = await storeJobInputReference({
+      tenantId: TENANT_ID,
+      payload: originalContent,
+    });
+    // reference 输入：Provider 保存内容，Job 冻结摘要，此后不得按当前内容漂移。
     const creationKey = `creation:${randomUUID()}`;
     const { job } = await createJob({
       tenantId: TENANT_ID,
@@ -1868,9 +1873,7 @@ describe("Thread-independent Job runtime integration", () => {
 
     // ── A. 同 Key 不同 Hash：稳定冲突，绝不能覆盖已冻结输入 ──
     const changedContent = { task: "tampered reference content", revision: 2 };
-    const changedDigest = `sha256:${createHash("sha256")
-      .update(JSON.stringify(changedContent))
-      .digest("hex")}`;
+    const changedDigest = computeJobInputDigest(changedContent);
     expect(changedDigest).not.toBe(frozenDigest);
     await expect(
       createJob({
@@ -1921,6 +1924,16 @@ describe("Thread-independent Job runtime integration", () => {
 
     const { startRuntimeInvocation } = await import("@/lib/runtime/application/runtime-start");
     const attempt = await createAttempt({ tenantId: TENANT_ID, invocationId: invocation.id });
+    const root = isAbsolute(workspaceConfig.root)
+      ? workspaceConfig.root
+      : resolve(process.cwd(), workspaceConfig.root);
+    await writeFile(
+      join(root, ".snow", "job-inputs", TENANT_ID, frozenDigest.slice("sha256:".length)),
+      JSON.stringify(changedContent),
+    );
+    await expect(
+      issueContextHandle({ tenantId: TENANT_ID, invocationId: invocation.id }),
+    ).rejects.toMatchObject({ code: "input_unavailable", message: "InputDigestMismatch" });
     await expect(
       startRuntimeInvocation({
         tenantId: TENANT_ID,
@@ -1932,8 +1945,6 @@ describe("Thread-independent Job runtime integration", () => {
         runtimeEndpoint: "http://127.0.0.1/stub",
         auth: { mode: "none" },
         callbackEndpoints,
-        // 本次真实读取 reference 得到的摘要 ≠ 创建时冻结的摘要。
-        expectedInputDigest: changedDigest,
       }),
     ).rejects.toThrow("InputDigestMismatch");
 
@@ -2203,153 +2214,163 @@ describe("Thread-independent Job runtime integration", () => {
     ).rejects.toMatchObject({ name: "CompletionPolicyInvalid" });
   });
 
-  it("JOB-01: 无 Agent / 无 Thread 的真实 Job 经默认 Hosted Runner 与真实 Worker 执行，输入摘要复验、产物持久、Job 完成", async () => {
-    // ── 1. 真实 Job service 创建：agentId=null，且不创建任何 Thread/Turn ──
-    const ownerId = await ensureDefaultTenantOwner();
-    const runtimeAuthority = await seedJobRuntimeAuthority();
-    const { job } = await createJob({
-      tenantId: TENANT_ID,
-      agentId: null,
-      jobType: "knowledge_build",
-      triggerRef: `trigger:${randomUUID()}`,
-      creationKey: `creation:${randomUUID()}`,
-      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
-      inputJson: { task: "summarize the released knowledge batch" },
-      createdBy: ownerId,
-    });
-    const admitted = await admitQueuedJob({ tenantId: TENANT_ID, jobId: job.id });
-    expect(admitted.outcome).toBe("admitted");
-    if (admitted.outcome !== "admitted") return;
-    const [invocation] = await db
-      .select()
-      .from(invocationTable)
-      .where(eq(invocationTable.id, admitted.invocationId))
-      .limit(1);
-    const binding = await getExecutionBindingByInvocation(TENANT_ID, admitted.invocationId);
-    if (!invocation || !binding) throw new Error("JOB-01: 接纳后回读 Invocation/Binding 失败");
+  it.each(["inline", "reference"] as const)(
+    "JOB-01: 无 Agent / 无 Thread 的真实 Job 经默认 Hosted Runner 与真实 Worker 执行，输入摘要复验、产物持久、Job 完成（%s）",
+    async (inputKind) => {
+      // ── 1. 真实 Job service 创建：agentId=null，且不创建任何 Thread/Turn ──
+      const ownerId = await ensureDefaultTenantOwner();
+      const runtimeAuthority = await seedJobRuntimeAuthority();
+      const input =
+        inputKind === "reference"
+          ? await storeJobInputReference({
+              tenantId: TENANT_ID,
+              payload: { task: "summarize the released knowledge batch" },
+            })
+          : { inputJson: { task: "summarize the released knowledge batch" } };
+      const { job } = await createJob({
+        tenantId: TENANT_ID,
+        agentId: null,
+        jobType: "knowledge_build",
+        triggerRef: `trigger:${randomUUID()}`,
+        creationKey: `creation:${randomUUID()}`,
+        completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
+        ...input,
+        createdBy: ownerId,
+      });
+      const admitted = await admitQueuedJob({ tenantId: TENANT_ID, jobId: job.id });
+      expect(admitted.outcome).toBe("admitted");
+      if (admitted.outcome !== "admitted") return;
+      const [invocation] = await db
+        .select()
+        .from(invocationTable)
+        .where(eq(invocationTable.id, admitted.invocationId))
+        .limit(1);
+      const binding = await getExecutionBindingByInvocation(TENANT_ID, admitted.invocationId);
+      if (!invocation || !binding) throw new Error("JOB-01: 接纳后回读 Invocation/Binding 失败");
 
-    // 无 Thread / 无 Turn：不是"缺字段"，而是 Job 主体的真实形状。
-    expect(invocation.subjectType).toBe("job");
-    expect(invocation.threadId).toBeNull();
-    expect(invocation.turnId).toBeNull();
-    // 输入摘要：Invocation 冻结的执行目标摘要必须等于 Job 的正式输入摘要。
-    expect(invocation.inputDigest).toBe(job.inputHash);
+      // 无 Thread / 无 Turn：不是"缺字段"，而是 Job 主体的真实形状。
+      expect(invocation.subjectType).toBe("job");
+      expect(invocation.threadId).toBeNull();
+      expect(invocation.turnId).toBeNull();
+      // 输入摘要：Invocation 冻结的执行目标摘要必须等于 Job 的正式输入摘要。
+      expect(invocation.inputDigest).toBe(job.inputHash);
 
-    // ── 2. 真实 Current Authority + Start 会话（dispatching ⇒ 首次执行必须提交 execution.started）──
-    const attempt = await createAttempt({ tenantId: TENANT_ID, invocationId: invocation.id });
-    const candidateEvidence = {
-      kind: "job-01-candidate",
-      invocationId: invocation.id,
-      attemptId: attempt.id,
-    };
-    await db.transaction((tx) =>
-      markAttemptPreparedForTestInTransaction(tx, {
+      // ── 2. 真实 Current Authority + Start 会话（dispatching ⇒ 首次执行必须提交 execution.started）──
+      const attempt = await createAttempt({ tenantId: TENANT_ID, invocationId: invocation.id });
+      const candidateEvidence = {
+        kind: "job-01-candidate",
+        invocationId: invocation.id,
         attemptId: attempt.id,
-        evidence: candidateEvidence,
-        digest: protocolDigest(candidateEvidence),
-      }),
-    );
-    // 生产时序：Start 先固定激活证据（activationEvidence/Digest + activatedAt），此时
-    // executionPhase 仍是 dispatching；Runtime 的 execution.started 到达时 applyLifecycle
-    // 才把它推到 executing。这里用同一套测试支持写入完成该前移（写真实列），随后由默认
-    // Hosted Runner 走"首次执行必须提交 execution.started"的同一条路径。
-    const activationEvidence = {
-      kind: "job-01-execution-activated",
-      invocationId: invocation.id,
-      attemptId: attempt.id,
-    };
-    const acquired = await acquireTestRuntimeAuthority({
-      tenantId: TENANT_ID,
-      invocationId: invocation.id,
-      attemptId: attempt.id,
-      runtimeRevisionId: binding.runtimeRevisionId,
-      runtimeCapabilitiesJson: runtimeAuthority.capabilities,
-      phase: "dispatching",
-      activationEvidence,
-    });
-    const dispatchRequest = { kind: "job-01-hosted-start", invocationId: invocation.id };
-    await applyRuntimeSessionDispatchForTest(TENANT_ID, acquired.session.id, {
-      bindingState: "dispatching",
-      semanticRequestJson: dispatchRequest,
-      semanticRequestDigest: protocolDigest(dispatchRequest),
-    });
+      };
+      await db.transaction((tx) =>
+        markAttemptPreparedForTestInTransaction(tx, {
+          attemptId: attempt.id,
+          evidence: candidateEvidence,
+          digest: protocolDigest(candidateEvidence),
+        }),
+      );
+      // 生产时序：Start 先固定激活证据（activationEvidence/Digest + activatedAt），此时
+      // executionPhase 仍是 dispatching；Runtime 的 execution.started 到达时 applyLifecycle
+      // 才把它推到 executing。这里用同一套测试支持写入完成该前移（写真实列），随后由默认
+      // Hosted Runner 走"首次执行必须提交 execution.started"的同一条路径。
+      const activationEvidence = {
+        kind: "job-01-execution-activated",
+        invocationId: invocation.id,
+        attemptId: attempt.id,
+      };
+      const acquired = await acquireTestRuntimeAuthority({
+        tenantId: TENANT_ID,
+        invocationId: invocation.id,
+        attemptId: attempt.id,
+        runtimeRevisionId: binding.runtimeRevisionId,
+        runtimeCapabilitiesJson: runtimeAuthority.capabilities,
+        phase: "dispatching",
+        activationEvidence,
+      });
+      const dispatchRequest = { kind: "job-01-hosted-start", invocationId: invocation.id };
+      await applyRuntimeSessionDispatchForTest(TENANT_ID, acquired.session.id, {
+        bindingState: "dispatching",
+        semanticRequestJson: dispatchRequest,
+        semanticRequestDigest: protocolDigest(dispatchRequest),
+      });
 
-    // ── 3. 默认 Hosted Runner 执行一个受管确定性任务；模型端口用受管确定性实现 ──
-    let observedInvocationView: Record<string, unknown> | null = null;
-    const service = createConfiguredHostedRuntimeApplicationService({
-      ...createDirectResponsePorts((view) => {
-        observedInvocationView = view.invocation as Record<string, unknown>;
-        expect(view.objective).toBe("summarize the released knowledge batch");
-        return "knowledge batch summarized";
-      }),
-      modelRef: "test-managed-model",
-    });
-    const started = await service.start({
-      tenantId: TENANT_ID,
-      invocationId: invocation.id,
-      idempotencyKey: `job-01:${invocation.id}`,
-      authority: acquired.authority,
-    });
-    expect(started.status).toBe("resumed");
-    expect(started.runtime).toBe("hosted");
-    expect(started.completed).toBe(true);
+      // ── 3. 默认 Hosted Runner 执行一个受管确定性任务；模型端口用受管确定性实现 ──
+      let observedInvocationView: Record<string, unknown> | null = null;
+      const service = createConfiguredHostedRuntimeApplicationService({
+        ...createDirectResponsePorts((view) => {
+          observedInvocationView = view.invocation as Record<string, unknown>;
+          expect(view.objective).toBe("summarize the released knowledge batch");
+          return "knowledge batch summarized";
+        }),
+        modelRef: "test-managed-model",
+      });
+      const started = await service.start({
+        tenantId: TENANT_ID,
+        invocationId: invocation.id,
+        idempotencyKey: `job-01:${invocation.id}`,
+        authority: acquired.authority,
+      });
+      expect(started.status).toBe("resumed");
+      expect(started.runtime).toBe("hosted");
+      expect(started.completed).toBe(true);
 
-    // 执行主体是 Job：Loop 视图只带 jobId，不携带 threadId/turnId
-    // （R06 §1：Thread/Turn 字段只在 Thread 分支必需）。
-    expect(observedInvocationView).not.toBeNull();
-    const viewSubject = observedInvocationView as unknown as {
-      jobId: string;
-      threadId?: unknown;
-      turnId?: unknown;
-    };
-    expect(viewSubject.jobId).toBe(job.id);
-    expect(viewSubject.threadId).toBeUndefined();
-    expect(viewSubject.turnId).toBeUndefined();
+      // 执行主体是 Job：Loop 视图只带 jobId，不携带 threadId/turnId
+      // （R06 §1：Thread/Turn 字段只在 Thread 分支必需）。
+      expect(observedInvocationView).not.toBeNull();
+      const viewSubject = observedInvocationView as unknown as {
+        jobId: string;
+        threadId?: unknown;
+        turnId?: unknown;
+      };
+      expect(viewSubject.jobId).toBe(job.id);
+      expect(viewSubject.threadId).toBeUndefined();
+      expect(viewSubject.turnId).toBeUndefined();
 
-    // ── 4. 真实 Ingress 事实：execution.started / response.completed / execution.completed ──
-    const ingressRows = await db
-      .select({
-        candidateType: runtimeEventIngressTable.candidateType,
-        payloadJson: runtimeEventIngressTable.payloadJson,
-      })
-      .from(runtimeEventIngressTable)
-      .where(eq(runtimeEventIngressTable.invocationId, invocation.id))
-      .orderBy(runtimeEventIngressTable.producerSequence);
-    const types = ingressRows.map((row) => row.candidateType);
-    expect(types).toContain("execution.started");
-    expect(types).toContain("response.completed");
-    expect(types).toContain("execution.completed");
-    const responseFact = ingressRows.find((row) => row.candidateType === "response.completed");
-    expect((responseFact?.payloadJson as Record<string, unknown>).text).toBe(
-      "knowledge batch summarized",
-    );
+      // ── 4. 真实 Ingress 事实：execution.started / response.completed / execution.completed ──
+      const ingressRows = await db
+        .select({
+          candidateType: runtimeEventIngressTable.candidateType,
+          payloadJson: runtimeEventIngressTable.payloadJson,
+        })
+        .from(runtimeEventIngressTable)
+        .where(eq(runtimeEventIngressTable.invocationId, invocation.id))
+        .orderBy(runtimeEventIngressTable.producerSequence);
+      const types = ingressRows.map((row) => row.candidateType);
+      expect(types).toContain("execution.started");
+      expect(types).toContain("response.completed");
+      expect(types).toContain("execution.completed");
+      const responseFact = ingressRows.find((row) => row.candidateType === "response.completed");
+      expect((responseFact?.payloadJson as Record<string, unknown>).text).toBe(
+        "knowledge batch summarized",
+      );
 
-    // ── 5. 真实终态 + 真实结果摘要 ──
-    const [terminal] = await db
-      .select()
-      .from(invocationTable)
-      .where(eq(invocationTable.id, invocation.id))
-      .limit(1);
-    expect(terminal?.executionState).toBe("completed");
-    expect(terminal?.resultRef).toBeTruthy();
-    expect(terminal?.resultDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+      // ── 5. 真实终态 + 真实结果摘要 ──
+      const [terminal] = await db
+        .select()
+        .from(invocationTable)
+        .where(eq(invocationTable.id, invocation.id))
+        .limit(1);
+      expect(terminal?.executionState).toBe("completed");
+      expect(terminal?.resultRef).toBeTruthy();
+      expect(terminal?.resultDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
 
-    // ── 6. 真实 Worker 拾取：默认 job-worker 角色消费终态命令并收口 Job ──
-    const worker = createProductionWorkerRole("job-worker");
-    const tick = (await worker.pollOnce()) as {
-      commandsScanned: number;
-      commandsConsumed: number;
-    };
-    expect(tick.commandsConsumed).toBeGreaterThanOrEqual(1);
-    const finished = await getJobById(TENANT_ID, job.id);
-    expect(finished?.jobState).toBe("completed");
-    expect(finished?.resultRef).toBe(terminal?.resultRef);
-    expect(finished?.resultHash).toBe(terminal?.resultDigest);
+      // ── 6. 真实 Worker 拾取：默认 job-worker 角色消费终态命令并收口 Job ──
+      const worker = createProductionWorkerRole("job-worker");
+      const tick = (await worker.pollOnce()) as {
+        commandsScanned: number;
+        commandsConsumed: number;
+      };
+      expect(tick.commandsConsumed).toBeGreaterThanOrEqual(1);
+      const finished = await getJobById(TENANT_ID, job.id);
+      expect(finished?.jobState).toBe("completed");
+      expect(finished?.resultRef).toBe(terminal?.resultRef);
+      expect(finished?.resultHash).toBe(terminal?.resultDigest);
 
-    // ── 7. 没有为通用 Job 执行补一个假 Thread / Turn / triggerItem ──
-    expect(await db.select().from(threadTable).where(eq(threadTable.tenantId, TENANT_ID))).toEqual(
-      [],
-    );
-    expect(await db.select().from(turnTable)).toEqual([]);
-  });
+      // ── 7. 没有为通用 Job 执行补一个假 Thread / Turn / triggerItem ──
+      expect(
+        await db.select().from(threadTable).where(eq(threadTable.tenantId, TENANT_ID)),
+      ).toEqual([]);
+      expect(await db.select().from(turnTable)).toEqual([]);
+    },
+  );
 });

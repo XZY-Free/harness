@@ -35,6 +35,7 @@ import {
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { assertJobInputDigestMatches } from "@/lib/job/job-input-digest";
+import { resolveJobInputReference } from "@/lib/job/job-input-reference";
 import { threadItemTable } from "@/lib/persistence/schema/conversation";
 import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 import {
@@ -426,7 +427,7 @@ async function loadHostedExecutionSubject(input: {
     // 共用同一实现（`assertJobInputDigestMatches`），因此 MySQL JSON 列回读重排键序不会
     // 把合法输入误判成篡改（A10）。
     assertJobInputDigestMatches({ job, invocationInputDigest: invocation.inputDigest });
-    return { kind: "job", jobId, objective: jobObjective(job) };
+    return { kind: "job", jobId, objective: await jobObjective(input.tenantId, job) };
   }
   const threadId = invocation.threadId;
   const turnId = invocation.turnId;
@@ -440,18 +441,24 @@ async function loadHostedExecutionSubject(input: {
  * 输入是业务数据，不是平台 prompt：这里只做"取出可读目标"的稳定投影，
  * 不发明字段、不注入平台指令。
  */
-function jobObjective(job: {
-  inputKind: string;
-  inputJson: unknown;
-  inputRef: string | null;
-  id: string;
-}): string {
-  if (job.inputKind !== "inline") {
-    // 受管 inputRef 的内容读取路径尚未落地（无受管输入解析器）：
-    // 不能拿引用字符串冒充"已读取的输入"，显式拒绝而不是伪造执行目标。
-    throw new Error("JobInputReferenceUnsupported");
-  }
-  const json = job.inputJson;
+async function jobObjective(
+  tenantId: string,
+  job: {
+    inputKind: string;
+    inputJson: unknown;
+    inputRef: string | null;
+    inputHash: string;
+    id: string;
+  },
+): Promise<string> {
+  const json =
+    job.inputKind === "reference"
+      ? await resolveJobInputReference({
+          tenantId,
+          inputRef: job.inputRef ?? "",
+          inputHash: job.inputHash,
+        })
+      : job.inputJson;
   if (json && typeof json === "object" && !Array.isArray(json)) {
     const task = (json as Record<string, unknown>).task;
     if (typeof task === "string" && task.length > 0) return task;

@@ -23,6 +23,7 @@ import { db } from "@/lib/db/client";
 import { JobAlreadyTerminalError, JobNotFoundError, JobNotTerminalError } from "@/lib/job/errors";
 import { acknowledgeCommand, rejectCommand } from "@/lib/job/job-command-queries";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
+import { resolveJobInputReference } from "@/lib/job/job-input-reference";
 import { createJob, recordJobResult, updateJobState } from "@/lib/job/job-queries";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
@@ -40,6 +41,30 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Invocation 终态集合（与 runtime 模块一致）。 */
 const INVOCATION_TERMINAL_STATES = ["completed", "failed", "cancelled", "lost"] as const;
+
+async function resolveRetryReferenceInput(input: {
+  tenantId: string;
+  inputRef: string | null;
+  inputHash: string;
+}): Promise<boolean> {
+  if (!input.inputRef) return false;
+  try {
+    await resolveJobInputReference({
+      tenantId: input.tenantId,
+      inputRef: input.inputRef,
+      inputHash: input.inputHash,
+    });
+    return true;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === "InputUnavailable" || error.message === "InputDigestMismatch")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
 
 // ─── processCancelCommand ───────────────────────────────
 
@@ -288,7 +313,7 @@ export interface ProcessRetryCommandParams {
   ) => Promise<boolean> | boolean;
   /**
    * 输入可访问性校验回调：返回 true 表示 inputRef 仍可访问；false 表示已不可访问。
-   * 默认回调返回 true（调度器在调用前已通过其他机制校验）。
+   * 默认由当前文件 Provider 读取并复验 reference 内容；inline 输入无需外部读取。
    */
   inputAvailabilityVerifier?: (jobId: string, inputRef: string) => Promise<boolean> | boolean;
   /** 调度器 correlationId（透传到 Event）。 */
@@ -369,10 +394,14 @@ export async function processRetryCommand(
   if (!preJob) {
     throw new JobNotFoundError(cmd.jobId);
   }
-  const inputOk = await (params.inputAvailabilityVerifier ?? (() => true))(
-    cmd.jobId,
-    preJob.inputRef ?? "",
-  );
+  const inputOk = params.inputAvailabilityVerifier
+    ? await params.inputAvailabilityVerifier(cmd.jobId, preJob.inputRef ?? "")
+    : preJob.inputKind !== "reference" ||
+      (await resolveRetryReferenceInput({
+        tenantId: params.tenantId,
+        inputRef: preJob.inputRef,
+        inputHash: preJob.inputHash,
+      }));
 
   const result = await db.transaction(async (tx) => {
     // 1. Job 根锁先行（R06 §4）——顺序与 `consumeTerminalCommand` 及 cancel 完全一致，
