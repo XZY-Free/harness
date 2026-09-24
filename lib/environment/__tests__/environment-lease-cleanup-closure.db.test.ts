@@ -45,6 +45,7 @@ import {
 } from "@/lib/environment/environment-provisioner";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import { spawnEnvironmentCleanupCrashProcess } from "@/lib/environment/test-support/environment-cleanup-crash-process";
+import { assertExecutionSourceSnapshot } from "@/lib/executions/domain/preparation-source";
 import {
   ATTEMPT_PREPARATION_LEASE_MS,
   claimAttemptPreparation,
@@ -468,6 +469,77 @@ describe("A08 环境资源终态清理与回收闭环", () => {
     expect(retiring?.releasedAt).toBeNull();
     expect(await inspectContainer(seeded.containerName)).not.toBeNull();
 
+    // 交接后由新 Attempt 正式领取准备，建立与旧 Lease 不同的真实容器和 Owner。
+    const successorAttempt = await createAttempt({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocationId,
+      retryReasonCode: "supervisor_handoff",
+    });
+    const [oldAttempt] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, seeded.attemptId))
+      .limit(1);
+    if (!oldAttempt) throw new Error("旧 Attempt 缺失");
+    const oldSource = assertExecutionSourceSnapshot(oldAttempt.preparationSourceJson);
+    const successorClaim = await claimAttemptPreparation({
+      source: {
+        ...oldSource,
+        attemptId: successorAttempt.id,
+        sourceKind: "handoff",
+        predecessor: {
+          attemptId: seeded.attemptId,
+          ownershipId: seeded.ownershipId,
+          leaseEpoch: String(seeded.authority.leaseEpoch),
+          sessionBindingId: seeded.sessionBindingId,
+        },
+      },
+      claimId: randomUUID(),
+    });
+    if (!successorClaim.claim) throw new Error("继任 Attempt 未取得准备 claim");
+    const workspaceBindingId = (retiring?.resourceManifest as Record<string, unknown>)
+      .workspaceBindingId as string;
+    const successorLease = await fixture.provisioner.provision({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocationId,
+      attemptId: successorAttempt.id,
+      revisionId: fixture.revision.id,
+      revision: fixture.revision,
+      workspaceBindingId,
+      workspaceRoot: fixture.workspaceRoot,
+      preparationClaim: successorClaim.claim,
+    });
+    const successorEvidence = { kind: "n07-successor", leaseId: successorLease.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedInTransaction(tx, {
+        attemptId: successorAttempt.id,
+        evidence: successorEvidence,
+        digest: protocolDigest(successorEvidence),
+        preparationClaim: successorClaim.claim!,
+      }),
+    );
+    const successorOwner = await acquireTestRuntimeAuthority({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocationId,
+      attemptId: successorAttempt.id,
+      runtimeRevisionId: seeded.authority.runtimeRevisionId,
+      environmentLeaseId: successorLease.id,
+    });
+    await activateEnvironmentLease({
+      tenantId: TENANT_ID,
+      leaseId: successorLease.id,
+      ownershipId: successorOwner.ownership.id,
+      attemptId: successorAttempt.id,
+      invocationId: seeded.invocationId,
+      environmentDefinitionRevisionId: fixture.revision.id,
+      recoveryAnchorDigest: null,
+    });
+    const successorContainerName =
+      (successorLease.preparedEvidence as { instance?: { workerRef?: string } })?.instance
+        ?.workerRef ?? "";
+    expect(successorContainerName).not.toBe(seeded.containerName);
+    expect(await inspectContainer(successorContainerName)).not.toBeNull();
+
     let releaseCalls = 0;
     const failOnceBackend: EnvironmentInstanceBackend = {
       ...fixture.backend,
@@ -499,6 +571,65 @@ describe("A08 环境资源终态清理与回收闭环", () => {
     expect(releaseCalls).toBe(2);
     expect((await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId))?.leaseState).toBe("released");
     expect(await inspectContainer(seeded.containerName)).toBeNull();
+    expect((await getEnvironmentLeaseById(TENANT_ID, successorLease.id))?.leaseState).toBe(
+      "active",
+    );
+    expect(await inspectContainer(successorContainerName)).not.toBeNull();
+
+    // 第二轮交接独立登记继任 Lease。清理进程在物理释放后被杀，原 Worker 接续持久义务。
+    const secondClaimId = randomUUID();
+    const secondNow = new Date();
+    const secondClaim = await db.transaction((tx) =>
+      claimRuntimeSessionSupervisorInTransaction(tx, {
+        tenantId: TENANT_ID,
+        id: successorOwner.session.id,
+        claimId: secondClaimId,
+        instanceId: `worker-instance:${randomUUID()}`,
+        leaseExpiresAt: new Date(secondNow.getTime() + 60_000),
+        now: secondNow,
+      }),
+    );
+    expect(secondClaim.claimed).toBe(true);
+    await handOffSupervisorGeneration({
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocationId,
+      ownershipId: successorOwner.ownership.id,
+      attemptId: successorAttempt.id,
+      leaseEpoch: Number(successorOwner.authority.leaseEpoch),
+      sessionBindingId: successorOwner.session.id,
+      claimId: secondClaimId,
+    });
+    expect((await getEnvironmentLeaseById(TENANT_ID, successorLease.id))?.leaseState).toBe(
+      "releasing",
+    );
+    const crashed = spawnEnvironmentCleanupCrashProcess({
+      tenantId: TENANT_ID,
+      leaseId: successorLease.id,
+      controlRoot: fixture.controlRoot,
+    });
+    try {
+      await crashed.released;
+      expect(await inspectContainer(successorContainerName)).toBeNull();
+      const inFlight = await getEnvironmentLeaseById(TENANT_ID, successorLease.id);
+      expect(inFlight?.leaseState).toBe("releasing");
+      crashed.kill();
+      expect((await crashed.exited).signal).toBe("SIGKILL");
+      const recovered = await runDueEnvironmentLeaseCleanups({
+        backend: fixture.backend,
+        owner: "cleanup-worker:n07:third-process",
+        now: new Date((inFlight?.cleanupLeaseExpiresAt?.getTime() ?? 0) + 1),
+      });
+      expect(recovered.released).toBe(1);
+      expect((await getEnvironmentLeaseById(TENANT_ID, successorLease.id))?.leaseState).toBe(
+        "released",
+      );
+      expect((await getEnvironmentLeaseById(TENANT_ID, seeded.leaseId))?.leaseState).toBe(
+        "released",
+      );
+    } finally {
+      crashed.kill();
+      await crashed.exited;
+    }
   }, 60_000);
 
   it("N05-T1/N05-T2: 旧 create 错误不清继任者，当前准备者失败则持久重试到真实 released", async () => {
