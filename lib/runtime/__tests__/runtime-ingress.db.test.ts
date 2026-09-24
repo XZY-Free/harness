@@ -52,7 +52,11 @@ import {
 } from "@/lib/runtime/application/ingress-runtime-events";
 import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
-import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
+import {
+  applyRuntimeSessionDispatchForTest,
+  createRuntimeSessionBindingForTest,
+  sourceIntentForFixture,
+} from "@/lib/runtime/test-support/session-write-fixtures";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -378,6 +382,23 @@ describe("RuntimeEventIngress database fencing", () => {
       batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [event] },
     });
     const replacement = await replaceCurrentOwner(runtime);
+    const replacementSession = await createRuntimeSessionBindingForTest({
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      attemptId: replacement.ownership.attemptId,
+      ownershipId: replacement.ownership.id,
+      runtimeRevisionId: runtime.fixture.binding.runtimeRevisionId,
+      leaseEpoch: replacement.ownership.leaseEpoch,
+      intentType: "start",
+      startIntentKey: `start:${replacement.ownership.id}`,
+      runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+      ...sourceIntentForFixture({
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        attemptId: replacement.ownership.attemptId,
+        intentType: "start",
+      }),
+    });
     const ledgerBefore = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
     const countersBefore = await readInvocationCounters(
       runtime.fixture.tenantId,
@@ -437,6 +458,7 @@ describe("RuntimeEventIngress database fencing", () => {
             attemptId: replacement.ownership.attemptId,
             ownershipId: replacement.ownership.id,
             leaseEpoch: String(replacement.ownership.leaseEpoch),
+            sessionBindingId: replacementSession.id,
           },
           events: [event],
         },
