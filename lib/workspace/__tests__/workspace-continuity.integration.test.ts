@@ -21,6 +21,7 @@ import { registerDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
+import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { type WorkspaceBackend, createWorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { cleanupWorkspaceCandidate } from "@/lib/workspace/workspace-cleanup";
@@ -29,7 +30,13 @@ import {
   computeWorkspaceContractDigest,
 } from "@/lib/workspace/workspace-contract";
 import { type WorkspaceHost, createManagedWorkspaceHost } from "@/lib/workspace/workspace-host";
-import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
+import {
+  WorkspaceIdentityMismatchError,
+  continuousWriterArgs,
+  createRemoteWorkspaceHost,
+  createWorkspaceHostBroker,
+  listenWorkspaceHostRpc,
+} from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import { requireWorkspaceReadiness } from "@/lib/workspace/workspace-readiness";
 import {
@@ -74,13 +81,17 @@ async function createTestBinding(input: {
   /** 显式传入时表示纯函数场景（不做 Writer 激活）；否则用受管 Broker 的真实探测结果。 */
   storageIdentity?: string;
   hostIdentity?: string;
+  brokerHostIdentity?: string;
   bindingType?: "desktop" | "cloud" | "remote" | "sandbox";
   deviceId?: string | null;
 }) {
   const probe =
     input.storageIdentity && input.hostIdentity
       ? null
-      : await createWorkspaceHostBroker({ root: input.root }).probeIdentity();
+      : await createWorkspaceHostBroker({
+          root: input.root,
+          hostIdentity: input.brokerHostIdentity,
+        }).probeIdentity();
   const storageIdentity = input.storageIdentity ?? probe?.storageIdentity ?? "";
   const hostIdentity = input.hostIdentity ?? probe?.hostIdentity ?? "";
   const logical = await createWorkspace({
@@ -186,7 +197,8 @@ describe("Workspace continuity integration", () => {
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
       });
-      const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
+      const broker = createWorkspaceHostBroker({ root: temporaryRoot });
+      const backend = createWorkspaceBackend(broker);
       const first = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
       const firstRun = await prepareAndActivate({
         fixture: first,
@@ -200,8 +212,25 @@ describe("Workspace continuity integration", () => {
         "durable bytes",
         "utf8",
       );
+      const activityFile = path.join(firstRun.activated.grant.root, "runtime-activity.txt");
+      const runtime = await broker.spawnManagedWriter({
+        tenantId: TENANT_ID,
+        scopeDigest: firstRun.activated.grant.scopeDigest,
+        writerGeneration: firstRun.activated.writerGeneration,
+        command: process.execPath,
+        args: continuousWriterArgs({ targetFile: activityFile, payload: "runtime-active" }),
+        cwd: firstRun.activated.grant.root,
+        activityPath: activityFile,
+      });
+      const activityDeadline = Date.now() + 8_000;
+      while (Date.now() < activityDeadline) {
+        if ((await stat(activityFile).catch(() => null))?.size) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect((await stat(activityFile)).size).toBeGreaterThan(0);
+      process.kill(runtime.pid, "SIGKILL");
 
-      // Runtime 进程死亡：Owner 关闭即为持久事实（R04 §3：I 侧**不**释放 W 行）。
+      // Runtime 进程真实退出后，Owner 关闭才成为持久事实（R04 §3：I 侧不释放 W 行）。
       // 接管必须仅凭"父 Owner 已失权 + W 路径复核"成立，不依赖任何显式撤销调用。
       await closeExecutionOwnership({
         tenantId: TENANT_ID,
@@ -332,40 +361,119 @@ describe("Workspace continuity integration", () => {
   });
 
   it("WORKSPACE-04: two invocations on the same physical scope get exactly one writer regardless of epoch", async () => {
+    const servers = [
+      await listenWorkspaceHostRpc({ broker: createWorkspaceHostBroker({ root: temporaryRoot }) }),
+      await listenWorkspaceHostRpc({ broker: createWorkspaceHostBroker({ root: temporaryRoot }) }),
+    ];
     try {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
       });
-      const backend = createWorkspaceBackend(createManagedWorkspaceHost(temporaryRoot));
       const first = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
       const second = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
-      const firstRun = await prepareAndActivate({
-        fixture: first,
-        binding,
-        backend,
-        root: temporaryRoot,
+      const firstAuthority = await acquireTestRuntimeAuthority({
+        tenantId: TENANT_ID,
+        invocationId: first.invocation.id,
+        attemptId: first.attempt.id,
+        runtimeRevisionId: first.binding.runtimeRevisionId,
       });
-      expect(firstRun.activated.writerGeneration).toBe(1);
-      // 不同 Invocation 申请同一物理 scope 的 writer：持有者父 Owner 仍健康，
-      // 必须在 W 路径复核后拒绝（R04 §4：不能用 slot 上的 leaseExpiresAt 推断）。
-      await expect(
-        reserveWorkspaceWriter({
-          tenantId: TENANT_ID,
-          storageScopeDigest: binding.storageScopeDigest as string,
-          invocationId: second.invocation.id,
-          attemptId: second.attempt.id,
-          ownershipId: "any-ownership",
-          workspaceBindingId: binding.id,
-          leaseExpiresAt: new Date(Date.now() + 60_000),
-          backendGrantRef: null,
-          backendEvidence: { phase: "reserved" },
+      const secondFirstAuthority = await acquireTestRuntimeAuthority({
+        tenantId: TENANT_ID,
+        invocationId: second.invocation.id,
+        attemptId: second.attempt.id,
+        runtimeRevisionId: second.binding.runtimeRevisionId,
+      });
+      await closeExecutionOwnership({
+        tenantId: TENANT_ID,
+        invocationId: second.invocation.id,
+        ownershipId: secondFirstAuthority.ownership.id,
+        state: "lost",
+        reasonCode: "test_next_epoch",
+      });
+      const secondAttempt = await createAttempt({
+        tenantId: TENANT_ID,
+        invocationId: second.invocation.id,
+        retryReasonCode: "test_next_epoch",
+      });
+      const secondEvidence = { kind: "workspace-race", attemptId: secondAttempt.id };
+      await db.transaction((tx) =>
+        markAttemptPreparedForTestInTransaction(tx, {
+          attemptId: secondAttempt.id,
+          evidence: secondEvidence,
+          digest: protocolDigest(secondEvidence),
         }),
-      ).rejects.toThrow("父 Owner 仍然健康");
+      );
+      const secondAuthority = await acquireTestRuntimeAuthority({
+        tenantId: TENANT_ID,
+        invocationId: second.invocation.id,
+        attemptId: secondAttempt.id,
+        runtimeRevisionId: second.binding.runtimeRevisionId,
+      });
+      expect(firstAuthority.ownership.leaseEpoch).not.toBe(secondAuthority.ownership.leaseEpoch);
+      const backends = servers.map((server) =>
+        createWorkspaceBackend(createRemoteWorkspaceHost(server.url)),
+      );
+      const candidates = await Promise.all([
+        prepareWorkspaceCandidate({
+          attemptId: first.attempt.id,
+          binding,
+          backend: backends[0]!,
+          root: temporaryRoot,
+          operationId: `workspace-race:${first.attempt.id}`,
+          runtimeRevisionId: first.binding.runtimeRevisionId,
+        }),
+        prepareWorkspaceCandidate({
+          attemptId: secondAttempt.id,
+          binding,
+          backend: backends[1]!,
+          root: temporaryRoot,
+          operationId: `workspace-race:${secondAttempt.id}`,
+          runtimeRevisionId: second.binding.runtimeRevisionId,
+        }),
+      ]);
+      if (!candidates[0] || !candidates[1]) throw new Error("race candidates missing");
+      const results = await Promise.allSettled([
+        activatePreparedWorkspaceWriter({
+          tenantId: TENANT_ID,
+          invocationId: first.invocation.id,
+          attemptId: first.attempt.id,
+          ownership: firstAuthority.ownership,
+          authority: firstAuthority.authority,
+          candidate: candidates[0],
+        }),
+        activatePreparedWorkspaceWriter({
+          tenantId: TENANT_ID,
+          invocationId: second.invocation.id,
+          attemptId: secondAttempt.id,
+          ownership: secondAuthority.ownership,
+          authority: secondAuthority.authority,
+          candidate: candidates[1],
+        }),
+      ]);
+      const winner = results.find((result) => result.status === "fulfilled");
+      const loser = results.find((result) => result.status === "rejected");
+      expect(winner?.status).toBe("fulfilled");
+      expect(loser?.status).toBe("rejected");
+      if (loser?.status !== "rejected") throw new Error("workspace writer race had no loser");
+      expect((loser.reason as Error).message).toContain("父 Owner 仍然健康");
+      const active = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.storageScopeDigest, binding.storageScopeDigest as string));
+      expect(active.filter((lock) => lock.lockState === "active")).toHaveLength(1);
+      if (winner?.status !== "fulfilled") throw new Error("workspace writer race had no winner");
+      const physical = await backends[0]!.host.getWriter(
+        binding.storageScopeDigest as string,
+        winner.value.writerGeneration,
+      );
+      expect(physical?.grantRef).toBe(winner.value.grant.grantRef);
+      await backends[1]!.host.assertWriter(winner.value.grant);
     } finally {
+      for (const server of servers) await server.close();
       await rm(temporaryRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("WORKSPACE-05: two binding aliases of the same root share one physical slot", async () => {
     try {
@@ -472,8 +580,23 @@ describe("Workspace continuity integration", () => {
         candidate: candidate2,
       });
       expect(secondRun.writerGeneration).toBe(oldGrant.writerGeneration + 1);
-      // 旧进程仍持旧 grant 尝试写入：host 断言失败，写拒绝，不污染当前 root。
+      // 旧进程持旧授权经正式受管写入口执行实际 IO，必须在写入前拒绝。
       await expect(backend.host.assertWriter(oldGrant)).rejects.toThrow("WorkspaceWriterNotFenced");
+      await expect(
+        backend.host.executeManagedFileOperation({
+          identity: {
+            tenantId: TENANT_ID,
+            scopeDigest: oldGrant.scopeDigest,
+            writerGeneration: oldGrant.writerGeneration,
+            invocationId: oldGrant.invocationId,
+            attemptId: oldGrant.attemptId,
+            ownershipId: oldGrant.ownershipId,
+            operationId: oldGrant.operationId,
+          },
+          operation: { kind: "write", path: "stale.txt", content: "old generation" },
+        }),
+      ).rejects.toThrow("WorkspaceWriterNotFenced");
+      await expect(stat(path.join(secondRun.grant.root, "stale.txt"))).rejects.toThrow();
       await writeFile(path.join(secondRun.grant.root, "current.txt"), "new generation", "utf8");
       await expect(readFile(path.join(secondRun.grant.root, "current.txt"), "utf8")).resolves.toBe(
         "new generation",
@@ -754,6 +877,50 @@ describe("Workspace continuity integration", () => {
           backend: backend.host,
         }),
       ).rejects.toThrow("WorkspaceWriterNotFenced");
+      await closeExecutionOwnership({
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+        ownershipId: run.acquired.ownership.id,
+        state: "lost",
+        reasonCode: "workspace_readiness_next_attempt",
+      });
+      const released = await runWorkspaceWriterRelease({
+        tenantId: TENANT_ID,
+        lockId: run.activated.lockId,
+        leaseOwner: "workspace-readiness-release",
+        deps: { resolveHost: async () => backend.host },
+      });
+      expect(released.outcome).toBe("released");
+      const nextAttempt = await createAttempt({
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+        retryReasonCode: "workspace_readiness_next_attempt",
+      });
+      const nextEvidence = { kind: "workspace-readiness", attemptId: nextAttempt.id };
+      await db.transaction((tx) =>
+        markAttemptPreparedForTestInTransaction(tx, {
+          attemptId: nextAttempt.id,
+          evidence: nextEvidence,
+          digest: protocolDigest(nextEvidence),
+        }),
+      );
+      const nextAuthority = await acquireTestRuntimeAuthority({
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+        attemptId: nextAttempt.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      });
+      expect(nextAuthority.ownership.attemptId).toBe(nextAttempt.id);
+      await expect(
+        requireWorkspaceReadiness({
+          tenantId: TENANT_ID,
+          invocationId: fixture.invocation.id,
+          ownershipId: nextAuthority.ownership.id,
+          workspaceBindingId: binding.id,
+          expectedWriterGeneration: run.activated.writerGeneration,
+          backend: backend.host,
+        }),
+      ).rejects.toThrow("WorkspaceNotReady");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -785,8 +952,7 @@ describe("Workspace continuity integration", () => {
     const { binding } = await createTestBinding({
       root: temporaryRoot,
       continuityMode: "HOST_AFFINE",
-      storageIdentity: protocolDigest({ storage: temporaryRoot }),
-      hostIdentity: deviceA.id,
+      brokerHostIdentity: deviceA.id,
       bindingType: "desktop",
       deviceId: deviceA.id,
     });
@@ -819,6 +985,31 @@ describe("Workspace continuity integration", () => {
         }),
       "ContinuityUnproven",
     );
+    const deviceBHost = createWorkspaceHostBroker({
+      root: temporaryRoot,
+      hostIdentity: deviceB.id,
+    });
+    await expect(deviceBHost.probeIdentity()).rejects.toBeInstanceOf(
+      WorkspaceIdentityMismatchError,
+    );
+    await expect(
+      deviceBHost.activateWriter({
+        tenantId: TENANT_ID,
+        scopeDigest: binding.storageScopeDigest as string,
+        writerGeneration: 1,
+        authority: {
+          invocationId: randomUUID(),
+          runtimeRevisionId: randomUUID(),
+          attemptId: randomUUID(),
+          ownershipId: randomUUID(),
+          leaseEpoch: "1",
+          sessionBindingId: randomUUID(),
+        },
+        expectedStorageIdentity: binding.storageIdentity as string,
+        operationId: `device-b:${randomUUID()}`,
+        root: temporaryRoot,
+      }),
+    ).rejects.toBeInstanceOf(WorkspaceIdentityMismatchError);
   });
 });
 
