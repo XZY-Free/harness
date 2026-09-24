@@ -6,6 +6,43 @@
  * 保持输入顺序并去重。scope 与禁词语义与 architecture-gate.ts 原有
  * checkDeprecatedArchitecture 一致，抽取为可单测的纯函数。
  */
+import ts from "typescript";
+
+const INTERNAL_SOURCE_PATH = /^(?:app|components|desktop|hooks|lib|scripts)\//;
+const ARCHITECTURE_VERSION_PATH =
+  /(?:^|\/)(?:v\d+|legacy|compatibility)(?:\/|$)|(?:^|\/)runtime-v\d+\.(?:ts|tsx|mts|mjs|js)$/i;
+const COMPATIBILITY_SYMBOL =
+  /^(?:Legacy[A-Z][A-Za-z0-9]*|Compat[A-Z][A-Za-z0-9]*|RuntimeProtocolV\d+|V\d+RuntimeClient|NewRuntimeService)$/;
+
+/** CLEAN-01/02：只检查内部生产文件路径与 TS 标识符，保留协议数值和字符串数据。 */
+export function collectCanonicalNamingViolations(documents: readonly SourceDocument[]): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!INTERNAL_SOURCE_PATH.test(document.path) || /\.test\.[cm]?[jt]sx?$/.test(document.path)) {
+      continue;
+    }
+    if (ARCHITECTURE_VERSION_PATH.test(document.path)) {
+      violations.add(document.path);
+      continue;
+    }
+    if (!/\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    const sourceFile = ts.createSourceFile(
+      document.path,
+      document.source,
+      ts.ScriptTarget.Latest,
+      true,
+      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    function visit(node: ts.Node): void {
+      if (ts.isIdentifier(node) && COMPATIBILITY_SYMBOL.test(node.text)) {
+        violations.add(document.path);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
+  return [...violations];
+}
 
 /** Agent/Runtime/Route Authority 及其正式消费者。 */
 const AUTHORITY_SOURCE_SCOPE =

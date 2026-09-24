@@ -11,6 +11,7 @@ import {
   checkExternalRuntimeTransportGate,
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
+  collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
@@ -110,6 +111,32 @@ describe("source history and retired dependency gates", () => {
       "lib/runtime/old-bridge.ts",
       "lib/agents/calls/old.ts",
     ]);
+  });
+});
+
+describe("Topic02 canonical naming injections", () => {
+  it("CLEAN-01: versioned internal paths report exact files; protocolVersion remains legal", () => {
+    expect(
+      collectCanonicalNamingViolations([
+        doc("lib/v11/runtime/client.ts", "export const x = 1;"),
+        doc("lib/runtime/runtime-v3.ts", "export const x = 1;"),
+        doc("lib/runtime/runtime-protocol.ts", "export const protocolVersion = 3;"),
+      ]),
+    ).toEqual(["lib/v11/runtime/client.ts", "lib/runtime/runtime-v3.ts"]);
+  });
+
+  it("CLEAN-02: AST identifiers reject compatibility symbols, not strings or insert models", () => {
+    expect(
+      collectCanonicalNamingViolations([
+        doc("lib/runtime/old-client.ts", "class LegacyRuntime {}"),
+        doc("lib/executions/compat.ts", "type CompatBinding = {};"),
+        doc("lib/runtime/protocol.ts", "interface RuntimeProtocolV3 {}"),
+        doc(
+          "lib/executions/new-invocation.ts",
+          'type NewInvocation = InferInsertModel<typeof invocationTable>; const label = "LegacyRuntime";',
+        ),
+      ]),
+    ).toEqual(["lib/runtime/old-client.ts", "lib/executions/compat.ts", "lib/runtime/protocol.ts"]);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
   checkWorkerProductionTopologyGate,
+  collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
@@ -203,6 +204,15 @@ function checkRetiredNaming(): void {
   pass("已退役版本命名归零");
 }
 
+function checkCanonicalNaming(): void {
+  const violations = collectCanonicalNamingViolations(productionDocuments());
+  if (violations.length > 0) {
+    fail(`生产架构版本路径或兼容 Symbol：${violations.join(", ")}`);
+    return;
+  }
+  pass("生产架构版本路径与兼容 Symbol 归零");
+}
+
 function checkAbsent(paths: readonly string[], title: string): void {
   const residual = paths.filter((path) => existsSync(resolve(ROOT, path)));
   if (residual.length > 0) {
@@ -349,6 +359,7 @@ function main(): void {
   checkMigrationJournal();
   checkSchemaAuthority();
   checkRetiredNaming();
+  checkCanonicalNaming();
   checkAbsent(
     [
       "app/api/chat/route.ts",
