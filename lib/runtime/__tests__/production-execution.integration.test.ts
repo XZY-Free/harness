@@ -48,9 +48,13 @@ import type { EnvironmentRevisionInput } from "@/lib/environment/environment-rev
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
 import type { ExecutionBindingConfigInput } from "@/lib/executions/domain/execution-binding";
 import { assertExecutionSourceSnapshot } from "@/lib/executions/domain/preparation-source";
-import { assertAttemptPreparationClaimHeld } from "@/lib/executions/persistence/attempt-store";
+import {
+  assertAttemptPreparationClaimHeld,
+  createAttempt,
+} from "@/lib/executions/persistence/attempt-store";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
+  acquireExecutionOwnership,
   closeExecutionOwnership,
   getActiveExecutionOwnership,
   getAuthorityDatabaseTime,
@@ -58,6 +62,7 @@ import {
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { createInvocation } from "@/lib/executions/persistence/invocation-store";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { registerDevice, revokeDevice } from "@/lib/identity/device-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
@@ -2100,6 +2105,47 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
         expect(writer.lockState).toBe("active");
         const originalGrant = await broker.getWriter(probe.scopeDigest, writer.writerGeneration);
         expect(originalGrant?.grantRef).toBe(writer.backendGrantRef);
+        if (stage === "after_request_freeze") {
+          const candidate = await createAttempt({
+            tenantId: context.tenantId,
+            invocationId: invocation.id,
+            retryReasonCode: "healthy-owner-candidate",
+          });
+          const candidateEvidence = { kind: "healthy-owner-candidate", attemptId: candidate.id };
+          await db.transaction((tx) =>
+            markAttemptPreparedForTestInTransaction(tx, {
+              attemptId: candidate.id,
+              evidence: candidateEvidence,
+              digest: protocolDigest(candidateEvidence),
+            }),
+          );
+          await expect(
+            acquireExecutionOwnership({
+              tenantId: context.tenantId,
+              invocationId: invocation.id,
+              attemptId: candidate.id,
+              runtimeRevisionId: session.runtimeRevisionId,
+              acquiredByType: "service",
+              acquiredById: "healthy-owner-candidate",
+            }),
+          ).rejects.toMatchObject({ code: "HealthyOwnerExists" });
+          expect(
+            (
+              await db
+                .select()
+                .from(executionOwnershipTable)
+                .where(eq(executionOwnershipTable.invocationId, invocation.id))
+            ).filter((row) => row.ownershipState === "active"),
+          ).toEqual([owner]);
+          expect(
+            (
+              await db.select().from(workspaceWriteLock).where(eq(workspaceWriteLock.id, writer.id))
+            )[0],
+          ).toEqual(writer);
+          expect(await broker.getWriter(probe.scopeDigest, writer.writerGeneration)).toEqual(
+            originalGrant,
+          );
+        }
         if (stage === "before_request_freeze") {
           expect(session.semanticRequestDigest).toBeNull();
         } else {
