@@ -14,6 +14,7 @@ import {
   collectArchitectureFlagViolations,
   collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
+  collectDualAuthorityWriteViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
@@ -198,6 +199,41 @@ describe("Topic02 production dependency boundary", () => {
       "lib/runtime/worker.ts",
       "scripts/workers/entry.ts",
       "scripts/production-wiring.ts",
+    ]);
+  });
+});
+
+describe("Topic02 authority write boundary", () => {
+  it("CLEAN-10: Runtime route writes and second Definition writers fail", () => {
+    expect(
+      collectDualAuthorityWriteViolations([
+        doc(
+          "app/runtime/invocations/route.ts",
+          "await db.update(invocationTable).set({ status: 'x' });",
+        ),
+        doc(
+          "app/runtime/definitions/route.ts",
+          "await db.update(environmentDefinitionTable).set({ displayName: 'x' });",
+        ),
+        doc("app/runtime/raw/route.ts", "await db.execute(sql`UPDATE Invocation SET status='x'`);"),
+        doc(
+          "lib/runtime/second-definition-store.ts",
+          "await tx.insert(environmentDefinitionRevisionTable).values({});",
+        ),
+        doc(
+          "lib/environment/environment-definition-store.ts",
+          "await tx.update(environmentDefinitionTable).set({ displayName: 'x' });",
+        ),
+        doc(
+          "lib/runtime/application/ingress-runtime-events.ts",
+          "await tx.update(invocationTable).set({ status: 'x' });",
+        ),
+      ]),
+    ).toEqual([
+      "app/runtime/invocations/route.ts",
+      "app/runtime/definitions/route.ts",
+      "app/runtime/raw/route.ts",
+      "lib/runtime/second-definition-store.ts",
     ]);
   });
 });

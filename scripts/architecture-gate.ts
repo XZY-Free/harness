@@ -19,6 +19,7 @@ import {
   collectArchitectureFlagViolations,
   collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
+  collectDualAuthorityWriteViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
@@ -240,6 +241,13 @@ function checkProductionTestSupportBoundary(): void {
   else pass("正式执行链未依赖测试支撑模块");
 }
 
+function checkDualAuthorityWriteBoundary(): void {
+  const violations = collectDualAuthorityWriteViolations(productionDocuments());
+  if (violations.length > 0)
+    fail(`Runtime 或 Definition 出现第二写入入口：${violations.join(", ")}`);
+  else pass("Runtime 与 Environment Definition 写入边界唯一");
+}
+
 function checkAbsent(paths: readonly string[], title: string): void {
   const residual = paths.filter((path) => existsSync(resolve(ROOT, path)));
   if (residual.length > 0) {
@@ -389,6 +397,7 @@ function main(): void {
   checkCanonicalNaming();
   checkConfigurationAndScriptNames();
   checkProductionTestSupportBoundary();
+  checkDualAuthorityWriteBoundary();
   checkAbsent(
     [
       "app/api/chat/route.ts",

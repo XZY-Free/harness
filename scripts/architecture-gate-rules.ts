@@ -212,6 +212,77 @@ export function collectProductionTestSupportViolations(
   return [...violations];
 }
 
+/** CLEAN-10：Runtime HTTP 入口不能直接改写 Invocation；Definition/Revision 只有定义存储服务可写。 */
+export function collectDualAuthorityWriteViolations(
+  documents: readonly SourceDocument[],
+): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!INTERNAL_SOURCE_PATH.test(document.path)) continue;
+    if (/(?:^|\/)(?:test-support|test|__tests__)\//.test(document.path)) continue;
+    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    if (!/\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    const runtimeRoute = /^app\/(?:runtime|gateway)\/.*\/route\.[cm]?[jt]s$/.test(document.path);
+    const definitionWriter = document.path === "lib/environment/environment-definition-store.ts";
+    const sourceFile = ts.createSourceFile(
+      document.path,
+      document.source,
+      ts.ScriptTarget.Latest,
+      true,
+      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const localNames = new Map<string, string>();
+    for (const statement of sourceFile.statements) {
+      if (!ts.isImportDeclaration(statement)) continue;
+      const bindings = statement.importClause?.namedBindings;
+      if (!bindings || !ts.isNamedImports(bindings)) continue;
+      for (const element of bindings.elements) {
+        localNames.set(element.name.text, element.propertyName?.text ?? element.name.text);
+      }
+    }
+    function visit(node: ts.Node): void {
+      if (ts.isTaggedTemplateExpression(node) && node.tag.getText(sourceFile) === "sql") {
+        const statement = node.template.getText(sourceFile);
+        const writesInvocation =
+          /\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+[`"]?Invocation\b/i.test(statement);
+        const writesDefinition =
+          /\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+[`"]?EnvironmentDefinition(?:Revision)?\b/i.test(
+            statement,
+          );
+        if ((runtimeRoute && writesInvocation) || (writesDefinition && !definitionWriter)) {
+          violations.add(document.path);
+        }
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["update", "insert", "delete"].includes(node.expression.name.text)
+      ) {
+        const target = node.arguments[0];
+        const localName =
+          target && ts.isIdentifier(target)
+            ? target.text
+            : target && ts.isPropertyAccessExpression(target)
+              ? target.name.text
+              : undefined;
+        const table = localName ? (localNames.get(localName) ?? localName) : undefined;
+        const write = node.expression.name.text;
+        if (
+          (runtimeRoute && table === "invocationTable") ||
+          (table === "environmentDefinitionTable" && !definitionWriter) ||
+          (table === "environmentDefinitionRevisionTable" &&
+            (!definitionWriter || write !== "insert"))
+        ) {
+          violations.add(document.path);
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
+  return [...violations];
+}
+
 function moduleSpecifiers(document: SourceDocument): string[] {
   if (!/\.[cm]?[jt]sx?$/.test(document.path)) return [];
   const sourceFile = ts.createSourceFile(
