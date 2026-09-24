@@ -102,9 +102,13 @@ import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/s
 import { takeRecoverablePauseCheckpoint } from "@/lib/workspace/checkpoint-pause";
 import { runCheckpointMaintenanceLane } from "@/lib/workspace/checkpoint-release";
 import { restoreFilesystemCheckpoint } from "@/lib/workspace/checkpoint-restore";
-import { getFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
+import {
+  getFilesystemCheckpoint,
+  listFilesystemCheckpoints,
+} from "@/lib/workspace/checkpoint-store";
 import {
   type RecoveryAnchorDeclarations,
+  computeRecoveryAnchorDigest,
   parseRecoveryAnchor,
 } from "@/lib/workspace/recovery-anchor";
 import { FileSnapshotStorage } from "@/lib/workspace/snapshot-storage";
@@ -924,6 +928,19 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(row?.invocationId).toBe(ctx.invocationId);
     expect(row?.workspaceBindingId).toBe(ctx.workspaceBindingId);
     expect(row?.fileCount).toBeGreaterThan(0);
+    expect(await listFilesystemCheckpoints(TENANT_ID, ctx.invocationId)).toHaveLength(1);
+    const anchor = parseRecoveryAnchor(row?.recoveryAnchor);
+    expect(anchor).not.toBeNull();
+    expect(row?.recoveryAnchorDigest).toBe(computeRecoveryAnchorDigest(anchor!));
+    expect(row?.recoveryAnchorDigest).toBe(
+      (row?.storageEvidence as { freeze: { anchorDigest: string } }).freeze.anchorDigest,
+    );
+    const manifest = await new FileSnapshotStorage(ctx.storageRoot).readManifest(
+      row!.manifestRef,
+      row!.manifestDigest,
+    );
+    expect(manifest.contentRootDigest).toBe(row?.contentRootDigest);
+    expect(manifest.entries.some((entry) => entry.path === "state.txt")).toBe(true);
     // 快照真的落在 `SNOWHARNESS_SNAPSHOT_STORAGE_ROOT` 指向的根里……
     await expect(readFile(path.join(ctx.storageRoot, row!.manifestRef), "utf8")).resolves.toContain(
       "state.txt",
