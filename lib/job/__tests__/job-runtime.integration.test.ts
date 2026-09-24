@@ -69,7 +69,7 @@ import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/s
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
 import { seedRuntimeRouteAuthority } from "@/lib/test-support/seed-runtime-route-authority";
 import { createProductionWorkerRole } from "@/lib/workers/production-worker-role";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000000";
@@ -1122,6 +1122,58 @@ describe("Thread-independent Job runtime integration", () => {
     const finalJob = await getJobById(TENANT_ID, fixture.job.id);
     expect(finalJob?.jobState).toBe("completed");
     expect(finalJob?.resultRef).toBe("job://result/ref");
+  });
+
+  it("JOB-11: 取消与完成命令并发消费只产生一个终态", async () => {
+    const fixture = await seedJobFixture();
+    const cancel = await createCancelCommand({
+      tenantId: TENANT_ID,
+      jobId: fixture.job.id,
+      requestedBy: "user",
+      idempotencyKey: `cancel:${randomUUID()}`,
+    });
+    await db.transaction((tx) =>
+      transitionInvocation(tx, {
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+        nextState: "completed",
+        resultRef: "job://result/race",
+        resultDigest: protocolDigest({ result: "race" }),
+      }),
+    );
+    const terminal = await readTerminalCommand(fixture.job.id);
+    const [cancelOutcome, completionOutcome] = await Promise.all([
+      consumeJobCommand({ tenantId: TENANT_ID, commandId: cancel.command.id }),
+      consumeJobCommand({ tenantId: TENANT_ID, commandId: terminal.id }),
+    ]);
+    expect(["cancelled", "rejected_job_terminal"]).toContain(cancelOutcome.outcome);
+    expect(["terminal_applied", "terminal_replayed"]).toContain(completionOutcome.outcome);
+
+    const finalJob = await getJobById(TENANT_ID, fixture.job.id);
+    expect(["cancelled", "completed"]).toContain(finalJob?.jobState);
+    const terminalEvents = await db
+      .select()
+      .from(jobEventTable)
+      .where(
+        and(
+          eq(jobEventTable.tenantId, TENANT_ID),
+          eq(jobEventTable.jobId, fixture.job.id),
+          inArray(jobEventTable.eventType, ["job.cancelled", "job.completed"]),
+        ),
+      );
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.eventType).toBe(`job.${finalJob?.jobState}`);
+    const [cancelCommand, terminalCommand] = await Promise.all([
+      db.select().from(jobCommandTable).where(eq(jobCommandTable.id, cancel.command.id)).limit(1),
+      db.select().from(jobCommandTable).where(eq(jobCommandTable.id, terminal.id)).limit(1),
+    ]);
+    expect(["acknowledged", "rejected"]).toContain(cancelCommand[0]?.commandState);
+    expect(terminalCommand[0]?.commandState).toBe("acknowledged");
+    if (finalJob?.jobState === "completed") {
+      expect(finalJob.resultRef).toBe("job://result/race");
+    } else {
+      expect(finalJob?.resultRef).toBeNull();
+    }
   });
 
   it("JOB-REG-12: ContextHandle subjects are strictly isolated between Job and Thread", async () => {
