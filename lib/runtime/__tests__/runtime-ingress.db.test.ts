@@ -38,8 +38,10 @@ import {
 } from "@/lib/persistence/schema/conversation";
 import {
   executionOwnershipTable,
+  invocationAttemptTable,
   invocationTable,
   runtimeEventIngressTable,
+  runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import { jobCommandTable } from "@/lib/persistence/schema/job";
 import {
@@ -264,6 +266,107 @@ describe("RuntimeEventIngress database fencing", () => {
       .where(eq(invocationTable.id, fixture.invocation.id));
     expect(before?.executionState).toBe("queued");
     expect(acquired.session.bindingState).toBe("prepared");
+    const activationEvidence = {
+      kind: "ingress-01-activation",
+      ownershipId: acquired.ownership.id,
+    };
+    await db
+      .update(executionOwnershipTable)
+      .set({
+        activationEvidence,
+        activationDigest: protocolDigest(activationEvidence),
+        activatedAt: new Date(),
+      })
+      .where(eq(executionOwnershipTable.id, acquired.ownership.id));
+    const semanticRequestJson = { kind: "ingress-01-start", invocationId: fixture.invocation.id };
+    const semanticRequestDigest = protocolDigest(semanticRequestJson);
+    const capabilitiesDigest = expectedCapabilityManifestDigest({
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+    });
+    await applyRuntimeSessionDispatchForTest(fixture.tenantId, acquired.session.id, {
+      bindingState: "dispatching",
+      semanticRequestJson,
+      semanticRequestDigest,
+      remoteSessionRef: "ingress-01-session",
+      remoteExecutionRef: "ingress-01-execution",
+      transportAcknowledgement: { capabilitiesDigest },
+    });
+    const [afterAck] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id));
+    expect(afterAck?.executionState).toBe("queued");
+    expect(afterAck?.lastProducerSequence).toBe(0n);
+    const [ownerBeforeStarted] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, acquired.ownership.id));
+    expect(ownerBeforeStarted?.executionPhase).toBe("dispatching");
+
+    const startedEventId = randomUUID();
+    const result = await ingressRuntimeEvents({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: acquired.authority,
+        events: [
+          {
+            eventId: startedEventId,
+            producerSequence: "1",
+            type: "execution.started",
+            schemaVersion: 1,
+            payload: {
+              intentKey: acquired.session.startIntentKey,
+              semanticRequestDigest,
+              remoteSessionRef: "ingress-01-session",
+              remoteExecutionRef: "ingress-01-execution",
+              capabilitiesDigest,
+            },
+          },
+        ],
+      },
+    });
+    expect(result.acceptedThroughProducerSequence).toBe("1");
+    expect(result.receipts).toHaveLength(1);
+    expect(result.receipts[0]?.eventId).toBe(startedEventId);
+    expect(result.receipts[0]?.acceptedAuthority).toEqual(acquired.authority);
+    const [invocationAfter] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id));
+    const [attemptAfter] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+    const [ownerAfter] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, acquired.ownership.id));
+    const [sessionAfter] = await db
+      .select()
+      .from(runtimeSessionBindingTable)
+      .where(eq(runtimeSessionBindingTable.id, acquired.session.id));
+    const ingressRows = await db
+      .select()
+      .from(runtimeEventIngressTable)
+      .where(eq(runtimeEventIngressTable.invocationId, fixture.invocation.id));
+    expect(invocationAfter?.executionState).toBe("running");
+    expect(invocationAfter?.lastProducerSequence).toBe(1n);
+    expect(attemptAfter?.attemptState).toBe("running");
+    expect(ownerAfter?.executionPhase).toBe("executing");
+    expect(sessionAfter?.bindingState).toBe("active");
+    expect(ingressRows).toHaveLength(1);
+    expect(ingressRows[0]).toMatchObject({
+      producerEventId: startedEventId,
+      producerSequence: 1n,
+      candidateType: "execution.started",
+      acceptedAttemptId: fixture.attempt.id,
+      acceptedOwnershipId: acquired.ownership.id,
+      acceptedSessionId: acquired.session.id,
+      acceptedEpoch: acquired.ownership.leaseEpoch,
+    });
   });
 
   it("INGRESS-03/INGRESS-04/INGRESS-07: old authority cannot add events or claim a historical receipt", async () => {
