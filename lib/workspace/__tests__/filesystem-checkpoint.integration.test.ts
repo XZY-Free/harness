@@ -1614,6 +1614,157 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
+  it("R5-a/R5-b: 跨进程迟到 freeze 在正式维护先 release 后拒绝，Gate 与写入一致", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      const requested = await requestFilesystemCheckpoint({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        ownershipId: ctx.ownershipId,
+        declarations: ctx.declarations(),
+        requestedByType: "service",
+        requestedById: "test-service",
+      });
+      const [lock] = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.holderInvocationId, ctx.invocationId))
+        .limit(1);
+      if (!lock) throw new Error("WorkspaceWriteLock 缺失");
+      const grant = await ctx.backend.host.getWriter(
+        ctx.workspaceBinding.storageScopeDigest as string,
+        lock.writerGeneration,
+      );
+      if (!grant) throw new Error("Writer grant 缺失");
+      const freezeIntent = {
+        checkpointIntentId: requested.checkpointIntentId,
+        scopeDigest: grant.scopeDigest,
+        writerGeneration: grant.writerGeneration,
+        anchorDigest: requested.anchorDigest,
+        registeredAt: new Date().toISOString(),
+      };
+      await db
+        .update(invocationTable)
+        .set({ checkpointPreparedEvidence: { freezeIntent } })
+        .where(eq(invocationTable.id, ctx.invocationId));
+
+      const barrierRoot = path.join(temporaryRoot, "r5-delayed-freeze");
+      await mkdir(barrierRoot, { recursive: true });
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          path.join(process.cwd(), "lib/workspace/test-support/delayed-freeze-rpc-child.mts"),
+          ctx.hostRoot,
+          ctx.managedRoot,
+          barrierRoot,
+        ],
+        { cwd: process.cwd(), stdio: "ignore" },
+      );
+      const waitForFile = async (file: string) => {
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          if (
+            await stat(file).then(
+              () => true,
+              () => false,
+            )
+          )
+            return;
+          if (child.exitCode !== null) throw new Error(`Broker 子进程提前退出: ${child.exitCode}`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error(`Broker 子进程等待超时: ${file}`);
+      };
+      const releaseBroker = createWorkspaceHostBroker({
+        root: ctx.hostRoot,
+        managedRoot: ctx.managedRoot,
+      });
+      const releaseRpc = await listenWorkspaceHostRpc({ broker: releaseBroker });
+      try {
+        const readyPath = path.join(barrierRoot, "ready");
+        await waitForFile(readyPath);
+        const delayedRemote = createRemoteWorkspaceHost(await readFile(readyPath, "utf8"));
+        const delayedFreeze = expect(
+          delayedRemote.freeze({
+            grant,
+            checkpointIntentId: requested.checkpointIntentId,
+            anchorDigest: requested.anchorDigest,
+          }),
+        ).rejects.toThrow("CheckpointIntentRetired");
+        await waitForFile(path.join(barrierRoot, "entered"));
+        const remoteBackend = createWorkspaceBackend(createRemoteWorkspaceHost(releaseRpc.url));
+        const maintenance = await runCheckpointMaintenanceLane({
+          now: new Date(Date.now() + 300_000),
+          graceMs: 0,
+          resolveBackend: async () => remoteBackend,
+          releaseRuntime: async ({ checkpointIntentId }) => {
+            expect(checkpointIntentId).toBe(requested.checkpointIntentId);
+          },
+        });
+        expect(maintenance.stuckGates.abandoned).toBe(1);
+        expect(maintenance.releases.gateOpened).toBe(1);
+        expect(maintenance.releases.failures).toEqual([]);
+        expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+        await writeFile(path.join(barrierRoot, "release"), "release", "utf8");
+        await delayedFreeze;
+
+        const intentPath = path.join(
+          ctx.hostRoot,
+          ".snow",
+          "safe-point-intents",
+          grant.scopeDigest.replace(/^sha256:/, ""),
+          `${requested.checkpointIntentId}.json`,
+        );
+        expect(JSON.parse(await readFile(intentPath, "utf8"))).toMatchObject({
+          checkpointIntentId: requested.checkpointIntentId,
+          scopeDigest: grant.scopeDigest,
+          writerGeneration: grant.writerGeneration,
+          anchorDigest: requested.anchorDigest,
+          state: "released",
+        });
+        const freezeFile = path.join(
+          ctx.hostRoot,
+          ".snow",
+          "grants",
+          grant.scopeDigest.replace(/^sha256:/, ""),
+          "freeze.json",
+        );
+        await expect(stat(freezeFile)).rejects.toThrow();
+        const [owner] = await db
+          .select()
+          .from(executionOwnershipTable)
+          .where(eq(executionOwnershipTable.id, ctx.ownershipId))
+          .limit(1);
+        expect(owner?.ownershipState).toBe("active");
+        await remoteBackend.host.executeManagedFileOperation({
+          identity: {
+            tenantId: TENANT_ID,
+            scopeDigest: grant.scopeDigest,
+            writerGeneration: grant.writerGeneration,
+            invocationId: grant.invocationId,
+            attemptId: grant.attemptId,
+            ownershipId: grant.ownershipId,
+            operationId: grant.operationId,
+          },
+          operation: { kind: "write", path: "after-r5-release.txt", content: "writable" },
+        });
+        expect(await readFile(path.join(grant.root, "after-r5-release.txt"), "utf8")).toBe(
+          "writable",
+        );
+      } finally {
+        await releaseRpc.close();
+        if (child.exitCode === null && child.signalCode === null) {
+          const exited = once(child, "exit");
+          child.kill("SIGKILL");
+          await exited;
+        }
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it("N06-T6: Owner 接管保留旧 checkpoint release tuple，并由维护 lane 收口而非直接清空", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
