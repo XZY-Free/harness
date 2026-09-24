@@ -170,7 +170,9 @@ export async function acceptExecutionPreparation(input: {
       }
       if (owner.executionPhase === "executing" || sourceSession.bindingState === "active") {
         return {
-          disposition: "receipt",
+          // started 先于 HTTP ACK 时只能证明远端已运行，不能拼造 accepted 回执。
+          // 用冻结的同一 Session/幂等键重新投递，取得真实 Transport ACK。
+          disposition: sourceSession.transportAcknowledgement ? "receipt" : "dispatch",
           source,
           sessionBindingId: sourceSession.id,
           ownershipId: owner.id,

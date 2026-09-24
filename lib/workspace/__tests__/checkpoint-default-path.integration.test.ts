@@ -83,6 +83,7 @@ import {
   removeContainer,
 } from "@/lib/runtime/container/docker-cli";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
+import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
 import { createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
 import {
   PROTOCOL_VERSION,
@@ -145,6 +146,7 @@ interface CheckpointRuntimeStub {
   readonly safePointRequests: Array<{ checkpointIntentId: string; idempotencyKey: string }>;
   readonly releaseRequests: Array<{ checkpointIntentId: string; path: string }>;
   readonly resumeRequests: RuntimeStartRequest[];
+  readonly resumeIdempotencyKeys: string[];
   setCapabilitiesDigest(value: string): void;
   setReleaseFailure(value: boolean): void;
   /** 让**下一次** Resume 接纳完成后切断连接：Runtime 已接纳，但回执永远到不了平台。 */
@@ -156,6 +158,7 @@ async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
   const safePointRequests: Array<{ checkpointIntentId: string; idempotencyKey: string }> = [];
   const releaseRequests: Array<{ checkpointIntentId: string; path: string }> = [];
   const resumeRequests: RuntimeStartRequest[] = [];
+  const resumeIdempotencyKeys: string[] = [];
   let capabilitiesDigest = "";
   let dropNextResume = false;
   let releaseFailure = false;
@@ -202,6 +205,7 @@ async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
       }
       const parsed = RuntimeStartRequestSchema.parse(body);
       resumeRequests.push(parsed);
+      resumeIdempotencyKeys.push(idempotencyKey);
       if (dropNextResume) {
         // 接纳事实已经产生（请求内容已记录），但回执在网络上丢失：平台侧只能看到一次可重试的传输失败。
         dropNextResume = false;
@@ -234,6 +238,7 @@ async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
     safePointRequests,
     releaseRequests,
     resumeRequests,
+    resumeIdempotencyKeys,
     setCapabilitiesDigest(value: string) {
       capabilitiesDigest = value;
     },
@@ -2078,6 +2083,113 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(await readSessions(ctx)).toHaveLength(2);
     // 恢复出来的目录没有因为重投被重建：文件内容是第一次恢复的那一份。
     expect(await readFile(path.join(chain.expectedRoot, "state.txt"), "utf8")).toBe("reply-once");
+  });
+
+  it("R3-d: Resume 的 started 先于 ACK，正式 Command Worker 回读历史且不重置运行目录", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "before-resume", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    await ingestRuntimeBatch(ctx, [resumeInputPayload()]);
+    const uar = await requireUar(ctx);
+    const checkpoint = await runDefaultCheckpoint(ctx);
+    await ingestRuntimeBatch(ctx, [
+      suspendedEvent(checkpoint.checkpointId, checkpoint.checkpoint.recoveryAnchorDigest),
+    ]);
+    const resolved = await submitResolution(uar.id);
+    ctx.stub.dropNextResumeResponse();
+    const first = await dispatchResumeCommandToRuntime({
+      tenantId: TENANT_ID,
+      commandId: resolved.resumeCommand.id,
+      actorId: "test-service",
+      correlationId: uar.id,
+    });
+    expect(first.dispatched).toBe(true);
+    if (!first.dispatched) throw new Error("首次 Resume 未投递");
+    expect(first.command.commandState).toBe("dispatched");
+    const request = ctx.stub.resumeRequests.at(-1);
+    if (!request) throw new Error("Runtime 未收到 Resume 请求");
+    const resumedSession = (await readSessions(ctx)).at(-1);
+    if (!resumedSession) throw new Error("Resume Session 未持久化");
+    await ingestRuntimeBatch(
+      ctx,
+      [
+        {
+          type: "execution.started",
+          payload: {
+            intentKey: resumedSession.startIntentKey,
+            semanticRequestDigest: resumedSession.semanticRequestDigest,
+            remoteSessionRef: `stub-session:${request.authority.sessionBindingId}`,
+            remoteExecutionRef: `stub-execution:${request.authority.ownershipId}`,
+            capabilitiesDigest: expectedCapabilityManifestDigest({
+              runtimeRevisionId: ctx.runtimeRevisionId,
+              runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+            }),
+          },
+        },
+      ],
+      { authority: request.authority },
+    );
+    expect((await readInvocationFacts(ctx.invocationId)).executionState).toBe("running");
+    const owner = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    const evidence = owner?.activationEvidence as {
+      workspace?: { writerGeneration?: number; grantRef?: string };
+    } | null;
+    const generation = evidence?.workspace?.writerGeneration;
+    if (!owner || !generation) throw new Error("恢复执行缺少物理 Writer");
+    const remote = createRemoteWorkspaceHost(process.env.SNOWHARNESS_WORKSPACE_HOST_URL!);
+    const grant = await remote.getWriter(ctx.scopeDigest, generation);
+    if (!grant) throw new Error("恢复 Writer grant 不存在");
+    const activeRoot = await realpath(grant.root);
+    await writeFile(path.join(activeRoot, "live.txt"), "changed-after-started", "utf8");
+    await waitForDispatchDue(resolved.resumeCommand.id);
+    const worker = await createRuntimeDispatchRetryWorker().tick();
+    expect(worker.commands).toBeGreaterThanOrEqual(1);
+    const [command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, resolved.resumeCommand.id))
+      .limit(1);
+    expect(command?.commandState).toBe("acknowledged");
+    const sessionAfterAck = (await readSessions(ctx)).at(-1);
+    expect(sessionAfterAck?.transportAcknowledgement).toBeTruthy();
+    expect(command?.receiptJson).toEqual(sessionAfterAck?.transportAcknowledgement);
+    expect(ctx.stub.resumeRequests).toHaveLength(2);
+    expect(ctx.stub.resumeRequests[1]?.authority).toEqual(request.authority);
+    expect(ctx.stub.resumeIdempotencyKeys).toEqual([
+      `start:${request.authority.ownershipId}`,
+      `start:${request.authority.ownershipId}`,
+    ]);
+    expect(await readFile(path.join(activeRoot, "live.txt"), "utf8")).toBe("changed-after-started");
+    expect((await remote.getWriter(ctx.scopeDigest, generation))?.grantRef).toBe(grant.grantRef);
+    expect((await readSessions(ctx)).at(-1)?.id).toBe(resumedSession.id);
+    expect(
+      (
+        await getActiveExecutionOwnership({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+        })
+      )?.id,
+    ).toBe(owner.id);
+
+    await ingestRuntimeBatch(
+      ctx,
+      [{ type: "execution.completed", payload: { finish_reason: "execution.completed" } }],
+      { authority: request.authority },
+    );
+    const beforeHistory = await readSessions(ctx);
+    const historical = await retryDispatchedCommandToRuntime({
+      tenantId: TENANT_ID,
+      commandId: resolved.resumeCommand.id,
+    });
+    expect(historical.dispatched).toBe(false);
+    expect(ctx.stub.resumeRequests).toHaveLength(2);
+    expect((await readSessions(ctx)).map((row) => row.id)).toEqual(
+      beforeHistory.map((row) => row.id),
+    );
+    expect(await readFile(path.join(activeRoot, "live.txt"), "utf8")).toBe("changed-after-started");
   });
 
   it("A06-T07: 文件恢复完成后确认丢失 —— 同 Resume 意图重投复用同一恢复操作，root/manifest 不漂移", async () => {

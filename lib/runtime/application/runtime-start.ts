@@ -391,29 +391,12 @@ export async function startRuntimeInvocation(
     });
     const historicalResponse = session.transportAcknowledgement as RuntimeStartResponse | null;
     if (preparationDecision.disposition === "receipt") {
-      const receipt =
-        historicalResponse ??
-        (session.bindingState === "active" &&
-        session.remoteSessionRef &&
-        session.remoteExecutionRef &&
-        session.semanticRequestDigest
-          ? {
-              protocolVersion: 3 as const,
-              authority,
-              semanticRequestDigest: session.semanticRequestDigest,
-              accepted: true as const,
-              remoteSessionRef: session.remoteSessionRef,
-              remoteExecutionRef: session.remoteExecutionRef,
-              capabilitiesDigest: publishedCapabilityManifestDigest,
-              acceptedAt: session.updatedAt.getTime(),
-            }
-          : null);
-      if (!receipt) {
+      if (!historicalResponse) {
         throw new ExecutionAuthorityError("NotCurrentExecutor", "SourceClosedWithoutReceipt");
       }
       return {
         authority,
-        response: receipt,
+        response: historicalResponse,
         sessionBindingId: session.id,
       };
     }
