@@ -2303,7 +2303,7 @@ describe("FilesystemCheckpoint integration", () => {
     },
   );
 
-  it("CHECKPOINT-REG-10: a superseded owner cannot commit a checkpoint and no formal row appears", async () => {
+  it("CHECKPOINT-09: 快照真实上传期间正式接管，旧 Owner 不得提交正式对象", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "data", "utf8");
@@ -2315,41 +2315,106 @@ describe("FilesystemCheckpoint integration", () => {
         requestedByType: "service",
         requestedById: "test-service",
       });
-      // 模拟上传期间发生 Takeover：旧 Ownership 失去 active 状态。
-      await db
-        .update(executionOwnershipTable)
-        .set({
-          ownershipState: "lost",
-          releasedAt: new Date(),
-          reasonCode: "superseded",
-        })
-        .where(eq(executionOwnershipTable.id, ctx.ownershipId));
-      await expect(
-        produceFilesystemCheckpoint({
-          tenantId: TENANT_ID,
-          invocationId: ctx.invocationId,
-          ownershipId: ctx.ownershipId,
-          backend: ctx.backend,
-          storage: { kind: "file", root: ctx.storageRoot },
-          checkpointIntentId: requested.checkpointIntentId,
-          safePointEvidence: {
-            checkpointIntentId: requested.checkpointIntentId,
-            safePointEvidenceDigest: protocolDigest({ safePoint: requested.checkpointIntentId }),
-            writerQuiescenceAchievedAt: new Date(),
+      let notifyUploaded!: () => void;
+      let continueAfterTakeover!: () => void;
+      const uploaded = new Promise<void>((resolve) => {
+        notifyUploaded = resolve;
+      });
+      const takeoverComplete = new Promise<void>((resolve) => {
+        continueAfterTakeover = resolve;
+      });
+      let manifestRef: string | null = null;
+      const backend = createWorkspaceBackend(
+        new Proxy(ctx.backend.host, {
+          get(target, property) {
+            if (property === "snapshot") {
+              return async (input: Parameters<typeof target.snapshot>[0]) => {
+                const receipt = await target.snapshot(input);
+                manifestRef = receipt.manifestRef;
+                notifyUploaded();
+                await takeoverComplete;
+                return receipt;
+              };
+            }
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
           },
         }),
-      ).rejects.toThrow("NotCurrentExecutor");
-      expect(await countCheckpoints(ctx.invocationId)).toBe(0);
-      // 受控清理：gate 回 open，不留下无法退出的屏障。
-      await abandonFilesystemCheckpoint({
+      );
+      const producing = produceFilesystemCheckpoint({
         tenantId: TENANT_ID,
         invocationId: ctx.invocationId,
         ownershipId: ctx.ownershipId,
+        backend,
+        storage: { kind: "file", root: ctx.storageRoot },
         checkpointIntentId: requested.checkpointIntentId,
-        reasonCode: "NotCurrentExecutor",
+        safePointEvidence: {
+          checkpointIntentId: requested.checkpointIntentId,
+          safePointEvidenceDigest: protocolDigest({ safePoint: requested.checkpointIntentId }),
+          writerQuiescenceAchievedAt: new Date(),
+        },
       });
-      const gate = await readGate(ctx.invocationId);
-      expect(gate?.checkpointGate).toBe("open");
+      void producing.catch(() => undefined);
+      try {
+        await Promise.race([
+          uploaded,
+          producing.then(() => {
+            throw new Error("Checkpoint 在上传屏障前意外完成");
+          }),
+        ]);
+        if (!manifestRef) throw new Error("上传屏障缺少 manifest");
+        await expect(readFile(path.join(ctx.storageRoot, manifestRef), "utf8")).resolves.toContain(
+          "state.txt",
+        );
+        expect(await countCheckpoints(ctx.invocationId)).toBe(0);
+        // 旧 Owner 的 DB 租约到期后，正式 Acquire 在另一个 Attempt 上完成真实接管。
+        // 上传已完成但旧生产者尚未进入正式提交事务。
+        const expiredAt = new Date(ctx.ownership.acquiredAt.getTime() + 1);
+        await db
+          .update(executionOwnershipTable)
+          .set({ leaseExpiresAt: expiredAt, lastHeartbeatAt: ctx.ownership.acquiredAt })
+          .where(eq(executionOwnershipTable.id, ctx.ownershipId));
+        const replacementAttempt = await createAttempt({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          retryReasonCode: "checkpoint_upload_takeover",
+        });
+        const evidence = { kind: "checkpoint-upload-takeover", attemptId: replacementAttempt.id };
+        await db.transaction((tx) =>
+          markAttemptPreparedForTestInTransaction(tx, {
+            attemptId: replacementAttempt.id,
+            evidence,
+            digest: protocolDigest(evidence),
+          }),
+        );
+        const takeover = await acquireExecutionOwnership({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          attemptId: replacementAttempt.id,
+          runtimeRevisionId: ctx.runtimeRevisionId,
+          acquiredByType: "service",
+          acquiredById: "checkpoint-upload-takeover",
+        });
+        expect(takeover.takeover).toBe(true);
+        expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
+        expect((await readGate(ctx.invocationId))?.checkpointIntentId).toBe(
+          requested.checkpointIntentId,
+        );
+        continueAfterTakeover();
+        await expect(producing).rejects.toThrow("CheckpointStale");
+        expect(await countCheckpoints(ctx.invocationId)).toBe(0);
+        const maintenance = await runCheckpointMaintenanceLane({
+          now: new Date(Date.now() + 300_000),
+          graceMs: 0,
+          resolveBackend: async () => ctx.backend,
+          releaseRuntime: async () => undefined,
+        });
+        expect(maintenance.releases.gateOpened).toBe(1);
+        expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+      } finally {
+        continueAfterTakeover();
+        await producing.catch(() => undefined);
+      }
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
