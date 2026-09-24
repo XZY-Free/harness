@@ -105,6 +105,7 @@ export class ProducerSequenceGapError extends Error {
     public readonly invocationId: string,
     public readonly expected: string,
     public readonly actual: string,
+    public readonly acceptedThroughProducerSequence?: string,
   ) {
     super(
       `Runtime Event producerSequence 不连续：${invocationId} expected=${expected} actual=${actual}`,
@@ -1275,7 +1276,12 @@ export async function ingressRuntimeEvents(
       const payloadHash = computeEventPayloadHash(event);
       const existing = await findExisting(tx, input.tenantId, input.invocationId, event);
       if (existing.kind === "conflict") {
-        throw new ProducerSequenceGapError(input.invocationId, existing.reason, event.eventId);
+        throw new ProducerSequenceGapError(
+          input.invocationId,
+          existing.reason,
+          event.eventId,
+          String(invocation.lastProducerSequence),
+        );
       }
       if (existing.kind === "exact") {
         const row = existing.row;
@@ -1305,6 +1311,7 @@ export async function ingressRuntimeEvents(
           input.invocationId,
           String(expected),
           event.producerSequence,
+          String(invocation.lastProducerSequence),
         );
       expected += 1n;
       newEvents.push({ event, payloadHash });

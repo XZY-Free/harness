@@ -150,7 +150,12 @@ export async function ingressErrorToResponse(
     });
   }
   if (error instanceof ProducerSequenceGapError) {
-    return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
+    return apiError("EVENT_SEQUENCE_GAP", error.message, {
+      requestId,
+      ...(error.acceptedThroughProducerSequence !== undefined
+        ? { details: { acceptedThroughProducerSequence: error.acceptedThroughProducerSequence } }
+        : {}),
+    });
   }
   // TransientSequenceGapError 来自 transient 域
   if (error instanceof Error && error.name === "TransientSequenceGapError") {

@@ -650,6 +650,53 @@ describe("RuntimeEventIngress database fencing", () => {
     ).toEqual(beforeCounters);
   });
 
+  it("INGRESS-09: 序号缺口返回安全接纳水位且不消费缺失序号", async () => {
+    const runtime = await createActiveRuntime();
+    const token = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      runtimeRevisionId: runtime.fixture.binding.runtimeRevisionId,
+      attemptId: runtime.fixture.attempt.id,
+      ownershipId: runtime.acquired.ownership.id,
+      leaseEpoch: String(runtime.acquired.ownership.leaseEpoch),
+      sessionBindingId: runtime.acquired.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    await ingressBatch(runtime, [progressEvent("2")]);
+    const routeEvent = (event: ReturnType<typeof progressEvent>) =>
+      ingestRuntimeEventsPOST(
+        buildApiRequest({
+          audience: "runtime",
+          method: "POST",
+          path: `/invocations/${runtime.fixture.invocation.id}/events`,
+          idempotencyKey: randomUUID(),
+          token,
+          body: {
+            protocolVersion: 3,
+            authority: runtime.acquired.authority,
+            events: [event],
+          },
+        }),
+        { params: Promise.resolve({ invocationId: runtime.fixture.invocation.id }) },
+      );
+    const gap = await routeEvent(progressEvent("4"));
+    expect(gap.status).toBe(409);
+    expect((await gap.json()).error).toMatchObject({
+      code: "EVENT_SEQUENCE_GAP",
+      details: { acceptedThroughProducerSequence: "2" },
+    });
+    expect(
+      (await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id))
+        ?.lastProducerSequence,
+    ).toBe(2n);
+    const recovered = await routeEvent(progressEvent("3"));
+    expect(recovered.status).toBe(200);
+    expect((await recovered.json()).acceptedThroughProducerSequence).toBe("3");
+  });
+
   it("INGRESS-10: a mixed batch rolls back every new event when any event conflicts", async () => {
     const runtime = await createActiveRuntime();
     const accepted = progressEvent("2");
