@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 /**
  * Snapshot 格式、并发/崩溃安全写入与 Restore 幂等（R09 §5/§6/§7）。
  *
@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
  * 不使用内存 mock——被验收的正是这些机制本身。
  */
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
   link,
   lstat,
@@ -14,6 +15,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -25,6 +27,7 @@ import {
   validateSnapshotManifest,
 } from "@/lib/workspace/snapshot-manifest";
 import { FileSnapshotStorage, type SnapshotRequirements } from "@/lib/workspace/snapshot-storage";
+import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const CHUNK_BYTES = 4 * 1024 * 1024;
@@ -335,21 +338,67 @@ describe("Snapshot storage (R09 §5/§6/§7)", () => {
   it("N08-T4: rename 已发布但 ready 尚未提交时，同一恢复意图可据实际内容收口", async () => {
     await writeFile(path.join(source, "a.txt"), "alpha", "utf8");
     const storage = new FileSnapshotStorage(storageRoot);
-    const { manifest } = await storage.writeSnapshot(source, "restore-crash", requirements());
-    const destination = path.join(root, "candidate");
-
-    // 先得到一棵真实、经过验证的发布树，再把 marker 回退到 rename 前的持久阶段，模拟
-    // 进程在 rename 成功、ready marker 落盘之前被杀。重试不能永久报 occupied。
-    await storage.restoreSnapshot(manifest, destination, "restore-crash", requirements());
-    await writeFile(
-      `${destination}.restore-state.json`,
-      JSON.stringify({
-        operationId: "restore-crash",
-        manifestDigest: manifest.manifestDigest,
-        phase: "publishing",
-      }),
+    const { receipt } = await storage.writeSnapshot(source, "restore-crash", requirements());
+    const hostRoot = path.join(root, "host");
+    const managedRoot = path.join(root, "managed");
+    await Promise.all([hostRoot, managedRoot].map((directory) => mkdir(directory)));
+    const destination = path.join(managedRoot, "candidate");
+    const renamedSignal = path.join(root, "renamed");
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.join(process.cwd(), "lib/workspace/test-support/restore-after-rename-child.mts"),
+        hostRoot,
+        managedRoot,
+        storageRoot,
+        receipt.manifestRef,
+        receipt.manifestDigest,
+        destination,
+        renamedSignal,
+      ],
+      { cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] },
     );
-    await storage.restoreSnapshot(manifest, destination, "restore-crash", requirements());
+    const exited = once(child, "exit");
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    try {
+      const deadline = Date.now() + 15_000;
+      while (
+        !(await stat(renamedSignal).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        if (child.exitCode !== null || Date.now() >= deadline) {
+          throw new Error(`子进程未到达 rename 后窗口：${stderr}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(await readFile(path.join(destination, "a.txt"), "utf8")).toBe("alpha");
+      expect(JSON.parse(await readFile(`${destination}.restore-state.json`, "utf8"))).toMatchObject(
+        { operationId: "restore-crash", phase: "publishing" },
+      );
+    } finally {
+      child.kill("SIGKILL");
+      await exited;
+    }
+    // 新 Broker 只用原 manifest/operation 读回真实发布树，补交 ready。
+    const restarted = createWorkspaceHostBroker({
+      root: hostRoot,
+      managedRoot,
+      snapshotStorage: new FileSnapshotStorage(storageRoot),
+    });
+    await restarted.restore({
+      manifestRef: receipt.manifestRef,
+      manifestDigest: receipt.manifestDigest,
+      destination,
+      operationId: "restore-crash",
+      requirements: requirements(),
+    });
     const state = JSON.parse(await readFile(`${destination}.restore-state.json`, "utf8")) as {
       operationId: string;
       phase: string;

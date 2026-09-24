@@ -134,6 +134,7 @@ export class FileSnapshotStorage implements SnapshotStorage {
   private readonly root: string;
   private readonly testHooks: {
     beforeRestorePublish?: (input: { target: string; operationId: string }) => Promise<void>;
+    afterRestoreRename?: (input: { target: string; operationId: string }) => Promise<void>;
   } | null;
 
   constructor(
@@ -141,6 +142,7 @@ export class FileSnapshotStorage implements SnapshotStorage {
     /** 仅供真实文件系统并发测试控制 publish 交错；生产装配不得传入。 */
     testHooks?: {
       beforeRestorePublish?: (input: { target: string; operationId: string }) => Promise<void>;
+      afterRestoreRename?: (input: { target: string; operationId: string }) => Promise<void>;
     },
   ) {
     this.root = path.resolve(root);
@@ -493,6 +495,7 @@ export class FileSnapshotStorage implements SnapshotStorage {
     await writeFile(stateFile, JSON.stringify({ ...state, phase: "publishing" }));
     await this.syncDirectory(path.dirname(target));
     await rename(staging, target);
+    await this.testHooks?.afterRestoreRename?.({ target, operationId: state.operationId });
     await writeFile(stateFile, JSON.stringify(state));
     await this.syncDirectory(path.dirname(target));
   }
