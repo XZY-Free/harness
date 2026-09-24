@@ -697,6 +697,58 @@ describe("RuntimeEventIngress database fencing", () => {
     expect((await recovered.json()).acceptedThroughProducerSequence).toBe("3");
   });
 
+  it("INGRESS-08: 相同事件 ID 的不同 Payload 经 Route 冲突且不终结 Invocation", async () => {
+    const runtime = await createActiveRuntime();
+    const token = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      runtimeRevisionId: runtime.fixture.binding.runtimeRevisionId,
+      attemptId: runtime.fixture.attempt.id,
+      ownershipId: runtime.acquired.ownership.id,
+      leaseEpoch: String(runtime.acquired.ownership.leaseEpoch),
+      sessionBindingId: runtime.acquired.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    const event = progressEvent("2");
+    await ingressBatch(runtime, [event]);
+    const beforeLedger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const beforeCounters = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const response = await ingestRuntimeEventsPOST(
+      buildApiRequest({
+        audience: "runtime",
+        method: "POST",
+        path: `/invocations/${runtime.fixture.invocation.id}/events`,
+        idempotencyKey: randomUUID(),
+        token,
+        body: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [progressEvent("2", event.eventId, { message: "changed" })],
+        },
+      }),
+      { params: Promise.resolve({ invocationId: runtime.fixture.invocation.id }) },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      beforeLedger,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(beforeCounters);
+    const [invocation] = await db
+      .select({ executionState: invocationTable.executionState })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, runtime.fixture.invocation.id));
+    expect(invocation?.executionState).toBe("running");
+  });
+
   it("INGRESS-10: a mixed batch rolls back every new event when any event conflicts", async () => {
     const runtime = await createActiveRuntime();
     const accepted = progressEvent("2");
