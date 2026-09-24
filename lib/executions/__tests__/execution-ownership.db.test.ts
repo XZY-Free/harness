@@ -461,6 +461,159 @@ describe("ExecutionOwnership database fencing", () => {
     expect(rows.filter((r) => r.ownershipState === "active")).toHaveLength(1);
   });
 
+  it("FENCE-05: 无 Owner 时双候选在独立事务重叠，第二个 Acquire 等待并被拒绝", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const candidateB = await prepareReplacementAttempt(fixture, "overlap-initial-b");
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstReady!: () => void;
+    const firstInsideTx = new Promise<void>((resolve) => {
+      firstReady = resolve;
+    });
+    const firstTx = db.transaction(async (tx) => {
+      const result = await acquireExecutionOwnershipInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: fixture.attempt.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "overlap-initial-a",
+      });
+      firstReady();
+      await firstGate;
+      return result;
+    });
+    try {
+      await firstInsideTx;
+      const secondTx = acquireExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: candidateB.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "overlap-initial-b",
+      });
+      const rejectedSecond = expect(secondTx).rejects.toMatchObject({
+        code: "HealthyOwnerExists",
+      });
+      expect(
+        await Promise.race([
+          secondTx.then(
+            () => "acquired",
+            () => "rejected",
+          ),
+          new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+        ]),
+      ).toBe("waiting");
+      releaseFirst();
+      const winner = await firstTx;
+      await rejectedSecond;
+      expect(winner.ownership.leaseEpoch).toBe(1n);
+      const rows = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.invocationId, fixture.invocation.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(winner.ownership.id);
+      expect(rows.find((row) => row.attemptId === candidateB.id)).toBeUndefined();
+      expect(
+        (
+          await getActiveExecutionOwnership({
+            tenantId: fixture.tenantId,
+            invocationId: fixture.invocation.id,
+          })
+        )?.id,
+      ).toBe(winner.ownership.id);
+    } finally {
+      releaseFirst();
+      await firstTx;
+    }
+  });
+
+  it("FENCE-08: 双 Takeover 在两个 MySQL 事务中重叠，只有首个候选取得新代际", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const first = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    });
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, first.ownership.id));
+    const candidateB = await prepareReplacementAttempt(fixture, "double-takeover-b");
+    const candidateC = await prepareReplacementAttempt(fixture, "double-takeover-c");
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstReady!: () => void;
+    const firstInsideTx = new Promise<void>((resolve) => {
+      firstReady = resolve;
+    });
+    const firstTx = db.transaction(async (tx) => {
+      const result = await acquireExecutionOwnershipInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: candidateB.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "double-takeover-b",
+      });
+      firstReady();
+      await firstGate;
+      return result;
+    });
+    try {
+      await firstInsideTx;
+      const secondTx = acquireExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: candidateC.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "double-takeover-c",
+      });
+      const rejectedSecond = expect(secondTx).rejects.toMatchObject({
+        code: "HealthyOwnerExists",
+      });
+      expect(
+        await Promise.race([
+          secondTx.then(
+            () => "acquired",
+            () => "rejected",
+          ),
+          new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+        ]),
+      ).toBe("waiting");
+      releaseFirst();
+      const successor = await firstTx;
+      await rejectedSecond;
+      expect(successor.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
+      const rows = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.invocationId, fixture.invocation.id));
+      expect(rows.filter((row) => row.ownershipState === "active")).toHaveLength(1);
+      expect(rows.find((row) => row.id === first.ownership.id)?.ownershipState).toBe("lost");
+      expect(rows.find((row) => row.attemptId === candidateC.id)).toBeUndefined();
+      expect(
+        (
+          await getActiveExecutionOwnership({
+            tenantId: fixture.tenantId,
+            invocationId: fixture.invocation.id,
+          })
+        )?.id,
+      ).toBe(successor.ownership.id);
+    } finally {
+      releaseFirst();
+      await firstTx;
+    }
+  });
+
   it("FENCE-06: renew-first keeps a healthy owner; takeover-first fences the old renew", async () => {
     const fixture = await seedPreparedRuntimeAttempt();
     const first = await acquireTestRuntimeAuthority({
