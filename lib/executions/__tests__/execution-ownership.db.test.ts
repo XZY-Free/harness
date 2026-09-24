@@ -21,6 +21,7 @@ import {
   acquireExecutionOwnership,
   acquireExecutionOwnershipInTransaction,
   closeExecutionOwnership,
+  closeExecutionOwnershipInTransaction,
   getActiveExecutionOwnership,
   getAuthorityDatabaseTime,
   renewExecutionOwnership,
@@ -874,6 +875,132 @@ describe("ExecutionOwnership database fencing", () => {
       expect((takeoverResult as PromiseRejectedResult).reason).toMatchObject({
         code: "HealthyOwnerExists",
       });
+    }
+  });
+
+  it("FENCE-07: Release 先与 Takeover 先两种事务交错均只授予一次新代际", async () => {
+    const fixture = await seedPreparedRuntimeAttempt();
+    const first = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+    });
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, first.ownership.id));
+    const candidateB = await prepareReplacementAttempt(fixture, "release-first-b");
+    let releaseFirst!: () => void;
+    const releaseGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let releaseReady!: () => void;
+    const releaseInsideTx = new Promise<void>((resolve) => {
+      releaseReady = resolve;
+    });
+    const releaseTx = db.transaction(async (tx) => {
+      const result = await closeExecutionOwnershipInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        ownershipId: first.ownership.id,
+        state: "released",
+        reasonCode: "release-first",
+      });
+      releaseReady();
+      await releaseGate;
+      return result;
+    });
+    let second: Awaited<ReturnType<typeof acquireExecutionOwnership>>;
+    try {
+      await releaseInsideTx;
+      const takeover = acquireExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: candidateB.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "release-first-b",
+      });
+      expect(
+        await Promise.race([
+          takeover.then(
+            () => "acquired",
+            () => "rejected",
+          ),
+          new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+        ]),
+      ).toBe("waiting");
+      releaseFirst();
+      expect((await releaseTx).ownershipState).toBe("released");
+      second = await takeover;
+      expect(second.ownership.leaseEpoch).toBe(first.ownership.leaseEpoch + 1n);
+    } finally {
+      releaseFirst();
+      await releaseTx;
+    }
+
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, second.ownership.id));
+    const candidateC = await prepareReplacementAttempt(fixture, "takeover-first-c");
+    let releaseTakeover!: () => void;
+    const takeoverGate = new Promise<void>((resolve) => {
+      releaseTakeover = resolve;
+    });
+    let takeoverReady!: () => void;
+    const takeoverInsideTx = new Promise<void>((resolve) => {
+      takeoverReady = resolve;
+    });
+    const takeoverTx = db.transaction(async (tx) => {
+      const result = await acquireExecutionOwnershipInTransaction(tx, {
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        attemptId: candidateC.id,
+        runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "takeover-first-c",
+      });
+      takeoverReady();
+      await takeoverGate;
+      return result;
+    });
+    try {
+      await takeoverInsideTx;
+      const staleRelease = closeExecutionOwnership({
+        tenantId: fixture.tenantId,
+        invocationId: fixture.invocation.id,
+        ownershipId: second.ownership.id,
+        state: "released",
+        reasonCode: "late-release",
+      });
+      expect(
+        await Promise.race([
+          staleRelease.then(
+            () => "released",
+            () => "rejected",
+          ),
+          new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 100)),
+        ]),
+      ).toBe("waiting");
+      releaseTakeover();
+      const third = await takeoverTx;
+      expect((await staleRelease).ownershipState).toBe("lost");
+      expect(third.ownership.leaseEpoch).toBe(second.ownership.leaseEpoch + 1n);
+      const rows = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.invocationId, fixture.invocation.id));
+      expect(rows).toHaveLength(3);
+      expect(rows.filter((row) => row.ownershipState === "active").map((row) => row.id)).toEqual([
+        third.ownership.id,
+      ]);
+      expect(rows.find((row) => row.id === first.ownership.id)?.ownershipState).toBe("released");
+      expect(rows.find((row) => row.id === second.ownership.id)?.ownershipState).toBe("lost");
+    } finally {
+      releaseTakeover();
+      await takeoverTx;
     }
   });
 
