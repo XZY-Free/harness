@@ -50,6 +50,7 @@ import {
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
 import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import { TEST_EXECUTION_BINDING_EVIDENCE } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
@@ -99,6 +100,7 @@ import {
 } from "@/lib/runtime/runtime-protocol";
 import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/session-write-fixtures";
 import { takeRecoverablePauseCheckpoint } from "@/lib/workspace/checkpoint-pause";
+import { runCheckpointMaintenanceLane } from "@/lib/workspace/checkpoint-release";
 import { restoreFilesystemCheckpoint } from "@/lib/workspace/checkpoint-restore";
 import { getFilesystemCheckpoint } from "@/lib/workspace/checkpoint-store";
 import {
@@ -149,7 +151,11 @@ const checkpointPolicy = {
 interface CheckpointRuntimeStub {
   readonly endpoint: string;
   readonly safePointRequests: Array<{ checkpointIntentId: string; idempotencyKey: string }>;
-  readonly releaseRequests: Array<{ checkpointIntentId: string; path: string }>;
+  readonly releaseRequests: Array<{
+    checkpointIntentId: string;
+    path: string;
+    idempotencyKey: string;
+  }>;
   readonly resumeRequests: RuntimeStartRequest[];
   readonly resumeIdempotencyKeys: string[];
   setCapabilitiesDigest(value: string): void;
@@ -161,7 +167,11 @@ interface CheckpointRuntimeStub {
 
 async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
   const safePointRequests: Array<{ checkpointIntentId: string; idempotencyKey: string }> = [];
-  const releaseRequests: Array<{ checkpointIntentId: string; path: string }> = [];
+  const releaseRequests: Array<{
+    checkpointIntentId: string;
+    path: string;
+    idempotencyKey: string;
+  }> = [];
   const resumeRequests: RuntimeStartRequest[] = [];
   const resumeIdempotencyKeys: string[] = [];
   let capabilitiesDigest = "";
@@ -198,7 +208,7 @@ async function startCheckpointRuntimeStub(): Promise<CheckpointRuntimeStub> {
         return;
       }
       if (release) {
-        releaseRequests.push({ checkpointIntentId: release[1]!, path: url });
+        releaseRequests.push({ checkpointIntentId: release[1]!, path: url, idempotencyKey });
         if (releaseFailure) {
           respondJson(response, 503, {
             error: { code: "RUNTIME_RELEASE_UNAVAILABLE", message: "simulated release failure" },
@@ -726,6 +736,18 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       workspaceBinding: workspace,
       environmentDefinitionRevisionId: environmentRevision.id,
       runtimeRevisionId,
+      controlPlaneEvidence: {
+        ...TEST_EXECUTION_BINDING_EVIDENCE,
+        runtimeEvidenceKind: "external_endpoint",
+        runtimeArtifactId: null,
+        runtimeArtifactDigest: null,
+        runtimeConfigDigest: digest,
+        runtimeTargetDigest: digest,
+        capabilityManifestDigest: expectedCapabilityManifestDigest({
+          runtimeRevisionId,
+          runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+        }),
+      },
     });
     const lease = await seedPreparedEnvironmentLease({
       tenantId: TENANT_ID,
@@ -972,6 +994,53 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(evidence?.checkpointId);
     expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+  });
+
+  it("N06-T4: Runtime release 首次失败后，正式维护 lane 向原目标重发同键并开放 Gate", async () => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "release retry", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    ctx.stub.setReleaseFailure(true);
+    const initial = await takeRecoverablePauseCheckpoint({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+      requestedById: "test-service",
+    });
+    expect(initial.dispatched).toBe(true);
+    const intentId = initial.checkpointIntentId!;
+    const pending = await readGate(ctx.invocationId);
+    expect(pending?.checkpointGate).toBe("releasing");
+    expect(pending?.checkpointPreparedEvidence).toMatchObject({
+      release: { runtime: "pending", backend: "confirmed" },
+    });
+    expect(ctx.stub.releaseRequests).toHaveLength(1);
+    const originalRequest = ctx.stub.releaseRequests[0]!;
+    expect(originalRequest).toMatchObject({
+      checkpointIntentId: intentId,
+      idempotencyKey: `checkpoint-release:${intentId}`,
+    });
+
+    ctx.stub.setReleaseFailure(false);
+    const maintenance = await runCheckpointMaintenanceLane({
+      now: new Date(pending!.updatedAt.getTime() + 1),
+      graceMs: 0,
+    });
+    expect(maintenance.releases.failures).toEqual([]);
+    expect(maintenance.releases.examined).toBeGreaterThanOrEqual(1);
+    expect(maintenance.releases.awaitingRuntime).toBe(0);
+    expect(maintenance.releases.gateOpened).toBe(1);
+    expect(ctx.stub.releaseRequests).toHaveLength(2);
+    expect(ctx.stub.releaseRequests[1]).toEqual(originalRequest);
+    const settled = await readGate(ctx.invocationId);
+    expect(settled?.checkpointGate).toBe("open");
+    expect(settled?.checkpointPreparedEvidence).toMatchObject({
+      release: { runtime: "confirmed", backend: "confirmed" },
+    });
+    const owner = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    expect(owner?.id).toBe(ctx.ownershipId);
   });
 
   it("A06-02: runtime-start 用恢复目录激活 Writer —— 候选运行区在受管根内、内容真实恢复", async () => {
