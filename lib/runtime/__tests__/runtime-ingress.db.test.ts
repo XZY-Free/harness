@@ -22,6 +22,7 @@ import {
 import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
+  seedPreparedJobRuntimeAttempt,
   seedPreparedRuntimeAttempt,
 } from "@/lib/executions/test-support/seed-runtime-authority";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
@@ -823,6 +824,194 @@ describe("RuntimeEventIngress database fencing", () => {
     expect(
       await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
     ).toEqual(beforeCounters);
+  });
+
+  it("INGRESS-12: Item 与 Ingress 写入阶段失败均回滚整个事件事务", async () => {
+    for (const stage of [
+      { trigger: "topic02_ingress12_item", table: "ThreadItem" },
+      { trigger: "topic02_ingress12_ledger", table: "RuntimeEventIngress" },
+    ]) {
+      const runtime = await createActiveRuntime();
+      const beforeLedger = await readLedger(
+        runtime.fixture.tenantId,
+        runtime.fixture.invocation.id,
+      );
+      const beforeCounters = await readInvocationCounters(
+        runtime.fixture.tenantId,
+        runtime.fixture.invocation.id,
+      );
+      const beforeMapping = await readProductMappingCounts(
+        runtime.fixture.tenantId,
+        runtime.fixture.threadId,
+      );
+      await db.execute(
+        sql.raw(
+          `CREATE TRIGGER ${stage.trigger} BEFORE INSERT ON ${stage.table} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${stage.trigger}'`,
+        ),
+      );
+      try {
+        await expect(ingressBatch(runtime, [progressEvent("2")])).rejects.toMatchObject({
+          cause: {
+            code: "ER_SIGNAL_EXCEPTION",
+            sqlMessage: stage.trigger,
+          },
+        });
+      } finally {
+        await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${stage.trigger}`));
+      }
+      expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+        beforeLedger,
+      );
+      expect(
+        await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+      ).toEqual(beforeCounters);
+      expect(
+        await readProductMappingCounts(runtime.fixture.tenantId, runtime.fixture.threadId),
+      ).toEqual(beforeMapping);
+    }
+  });
+
+  it("INGRESS-12: 正式终态 State 写入失败时回滚先前的 Ingress 与水位", async () => {
+    const runtime = await createActiveRuntime();
+    const beforeLedger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const beforeCounters = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const trigger = "topic02_ingress12_state";
+    await db.execute(
+      sql.raw(
+        `CREATE TRIGGER ${trigger} BEFORE UPDATE ON Invocation FOR EACH ROW BEGIN IF NEW.executionState = 'completed' AND OLD.executionState <> 'completed' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${trigger}'; END IF; END`,
+      ),
+    );
+    try {
+      await expect(
+        ingressBatch(runtime, [
+          {
+            eventId: randomUUID(),
+            producerSequence: "2",
+            type: "execution.completed",
+            schemaVersion: 1,
+            payload: { finish_reason: "execution.completed" },
+          },
+        ]),
+      ).rejects.toMatchObject({
+        cause: { code: "ER_SIGNAL_EXCEPTION", sqlMessage: trigger },
+      });
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger}`));
+    }
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      beforeLedger,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(beforeCounters);
+    const [invocation] = await db
+      .select({ executionState: invocationTable.executionState })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, runtime.fixture.invocation.id));
+    expect(invocation?.executionState).toBe("running");
+  });
+
+  it("INGRESS-12: JobCommand 桥写入失败时回滚终态与整批水位", async () => {
+    const fixture = await seedPreparedJobRuntimeAttempt();
+    const acquired = await acquireTestRuntimeAuthority({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      attemptId: fixture.attempt.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+      activationEvidence: { kind: "ingress12-job-activation" },
+    });
+    const semanticRequestJson = {
+      kind: "ingress12-job-start",
+      invocationId: fixture.invocation.id,
+    };
+    const semanticRequestDigest = protocolDigest(semanticRequestJson);
+    const capabilitiesDigest = expectedCapabilityManifestDigest({
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      runtimeCapabilitiesJson: RUNTIME_CAPABILITIES_JSON,
+    });
+    await applyRuntimeSessionDispatchForTest(fixture.tenantId, acquired.session.id, {
+      bindingState: "dispatching",
+      semanticRequestJson,
+      semanticRequestDigest,
+      remoteSessionRef: "ingress12-job-session",
+      remoteExecutionRef: "ingress12-job-execution",
+      transportAcknowledgement: { capabilitiesDigest },
+    });
+    await ingressRuntimeEvents({
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      batch: {
+        protocolVersion: 3,
+        authority: acquired.authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: "1",
+            type: "execution.started",
+            schemaVersion: 1,
+            payload: {
+              intentKey: acquired.session.startIntentKey,
+              semanticRequestDigest,
+              remoteSessionRef: "ingress12-job-session",
+              remoteExecutionRef: "ingress12-job-execution",
+              capabilitiesDigest,
+            },
+          },
+        ],
+      },
+    });
+    const beforeLedger = await readLedger(fixture.tenantId, fixture.invocation.id);
+    const beforeCounters = await readInvocationCounters(fixture.tenantId, fixture.invocation.id);
+    const trigger = "topic02_ingress12_job_command";
+    await db.execute(
+      sql.raw(
+        `CREATE TRIGGER ${trigger} BEFORE INSERT ON JobCommand FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${trigger}'`,
+      ),
+    );
+    try {
+      await expect(
+        ingressRuntimeEvents({
+          tenantId: fixture.tenantId,
+          invocationId: fixture.invocation.id,
+          batch: {
+            protocolVersion: 3,
+            authority: acquired.authority,
+            events: [
+              {
+                eventId: randomUUID(),
+                producerSequence: "2",
+                type: "execution.completed",
+                schemaVersion: 1,
+                payload: { finish_reason: "execution.completed" },
+              },
+            ],
+          },
+        }),
+      ).rejects.toMatchObject({
+        cause: { code: "ER_SIGNAL_EXCEPTION", sqlMessage: trigger },
+      });
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger}`));
+    }
+    expect(await readLedger(fixture.tenantId, fixture.invocation.id)).toEqual(beforeLedger);
+    expect(await readInvocationCounters(fixture.tenantId, fixture.invocation.id)).toEqual(
+      beforeCounters,
+    );
+    expect(
+      await db
+        .select({ id: jobCommandTable.id })
+        .from(jobCommandTable)
+        .where(eq(jobCommandTable.invocationId, fixture.invocation.id)),
+    ).toHaveLength(0);
+    const [invocation] = await db
+      .select({ executionState: invocationTable.executionState })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id));
+    expect(invocation?.executionState).toBe("running");
   });
 
   // ─── REPLAY-01..06（R05 / R04 / R03）──────────────────────────────────────
