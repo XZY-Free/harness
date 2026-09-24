@@ -42,6 +42,7 @@ import type { EnvironmentRevisionInput } from "@/lib/environment/environment-rev
 import { seedPreparedEnvironmentLease } from "@/lib/environment/test-support/seed-prepared-environment-lease";
 import {
   assertExecutionSourceSnapshot,
+  executionSourceDigest,
   executionSourceRequestOf,
 } from "@/lib/executions/domain/preparation-source";
 import {
@@ -1296,6 +1297,32 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       attempt,
       lease,
       candidateParent,
+      async stageReadyCandidate() {
+        const resources = await resolveExecutionResources({
+          tenantId: TENANT_ID,
+          binding: bindingRow,
+          purpose: "resume",
+        });
+        if (!resources.workspace) throw new Error("Workspace 执行资源缺失");
+        const candidate = await prepareWorkspaceCandidate({
+          attemptId: attempt.id,
+          binding: resources.workspace.binding,
+          backend: resources.workspace.backend,
+          root: resources.workspace.root,
+          operationId: `workspace-${protocolDigest({
+            sourceOperationKey,
+            checkpointId: checkpoint.checkpointId,
+            sourceRequestDigest: executionSourceDigest(accepted.source),
+          }).slice(7, 39)}`,
+          runtimeRevisionId: bindingRow.runtimeRevisionId,
+        });
+        if (!candidate) throw new Error("Workspace 候选目录缺失");
+        const restored = await restoreCheckpoint(ctx, {
+          checkpointId: checkpoint.checkpointId,
+          destination: candidate.preparation.candidateRoot,
+        });
+        return { candidate, restored };
+      },
       async start() {
         const resources = await resolveExecutionResources({
           tenantId: TENANT_ID,
@@ -2586,5 +2613,60 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     const checkpointAfter = await getFilesystemCheckpoint(TENANT_ID, checkpoint.checkpointId);
     expect(checkpointAfter?.manifestDigest).toBe(checkpoint.checkpoint.manifestDigest);
     expect(checkpointAfter?.recoveryVersion).toBe(checkpoint.checkpoint.recoveryVersion);
+  });
+
+  it.each([
+    {
+      name: "同长度改写",
+      mutate: (root: string) => writeFile(path.join(root, "state.txt"), "TAMPER-ME", "utf8"),
+    },
+    { name: "删除文件", mutate: (root: string) => rm(path.join(root, "state.txt")) },
+    {
+      name: "添加文件",
+      mutate: (root: string) => writeFile(path.join(root, "extra.txt"), "extra", "utf8"),
+    },
+  ])("N08-T3: ready 候选目标被$name后，真实恢复准入拒绝", async ({ mutate }) => {
+    const ctx = await setupDefaultPathContext();
+    await writeFile(path.join(ctx.writerRoot, "state.txt"), "tamper-me", "utf8");
+    await assertCheckpointGateFacts(ctx);
+    const checkpoint = await runDefaultCheckpoint(ctx);
+    const generation = await prepareResumeGeneration(ctx, checkpoint);
+    const beforeOwner = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    const { candidate, restored } = await generation.stageReadyCandidate();
+    const target = candidate.preparation.candidateRoot;
+    expect(restored.destination).toBe(target);
+    expect(await readFile(path.join(target, "state.txt"), "utf8")).toBe("tamper-me");
+    const marker = JSON.parse(await readFile(`${target}.restore-state.json`, "utf8")) as {
+      phase: string;
+      manifestDigest: string;
+    };
+    expect(marker.phase).toBe("ready");
+    expect(marker.manifestDigest).toBe(checkpoint.checkpoint.manifestDigest);
+    const manifest = JSON.parse(
+      await readFile(path.join(ctx.storageRoot, checkpoint.checkpoint.manifestRef), "utf8"),
+    ) as { entries: Array<{ path: string; chunks?: Array<{ digest: string }> }> };
+    const chunkDigest = manifest.entries.find((entry) => entry.path === "state.txt")?.chunks?.[0]
+      ?.digest;
+    if (!chunkDigest) throw new Error("快照源内容块缺失");
+    const chunkPath = path.join(ctx.storageRoot, "chunks", chunkDigest.slice("sha256:".length));
+    const sourceChunk = await readFile(chunkPath);
+
+    await mutate(target);
+    await expect(generation.start()).rejects.toThrow(/CheckpointIntegrityFailed|目标实际内容/);
+    expect(await readFile(chunkPath)).toEqual(sourceChunk);
+    expect(ctx.stub.resumeRequests).toHaveLength(0);
+    const afterOwner = await getActiveExecutionOwnership({
+      tenantId: TENANT_ID,
+      invocationId: ctx.invocationId,
+    });
+    expect(afterOwner?.id).toBe(beforeOwner?.id);
+    expect(afterOwner?.attemptId).toBe(ctx.attemptId);
+    expect(await getFilesystemCheckpoint(TENANT_ID, checkpoint.checkpointId)).toMatchObject({
+      manifestDigest: checkpoint.checkpoint.manifestDigest,
+      recoveryVersion: checkpoint.checkpoint.recoveryVersion,
+    });
   });
 });
