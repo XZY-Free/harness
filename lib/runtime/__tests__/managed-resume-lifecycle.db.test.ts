@@ -23,7 +23,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -135,6 +135,8 @@ import {
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
 import { ensureDesktopWorkspace } from "@/lib/workspace/desktop-workspace-queries";
+import { cleanupWorkspaceCandidate } from "@/lib/workspace/workspace-cleanup";
+import { createWorkspaceHostBroker } from "@/lib/workspace/workspace-host-server";
 import { getWorkspaceBindingById } from "@/lib/workspace/workspace-queries";
 import { runEnvironmentCleanupOnce } from "@/scripts/workers/environment-lease-cleanup";
 import { and, eq } from "drizzle-orm";
@@ -2854,6 +2856,102 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
     } finally {
       releaseW2();
       await secondTransaction;
+    }
+  });
+
+  it("N02-T3: 旧准备真实 IO 成功晚到后仅清理独占候选，不改继任代际", async () => {
+    const fixture = await seedClaimFixture();
+    const root = await mkdtemp(path.join(tmpdir(), "snow-n02-late-prepare-"));
+    try {
+      const broker = createWorkspaceHostBroker({ root });
+      const first = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+      if (!first.claim) throw new Error("W1 未取得准备 claim");
+      let releaseOldIo!: () => void;
+      const holdOldIo = new Promise<void>((resolve) => {
+        releaseOldIo = resolve;
+      });
+      let signalPhysicalReady!: (value: Awaited<ReturnType<typeof broker.prepare>>) => void;
+      const physicalReady = new Promise<Awaited<ReturnType<typeof broker.prepare>>>((resolve) => {
+        signalPhysicalReady = resolve;
+      });
+      const oldIo = broker
+        .prepare({
+          candidateAttemptId: fixture.attempt.id,
+          revisionId: fixture.binding.runtimeRevisionId,
+          workspaceBindingId: fixture.binding.workspaceBindingId,
+          operationId: `old-prepare:${randomUUID()}`,
+        })
+        .then(async (prepared) => {
+          signalPhysicalReady(prepared);
+          await holdOldIo;
+          return prepared;
+        });
+      try {
+        const oldPhysical = await physicalReady;
+        await expect(stat(oldPhysical.candidateRoot)).resolves.toBeTruthy();
+        await db
+          .update(invocationAttemptTable)
+          .set({ preparationLeaseExpiresAt: new Date(Date.now() - 1) })
+          .where(eq(invocationAttemptTable.id, fixture.attempt.id));
+        const second = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));
+        if (!second.claim) throw new Error("W2 未接管准备 claim");
+        const successor = await broker.prepare({
+          candidateAttemptId: fixture.attempt.id,
+          revisionId: fixture.binding.runtimeRevisionId,
+          workspaceBindingId: fixture.binding.workspaceBindingId,
+          operationId: `new-prepare:${randomUUID()}`,
+        });
+        const evidence = {
+          kind: "candidate-prepared",
+          resourceId: successor.resourceId,
+          candidateRoot: successor.candidateRoot,
+        };
+        await db.transaction((tx) =>
+          markAttemptPreparedInTransaction(tx, {
+            attemptId: fixture.attempt.id,
+            evidence,
+            digest: protocolDigest(evidence),
+            preparationClaim: second.claim!,
+          }),
+        );
+        const active = await acquireTestRuntimeAuthority({
+          tenantId: fixture.tenantId,
+          invocationId: fixture.invocation.id,
+          attemptId: fixture.attempt.id,
+          runtimeRevisionId: fixture.binding.runtimeRevisionId,
+        });
+        releaseOldIo();
+        const lateSuccess = await oldIo;
+        await expect(
+          db.transaction((tx) =>
+            markAttemptPreparedInTransaction(tx, {
+              attemptId: fixture.attempt.id,
+              evidence: { kind: "late-old-io", resourceId: lateSuccess.resourceId },
+              digest: protocolDigest({ kind: "late-old-io", resourceId: lateSuccess.resourceId }),
+              preparationClaim: first.claim!,
+            }),
+          ),
+        ).rejects.toThrow("PreparationClaimSuperseded");
+        await cleanupWorkspaceCandidate(broker, lateSuccess);
+        await expect(stat(lateSuccess.candidateRoot)).rejects.toThrow();
+        await expect(stat(successor.candidateRoot)).resolves.toBeTruthy();
+        expect((await getAttemptById(fixture.attempt.id))?.preparationDigest).toBe(
+          protocolDigest(evidence),
+        );
+        expect(
+          (
+            await getActiveExecutionOwnership({
+              tenantId: fixture.tenantId,
+              invocationId: fixture.invocation.id,
+            })
+          )?.id,
+        ).toBe(active.ownership.id);
+      } finally {
+        releaseOldIo();
+        await oldIo;
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
