@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { db } from "@/lib/db/client";
@@ -485,6 +486,97 @@ describe("Workspace host recovery integration", () => {
     );
     await broker.assertWriter(recovered);
     process.kill(spawned.pid, "SIGKILL");
+  }, 60_000);
+
+  it("WORKSPACE-08: a lost HTTP activation receipt replays the same generation without a second writer", async () => {
+    const broker = createWorkspaceHostBroker({ root });
+    const upstream = await listenWorkspaceHostRpc({ broker });
+    let dropped = false;
+    let confirmFirstCommit: () => void = () => undefined;
+    const firstCommit = new Promise<void>((resolve) => {
+      confirmFirstCommit = resolve;
+    });
+    const proxy = createServer(async (request, response) => {
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk as Buffer);
+        const body = Buffer.concat(chunks);
+        const forwarded = await fetch(`${upstream.url}/rpc`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        });
+        const payload = await forwarded.text();
+        if (!dropped && JSON.parse(body.toString("utf8")).method === "activateWriter") {
+          dropped = true;
+          confirmFirstCommit();
+          request.socket.destroy();
+          return;
+        }
+        response.writeHead(forwarded.status, { "content-type": "application/json" });
+        response.end(payload);
+      } catch (error) {
+        response.destroy(error instanceof Error ? error : undefined);
+      }
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    const address = proxy.address();
+    if (!address || typeof address === "string") throw new Error("proxy port missing");
+    const client = createRemoteWorkspaceHost(`http://127.0.0.1:${address.port}`);
+    let writerPid: number | null = null;
+    try {
+      const probe = await broker.probeIdentity();
+      const authority = {
+        invocationId: randomUUID(),
+        runtimeRevisionId: randomUUID(),
+        attemptId: randomUUID(),
+        ownershipId: randomUUID(),
+        leaseEpoch: "1",
+        sessionBindingId: randomUUID(),
+      };
+      const input = {
+        tenantId: TENANT_ID,
+        scopeDigest: probe.scopeDigest,
+        writerGeneration: 1,
+        authority,
+        expectedStorageIdentity: probe.storageIdentity,
+        operationId: nextOperationId("lost-http-receipt"),
+        root,
+      };
+      await expect(client.activateWriter(input)).rejects.toThrow();
+      await firstCommit;
+      const committed = await broker.getWriter(probe.scopeDigest, 1);
+      expect(committed).not.toBeNull();
+      const activityFile = path.join(root, "http-receipt-writer.log");
+      const writer = await broker.spawnManagedWriter({
+        tenantId: TENANT_ID,
+        scopeDigest: probe.scopeDigest,
+        writerGeneration: 1,
+        command: process.execPath,
+        args: continuousWriterArgs({ targetFile: activityFile, payload: "original-writer" }),
+        cwd: root,
+        activityPath: activityFile,
+      });
+      writerPid = writer.pid;
+      await waitForGrowth(activityFile, 32);
+
+      const recovered = await client.activateWriter(input);
+      expect(recovered.grantRef).toBe(committed?.grantRef);
+      expect(recovered.writerGeneration).toBe(1);
+      expect(processAlive(writer.pid)).toBe(true);
+      expect((await broker.getWriter(probe.scopeDigest, 1))?.grantRef).toBe(committed?.grantRef);
+      await broker.assertWriter(recovered);
+    } finally {
+      if (writerPid !== null) {
+        try {
+          process.kill(-writerPid, "SIGKILL");
+        } catch {
+          // 已退出。
+        }
+      }
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      await upstream.close();
+    }
   }, 60_000);
 
   it("WRITER-06: a permanently lost HOST_AFFINE host fails closed instead of mounting a fresh directory", async () => {
