@@ -12,7 +12,10 @@ import {
   closeExecutionOwnership,
   getActiveExecutionOwnership,
 } from "@/lib/executions/persistence/execution-ownership-store";
-import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
+import {
+  attemptPreparationClaimForTest,
+  markAttemptPreparedForTestInTransaction,
+} from "@/lib/executions/test-support/preparation-fixtures";
 import {
   acquireTestRuntimeAuthority,
   seedPreparedRuntimeAttempt,
@@ -22,16 +25,20 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
+import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
-import { createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
-import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { getRuntimeSessionBindingsByInvocation } from "@/lib/runtime/persistence/runtime-session-store";
+import { createHttpRuntimeClient, createMockRuntimeClient } from "@/lib/runtime/runtime-client";
+import { PROTOCOL_VERSION, protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { type WorkspaceBackend, createWorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { cleanupWorkspaceCandidate } from "@/lib/workspace/workspace-cleanup";
 import {
   assertWorkspaceContinuity,
   computeWorkspaceContractDigest,
 } from "@/lib/workspace/workspace-contract";
-import { createManagedWorkspaceHost } from "@/lib/workspace/workspace-host";
+import { type WorkspaceHost, createManagedWorkspaceHost } from "@/lib/workspace/workspace-host";
 import {
   WorkspaceIdentityMismatchError,
   continuousWriterArgs,
@@ -1036,5 +1043,152 @@ describe("Workspace continuity integration", () => {
         root: temporaryRoot,
       }),
     ).rejects.toBeInstanceOf(WorkspaceIdentityMismatchError);
+  });
+
+  it("N05-T4: 同源激活的迟到错误不关闭已运行 Owner 与真实 Writer", async () => {
+    try {
+      const { binding } = await createTestBinding({
+        root: temporaryRoot,
+        continuityMode: "SHARED_DURABLE",
+      });
+      const broker = createWorkspaceHostBroker({ root: temporaryRoot });
+      const fixture = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
+      const attempt = await createAttempt({
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+      });
+      const revision = await getRuntimeRevisionById(fixture.binding.runtimeRevisionId);
+      if (!revision) throw new Error("RuntimeRevision 缺失");
+      const capabilitiesDigest = expectedCapabilityManifestDigest({
+        runtimeRevisionId: revision.id,
+        runtimeCapabilitiesJson: revision.runtimeCapabilitiesJson,
+      });
+      let releaseOld!: () => void;
+      const holdOld = new Promise<void>((resolve) => {
+        releaseOld = resolve;
+      });
+      let reached!: () => void;
+      const oldReached = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const delayedHost: WorkspaceHost = new Proxy(broker, {
+        get(target, property, receiver) {
+          if (property === "activateWriter")
+            return async () => {
+              reached();
+              await holdOld;
+              throw new Error("ordinary delayed activation error");
+            };
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const runtimeClient = createMockRuntimeClient({
+        async startInvocation({ request }) {
+          const remoteSessionRef = `n05-session:${request.authority.ownershipId}`;
+          const remoteExecutionRef = `n05-execution:${request.authority.ownershipId}`;
+          await ingressRuntimeEvents({
+            tenantId: TENANT_ID,
+            invocationId: fixture.invocation.id,
+            batch: {
+              protocolVersion: PROTOCOL_VERSION,
+              authority: request.authority,
+              events: [
+                {
+                  eventId: randomUUID(),
+                  producerSequence: request.producerSequenceStart,
+                  type: "execution.started",
+                  schemaVersion: 1,
+                  payload: {
+                    intentKey: `start:${request.authority.ownershipId}`,
+                    semanticRequestDigest: request.semanticRequestDigest,
+                    remoteSessionRef,
+                    remoteExecutionRef,
+                    capabilitiesDigest,
+                  },
+                },
+              ],
+            },
+          });
+          return {
+            protocolVersion: PROTOCOL_VERSION,
+            authority: request.authority,
+            semanticRequestDigest: request.semanticRequestDigest,
+            accepted: true,
+            remoteSessionRef,
+            remoteExecutionRef,
+            capabilitiesDigest,
+            acceptedAt: Date.now(),
+          };
+        },
+      });
+      const start = (
+        host: WorkspaceHost,
+        preparationClaim?: Awaited<ReturnType<typeof attemptPreparationClaimForTest>>,
+      ) =>
+        startRuntimeInvocation({
+          tenantId: TENANT_ID,
+          invocation: fixture.invocation,
+          binding: fixture.binding,
+          attempt,
+          sourceOperationKey: `invocation:${fixture.invocation.id}`,
+          ...(preparationClaim ? { preparationClaim } : {}),
+          runtimeClient,
+          runtimeEndpoint: "https://runtime.example.invalid",
+          auth: { mode: "none" },
+          callbackEndpoints: {
+            events: "https://runtime.example.invalid/events",
+            heartbeat: "https://runtime.example.invalid/heartbeat",
+            context: "https://runtime.example.invalid/context",
+            capabilityActions: "https://runtime.example.invalid/capability-actions",
+            toolCalls: "https://runtime.example.invalid/tool-calls",
+            userActions: "https://runtime.example.invalid/user-actions",
+          },
+          workspace: {
+            binding,
+            backend: createWorkspaceBackend(host),
+            root: temporaryRoot,
+            snapshotStorage: { kind: "broker_default" },
+          },
+        });
+      const first = start(delayedHost);
+      try {
+        await oldReached;
+        const second = await start(broker, await attemptPreparationClaimForTest(attempt.id));
+        const current = await getActiveExecutionOwnership({
+          tenantId: TENANT_ID,
+          invocationId: fixture.invocation.id,
+        });
+        expect(current?.id).toBe(second.authority.ownershipId);
+        expect(current?.executionPhase).toBe("executing");
+        releaseOld();
+        await expect(first).rejects.toThrow("ordinary delayed activation error");
+        const after = await getActiveExecutionOwnership({
+          tenantId: TENANT_ID,
+          invocationId: fixture.invocation.id,
+        });
+        expect(after?.id).toBe(current?.id);
+        expect(after?.executionPhase).toBe("executing");
+        expect(
+          await getRuntimeSessionBindingsByInvocation(TENANT_ID, fixture.invocation.id),
+        ).toHaveLength(1);
+        const [lock] = await db
+          .select()
+          .from(workspaceWriteLock)
+          .where(eq(workspaceWriteLock.holderOwnershipId, current!.id));
+        expect(lock?.lockState).toBe("active");
+        const grant = await broker.getWriter(
+          binding.storageScopeDigest as string,
+          lock!.writerGeneration,
+        );
+        expect(grant).not.toBeNull();
+        if (grant) await broker.assertWriter(grant);
+      } finally {
+        releaseOld();
+        await first.catch(() => undefined);
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
   });
 });
