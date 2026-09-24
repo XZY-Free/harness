@@ -70,6 +70,51 @@ function baseParams(overrides: Record<string, unknown> = {}) {
 }
 
 describe("HarnessLoop", () => {
+  it("已明确提交的智能体事务直接返回权威回执，不再次调用智能体", async () => {
+    const decideNextAction = vi.fn()
+      .mockResolvedValueOnce({
+        actionId: "call-1", stepNo: 1, actionType: "agent.call",
+        purposeCode: "submit_leave", shortPurpose: "提交请假",
+        payload: { agentId: "hr-agent", task: "帮我请一天调休" },
+      })
+      .mockResolvedValueOnce({
+        actionId: "call-2", stepNo: 2, actionType: "agent.call",
+        purposeCode: "submit_leave_again", shortPurpose: "再次提交请假",
+        payload: { agentId: "hr-agent", task: "帮我请一天调休" },
+      });
+    const executeAgent = vi.fn(async () => ({
+      authorityRef: "agent-call:call-1",
+      observation: {
+        observationType: "agent" as const,
+        summary: "调休假申请已提交，等待审批。",
+        sourceRefs: ["agent-call:call-1"],
+        data: {
+          callId: "call-1",
+          resultText: "调休假申请已提交，等待审批。",
+          resultJson: { status: "completed", data: { submission: { submitted: true } } },
+        },
+      },
+    }));
+    const writer = eventWriter();
+    const loop = new HarnessLoop(baseParams({
+      objective: "帮我请一天调休",
+      capabilityDirectives: [{ capability_type: "agent", capability_id: "hr-agent", mode: "preferred" }],
+      decisionPort: { decideNextAction },
+      finalResponsePort: finalPort("错误：模型擅自解释"),
+      executors: { "agent.call": executeAgent },
+      eventWriter: writer,
+    }));
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({ completed: true, responseText: "调休假申请已提交，等待审批。" });
+    expect(decideNextAction).toHaveBeenCalledOnce();
+    expect(executeAgent).toHaveBeenCalledOnce();
+    expect(writer.events).toContainEqual(expect.objectContaining({
+      type: "response.completed",
+      payload: expect.objectContaining({ evidence_refs: ["agent-call:call-1"] }),
+    }));
+  });
   it("live cancel 会中断模型决策并写 cancelled，不再提交 action", async () => {
     const writer = eventWriter();
     const controller = new AbortController();

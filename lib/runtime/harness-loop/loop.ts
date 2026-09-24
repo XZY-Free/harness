@@ -237,6 +237,8 @@ export class HarnessLoop {
       while (true) {
         await this.refreshDurableState();
         this.throwIfCancelled();
+        const submitted = this.completedPreferredAgentSubmission();
+        if (submitted) return await this.completeAgentSubmissionResponse(submitted);
         const nextStepNo = this.nextStepNo();
         if (nextStepNo > this.limits.maxLoopSteps) {
           throw new HarnessLoopError(
@@ -453,7 +455,52 @@ export class HarnessLoop {
         ? this.terminalPreferredAgentFailure()
         : null;
     if (agentFailure) return await this.completeAgentFailureResponse(agentFailure);
+    const submitted = this.completedPreferredAgentSubmission();
+    if (submitted) return await this.completeAgentSubmissionResponse(submitted);
     return null;
+  }
+
+  private completedPreferredAgentSubmission(): HarnessObservation | null {
+    const preferredAgentId = this.preferredAgentId();
+    if (!preferredAgentId) return null;
+    const completed = this.actionHistory.findLast((entry) =>
+      (entry.action.actionType === "agent.call" || entry.action.actionType === "agent.resume") &&
+      entry.state === "completed" &&
+      entry.observation?.observationType === "agent" &&
+      (entry.action.actionType !== "agent.call" || entry.action.payload.agentId === preferredAgentId),
+    );
+    if (!completed?.observation) return null;
+    const data = recordValue(completed.observation.data);
+    const result = recordValue(data.resultJson);
+    const submission = recordValue(recordValue(result.data).submission);
+    return result.status === "completed" && submission.submitted === true &&
+      typeof data.resultText === "string" && data.resultText.trim()
+      ? completed.observation
+      : null;
+  }
+
+  private async completeAgentSubmissionResponse(
+    observation: HarnessObservation,
+  ): Promise<HarnessLoopResult> {
+    const responseText = recordValue(observation.data).resultText as string;
+    this.throwIfCancelled();
+    await this.params.emitTextDelta?.(responseText);
+    await this.params.eventWriter.write("response.completed", {
+      text: responseText,
+      item_type: "assistant_message",
+      model_ref: this.params.modelRef,
+      finish_reason: "stop",
+      evidence_refs: observation.sourceRefs,
+    });
+    await this.params.eventWriter.write("execution.completed", {
+      finish_reason: "execution.completed",
+    });
+    return {
+      completed: true,
+      responseText,
+      observations: [...this.observations],
+      actionHistory: [...this.actionHistory],
+    };
   }
 
   private async completeAgentFailureResponse(
