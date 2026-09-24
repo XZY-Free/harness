@@ -1937,7 +1937,7 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it("CHECKPOINT-REG-03: restores multi-file trees with permissions, mtime and root-relative symlinks intact", async () => {
+  it("CHECKPOINT-03: 隔离 Host B 从正式快照恢复多文件、权限、mtime 和根内 symlink", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       const fixedMtime = new Date("2026-01-02T03:04:05.000Z");
@@ -1948,13 +1948,21 @@ describe("FilesystemCheckpoint integration", () => {
       await symlink("a.txt", path.join(ctx.writerRoot, "link.txt"));
       await utimes(path.join(ctx.writerRoot, "a.txt"), fixedMtime, fixedMtime);
       const { checkpointId } = await ctx.commit();
-      const destination = path.join(temporaryRoot, "restore");
+      const hostBRoot = path.join(temporaryRoot, "host-b-control");
+      const hostBManagedRoot = path.join(temporaryRoot, "host-b-managed");
+      await mkdir(hostBRoot, { recursive: true });
+      await mkdir(hostBManagedRoot, { recursive: true });
+      const hostB = createWorkspaceHostBroker({ root: hostBRoot, managedRoot: hostBManagedRoot });
+      expect((await hostB.probeIdentity()).scopeDigest).not.toBe(
+        ctx.workspaceBinding.storageScopeDigest,
+      );
+      const destination = path.join(hostBManagedRoot, "restore");
       await restoreFilesystemCheckpoint({
         tenantId: TENANT_ID,
         checkpointId,
         destination,
         storage: { kind: "file", root: ctx.storageRoot },
-        backend: ctx.backend,
+        backend: createWorkspaceBackend(hostB),
         expected: {
           invocationId: ctx.invocationId,
           workspaceBindingId: ctx.workspaceBindingId,
@@ -1966,12 +1974,25 @@ describe("FilesystemCheckpoint integration", () => {
       expect(await readFile(path.join(destination, "sub", "b.bin"))).toEqual(
         Buffer.from([0, 1, 2, 255]),
       );
-      const restoredStat = await readFile(path.join(destination, "sub", "b.bin"));
-      expect(restoredStat).toBeInstanceOf(Buffer);
+      const manifestRow = (await listFilesystemCheckpoints(TENANT_ID, ctx.invocationId))[0];
+      const manifest = await new FileSnapshotStorage(ctx.storageRoot).readManifest(
+        manifestRow!.manifestRef,
+        manifestRow!.manifestDigest,
+      );
+      const fileEntry = manifest.entries.find((entry) => entry.path === "sub/b.bin");
+      expect(fileEntry?.type).toBe("file");
+      expect((await stat(path.join(destination, "sub", "b.bin"))).mode & 0o777).toBe(
+        fileEntry!.mode & 0o777,
+      );
       const linkTarget = await readlink(path.join(destination, "link.txt"));
       expect(linkTarget).toBe("a.txt");
+      expect(await readFile(path.join(destination, "link.txt"), "utf8")).toBe("alpha");
       const mtime = (await stat(path.join(destination, "a.txt"))).mtime;
       expect(mtime.toISOString()).toBe(fixedMtime.toISOString());
+      expect(mtime.getTime()).toBe(
+        manifest.entries.find((entry) => entry.path === "a.txt")?.mtimeMs,
+      );
+      expect(await readFile(path.join(ctx.writerRoot, "a.txt"), "utf8")).toBe("alpha");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
