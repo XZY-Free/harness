@@ -734,6 +734,129 @@ describe("A08 环境资源终态清理与回收闭环", () => {
     expect(await inspectContainer(seeded.containerName)).toBeNull();
   }, 60_000);
 
+  it("N05-T1: 旧 Backend create 的普通错误晚到时不释放已激活的继任容器", async () => {
+    const fixture = await makeFixture();
+    const seeded = await seedPreparedRuntimeAttempt({
+      environmentDefinitionRevisionId: fixture.revision.id,
+    });
+    const [preparedAttempt] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, seeded.attempt.id))
+      .limit(1);
+    if (!preparedAttempt) throw new Error("准备夹具 Attempt 缺失");
+    const source = assertExecutionSourceSnapshot(preparedAttempt.preparationSourceJson);
+    await db
+      .update(invocationAttemptTable)
+      .set({
+        preparationState: "pending",
+        preparationEvidence: null,
+        preparationDigest: null,
+        preparedAt: null,
+        preparationIntentKey: null,
+        preparationRequestDigest: null,
+        preparationSourceJson: null,
+        preparationClaimId: null,
+        preparationLeaseExpiresAt: null,
+      })
+      .where(eq(invocationAttemptTable.id, seeded.attempt.id));
+    const t0 = new Date();
+    const first = await claimAttemptPreparation({ source, claimId: randomUUID(), now: t0 });
+    if (!first.claim) throw new Error("W1 未取得准备 claim");
+    let releaseOldCreate!: () => void;
+    const holdOldCreate = new Promise<void>((resolve) => {
+      releaseOldCreate = resolve;
+    });
+    let signalOldCreate!: () => void;
+    const oldCreateReached = new Promise<void>((resolve) => {
+      signalOldCreate = resolve;
+    });
+    let releaseCalls = 0;
+    const oldProvisioner = createEnvironmentProvisioner({
+      backend: {
+        ...fixture.backend,
+        async create() {
+          signalOldCreate();
+          await holdOldCreate;
+          throw new Error("ordinary delayed create error");
+        },
+        async release(input) {
+          releaseCalls += 1;
+          return fixture.backend.release(input);
+        },
+      },
+    });
+    const request = {
+      tenantId: TENANT_ID,
+      invocationId: seeded.invocation.id,
+      attemptId: seeded.attempt.id,
+      revisionId: fixture.revision.id,
+      revision: fixture.revision,
+      workspaceBindingId: seeded.workspace.id,
+      workspaceRoot: fixture.workspaceRoot,
+    };
+    const oldCreate = oldProvisioner.provision({ ...request, preparationClaim: first.claim });
+    try {
+      await oldCreateReached;
+      const second = await claimAttemptPreparation({
+        source,
+        claimId: randomUUID(),
+        now: new Date(t0.getTime() + ATTEMPT_PREPARATION_LEASE_MS + 1),
+      });
+      if (!second.claim) throw new Error("W2 未接管准备 claim");
+      const successorLease = await fixture.provisioner.provision({
+        ...request,
+        preparationClaim: second.claim,
+      });
+      const evidence = { kind: "n05-successor", leaseId: successorLease.id };
+      await db.transaction((tx) =>
+        markAttemptPreparedInTransaction(tx, {
+          attemptId: seeded.attempt.id,
+          evidence,
+          digest: protocolDigest(evidence),
+          preparationClaim: second.claim!,
+        }),
+      );
+      const successorOwner = await acquireTestRuntimeAuthority({
+        tenantId: TENANT_ID,
+        invocationId: seeded.invocation.id,
+        attemptId: seeded.attempt.id,
+        runtimeRevisionId: seeded.binding.runtimeRevisionId,
+        environmentLeaseId: successorLease.id,
+      });
+      await activateEnvironmentLease({
+        tenantId: TENANT_ID,
+        leaseId: successorLease.id,
+        ownershipId: successorOwner.ownership.id,
+        attemptId: seeded.attempt.id,
+        invocationId: seeded.invocation.id,
+        environmentDefinitionRevisionId: fixture.revision.id,
+        recoveryAnchorDigest: null,
+      });
+      releaseOldCreate();
+      await expect(oldCreate).rejects.toMatchObject({
+        name: "EnvironmentPreparationClaimSupersededError",
+      });
+      const containerName =
+        (successorLease.preparedEvidence as { instance?: { workerRef?: string } })?.instance
+          ?.workerRef ?? "";
+      expect((await getEnvironmentLeaseById(TENANT_ID, successorLease.id))?.leaseState).toBe(
+        "active",
+      );
+      expect(await inspectContainer(containerName)).not.toBeNull();
+      const sweep = await runDueEnvironmentLeaseCleanups({
+        backend: fixture.backend,
+        owner: "cleanup-worker:n05-ordinary-late",
+      });
+      expect(sweep.scanned).toBe(0);
+      expect(releaseCalls).toBe(0);
+      expect(await inspectContainer(containerName)).not.toBeNull();
+    } finally {
+      releaseOldCreate();
+      await oldCreate.catch(() => undefined);
+    }
+  }, 60_000);
+
   it("F4 / ENV.C04：Prepared 无 Owner 复验普通失败后由原工作身份登记真实清理", async () => {
     const fixture = await makeFixture();
     const seeded = await seedPreparedRuntimeAttempt({
