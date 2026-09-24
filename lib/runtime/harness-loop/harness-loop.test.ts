@@ -893,6 +893,54 @@ describe("HarnessLoop", () => {
     expect(generateFinalResponse).toHaveBeenCalledOnce();
   });
 
+  it("外部提交结果不明时禁止模型建议重试，并保留会话可继续使用", async () => {
+    const generateFinalResponse = vi.fn(async () => "稍后重新提交这笔申请。");
+    const emitTextDelta = vi.fn(async () => undefined);
+    const loop = new HarnessLoop(
+      baseParams({
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-allowed", mode: "preferred" },
+        ],
+        decisionPort: decisionPort([
+          {
+            actionId: "action-agent-uncertain",
+            stepNo: 1,
+            actionType: "agent.call",
+            purposeCode: "submit_request",
+            shortPurpose: "提交申请",
+            payload: { agentId: "agent-allowed", task: "提交申请" },
+          },
+        ]),
+        executors: {
+          "agent.call": async () => ({
+            authorityRef: "agent-call:call-1",
+            observation: {
+              observationType: "agent" as const,
+              summary: "提交结果无法确认，请勿重复提交并联系管理员核查。",
+              sourceRefs: ["agent-call:call-1"],
+              data: {
+                callId: "call-1",
+                state: "failed",
+                errorCode: "AGENT_CALL_FAILED",
+                errorSummary: "提交结果无法确认，请勿重复提交并联系管理员核查。",
+              },
+            },
+          }),
+        },
+        finalResponsePort: { generateFinalResponse },
+        emitTextDelta,
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result.responseText).toContain("请勿重复提交");
+    expect(result.responseText).toContain("联系管理员核查");
+    expect(result.responseText).not.toContain("重新提交");
+    expect(generateFinalResponse).not.toHaveBeenCalled();
+    expect(emitTextDelta).toHaveBeenCalledWith(result.responseText);
+  });
+
   it("preferred Agent 失败后直接结束，不给模型机会提议工具兜底", async () => {
     const tool = vi.fn();
     const loop = new HarnessLoop(

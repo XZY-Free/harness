@@ -557,6 +557,17 @@ export class HarnessLoop {
     error: HarnessLoopError,
     historyEntry?: HarnessActionHistoryEntry,
   ): Promise<string> {
+    if (
+      isUncertainExternalSubmission(
+        historyEntry?.observation ?? this.terminalPreferredAgentFailure() ?? undefined,
+      )
+    ) {
+      // 外部系统可能已经落单。此时模型不能把“稍后重试”当成普通失败建议。
+      const response =
+        "该操作的提交结果暂时无法确认。请勿重复提交，也不要换渠道再次办理；请联系管理员核查原申请。当前会话可以继续咨询其他问题。";
+      await this.params.emitTextDelta?.(response);
+      return response;
+    }
     // 只有失败事实已进入模型视图时才让模型组织说明。Schema/预算/模型本身等
     // Harness 内部故障没有可信 observation，直接使用受控文案，避免模型猜测原因。
     if (historyEntry?.observation && isFailureObservation(historyEntry.observation)) {
@@ -984,4 +995,12 @@ function fallbackFailureResponse(code: string, shortPurpose?: string): string {
 function isFailureObservation(observation: HarnessObservation): boolean {
   const state = recordValue(observation.data).state;
   return state === "failed" || state === "cancelled" || state === "lost";
+}
+
+function isUncertainExternalSubmission(observation?: HarnessObservation): boolean {
+  if (!observation || observation.observationType !== "agent") return false;
+  const data = recordValue(observation.data);
+  if (data.errorCode === "SUBMISSION_OUTCOME_UNKNOWN") return true;
+  const summary = typeof data.errorSummary === "string" ? data.errorSummary : observation.summary;
+  return summary.includes("提交结果无法确认") && summary.includes("请勿重复提交");
 }
