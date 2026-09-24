@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { POST as ingestRuntimeEventsPOST } from "@/app/runtime/invocations/[invocationId]/events/route";
+import { POST as runtimeHeartbeatPOST } from "@/app/runtime/invocations/[invocationId]/heartbeat/route";
 import { rebuildProjectionsForThread } from "@/lib/conversations/projector";
 import {
   getItemSnapshotWithCursor,
@@ -238,6 +239,82 @@ describe("RuntimeEventIngress database fencing", () => {
   beforeEach(async () => {
     await resetDatabase(db);
     await ensureDefaultTenant();
+  });
+
+  it("START-11: execution routes reject protocol 2 and missing authority without side effects", async () => {
+    const runtime = await createActiveRuntime();
+    const { fixture, acquired } = runtime;
+    const token = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: fixture.tenantId,
+      invocationId: fixture.invocation.id,
+      runtimeRevisionId: fixture.binding.runtimeRevisionId,
+      attemptId: fixture.attempt.id,
+      ownershipId: acquired.ownership.id,
+      leaseEpoch: String(acquired.ownership.leaseEpoch),
+      sessionBindingId: acquired.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    const ledgerBefore = await readLedger(fixture.tenantId, fixture.invocation.id);
+    const countersBefore = await readInvocationCounters(fixture.tenantId, fixture.invocation.id);
+    const [ownerBefore] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, acquired.ownership.id));
+    const routes = [
+      {
+        path: "events",
+        handler: ingestRuntimeEventsPOST,
+        body: {
+          protocolVersion: 3,
+          authority: acquired.authority,
+          events: [progressEvent("2")],
+        },
+      },
+      {
+        path: "heartbeat",
+        handler: runtimeHeartbeatPOST,
+        body: {
+          protocolVersion: 3,
+          authority: acquired.authority,
+          heartbeatId: randomUUID(),
+          runtimeState: "running",
+          lastObservedProducerSequence: "1",
+          requestCredentialRefresh: true,
+        },
+      },
+    ];
+    for (const route of routes) {
+      for (const body of [
+        { ...route.body, protocolVersion: 2 },
+        { ...route.body, authority: undefined },
+      ]) {
+        const response = await route.handler(
+          buildApiRequest({
+            audience: "runtime",
+            method: "POST",
+            path: `/invocations/${fixture.invocation.id}/${route.path}`,
+            idempotencyKey: randomUUID(),
+            token,
+            body,
+          }),
+          { params: Promise.resolve({ invocationId: fixture.invocation.id }) },
+        );
+        expect(response.status).toBe(400);
+        expect((await response.json()).error.code).toBe("REQUEST_SCHEMA_INVALID");
+      }
+    }
+    expect(await readLedger(fixture.tenantId, fixture.invocation.id)).toEqual(ledgerBefore);
+    expect(await readInvocationCounters(fixture.tenantId, fixture.invocation.id)).toEqual(
+      countersBefore,
+    );
+    const [ownerAfter] = await db
+      .select()
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, acquired.ownership.id));
+    expect(ownerAfter).toEqual(ownerBefore);
   });
 
   it("MIGRATE-04: 大于 2^53 的事件序号写入、读取与 wire 回执不丢精度", async () => {
