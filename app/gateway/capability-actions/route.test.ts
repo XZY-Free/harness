@@ -7,7 +7,10 @@ import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
-import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  acquireExecutionOwnership,
+  getAuthorityDatabaseTime,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import {
   TEST_EXECUTION_BINDING_EVIDENCE,
   createExecutionBinding,
@@ -610,6 +613,63 @@ describe("POST /gateway/capability-actions", () => {
       .from(runtimeEventIngressTable)
       .where(eq(runtimeEventIngressTable.invocationId, seeded.invocationId));
     expect(ingress).toHaveLength(0);
+  });
+
+  it("ACTION-02: epoch2 当前时签名有效的旧 Gateway Token 不能创建 AgentCall", async () => {
+    const seeded = await seedRunningTurn("agent-allowed");
+    const action = {
+      actionId: `stale-agent:${randomUUID()}`,
+      stepNo: 1,
+      actionType: "agent.call",
+      purposeCode: "query_balance",
+      shortPurpose: "查询余额",
+      payload: { agentId: "agent-allowed", task: "查询员工年假余额" },
+    };
+    const oldRequest = request(seeded.invocationId, action);
+    const authority1 = authorityByInvocation.get(seeded.invocationId);
+    if (!authority1) throw new Error("初始 Authority 不存在");
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, authority1.ownershipId));
+    const attempt2 = await createAttempt({
+      tenantId: TENANT,
+      invocationId: seeded.invocationId,
+      retryReasonCode: "action-02-takeover",
+    });
+    const evidence = { kind: "action-02-takeover", attemptId: attempt2.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedForTestInTransaction(tx, {
+        attemptId: attempt2.id,
+        evidence,
+        digest: protocolDigest(evidence),
+      }),
+    );
+    const owner2 = await acquireExecutionOwnership({
+      tenantId: TENANT,
+      invocationId: seeded.invocationId,
+      attemptId: attempt2.id,
+      runtimeRevisionId: authority1.runtimeRevisionId,
+      acquiredByType: "service",
+      acquiredById: "action-02-takeover",
+    });
+    expect(owner2.ownership.leaseEpoch).toBeGreaterThan(1n);
+
+    const response = await POST(oldRequest);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "ACCESS_DENIED", details: { code: "NotCurrentExecutor" } },
+    });
+    expect(await db.select().from(agentCallTable)).toEqual([]);
+    expect(await db.select().from(agentCallBindingTable)).toEqual([]);
+    expect(await db.select().from(agentCallAttemptTable)).toEqual([]);
+    expect(
+      await db
+        .select()
+        .from(runtimeEventIngressTable)
+        .where(eq(runtimeEventIngressTable.invocationId, seeded.invocationId)),
+    ).toEqual([]);
+    expect(await db.select().from(invocationTable)).toHaveLength(1);
   });
 
   it("agent.call 通过统一执行器解析 Route，Route 不存在时稳定失败且不伪装成功", async () => {

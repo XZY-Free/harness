@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { API_ERROR_CODES, type ApiErrorCode } from "@/lib/error-codes";
+import { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import {
@@ -86,6 +87,20 @@ function parseBody(raw: unknown): {
 
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
+  try {
+    return await handlePost(request, requestId);
+  } catch (error) {
+    if (error instanceof ExecutionAuthorityError) {
+      return apiError("ACCESS_DENIED", error.message, {
+        requestId,
+        details: { code: error.code },
+      });
+    }
+    throw error;
+  }
+}
+
+async function handlePost(request: Request, requestId: string): Promise<Response> {
   let principal: GatewayPrincipal;
   try {
     principal = await resolveGatewayPrincipal(request.headers);

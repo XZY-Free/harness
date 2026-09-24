@@ -45,7 +45,10 @@ import {
   createAttempt,
   markAttemptPreparedInTransaction,
 } from "@/lib/executions/persistence/attempt-store";
-import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
+import {
+  acquireExecutionOwnership,
+  getAuthorityDatabaseTime,
+} from "@/lib/executions/persistence/execution-ownership-store";
 import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { registerDevice } from "@/lib/identity/device-queries";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
@@ -627,6 +630,64 @@ afterEach(() => {
 });
 
 describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () => {
+  it("ACTION-01: epoch2 当前时签名有效的旧 Gateway Token 不能创建 ToolCall 或 Effect", async () => {
+    const tool = await seedToolchain();
+    const policy = await seedPolicy("allow", [rule({})]);
+    const invocationId = await seedInvocation({
+      threadId: randomUUID(),
+      turnId: randomUUID(),
+    });
+    await seedBinding(invocationId, policy);
+    const token1 = gatewayToken(invocationId);
+    const authority1 = currentAuthority;
+    if (!authority1) throw new Error("初始 Authority 不存在");
+    const owner1 = authority1.ownershipId;
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, owner1));
+    const attempt2 = await createAttempt({
+      tenantId: TENANT,
+      invocationId,
+      retryReasonCode: "action-01-takeover",
+    });
+    const evidence = { kind: "action-01-takeover", attemptId: attempt2.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedForTestInTransaction(tx, {
+        attemptId: attempt2.id,
+        evidence,
+        digest: protocolDigest(evidence),
+      }),
+    );
+    const owner2 = await acquireExecutionOwnership({
+      tenantId: TENANT,
+      invocationId,
+      attemptId: attempt2.id,
+      runtimeRevisionId: authority1.runtimeRevisionId,
+      acquiredByType: "service",
+      acquiredById: "action-01-takeover",
+    });
+    expect(owner2.ownership.leaseEpoch).toBeGreaterThan(1n);
+
+    const response = await POST(
+      gatewayRequest(
+        token1,
+        toolCallBody({
+          invocation_id: invocationId,
+          tool_id: tool.toolId,
+          schema_hash: tool.schemaHash,
+          operation_id: `stale-token:${randomUUID()}`,
+        }),
+      ),
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "ACCESS_DENIED", details: { code: "NotCurrentExecutor" } },
+    });
+    expect(await db.select().from(toolCallTable)).toEqual([]);
+    expect(await db.select().from(effectRecordTable)).toEqual([]);
+  });
+
   it.runIf(process.platform === "darwin")(
     "真实桌面签名桥只执行已授权命令，持久 Attempt 防止并发重复发送",
     async (ctx) => {
