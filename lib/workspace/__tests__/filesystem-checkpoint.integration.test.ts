@@ -82,6 +82,7 @@ import { computeWorkspaceContractDigest } from "@/lib/workspace/workspace-contra
 import {
   createRemoteWorkspaceHost,
   createWorkspaceHostBroker,
+  listenWorkspaceHostRpc,
 } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import {
@@ -845,7 +846,7 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it("N06-T1/N06-T3: Runtime 已确认且 Backend 物理解冻失败后，正式维护 lane 恢复写入", async () => {
+  it("R5-c/N06-T1/N06-T3: Runtime 已确认且 Backend 物理解冻失败后，正式维护 lane 恢复写入", async () => {
     try {
       const ctx = await setupCheckpointFixture(temporaryRoot);
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "backend release", "utf8");
@@ -936,45 +937,61 @@ describe("FilesystemCheckpoint integration", () => {
         } | null
       )?.freeze;
       if (!freeze) throw new Error("冻结回执缺失");
-      await chmod(grantRoot, 0o555);
+      const rpc = await listenWorkspaceHostRpc({
+        broker: createWorkspaceHostBroker({ root: ctx.hostRoot, managedRoot: ctx.managedRoot }),
+      });
       try {
-        const blocked = await confirmCheckpointBackendRelease({
-          tenantId: TENANT_ID,
-          invocationId: ctx.invocationId,
-          checkpointIntentId: requested.checkpointIntentId,
-          freeze,
-          backend: ctx.backend,
+        const remoteBackend = createWorkspaceBackend(createRemoteWorkspaceHost(rpc.url));
+        await chmod(grantRoot, 0o555);
+        try {
+          await expect(remoteBackend.host.releaseFreeze(freeze)).rejects.toThrow(/EACCES/);
+          const blocked = await confirmCheckpointBackendRelease({
+            tenantId: TENANT_ID,
+            invocationId: ctx.invocationId,
+            checkpointIntentId: requested.checkpointIntentId,
+            freeze,
+            backend: remoteBackend,
+          });
+          expect(blocked).toEqual({ runtime: "confirmed", backend: "pending" });
+          expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
+          await expect(stat(frozenFile)).resolves.toBeTruthy();
+          await expect(
+            remoteBackend.host.freeze({
+              grant,
+              checkpointIntentId: requested.checkpointIntentId,
+              anchorDigest: freeze.anchorDigest,
+            }),
+          ).rejects.toThrow("CheckpointIntentRetired");
+        } finally {
+          await chmod(grantRoot, 0o755);
+        }
+        const pending = await readGate(ctx.invocationId);
+        expect(pending?.checkpointGate).toBe("releasing");
+        expect(pending?.checkpointPreparedEvidence).toMatchObject({
+          release: { runtime: "confirmed", backend: "pending" },
         });
-        expect(blocked).toEqual({ runtime: "confirmed", backend: "pending" });
-        expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
-        await expect(stat(frozenFile)).resolves.toBeTruthy();
+        const maintenance = await runCheckpointMaintenanceLane({
+          now: new Date(pending!.updatedAt.getTime() + 1),
+          graceMs: 0,
+          resolveBackend: async () => remoteBackend,
+        });
+        expect(maintenance.releases.failures).toEqual([]);
+        expect(maintenance.releases.backendReleased).toBe(1);
+        expect(maintenance.releases.gateOpened).toBe(1);
+        await expect(stat(frozenFile)).rejects.toThrow();
+        const settled = await readGate(ctx.invocationId);
+        expect(settled?.checkpointGate).toBe("open");
+        expect(settled?.checkpointPreparedEvidence).toMatchObject({
+          release: { runtime: "confirmed", backend: "confirmed" },
+        });
+        await remoteBackend.host.executeManagedFileOperation({
+          identity,
+          operation: { kind: "write", path: "after-release.txt", content: "writable" },
+        });
+        expect(await readFile(path.join(grant.root, "after-release.txt"), "utf8")).toBe("writable");
       } finally {
-        await chmod(grantRoot, 0o755);
+        await rpc.close();
       }
-      const pending = await readGate(ctx.invocationId);
-      expect(pending?.checkpointGate).toBe("releasing");
-      expect(pending?.checkpointPreparedEvidence).toMatchObject({
-        release: { runtime: "confirmed", backend: "pending" },
-      });
-      const maintenance = await runCheckpointMaintenanceLane({
-        now: new Date(pending!.updatedAt.getTime() + 1),
-        graceMs: 0,
-        resolveBackend: async () => ctx.backend,
-      });
-      expect(maintenance.releases.failures).toEqual([]);
-      expect(maintenance.releases.backendReleased).toBe(1);
-      expect(maintenance.releases.gateOpened).toBe(1);
-      await expect(stat(frozenFile)).rejects.toThrow();
-      const settled = await readGate(ctx.invocationId);
-      expect(settled?.checkpointGate).toBe("open");
-      expect(settled?.checkpointPreparedEvidence).toMatchObject({
-        release: { runtime: "confirmed", backend: "confirmed" },
-      });
-      await ctx.backend.host.executeManagedFileOperation({
-        identity,
-        operation: { kind: "write", path: "after-release.txt", content: "writable" },
-      });
-      expect(await readFile(path.join(grant.root, "after-release.txt"), "utf8")).toBe("writable");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
