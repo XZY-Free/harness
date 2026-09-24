@@ -11,6 +11,7 @@ import {
 } from "@/lib/executions/persistence/attempt-store";
 import {
   acquireExecutionOwnership,
+  acquireExecutionOwnershipInTransaction,
   getAuthorityDatabaseTime,
 } from "@/lib/executions/persistence/execution-ownership-store";
 import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
@@ -217,6 +218,106 @@ describe("Runtime action authority", () => {
     expect(await db.select().from(toolCallTable)).toEqual([]);
     expect(await db.select().from(effectRecordTable)).toEqual([]);
     expect(await db.select().from(agentCallTable)).toEqual([]);
+  });
+
+  it("ACTION-04: Takeover 持有父 Invocation 根锁时子 Call 接纳等待，提交后旧身份零写入", async () => {
+    const runtime = await createActiveRuntime();
+    await db
+      .update(executionOwnershipTable)
+      .set({ leaseExpiresAt: await getAuthorityDatabaseTime(db) })
+      .where(eq(executionOwnershipTable.id, runtime.acquired.ownership.id));
+    const replacement = await createAttempt({
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      retryReasonCode: "action-call-overlap",
+    });
+    const prepared = { kind: "action-call-overlap", attemptId: replacement.id };
+    await db.transaction((tx) =>
+      markAttemptPreparedForTestInTransaction(tx, {
+        attemptId: replacement.id,
+        evidence: prepared,
+        digest: digest(prepared),
+      }),
+    );
+    let signalClaimed!: () => void;
+    let releaseTakeover!: () => void;
+    const claimed = new Promise<void>((resolve) => {
+      signalClaimed = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseTakeover = resolve;
+    });
+    const takeover = db.transaction(async (tx) => {
+      const result = await acquireExecutionOwnershipInTransaction(tx, {
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        attemptId: replacement.id,
+        runtimeRevisionId: runtime.fixture.binding.runtimeRevisionId,
+        acquiredByType: "service",
+        acquiredById: "action-call-overlap",
+      });
+      signalClaimed();
+      await release;
+      return result;
+    });
+    void takeover.catch(() => undefined);
+    try {
+      await Promise.race([
+        claimed,
+        takeover.then(() => {
+          throw new Error("Takeover 未进入数据库屏障");
+        }),
+      ]);
+      const oldAuthority = runtime.acquired.authority;
+      const tool = applyToolCall({
+        tenantId: runtime.fixture.tenantId,
+        invocationId: runtime.fixture.invocation.id,
+        authority: oldAuthority,
+        executionSubject: {
+          tenantId: runtime.fixture.tenantId,
+          subjectType: "user",
+          subjectId: "test-user",
+        },
+        toolId: randomUUID(),
+        toolSchemaRevisionId: randomUUID(),
+        schemaHash: digest({ schema: "overlap" }),
+        operationId: `overlap-tool:${randomUUID()}`,
+        arguments: {},
+      });
+      const candidate = agentBindingCandidate(randomUUID());
+      const agent = mysqlAgentCallStore.finalizeAgentCall({
+        id: randomUUID(),
+        tenantId: runtime.fixture.tenantId,
+        parentInvocationId: runtime.fixture.invocation.id,
+        authority: oldAuthority,
+        agentId: candidate.agentId,
+        sourceType: "harness_planned",
+        sourceRef: `overlap-agent:${randomUUID()}`,
+        logicalCallKey: `overlap-agent:${randomUUID()}`,
+        transportChannel: "gateway",
+        bindingCandidate: candidate,
+        bindingHash: digest({ binding: "overlap" }),
+        createdAt: new Date(),
+      });
+      void tool.catch(() => undefined);
+      void agent.catch(() => undefined);
+      let childrenSettled = false;
+      void Promise.allSettled([tool, agent]).then(() => {
+        childrenSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(childrenSettled).toBe(false);
+      releaseTakeover();
+      expect((await takeover).takeover).toBe(true);
+      await expect(tool).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+      await expect(agent).rejects.toMatchObject({ code: "NotCurrentExecutor" });
+      expect(await db.select().from(toolCallTable)).toEqual([]);
+      expect(await db.select().from(effectRecordTable)).toEqual([]);
+      expect(await db.select().from(agentCallTable)).toEqual([]);
+    } finally {
+      releaseTakeover();
+      await takeover.catch(() => undefined);
+    }
   });
 
   it("ACTION-05: a frozen checkpoint gate rejects both direct actions and Runtime action ingress without changing receipts", async () => {
