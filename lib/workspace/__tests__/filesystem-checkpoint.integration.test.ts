@@ -1553,6 +1553,15 @@ describe("FilesystemCheckpoint integration", () => {
       const before = await readGate(ctx.invocationId);
       expect(before?.checkpointGate).toBe("releasing");
       expect(before?.checkpointIntentId).toBe(checkpoint.checkpointIntentId);
+      const frozenFile = path.join(
+        ctx.hostRoot,
+        ".snow",
+        "grants",
+        (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
+        "freeze.json",
+      );
+      // Backend 腿的 confirmed 必须对应原物理屏障已删除；接管只续收 Runtime 腿。
+      await expect(stat(frozenFile)).rejects.toThrow();
 
       await db
         .update(executionOwnershipTable)
@@ -1600,6 +1609,7 @@ describe("FilesystemCheckpoint integration", () => {
       expect(maintenance.releases.runtimeClosed).toBe(1);
       expect(maintenance.releases.gateOpened).toBe(1);
       expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("open");
+      await expect(stat(frozenFile)).rejects.toThrow();
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
