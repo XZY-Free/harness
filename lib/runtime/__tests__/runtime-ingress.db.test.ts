@@ -597,6 +597,59 @@ describe("RuntimeEventIngress database fencing", () => {
     ).rejects.toBeInstanceOf(ProducerSequenceGapError);
   });
 
+  it("INGRESS-06: 历史事件存在但旧 Token 已过期时，Route 不允许读取原回执", async () => {
+    const runtime = await createActiveRuntime();
+    const oldToken = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      audience: "runtime",
+      tenantId: runtime.fixture.tenantId,
+      invocationId: runtime.fixture.invocation.id,
+      runtimeRevisionId: runtime.fixture.binding.runtimeRevisionId,
+      attemptId: runtime.fixture.attempt.id,
+      ownershipId: runtime.acquired.ownership.id,
+      leaseEpoch: String(runtime.acquired.ownership.leaseEpoch),
+      sessionBindingId: runtime.acquired.session.id,
+      expiresAt: Date.now() + 60_000,
+    });
+    const event = progressEvent("2");
+    await ingressBatch(runtime, [event]);
+    await replaceCurrentOwner(runtime);
+    const expiredToken = signWorkloadTokenPayload({
+      ...decodeWorkloadToken(oldToken),
+      issuedAt: Date.now() - 120_000,
+      expiresAt: Date.now() - 60_000,
+    });
+    const beforeLedger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const beforeCounters = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
+    const response = await ingestRuntimeEventsPOST(
+      buildApiRequest({
+        audience: "runtime",
+        method: "POST",
+        path: `/invocations/${runtime.fixture.invocation.id}/events`,
+        idempotencyKey: randomUUID(),
+        token: expiredToken,
+        body: {
+          protocolVersion: 3,
+          authority: runtime.acquired.authority,
+          events: [event],
+        },
+      }),
+      { params: Promise.resolve({ invocationId: runtime.fixture.invocation.id }) },
+    );
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe("AUTHENTICATION_REQUIRED");
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      beforeLedger,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(beforeCounters);
+  });
+
   it("INGRESS-10: a mixed batch rolls back every new event when any event conflicts", async () => {
     const runtime = await createActiveRuntime();
     const accepted = progressEvent("2");
