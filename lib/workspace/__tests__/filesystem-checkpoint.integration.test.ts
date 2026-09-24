@@ -59,6 +59,7 @@ import {
 } from "@/lib/workspace/checkpoint-producer";
 import {
   type CheckpointReleaseRecoveryReport,
+  confirmCheckpointBackendRelease,
   confirmCheckpointRuntimeRelease,
   recoverPendingCheckpointReleases,
   runCheckpointMaintenanceLane,
@@ -834,6 +835,141 @@ describe("FilesystemCheckpoint integration", () => {
         },
       });
       expect(await readFile(path.join(destination, "state.txt"), "utf8")).toBe("release matters");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("N06-T1/N06-T3: Runtime 已确认且 Backend 物理解冻失败后，正式维护 lane 恢复写入", async () => {
+    try {
+      const ctx = await setupCheckpointFixture(temporaryRoot);
+      await writeFile(path.join(ctx.writerRoot, "state.txt"), "backend release", "utf8");
+      const grantRoot = path.join(
+        ctx.hostRoot,
+        ".snow",
+        "grants",
+        (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
+      );
+      const blockedHost = new Proxy(ctx.backend.host, {
+        get(target, property) {
+          if (property === "releaseFreeze") {
+            return async (...args: Parameters<typeof target.releaseFreeze>) => {
+              await chmod(grantRoot, 0o555);
+              try {
+                return await target.releaseFreeze(...args);
+              } finally {
+                await chmod(grantRoot, 0o755);
+              }
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const requested = await requestFilesystemCheckpoint({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        ownershipId: ctx.ownershipId,
+        declarations: ctx.declarations(),
+        requestedByType: "service",
+        requestedById: "test-service",
+      });
+      const checkpoint = await produceFilesystemCheckpoint({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        ownershipId: ctx.ownershipId,
+        backend: createWorkspaceBackend(blockedHost),
+        storage: { kind: "file", root: ctx.storageRoot },
+        checkpointIntentId: requested.checkpointIntentId,
+        safePointEvidence: {
+          checkpointIntentId: requested.checkpointIntentId,
+          safePointEvidenceDigest: protocolDigest({ safePoint: requested.checkpointIntentId }),
+          writerQuiescenceAchievedAt: new Date(),
+        },
+      });
+      expect(checkpoint.release).toEqual({ runtime: "pending", backend: "pending" });
+      const frozenFile = path.join(grantRoot, "freeze.json");
+      await expect(stat(frozenFile)).resolves.toBeTruthy();
+      const [lock] = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.holderInvocationId, ctx.invocationId))
+        .limit(1);
+      if (!lock) throw new Error("WorkspaceWriteLock 缺失");
+      const grant = await ctx.backend.host.getWriter(
+        ctx.workspaceBinding.storageScopeDigest as string,
+        lock.writerGeneration,
+      );
+      if (!grant) throw new Error("Writer grant 缺失");
+      const identity = {
+        tenantId: TENANT_ID,
+        scopeDigest: grant.scopeDigest,
+        writerGeneration: grant.writerGeneration,
+        invocationId: grant.invocationId,
+        attemptId: grant.attemptId,
+        ownershipId: grant.ownershipId,
+        operationId: grant.operationId,
+      };
+      await expect(
+        ctx.backend.host.executeManagedFileOperation({
+          identity,
+          operation: { kind: "write", path: "after-release.txt", content: "too-early" },
+        }),
+      ).rejects.toThrow();
+
+      await confirmCheckpointRuntimeRelease({
+        tenantId: TENANT_ID,
+        invocationId: ctx.invocationId,
+        checkpointIntentId: requested.checkpointIntentId,
+      });
+      // N06-T1 的精确前提：Runtime 腿已 confirmed，此时匹配的物理 freeze 仍在；
+      // grants 目录不可删除时，即使 Broker 收到原 tuple，也不能伪造 Backend confirmed。
+      const afterRuntime = await readGate(ctx.invocationId);
+      const freeze = (
+        afterRuntime?.checkpointPreparedEvidence as {
+          freeze?: Parameters<typeof confirmCheckpointBackendRelease>[0]["freeze"];
+        } | null
+      )?.freeze;
+      if (!freeze) throw new Error("冻结回执缺失");
+      await chmod(grantRoot, 0o555);
+      try {
+        const blocked = await confirmCheckpointBackendRelease({
+          tenantId: TENANT_ID,
+          invocationId: ctx.invocationId,
+          checkpointIntentId: requested.checkpointIntentId,
+          freeze,
+          backend: ctx.backend,
+        });
+        expect(blocked).toEqual({ runtime: "confirmed", backend: "pending" });
+        expect((await readGate(ctx.invocationId))?.checkpointGate).toBe("releasing");
+        await expect(stat(frozenFile)).resolves.toBeTruthy();
+      } finally {
+        await chmod(grantRoot, 0o755);
+      }
+      const pending = await readGate(ctx.invocationId);
+      expect(pending?.checkpointGate).toBe("releasing");
+      expect(pending?.checkpointPreparedEvidence).toMatchObject({
+        release: { runtime: "confirmed", backend: "pending" },
+      });
+      const maintenance = await runCheckpointMaintenanceLane({
+        now: new Date(pending!.updatedAt.getTime() + 1),
+        graceMs: 0,
+        resolveBackend: async () => ctx.backend,
+      });
+      expect(maintenance.releases.failures).toEqual([]);
+      expect(maintenance.releases.backendReleased).toBe(1);
+      expect(maintenance.releases.gateOpened).toBe(1);
+      await expect(stat(frozenFile)).rejects.toThrow();
+      const settled = await readGate(ctx.invocationId);
+      expect(settled?.checkpointGate).toBe("open");
+      expect(settled?.checkpointPreparedEvidence).toMatchObject({
+        release: { runtime: "confirmed", backend: "confirmed" },
+      });
+      await ctx.backend.host.executeManagedFileOperation({
+        identity,
+        operation: { kind: "write", path: "after-release.txt", content: "writable" },
+      });
+      expect(await readFile(path.join(grant.root, "after-release.txt"), "utf8")).toBe("writable");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
