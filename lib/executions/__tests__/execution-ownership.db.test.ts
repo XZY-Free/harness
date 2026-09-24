@@ -36,6 +36,7 @@ import {
   isTokenRevoked,
   revokeWorkloadToken,
 } from "@/lib/identity/workload-token-revocation-queries";
+import { threadEventTable } from "@/lib/persistence/schema/conversation";
 import {
   executionOwnershipTable,
   invocationAttemptTable,
@@ -376,6 +377,14 @@ describe("ExecutionOwnership database fencing", () => {
       .select()
       .from(executionOwnershipTable)
       .where(eq(executionOwnershipTable.id, first.ownership.id));
+    const [executionBefore] = await db
+      .select({ producerSequence: invocationTable.lastProducerSequence })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id));
+    const eventsBefore = await db
+      .select({ id: threadEventTable.id })
+      .from(threadEventTable)
+      .where(eq(threadEventTable.invocationId, fixture.invocation.id));
     const renewed = await renewExecutionOwnership({
       tenantId: fixture.tenantId,
       invocationId: fixture.invocation.id,
@@ -394,6 +403,17 @@ describe("ExecutionOwnership database fencing", () => {
       invocationId: fixture.invocation.id,
     });
     expect(active?.id).toBe(first.ownership.id);
+    const [executionAfter] = await db
+      .select({ producerSequence: invocationTable.lastProducerSequence })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, fixture.invocation.id));
+    expect(executionAfter?.producerSequence).toBe(executionBefore?.producerSequence);
+    expect(
+      await db
+        .select({ id: threadEventTable.id })
+        .from(threadEventTable)
+        .where(eq(threadEventTable.invocationId, fixture.invocation.id)),
+    ).toEqual(eventsBefore);
   });
 
   it("FENCE-05: two racing candidates for the same invocation leave exactly one active owner", async () => {
