@@ -22,6 +22,8 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
+import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
+import { createHttpRuntimeClient } from "@/lib/runtime/runtime-client";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import { type WorkspaceBackend, createWorkspaceBackend } from "@/lib/workspace/workspace-backend";
 import { cleanupWorkspaceCandidate } from "@/lib/workspace/workspace-cleanup";
@@ -29,7 +31,7 @@ import {
   assertWorkspaceContinuity,
   computeWorkspaceContractDigest,
 } from "@/lib/workspace/workspace-contract";
-import { type WorkspaceHost, createManagedWorkspaceHost } from "@/lib/workspace/workspace-host";
+import { createManagedWorkspaceHost } from "@/lib/workspace/workspace-host";
 import {
   WorkspaceIdentityMismatchError,
   continuousWriterArgs,
@@ -39,11 +41,7 @@ import {
 } from "@/lib/workspace/workspace-host-server";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/workspace/workspace-queries";
 import { requireWorkspaceReadiness } from "@/lib/workspace/workspace-readiness";
-import {
-  type AcquireWorkspaceWriteLockResult,
-  type ReserveWorkspaceWriterOutcome,
-  reserveWorkspaceWriter,
-} from "@/lib/workspace/workspace-write-lock-queries";
+import { reserveWorkspaceWriter } from "@/lib/workspace/workspace-write-lock-queries";
 import {
   activatePreparedWorkspaceWriter,
   prepareWorkspaceCandidate,
@@ -607,13 +605,13 @@ describe("Workspace continuity integration", () => {
   });
 
   it("WORKSPACE-07: a reserved DB slot without a fenced backend writer fails closed before running", async () => {
+    let oldPid: number | null = null;
     try {
       const broker = createWorkspaceHostBroker({ root: temporaryRoot });
       const probe = await broker.probeIdentity();
       const scopeDigest = probe.scopeDigest;
-      // Backend 已存在更高的 current writer generation（旧进程未停）。
-      const host: WorkspaceHost = broker;
-      const backend = createWorkspaceBackend(host);
+      // Backend 已存在更高的 current writer generation，且受管进程真实存活、持续写盘。
+      const backend = createWorkspaceBackend(broker);
       const dummyAuthority = {
         invocationId: randomUUID(),
         runtimeRevisionId: randomUUID(),
@@ -631,39 +629,60 @@ describe("Workspace continuity integration", () => {
         operationId: "stale-backend",
         root: path.join(temporaryRoot, "old-root"),
       });
+      const activityFile = path.join(temporaryRoot, "old-writer-activity.txt");
+      const oldWriter = await broker.spawnManagedWriter({
+        tenantId: TENANT_ID,
+        scopeDigest,
+        writerGeneration: 2,
+        command: process.execPath,
+        args: continuousWriterArgs({ targetFile: activityFile, payload: "old-writer" }),
+        cwd: temporaryRoot,
+        activityPath: activityFile,
+      });
+      oldPid = oldWriter.pid;
+      process.kill(oldWriter.pid, 0);
       const { binding } = await createTestBinding({
         root: temporaryRoot,
         continuityMode: "SHARED_DURABLE",
       });
       const fixture = await seedPreparedRuntimeAttempt({ workspaceBinding: binding });
-      // DB 侧 reserve 得到 gen1，但 Host current 已是 gen2：激活必须 fail closed。
-      const reserved = expectReserved(
-        await reserveWorkspaceWriter({
-          tenantId: TENANT_ID,
-          storageScopeDigest: scopeDigest,
-          invocationId: fixture.invocation.id,
-          attemptId: fixture.attempt.id,
-          ownershipId: fixture.invocation.id,
-          workspaceBindingId: binding.id,
-          leaseExpiresAt: new Date(Date.now() + 60_000),
-        }),
-      );
-      expect(reserved.writerGeneration).toBe(1);
+      const startAttempt = await createAttempt({
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+      });
+      // 正式 Start 自己预留 DB gen1，再请求物理激活；不能由测试直接调用 Backend 代替 Start。
       await expect(
-        backend.host.activateWriter({
+        startRuntimeInvocation({
           tenantId: TENANT_ID,
-          scopeDigest,
-          writerGeneration: reserved.writerGeneration,
-          authority: {
-            ...dummyAuthority,
-            invocationId: fixture.invocation.id,
-            attemptId: fixture.attempt.id,
+          invocation: fixture.invocation,
+          binding: fixture.binding,
+          attempt: startAttempt,
+          sourceOperationKey: `invocation:${fixture.invocation.id}`,
+          runtimeClient: createHttpRuntimeClient(),
+          runtimeEndpoint: "http://127.0.0.1:1",
+          auth: { mode: "none" },
+          callbackEndpoints: {
+            events: "http://127.0.0.1:1/runtime/events",
+            heartbeat: "http://127.0.0.1:1/runtime/heartbeat",
+            context: "http://127.0.0.1:1/gateway/context",
+            capabilityActions: "http://127.0.0.1:1/gateway/capability-actions",
+            toolCalls: "http://127.0.0.1:1/gateway/tool-calls",
+            userActions: "http://127.0.0.1:1/gateway/user-actions",
           },
-          expectedStorageIdentity: probe.storageIdentity,
-          operationId: "fenced-start",
-          root: path.join(temporaryRoot, "new-root"),
+          workspace: {
+            binding,
+            backend,
+            root: temporaryRoot,
+            snapshotStorage: { kind: "broker_default" },
+          },
         }),
       ).rejects.toThrow("WorkspaceWriterNotFenced");
+      const locks = await db
+        .select()
+        .from(workspaceWriteLock)
+        .where(eq(workspaceWriteLock.storageScopeDigest, scopeDigest));
+      expect(locks.some((lock) => lock.writerGeneration === 1)).toBe(true);
+      process.kill(oldWriter.pid, 0);
       const [invocation] = await db
         .select()
         .from(invocationTable)
@@ -675,6 +694,13 @@ describe("Workspace continuity integration", () => {
         );
       expect(invocation?.executionState).not.toBe("running");
     } finally {
+      if (oldPid !== null) {
+        try {
+          process.kill(oldPid, "SIGKILL");
+        } catch {
+          // Broker 已确认旧进程退出时无需重复发送信号。
+        }
+      }
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
@@ -1012,14 +1038,3 @@ describe("Workspace continuity integration", () => {
     ).rejects.toBeInstanceOf(WorkspaceIdentityMismatchError);
   });
 });
-
-/**
- * A07 决策四：预留的成功出口现在是**显式 outcome**。测试里凡是"预期预留成功"的地方都必须
- * 穿过这个断言，避免直接读联合体上可能表示 `release_pending` 的字段。
- */
-function expectReserved(outcome: ReserveWorkspaceWriterOutcome): AcquireWorkspaceWriteLockResult {
-  if (outcome.outcome !== "reserved") {
-    throw new Error(`预期预留成功，实际得到 release_pending（${outcome.reason}）`);
-  }
-  return outcome;
-}
