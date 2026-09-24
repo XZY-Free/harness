@@ -506,6 +506,11 @@ describe("RuntimeEventIngress database fencing", () => {
       invocationId: runtime.fixture.invocation.id,
       batch: { protocolVersion: 3, authority: runtime.acquired.authority, events: [accepted] },
     });
+    const beforeLedger = await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id);
+    const beforeCounters = await readInvocationCounters(
+      runtime.fixture.tenantId,
+      runtime.fixture.invocation.id,
+    );
     const legal = progressEvent("3");
     await expect(
       ingressRuntimeEvents({
@@ -539,6 +544,12 @@ describe("RuntimeEventIngress database fencing", () => {
         ),
       );
     expect(ingress).toEqual([]);
+    expect(await readLedger(runtime.fixture.tenantId, runtime.fixture.invocation.id)).toEqual(
+      beforeLedger,
+    );
+    expect(
+      await readInvocationCounters(runtime.fixture.tenantId, runtime.fixture.invocation.id),
+    ).toEqual(beforeCounters);
   });
 
   // ─── REPLAY-01..06（R05 / R04 / R03）──────────────────────────────────────
