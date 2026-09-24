@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { issueContextHandle, resolveContextHandle } from "@/lib/context/context-handle";
-import { db } from "@/lib/db/client";
+import { db, openMigrationConnection } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { transitionInvocation } from "@/lib/executions/application/transition-invocation";
 import { sameAuthority } from "@/lib/executions/domain/execution-authority";
@@ -45,6 +45,7 @@ import {
   failJobStep,
   runJobStepEffect,
 } from "@/lib/job/job-step-effects";
+import { spawnJobConsumerCrashProcess } from "@/lib/job/test-support/job-consumer-crash-process";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import {
   executionBindingTable,
@@ -79,7 +80,7 @@ import { applyRuntimeSessionDispatchForTest } from "@/lib/runtime/test-support/s
 import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
 import { seedRuntimeRouteAuthority } from "@/lib/test-support/seed-runtime-route-authority";
 import { createProductionWorkerRole } from "@/lib/workers/production-worker-role";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000000";
@@ -1171,6 +1172,89 @@ describe("Thread-independent Job runtime integration", () => {
       );
     expect(events).toHaveLength(1);
   });
+
+  it("JOB-08: 消费事务写入 Job/Event 后进程崩溃，新 Worker 重启只完成一次", async () => {
+    const fixture = await seedJobFixture();
+    await db.transaction((tx) =>
+      transitionInvocation(tx, {
+        tenantId: TENANT_ID,
+        invocationId: fixture.invocation.id,
+        nextState: "completed",
+        resultRef: "job://result/crash",
+        resultDigest: protocolDigest({ result: "crash-recovery" }),
+      }),
+    );
+    const command = await readTerminalCommand(fixture.job.id);
+    const gate = `t02_j08_gate_${randomUUID().slice(0, 12)}`;
+    const marker = `t02_j08_mark_${randomUUID().slice(0, 12)}`;
+    const trigger = "topic02_job08_ack_gate";
+    const control = await openMigrationConnection();
+    let child: ReturnType<typeof spawnJobConsumerCrashProcess> | null = null;
+    try {
+      await control.query("SELECT GET_LOCK(?, 0)", [gate]);
+      // Job 状态与 Event 已在本事务内写完；Ack 的 Trigger 挡在提交前。
+      await db.execute(
+        sql.raw(
+          `CREATE TRIGGER ${trigger} BEFORE UPDATE ON JobCommand FOR EACH ROW BEGIN IF NEW.commandState = 'acknowledged' THEN DO GET_LOCK('${marker}', 30); DO GET_LOCK('${gate}', 30); DO RELEASE_LOCK('${gate}'); DO RELEASE_LOCK('${marker}'); END IF; END`,
+        ),
+      );
+      child = spawnJobConsumerCrashProcess(TENANT_ID, command.id);
+      let reachedAck = false;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const [rows] = await control.query("SELECT IS_USED_LOCK(?) AS owner", [marker]);
+        if ((rows as unknown as Array<{ owner: number | null }>)[0]?.owner != null) {
+          reachedAck = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(reachedAck).toBe(true);
+      // 另一连接只能看到事务前事实，不能看到一半的 Job 或 Event。
+      expect((await getJobById(TENANT_ID, fixture.job.id))?.jobState).toBe("queued");
+      expect(await countJobCompletedEvents(fixture.job.id)).toBe(0);
+      const [beforeCrashCommand] = await db
+        .select()
+        .from(jobCommandTable)
+        .where(eq(jobCommandTable.id, command.id));
+      expect(beforeCrashCommand?.commandState).toBe("queued");
+
+      child.kill();
+      await control.query("SELECT RELEASE_LOCK(?)", [gate]);
+      const exit = await child.exited;
+      expect(exit.signal).toBe("SIGKILL");
+      await expect
+        .poll(async () => (await getJobById(TENANT_ID, fixture.job.id))?.jobState, {
+          interval: 50,
+          timeout: 5_000,
+        })
+        .toBe("queued");
+      expect(await countJobCompletedEvents(fixture.job.id)).toBe(0);
+      const [rolledBackCommand] = await db
+        .select()
+        .from(jobCommandTable)
+        .where(eq(jobCommandTable.id, command.id));
+      expect(rolledBackCommand?.commandState).toBe("queued");
+    } finally {
+      child?.kill();
+      await control.query("SELECT RELEASE_LOCK(?)", [gate]);
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${trigger}`));
+      control.release();
+    }
+
+    const restarted = createProductionWorkerRole("job-worker");
+    expect(await restarted.pollOnce()).toMatchObject({ commandsConsumed: 1 });
+    const completed = await getJobById(TENANT_ID, fixture.job.id);
+    expect(completed?.jobState).toBe("completed");
+    expect(completed?.resultRef).toBe("job://result/crash");
+    expect(await countJobCompletedEvents(fixture.job.id)).toBe(1);
+    const [acknowledged] = await db
+      .select()
+      .from(jobCommandTable)
+      .where(eq(jobCommandTable.id, command.id));
+    expect(acknowledged?.commandState).toBe("acknowledged");
+    expect(await restarted.pollOnce()).toMatchObject({ commandsConsumed: 0 });
+    expect(await countJobCompletedEvents(fixture.job.id)).toBe(1);
+  }, 30_000);
 
   it("JOB-REG-09: an unresolved effect moves the Job to waiting_external with a durable retry timestamp", async () => {
     const fixture = await seedJobFixture();
