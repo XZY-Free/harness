@@ -1633,8 +1633,13 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
       releasePublish = resolve;
     });
     let pauseFirstPublish = true;
+    let failOnceBeforePublish = true;
     const storage = new FileSnapshotStorage(storageRoot, {
       beforeRestorePublish: async ({ operationId }) => {
+        if (operationId === "restore-fails-once" && failOnceBeforePublish) {
+          failOnceBeforePublish = false;
+          throw new Error("injected publish failure");
+        }
         if (operationId !== "restore-one" || !pauseFirstPublish) return;
         pauseFirstPublish = false;
         publishEntered();
@@ -1704,6 +1709,39 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     ) as { phase: string; operationId: string };
     expect(firstState).toMatchObject({ phase: "ready", operationId: "restore-one" });
     expect(secondState).toMatchObject({ phase: "ready", operationId: "restore-two" });
+
+    // 已发布目录不能被另一个恢复意图覆盖；拒绝后内容与 ready 归属都不变。
+    await expect(restore(secondSnapshot, destinationOne, "restore-other")).rejects.toThrow(
+      /不属于本次恢复/,
+    );
+    expect(await readFile(path.join(destinationOne, "state.txt"), "utf8")).toBe("snapshot-one");
+    expect(
+      JSON.parse(await readFile(`${destinationOne}.restore-state.json`, "utf8")),
+    ).toMatchObject({ phase: "ready", operationId: "restore-one" });
+
+    // staging 已生成但 publish 失败：其他意图不得清理，原意图重试能按归属安全续做。
+    const failedDestination = path.join(attemptRoot, "restore-failed");
+    await expect(restore(secondSnapshot, failedDestination, "restore-fails-once")).rejects.toThrow(
+      "injected publish failure",
+    );
+    expect(await readFile(path.join(`${failedDestination}.staging`, "state.txt"), "utf8")).toBe(
+      "snapshot-two",
+    );
+    expect(
+      JSON.parse(await readFile(`${failedDestination}.restore-state.json`, "utf8")),
+    ).toMatchObject({ phase: "staging", operationId: "restore-fails-once" });
+    await expect(restore(firstSnapshot, failedDestination, "restore-other")).rejects.toThrow(
+      /staging 属于其他恢复操作/,
+    );
+    expect(await readFile(path.join(`${failedDestination}.staging`, "state.txt"), "utf8")).toBe(
+      "snapshot-two",
+    );
+    await restore(secondSnapshot, failedDestination, "restore-fails-once");
+    expect(await readFile(path.join(failedDestination, "state.txt"), "utf8")).toBe("snapshot-two");
+    expect(await pathExists(`${failedDestination}.staging`)).toBe(false);
+    expect(
+      JSON.parse(await readFile(`${failedDestination}.restore-state.json`, "utf8")),
+    ).toMatchObject({ phase: "ready", operationId: "restore-fails-once" });
   });
 });
 
