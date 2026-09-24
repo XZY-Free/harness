@@ -181,6 +181,22 @@ export async function claimSessionDispatch(params: {
       .where(eq(invocationAttemptTable.id, session.attemptId))
       .limit(1);
     if (!attempt || attempt.attemptState !== "queued") return null;
+    // Session 的派发领取不能先于失权恢复 lane 把过期 Owner 的旧 Attempt 推成失败。
+    // 尤其 activating 阶段还没有发出用户请求，正式恢复需要用新 Attempt 接管。
+    const [owner] = await tx
+      .select({
+        state: executionOwnershipTable.ownershipState,
+        expiresAt: executionOwnershipTable.leaseExpiresAt,
+      })
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.id, session.ownershipId))
+      .limit(1);
+    if (
+      !owner ||
+      owner.state !== "active" ||
+      owner.expiresAt <= (await getAuthorityDatabaseTime(tx))
+    )
+      return null;
     const leaseExpiresAt = new Date(params.now.getTime() + params.leaseDurationMs);
     // R02 §8：Session 写入只经仓储方法（行锁 + 版本 CAS）。
     await claimRuntimeSessionDispatchInTransaction(tx, {

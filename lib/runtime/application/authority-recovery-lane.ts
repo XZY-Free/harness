@@ -1,8 +1,9 @@
 /**
  * Authority recovery lane（R01 §3 `Owner expired`；R04 §5 claim 规则）。
  *
- * 职责单一：发现「Current Owner 租约已到期」的 Invocation，并把**扫描时观察到的完整
- * Owner tuple** 交给 `markInvocationLost` 在根锁内复核后收口。
+ * 发现「Current Owner 租约已到期」的 Invocation，并把**扫描时观察到的完整
+ * Owner tuple** 在根锁内复核。activating 阶段用新 Attempt/Owner 接管；其他阶段
+ * 交给 `markInvocationLost` 收口。
  *
  * 为什么必须是一条持久 lane 而不是请求内联处理：
  * 初始进程（Web / 单次请求栈）可能在任意提交点死亡，而"某个 Invocation 的 Owner 已经
@@ -10,8 +11,10 @@
  * `queued/running/waiting_user`，占着 Thread 的 active Invocation 且没有任何收口路径。
  *
  * 语义边界（与 `evaluateStaleObservation` 严格一致，不是"杀掉一切租约到期的行"）：
- * - 租约确实到期且代际未变 → `lost`：Owner 关 `lost`、Session 关 `lost`、Invocation 收口、
- *   Turn 落 `failed`。
+ * - activating 租约确实到期且代际未变 → 新 Attempt 重新准备并取得新 Owner；旧
+ *   Owner/Session/Attempt 在 Acquire 时退役。
+ * - 其他阶段租约确实到期且代际未变 → `lost`：Owner 关 `lost`、Session 关 `lost`、
+ *   Invocation 收口、Turn 落 `failed`。
  * - 扫描与收口之间发生了续租 → 陈旧观察（`owner_renewed`），**不改任何状态**。
  * - 扫描与收口之间发生了换代 → 陈旧观察（`owner_replaced`），**新 Owner 不被触碰**。
  * - 扫描后 Invocation 已被别处收口 → 不再是本 lane 的工作，直接跳过。
@@ -19,6 +22,7 @@
  * 单个 Invocation 的处理失败不阻断本轮其余候选：租约仍处于过期状态，下一轮会被再次扫到。
  */
 import { logger } from "@/lib/logger";
+import { recoverExpiredActivatingOwner } from "@/lib/runtime/application/expired-activating-owner-recovery";
 import {
   findStaleInvocations,
   markInvocationLost,
@@ -41,10 +45,10 @@ export interface AuthorityRecoveryDeps {
 }
 
 /**
- * 单轮：按持久状态发现所有租约已到期的 Owner 并收口。
+ * 单轮：按持久状态发现所有租约已到期的 Owner 并恢复或收口。
  *
- * 可被任意 Worker 在任意时刻重复调用：重复运行只会看到已经没有候选（收口后 Invocation
- * 不再是可恢复状态），因此天然幂等。
+ * 可被任意 Worker 在任意时刻重复调用：activating 的继任 Attempt 用原 Owner ID
+ * 生成稳定原因码，其他阶段收口后 Invocation 不再是可恢复状态。
  */
 export async function runDueExpiredOwnerRecoveries(input: {
   limit?: number;
@@ -64,6 +68,15 @@ export async function runDueExpiredOwnerRecoveries(input: {
 
   for (const candidate of candidates) {
     try {
+      const activating = await recoverExpiredActivatingOwner(candidate);
+      if (activating === "recovered") {
+        summary.recovered += 1;
+        continue;
+      }
+      if (activating === "stale") {
+        summary.discarded += 1;
+        continue;
+      }
       const result = await markInvocationLost({
         tenantId: candidate.tenantId,
         invocationId: candidate.invocationId,

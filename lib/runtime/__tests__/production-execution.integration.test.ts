@@ -43,6 +43,7 @@ import {
 import { managedContainerName } from "@/lib/environment/environment-instance-backend";
 import { getEnvironmentLeaseByAttempt } from "@/lib/environment/environment-lease-store";
 import { ENVIRONMENT_PREPARED_TTL_MS } from "@/lib/environment/environment-prepared-evidence";
+import { createDefaultEnvironmentProvisioner } from "@/lib/environment/environment-provisioner";
 import type { EnvironmentRevisionInput } from "@/lib/environment/environment-revision";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
 import type { ExecutionBindingConfigInput } from "@/lib/executions/domain/execution-binding";
@@ -70,12 +71,14 @@ import {
   executionOwnershipTable,
   invocationAttemptTable,
   invocationTable,
+  runtimeSessionBindingTable,
 } from "@/lib/persistence/schema/executions";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { workspace, workspaceBinding } from "@/lib/persistence/schema/workspace";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { getIngressByInvocation } from "@/lib/runtime/application/ingress-runtime-events";
+import { startRuntimeInvocation } from "@/lib/runtime/application/runtime-start";
 import {
   inspectContainer,
   inspectImage,
@@ -87,6 +90,7 @@ import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
 import { HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
 import { verifyCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import { getRuntimeSessionBindingsByInvocation } from "@/lib/runtime/persistence/runtime-session-store";
+import { failAttemptAndInvokeRecoveryAuthority } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import { DISPATCH_STUCK_GRACE_MS } from "@/lib/runtime/retry/dispatch-retry-queries";
 import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
 import {
@@ -2165,6 +2169,171 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
     },
     120_000,
   );
+
+  it("R3-e: activating Owner 过期后正式消费者以新 Attempt/Owner 承接而旧代际不复活", async () => {
+    const { context } = await seedManagedWriterEntryContext("r3e");
+    const turn = await acceptTurnOnly(context, "r3e-crash", "请读取工作区并回答");
+    await db.execute(
+      sql.raw(
+        "CREATE TRIGGER topic02_r3e_before_writer BEFORE INSERT ON WorkspaceWriteLock FOR EACH ROW DO SLEEP(60)",
+      ),
+    );
+    const child = spawnInitialDispatchCrashProcess({
+      tenantId: context.tenantId,
+      turnId: turn.id,
+      ownerId: context.ownerId,
+      stage: "before_writer",
+    });
+    try {
+      let invocation: Awaited<ReturnType<typeof listInvocationsForTurn>>[number] | undefined;
+      let oldOwner: typeof executionOwnershipTable.$inferSelect | undefined;
+      let oldSession:
+        | Awaited<ReturnType<typeof getRuntimeSessionBindingsByInvocation>>[number]
+        | undefined;
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
+        [invocation] = await listInvocationsForTurn(context.tenantId, turn.id);
+        if (invocation) {
+          [oldOwner] = await db
+            .select()
+            .from(executionOwnershipTable)
+            .where(eq(executionOwnershipTable.invocationId, invocation.id))
+            .limit(1);
+          [oldSession] = await getRuntimeSessionBindingsByInvocation(
+            context.tenantId,
+            invocation.id,
+          );
+        }
+        if (oldOwner?.executionPhase === "activating" && oldSession) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!invocation || !oldOwner || !oldSession)
+        throw new Error(`原 O/S 未进入 activating：${child.stderr()}`);
+      const [oldAttempt] = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      if (!oldAttempt) throw new Error("原 Attempt 缺失");
+      if (
+        !oldAttempt.preparationIntentKey ||
+        !oldAttempt.preparationRequestDigest ||
+        !oldAttempt.preparationClaimId ||
+        !oldAttempt.preparationSourceJson
+      )
+        throw new Error("原准备 claim 不完整");
+      const staleClaim = {
+        tenantId: context.tenantId,
+        invocationId: invocation.id,
+        attemptId: oldAttempt.id,
+        intentKey: oldAttempt.preparationIntentKey,
+        requestDigest: oldAttempt.preparationRequestDigest,
+        claimId: oldAttempt.preparationClaimId,
+        source: assertExecutionSourceSnapshot(oldAttempt.preparationSourceJson),
+      };
+      const oldLease = await getEnvironmentLeaseByAttempt(
+        context.tenantId,
+        invocation.id,
+        oldAttempt.id,
+      );
+      expect(oldLease?.readinessState).toBe("prepared");
+      child.kill();
+      expect((await child.exited).signal).toBe("SIGKILL");
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3e_before_writer"));
+      // 只推进测试库中的租约时间事实；恢复本身仍由未注入的正式 Worker 消费。
+      await db
+        .update(executionOwnershipTable)
+        .set({ leaseExpiresAt: new Date(Date.now() - 1_000) })
+        .where(eq(executionOwnershipTable.id, oldOwner.id));
+      await db
+        .update(runtimeSessionBindingTable)
+        .set({ updatedAt: new Date(Date.now() - DISPATCH_STUCK_GRACE_MS - 1_000) })
+        .where(eq(runtimeSessionBindingTable.id, oldSession.id));
+      const result = await createRuntimeDispatchRetryWorker().tick();
+      expect(result.ownerRecoveries).toBe(1);
+      const attempts = await listAttemptsForInvocation(context.tenantId, invocation.id);
+      expect(attempts).toHaveLength(2);
+      expect(attempts.find((row) => row.id === oldAttempt.id)?.attemptState).toBe("lost");
+      const successorAttempt = attempts.find((row) => row.id !== oldAttempt.id);
+      if (!successorAttempt) throw new Error("继任 Attempt 缺失");
+      const owners = await db
+        .select()
+        .from(executionOwnershipTable)
+        .where(eq(executionOwnershipTable.invocationId, invocation.id));
+      expect(owners).toHaveLength(2);
+      expect(owners.find((row) => row.id === oldOwner.id)?.ownershipState).toBe("lost");
+      const successorOwner = owners.find((row) => row.id !== oldOwner.id);
+      if (!successorOwner) throw new Error("继任 Owner 缺失");
+      expect(successorOwner.leaseEpoch).toBeGreaterThan(oldOwner.leaseEpoch);
+      const newLease = await getEnvironmentLeaseByAttempt(
+        context.tenantId,
+        invocation.id,
+        successorAttempt.id,
+      );
+      if (!oldLease || !newLease) throw new Error("旧/新 Lease 缺失");
+      expect(newLease.id).not.toBe(oldLease.id);
+      const newOperation = (newLease.resourceManifest as { operationId?: string }).operationId;
+      if (!newOperation) throw new Error("新 Lease 缺少容器 operation");
+      const newContainerBefore = await inspectContainer(managedContainerName(newOperation));
+      expect(newContainerBefore).not.toBeNull();
+      const binding = await getExecutionBindingByInvocation(context.tenantId, invocation.id);
+      if (!binding) throw new Error("Binding 缺失");
+      await expect(
+        startRuntimeInvocation({
+          tenantId: context.tenantId,
+          invocation,
+          binding,
+          attempt: oldAttempt,
+          runtimeClient: {} as RuntimeHttpClient,
+          runtimeEndpoint: "in-process://hosted",
+          auth: { mode: "workload_token", token: "in-process-runtime" },
+          callbackEndpoints: buildGatewayEndpoints({
+            external: false,
+            invocationId: invocation.id,
+          }),
+          environmentLeaseId: oldLease.id,
+          sourceOperationKey: staleClaim.intentKey,
+          preparationClaim: staleClaim,
+        }),
+      ).rejects.toBeDefined();
+      await failAttemptAndInvokeRecoveryAuthority({
+        tenantId: context.tenantId,
+        invocation: invocation,
+        attempt: oldAttempt,
+        errorCode: "LateOldActivationError",
+        errorSummary: "旧激活普通错误迟到",
+        now: new Date(),
+        workIdentity: { kind: "preparation", claim: staleClaim },
+      }).catch(() => undefined);
+      const oldCleanup = await createDefaultEnvironmentProvisioner({
+        runtimeType: "container",
+      }).cleanup({
+        tenantId: context.tenantId,
+        leaseId: oldLease.id,
+        reasonCode: "ownership_lease_expired",
+      });
+      expect(oldCleanup.state).toBe("released");
+      expect((await inspectContainer(managedContainerName(newOperation)))?.Id).toBe(
+        newContainerBefore?.Id,
+      );
+      expect(
+        (
+          await db
+            .select()
+            .from(executionOwnershipTable)
+            .where(eq(executionOwnershipTable.id, successorOwner.id))
+            .limit(1)
+        )[0]?.reasonCode,
+      ).not.toBe("LateOldActivationError");
+      expect((await waitForTurn(context.tenantId, turn.id)).turnState).toBe("completed");
+      expect(
+        (await getRuntimeSessionBindingsByInvocation(context.tenantId, invocation.id)).map(
+          (row) => row.id,
+        ),
+      ).toContain(oldSession.id);
+    } finally {
+      child.kill();
+      await child.exited;
+      await db.execute(sql.raw("DROP TRIGGER IF EXISTS topic02_r3e_before_writer"));
+      await removeTestContainerForTurn(context.tenantId, turn.id);
+    }
+  }, 120_000);
 
   it(
     "R2-e: Prepared 证据实际过期后，正式 Worker 真实回读原容器并以原 Revision 续写证据",
