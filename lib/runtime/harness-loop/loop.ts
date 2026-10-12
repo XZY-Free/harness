@@ -521,18 +521,22 @@ export class HarnessLoop {
   private completedPreferredAgentSubmission(): HarnessObservation | null {
     const preferredAgentId = this.preferredAgentId();
     if (!preferredAgentId) return null;
-    const completed = this.actionHistory.findLast((entry) =>
-      (entry.action.actionType === "agent.call" || entry.action.actionType === "agent.resume") &&
-      entry.state === "completed" &&
-      entry.observation?.observationType === "agent" &&
-      (entry.action.actionType !== "agent.call" || entry.action.payload.agentId === preferredAgentId),
+    const completed = this.actionHistory.findLast(
+      (entry) =>
+        (entry.action.actionType === "agent.call" || entry.action.actionType === "agent.resume") &&
+        entry.state === "completed" &&
+        entry.observation?.observationType === "agent" &&
+        (entry.action.actionType !== "agent.call" ||
+          entry.action.payload.agentId === preferredAgentId),
     );
     if (!completed?.observation) return null;
     const data = recordValue(completed.observation.data);
     const result = recordValue(data.resultJson);
     const submission = recordValue(recordValue(result.data).submission);
-    return result.status === "completed" && submission.submitted === true &&
-      typeof data.resultText === "string" && data.resultText.trim()
+    return result.status === "completed" &&
+      submission.submitted === true &&
+      typeof data.resultText === "string" &&
+      data.resultText.trim()
       ? completed.observation
       : null;
   }

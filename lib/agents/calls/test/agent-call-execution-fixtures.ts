@@ -69,13 +69,13 @@ import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
-import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
 import {
   applyRuntimeSessionDispatchForTest,
   createRuntimeSessionBindingForTest,
   sourceIntentForFixture,
 } from "@/lib/runtime/test-support/session-write-fixtures";
+import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { seedActionPermission } from "@/lib/test-support/seed-action-permission";

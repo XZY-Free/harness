@@ -25,11 +25,11 @@ import { userActionRequestTable } from "@/lib/persistence/schema/user-action-req
 import { workspaceAttachmentAccessGrant } from "@/lib/persistence/schema/workspace";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
-import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
+import { getLatestProducerSequence } from "@/lib/runtime/application/runtime-recovery";
+import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
 import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
-import { getLatestProducerSequence } from "@/lib/runtime/application/runtime-recovery";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import {
   createManagedWorkspaceAttachment,
@@ -473,7 +473,8 @@ describe("AgentActionExecutor", () => {
       actionDigest,
     };
     const sequence =
-      ((await getLatestProducerSequence(scenario.tenantId, scenario.parentInvocationId)) ?? 0n) + 1n;
+      ((await getLatestProducerSequence(scenario.tenantId, scenario.parentInvocationId)) ?? 0n) +
+      1n;
     const actionPayload = {
       action_id: action.actionId,
       step_no: action.stepNo,

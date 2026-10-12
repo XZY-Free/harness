@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { POST as runtimeEventsPOST } from "@/app/runtime/invocations/[invocationId]/events/route";
 import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
+import {
+  createAgent,
+  getAgentById,
+  updateAgentLifecycle,
+} from "@/lib/agents/persistence/agent-queries";
+import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
+import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -16,6 +23,7 @@ import {
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import {
   DEFAULT_TENANT_ID,
   INITIAL_GOVERNANCE_CONFIG,
@@ -23,14 +31,6 @@ import {
   ensureDefaultTenant,
 } from "@/lib/identity/tenant-bootstrap";
 import { issueTestExecutionToken } from "@/lib/identity/test-support/execution-token";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import {
-  createAgent,
-  getAgentById,
-  updateAgentLifecycle,
-} from "@/lib/agents/persistence/agent-queries";
-import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
-import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   agentCallAttemptTable,
@@ -59,14 +59,14 @@ import {
   buildCapabilityCatalogSnapshot,
 } from "@/lib/runtime/harness-loop/capability-catalog";
 import { protocolDigest } from "@/lib/runtime/runtime-protocol";
-import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
-import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
-import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import {
   applyRuntimeSessionDispatchForTest,
   createRuntimeSessionBindingForTest,
   sourceIntentForFixture,
 } from "@/lib/runtime/test-support/session-write-fixtures";
+import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
+import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
+import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
 import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, asc, eq, like } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

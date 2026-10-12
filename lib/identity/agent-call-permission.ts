@@ -1,5 +1,8 @@
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { recoverTrustedExecutionSubject, type ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import {
+  type ExecutionSubject,
+  recoverTrustedExecutionSubject,
+} from "@/lib/runtime/transport/execution-subject";
 import { checkActionScope, checkServiceActionScope } from "./authorization";
 export class AgentCallPermissionError extends Error {
   readonly code = "ACTION_SCOPE_DENIED";
@@ -37,7 +40,7 @@ export async function assertAgentInvocationPermission(
     outboundSubject &&
     (outboundSubject.tenantId !== tenantId ||
       outboundSubject.subjectId !== subject.subjectId ||
-        outboundSubject.subjectType !== subject.subjectType)
+      outboundSubject.subjectType !== subject.subjectType)
   )
     throw new AgentCallPermissionError();
   await assertAgentSubjectPermission(tenantId, agentId, subject);

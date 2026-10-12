@@ -19,13 +19,13 @@ import {
   getIngressByProducerEventId,
   ingressRuntimeEvents,
 } from "@/lib/runtime/application/ingress-runtime-events";
-import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import {
   buildConfirmationActionId,
   computeConfirmationProposalSemanticDigest,
 } from "@/lib/runtime/harness-loop/confirmation-proposal-identity";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
 import { getRuntimeSessionBindingByOwnership } from "@/lib/runtime/persistence/runtime-session-store";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import {
   type RecoverablePauseCheckpointOutcome,
   takeRecoverablePauseCheckpoint,
