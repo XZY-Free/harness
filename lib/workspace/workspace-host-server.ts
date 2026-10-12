@@ -1612,8 +1612,15 @@ export class WorkspaceHostBroker implements WorkspaceHost {
         .filter(Boolean)
         .some((value) => Number.parseInt(value, 10) === processGroupId);
     } catch {
-      // 无法探测时按存活处理：fail closed 比误判"已退出"安全。
-      return processAlive(processGroupId);
+      // 无法探测（如环境禁用 ps）时，对**进程组**发 0 信号保守判定：
+      // 单看组长 PID 会把"组长已死、组内仍有成员"误判成"组空"，从而跳过组信号、
+      // 留下活写者（`processAlive` 的语义只覆盖单个进程）。这里必须问"组里是否还有人"。
+      try {
+        process.kill(-processGroupId, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === "EPERM";
+      }
     }
   }
 
