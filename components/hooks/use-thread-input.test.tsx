@@ -71,7 +71,7 @@ describe("useThreadInput 既有 Thread 正式路径", () => {
       await result.current.send("请读取附件", "hr-agent", [file]);
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/threads/thread-1/attachments");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/threads/thread-1/attachments");
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBeInstanceOf(FormData);
     expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({
       input: { type: "message", text: "请读取附件" },

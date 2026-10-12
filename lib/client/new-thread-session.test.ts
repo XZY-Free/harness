@@ -103,7 +103,7 @@ describe("new thread client session", () => {
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/threads/thread-1/attachments",
+      "/api/threads/thread-1/attachments",
       expect.objectContaining({
         method: "POST",
         headers: { "idempotency-key": "attachment-key" },
@@ -114,7 +114,7 @@ describe("new thread client session", () => {
     expect(uploadBody.get("file")).toBe(file);
     expect(fetchImpl).toHaveBeenNthCalledWith(
       3,
-      "/api/v1/threads/thread-1/turns",
+      "/api/threads/thread-1/turns",
       expect.objectContaining({
         body: JSON.stringify({
           input: { type: "message", text: "请读取附件" },

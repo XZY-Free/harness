@@ -30,7 +30,7 @@ export async function uploadThreadAttachment(
 ): Promise<UploadedThreadAttachment> {
   const formData = new FormData();
   formData.set("file", file);
-  const response = await fetchImpl(`/api/v1/threads/${threadId}/attachments`, {
+  const response = await fetchImpl(`/api/threads/${threadId}/attachments`, {
     method: "POST",
     credentials: "include",
     headers: { "idempotency-key": idempotencyKey },

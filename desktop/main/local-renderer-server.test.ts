@@ -144,7 +144,7 @@ describe("startLocalRendererServer", () => {
     cleanups.push(() => server.close());
 
     const controller = new AbortController();
-    const response = await fetch(`${server.origin}/api/v1/threads/test/events`, {
+    const response = await fetch(`${server.origin}/api/threads/test/events`, {
       signal: controller.signal,
     });
     await response.body?.getReader().read();
