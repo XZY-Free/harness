@@ -58,6 +58,10 @@ docs/
 #   docs/topic-01/evidence/ 下的受控基线 —— 验证计划、验收矩阵、schema 证据、
 #   测试清单、跳过用例受控允许清单 skipped-test-registry.json，
 #   以及 scripts/ 下的验收脚本本身。
+#   docs/contracts/scripts/contract_rules.py —— contracts:verify 与契约测试依赖
+#   的规则模块（与同目录 generate_openapi.py / validate_contracts.py 同为验收入口）。
+#   docs/V12/02/snowharness-execution-design/schema-dictionary.json —— fresh-db
+#   阶段「四方 Schema 对比」的权威设计字典。
 # 本地产物（流程自身重写，不得入库）：验收结果与跳过用例记录。
 docs/topic-01/evidence/artifacts/
 # 散落在其他目录的方案 / 调试 / 记忆文档
