@@ -16,8 +16,10 @@
  *   - lib/control-plane/admin-routes.test.ts（If-Match 412 + 幂等重放）
  *   - lib/admin/export-queries.test.ts（导出 CRUD + 审计）
  *   - lib/admin/export-runner.test.ts（导出执行 + 脱敏 + NDJSON）
- * - e2e 环境使用 dev 认证（APP_ENV=test → SNOW_AUTH_MODE=dev），默认用户无 action binding，
- *   action scope 校验返回 403；header 守卫（If-Match/Idempotency-Key）在 action scope 之前校验。
+ * - e2e 使用正式本地登录：本地管理员持有 admin 角色模板（含 admin.export.read、
+ *   不含 admin.export.create 等敏感导出动作 —— 「管理员不隐含敏感导出权限」的既定边界），
+ *   故 GET exports → 200、POST exports → 403 ACTION_SCOPE_DENIED；
+ *   header 守卫（If-Match/Idempotency-Key）在 action scope 之前校验。
  *
  * 运行：
  *   pnpm test:e2e
@@ -258,17 +260,14 @@ test.describe("S11-W08 管理操作一致性", () => {
     expect(body.error.retryable).toBe(false);
   });
 
-  // ─── 9. Action Scope 一致性 — GET exports → 403 ──────────
+  // ─── 9. Action Scope 一致性 — GET exports → 200（read 在管理员模板内）──────────
 
-  test("Action Scope 一致性：GET exports 缺少 action binding → ACTION_SCOPE_DENIED", async ({
-    request,
-  }) => {
+  test("Action Scope 一致性：GET exports 具备 admin.export.read → 200", async ({ request }) => {
     const response = await request.get(`${ADMIN_BASE}/exports`);
 
-    expect(response.status()).toBe(403);
-    const body = await parseErrorBody(response);
-    expect(body.error.code).toBe("ACTION_SCOPE_DENIED");
-    expect(body.error.request_id).toBeTruthy();
-    expect(body.error.retryable).toBe(false);
+    expect(response.status()).toBe(200);
+    const body = (await response.json()) as { items: unknown[]; total: number };
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(typeof body.total).toBe("number");
   });
 });
