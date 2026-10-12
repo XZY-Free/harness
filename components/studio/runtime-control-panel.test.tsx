@@ -91,17 +91,17 @@ let backend: BackendState;
 function stubBackend() {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url === "/admin/api/v1/runtimes") {
+    if (url === "/admin/api/runtimes") {
       if (backend.failRuntimes) throw new Error("temporary failure");
       return Response.json({ items: [runtime], total: 1 });
     }
-    if (url === "/admin/api/v1/runtimes/rt-1/revisions") {
+    if (url === "/admin/api/runtimes/rt-1/revisions") {
       return Response.json({
         items: backend.published ? [publishedRevision] : backend.revisions,
         total: 1,
       });
     }
-    if (url === "/admin/api/v1/runtime-revisions/rtr-1/publish" && init?.method === "POST") {
+    if (url === "/admin/api/runtime-revisions/rtr-1/publish" && init?.method === "POST") {
       backend.published = true;
       return Response.json(publishResponse);
     }
@@ -113,7 +113,7 @@ function publishPosts(): Array<{ body: unknown; headers: Headers }> {
   return fetchMock.mock.calls
     .filter(
       ([url, init]) =>
-        String(url) === "/admin/api/v1/runtime-revisions/rtr-1/publish" && init?.method === "POST",
+        String(url) === "/admin/api/runtime-revisions/rtr-1/publish" && init?.method === "POST",
     )
     .map(([, init]) => ({
       body: JSON.parse(String(init?.body)),
@@ -158,10 +158,10 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
     expect(document.body.textContent).not.toContain(draftRevision.runtime_target_digest);
   });
 
-  it("refreshToken 改变必须重新 GET /admin/api/v1/runtimes 与 revisions；首次失败刷新成功后清除旧错误", async () => {
+  it("refreshToken 改变必须重新 GET /admin/api/runtimes 与 revisions；首次失败刷新成功后清除旧错误", async () => {
     backend.failRuntimes = true;
     const runtimesCalls = () =>
-      fetchMock.mock.calls.filter(([url]) => String(url) === "/admin/api/v1/runtimes").length;
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/admin/api/runtimes").length;
 
     const view = render(<RuntimeControlPanel canPublish refreshToken={0} />);
     await waitFor(() => expect(screen.getByText(/加载失败/)).toBeTruthy());
@@ -300,7 +300,7 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
     let resolveOldList: ((response: Response) => void) | undefined;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/admin/api/v1/runtimes") {
+      if (url === "/admin/api/runtimes") {
         if (!resolveOldList) {
           return await new Promise<Response>((resolvePromise) => {
             resolveOldList = resolvePromise;
@@ -311,10 +311,10 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
           total: 1,
         });
       }
-      if (url === "/admin/api/v1/runtimes/rt-new/revisions") {
+      if (url === "/admin/api/runtimes/rt-new/revisions") {
         return Response.json({ items: [], total: 0 });
       }
-      if (url === "/admin/api/v1/runtimes/rt-old/revisions") {
+      if (url === "/admin/api/runtimes/rt-old/revisions") {
         return Response.json({ items: [], total: 0 });
       }
       return Response.json({ items: [], total: 0 });
@@ -373,7 +373,7 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
   it("空列表刷新失败时显示错误，不把失败遮成稳定空态", async () => {
     let listCalls = 0;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      if (String(input) !== "/admin/api/v1/runtimes") {
+      if (String(input) !== "/admin/api/runtimes") {
         return Response.json({ items: [], total: 0 });
       }
       listCalls += 1;

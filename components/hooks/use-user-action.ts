@@ -8,7 +8,7 @@
  *
  * 职责：
  * - resolveUserAction：员工解析通用 UserAction 请求
- *   （POST /api/v1/threads/{thread_id}/user-actions/{request_id}:resolve）。
+ *   （POST /api/threads/{thread_id}/user-actions/{request_id}:resolve）。
  * - 支持 4 种 resolution：approve / deny / submit / cancel。
  * - input 类型 submit 时通过 responseRedactedJson 传入脱敏响应。
  * - 专题01 废弃 handoff：不再有 handoff 类型，通用 resolve 只处理 confirmation/auth/grant/input。
@@ -145,18 +145,15 @@ export function useUserAction({ threadId }: UseUserActionParams): UseUserActionR
           body.response_redacted = options.responseRedactedJson;
         }
         // 路径含冒号 custom method（:resolve）；Next.js App Router 直接收录此段名。
-        const resp = await apiFetch(
-          `/api/v1/threads/${threadId}/user-actions/${requestId}/resolve`,
-          {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              "content-type": "application/json",
-              "idempotency-key": idempotencyKey,
-            },
-            body: JSON.stringify(body),
+        const resp = await apiFetch(`/api/threads/${threadId}/user-actions/${requestId}/resolve`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": idempotencyKey,
           },
-        );
+          body: JSON.stringify(body),
+        });
         if (!resp.ok) {
           const visible = await parseError(resp);
           setError(visible);

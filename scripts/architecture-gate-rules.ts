@@ -1,3 +1,8 @@
+import { posix } from "node:path";
+import {
+  FORBIDDEN_ENV_FLAG_KEYS,
+  FORBIDDEN_ENV_FLAG_PREFIXES,
+} from "@/lib/runtime/runtime-settings";
 /**
  * Architecture Gate 的 deprecated/legacy 检查纯规则模块。
  *
@@ -6,6 +11,113 @@
  * 保持输入顺序并去重。scope 与禁词语义与 architecture-gate.ts 原有
  * checkDeprecatedArchitecture 一致，抽取为可单测的纯函数。
  */
+import ts from "typescript";
+
+const INTERNAL_SOURCE_PATH = /^(?:app|components|desktop|hooks|lib|scripts)\//;
+const ARCHITECTURE_VERSION_PATH =
+  /(?:^|\/)(?:v\d+|legacy|compatibility)(?:\/|$)|(?:^|\/)runtime-v\d+\.(?:ts|tsx|mts|mjs|js)$/i;
+const COMPATIBILITY_SYMBOL =
+  /^(?:Legacy[A-Z][A-Za-z0-9]*|Compat[A-Z][A-Za-z0-9]*|RuntimeProtocolV\d+|V\d+RuntimeClient|NewRuntimeService)$/;
+
+/** CLEAN-01/02：只检查内部生产文件路径与 TS 标识符，保留协议数值和字符串数据。 */
+export function collectCanonicalNamingViolations(documents: readonly SourceDocument[]): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!INTERNAL_SOURCE_PATH.test(document.path) || /\.test\.[cm]?[jt]sx?$/.test(document.path)) {
+      continue;
+    }
+    if (ARCHITECTURE_VERSION_PATH.test(document.path)) {
+      violations.add(document.path);
+      continue;
+    }
+    if (!/\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    const sourceFile = ts.createSourceFile(
+      document.path,
+      document.source,
+      ts.ScriptTarget.Latest,
+      true,
+      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    function visit(node: ts.Node): void {
+      if (ts.isIdentifier(node) && COMPATIBILITY_SYMBOL.test(node.text)) {
+        violations.add(document.path);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
+  return [...violations];
+}
+
+function isArchitectureFlag(key: string): boolean {
+  return (
+    (FORBIDDEN_ENV_FLAG_KEYS as readonly string[]).includes(key) ||
+    FORBIDDEN_ENV_FLAG_PREFIXES.some((prefix) => key.startsWith(prefix))
+  );
+}
+
+/** CLEAN-06：检查生产配置及声明的标识符，不把运行时黑名单中的字符串当违规。 */
+export function collectArchitectureFlagViolations(documents: readonly SourceDocument[]): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (
+      !INTERNAL_SOURCE_PATH.test(document.path) ||
+      /\.test\.[cm]?[jt]sx?$/.test(document.path) ||
+      !/\.[cm]?[jt]sx?$/.test(document.path)
+    ) {
+      continue;
+    }
+    const configFile = /(?:^|\/)(?:config|env|runtime-settings)(?:[./-]|$)/.test(document.path);
+    const sourceFile = ts.createSourceFile(
+      document.path,
+      document.source,
+      ts.ScriptTarget.Latest,
+      true,
+      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    function visit(node: ts.Node): void {
+      const processEnv =
+        ts.isIdentifier(node) &&
+        ts.isPropertyAccessExpression(node.parent) &&
+        ts.isPropertyAccessExpression(node.parent.expression) &&
+        node.parent.expression.expression.getText(sourceFile) === "process" &&
+        node.parent.expression.name.text === "env";
+      const configDeclaration =
+        ts.isIdentifier(node) &&
+        configFile &&
+        (ts.isPropertySignature(node.parent) ||
+          ts.isPropertyAssignment(node.parent) ||
+          ts.isVariableDeclaration(node.parent));
+      if (
+        (ts.isIdentifier(node) &&
+          isArchitectureFlag(node.text) &&
+          (processEnv || configDeclaration)) ||
+        (ts.isStringLiteral(node) &&
+          isArchitectureFlag(node.text) &&
+          (ts.isElementAccessExpression(node.parent) ||
+            (configFile &&
+              (ts.isPropertyAssignment(node.parent) || ts.isPropertySignature(node.parent)))))
+      ) {
+        violations.add(document.path);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
+  return [...violations];
+}
+
+/** CLEAN-07：正式脚本入口与 CI 不得调用专题阶段脚本名。 */
+export function collectLegacyScriptViolations(documents: readonly SourceDocument[]): string[] {
+  return documents
+    .filter(
+      (document) =>
+        document.path === "package.json" ||
+        /^\.github\/workflows\/[^/]+\.ya?ml$/.test(document.path),
+    )
+    .filter((document) => /\btopic01:|(?:scripts\/)?topic-01-[A-Za-z0-9_-]+/.test(document.source))
+    .map((document) => document.path);
+}
 
 /** Agent/Runtime/Route Authority 及其正式消费者。 */
 const AUTHORITY_SOURCE_SCOPE =
@@ -19,11 +131,21 @@ const IMPLEMENTATION_HISTORY_PATTERN =
   /docs\/V(?:11|12)\/01|专题0?1|\bBatch\s*\d+\b|\bPhase\s*[A-Z0-9]+\b|\bStage\s*[A-Z0-9]+\b|阶段\s*[0-9一二三四五六七八九十]+|关口\s*\d+|\bS\d{2}-[CW]\d{2}\b|(?:^|[\s（(])0[0-7]\s*§\s*[0-9一二三四五六七八九十]+/im;
 
 /** 已物理删除的第二入口。测试可以写拒绝文本，但不能再依赖这些模块。 */
-const RETIRED_MODULE_SPECIFIER =
-  /(?:@\/|(?:\.\.\/)+)(?:lib\/runtime\/(?:.*\/)?a2a[^"']*|lib\/routes\/application\/(?:upsert|disable)-deployment-route|app\/api\/v1\/agents(?:\/route)?|lib\/agents\/(?:hosted-agent-publication|hosted-agent-route)[^"']*)/;
+const RETIRED_MODULE_PATH =
+  /^(?:lib\/runtime\/(?:.*\/)?a2a[^/]*|lib\/routes\/application\/(?:upsert|disable)-deployment-route|app\/api\/v1\/agents(?:\/route)?|lib\/agents\/(?:hosted-agent-publication|hosted-agent-route)[^/]*)$/;
 
-const MODULE_DEPENDENCY =
-  /(?:from\s*|require\(\s*|import\(\s*|export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s*)["']([^"']+)["']/g;
+function resolvesToRetiredModule(importer: string, specifier: string): boolean {
+  const path = resolveInternalModulePath(importer, specifier);
+  return RETIRED_MODULE_PATH.test(path.replace(/\.(?:[cm]?[jt]sx?)$/, ""));
+}
+
+function resolveInternalModulePath(importer: string, specifier: string): string {
+  return specifier.startsWith("@/")
+    ? specifier.slice(2)
+    : specifier.startsWith(".")
+      ? posix.normalize(posix.join(posix.dirname(importer), specifier))
+      : specifier;
+}
 
 const RETIRED_AGENT_EXECUTION_PATTERN =
   /\b(?:resolveRequiredAgentBinding|RequiredAgentUnavailableError|invokeRequiredAgent)\b|harness-required-agent|required-agent/;
@@ -48,7 +170,7 @@ export function collectImplementationHistoryViolations(
   return [...violations];
 }
 
-/** 返回仍 import/require/export 已删除第二入口的源码，包括测试与 test-support。 */
+/** CLEAN-05：AST 检查 import/require/export 已删除第二入口，包括测试与 test-support。 */
 export function collectRetiredModuleDependencyViolations(
   documents: readonly SourceDocument[],
 ): string[] {
@@ -61,12 +183,143 @@ export function collectRetiredModuleDependencyViolations(
     ) {
       continue;
     }
-    MODULE_DEPENDENCY.lastIndex = 0;
-    for (const match of document.source.matchAll(MODULE_DEPENDENCY)) {
-      if (RETIRED_MODULE_SPECIFIER.test(match[1] ?? "")) violations.add(document.path);
+    for (const specifier of moduleSpecifiers(document)) {
+      if (resolvesToRetiredModule(document.path, specifier)) {
+        violations.add(document.path);
+      }
     }
   }
   return [...violations];
+}
+
+/** CLEAN-09：正式执行链不能引用测试夹具或无校验的 Binding 构造器。 */
+export function collectProductionTestSupportViolations(
+  documents: readonly SourceDocument[],
+): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!/^(?:app|components|desktop|lib|scripts)\//.test(document.path)) continue;
+    if (document.path === "scripts/e2e-bootstrap.ts") continue;
+    if (/(?:^|\/)(?:test-support|test|__tests__)\//.test(document.path)) continue;
+    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    for (const specifier of moduleSpecifiers(document)) {
+      const path = resolveInternalModulePath(document.path, specifier);
+      if (/(?:^|\/)test-support\//.test(path) || /create-unverified-execution-binding/.test(path)) {
+        violations.add(document.path);
+      }
+    }
+  }
+  return [...violations];
+}
+
+/** CLEAN-10：Runtime HTTP 入口不能直接改写 Invocation；Definition/Revision 只有定义存储服务可写。 */
+export function collectDualAuthorityWriteViolations(
+  documents: readonly SourceDocument[],
+): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!INTERNAL_SOURCE_PATH.test(document.path)) continue;
+    if (/(?:^|\/)(?:test-support|test|__tests__)\//.test(document.path)) continue;
+    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    if (!/\.[cm]?[jt]sx?$/.test(document.path)) continue;
+    const runtimeRoute = /^app\/(?:runtime|gateway)\/.*\/route\.[cm]?[jt]s$/.test(document.path);
+    const definitionWriter = document.path === "lib/environment/environment-definition-store.ts";
+    const sourceFile = ts.createSourceFile(
+      document.path,
+      document.source,
+      ts.ScriptTarget.Latest,
+      true,
+      document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const localNames = new Map<string, string>();
+    for (const statement of sourceFile.statements) {
+      if (!ts.isImportDeclaration(statement)) continue;
+      const bindings = statement.importClause?.namedBindings;
+      if (!bindings || !ts.isNamedImports(bindings)) continue;
+      for (const element of bindings.elements) {
+        localNames.set(element.name.text, element.propertyName?.text ?? element.name.text);
+      }
+    }
+    function visit(node: ts.Node): void {
+      if (ts.isTaggedTemplateExpression(node) && node.tag.getText(sourceFile) === "sql") {
+        const statement = node.template.getText(sourceFile);
+        const writesInvocation =
+          /\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+[`"]?Invocation\b/i.test(statement);
+        const writesDefinition =
+          /\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+[`"]?EnvironmentDefinition(?:Revision)?\b/i.test(
+            statement,
+          );
+        if ((runtimeRoute && writesInvocation) || (writesDefinition && !definitionWriter)) {
+          violations.add(document.path);
+        }
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["update", "insert", "delete"].includes(node.expression.name.text)
+      ) {
+        const target = node.arguments[0];
+        const localName =
+          target && ts.isIdentifier(target)
+            ? target.text
+            : target && ts.isPropertyAccessExpression(target)
+              ? target.name.text
+              : undefined;
+        const table = localName ? (localNames.get(localName) ?? localName) : undefined;
+        const write = node.expression.name.text;
+        if (
+          (runtimeRoute && table === "invocationTable") ||
+          (table === "environmentDefinitionTable" && !definitionWriter) ||
+          (table === "environmentDefinitionRevisionTable" &&
+            (!definitionWriter || write !== "insert"))
+        ) {
+          violations.add(document.path);
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
+  return [...violations];
+}
+
+function moduleSpecifiers(document: SourceDocument): string[] {
+  if (!/\.[cm]?[jt]sx?$/.test(document.path)) return [];
+  const sourceFile = ts.createSourceFile(
+    document.path,
+    document.source,
+    ts.ScriptTarget.Latest,
+    true,
+    document.path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const specifiers: string[] = [];
+  function visit(node: ts.Node): void {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      specifiers.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      node.moduleReference.expression &&
+      ts.isStringLiteralLike(node.moduleReference.expression)
+    ) {
+      specifiers.push(node.moduleReference.expression.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.arguments[0] &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+      ts.isStringLiteralLike(node.arguments[0])
+    ) {
+      specifiers.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return specifiers;
 }
 
 /** 返回重新引入旧 Required-Agent 执行桥、符号或幂等前缀的源码。 */
@@ -125,6 +378,7 @@ export function checkWorkerProductionTopologyGate(
     "hosted-provisioning-worker",
     "control-plane-outbox-worker",
     "runtime-dispatch-retry-worker",
+    "job-worker",
     "tool-execution-worker",
   ];
   const packageJson = source("package.json");
@@ -133,6 +387,7 @@ export function checkWorkerProductionTopologyGate(
   const webImage = source("Dockerfile");
   const entrypoint = source("scripts/workers/worker-entrypoint.ts");
   const retryWorker = stripComments(source("lib/runtime/retry/runtime-dispatch-retry-worker.ts"));
+  const jobWorker = stripComments(source("lib/job/job-worker.ts"));
 
   if (!packageJson.includes('"worker:start"')) failures.push("package 缺少统一 worker:start");
   if (!entrypoint.includes("runConfiguredWorkerProcess"))
@@ -156,6 +411,28 @@ export function checkWorkerProductionTopologyGate(
     retryWorker.includes("recordAttemptDispatchTransientFailure")
   ) {
     failures.push("Runtime retry 默认 lane 未调用 canonical persisted dispatch service");
+  }
+  // R04 §3：Writer 的物理撤销必须由常驻 lane 按 W→I 处理，不能只在测试里调用。
+  if (!retryWorker.includes("runDueWorkspaceWriterReleases")) {
+    failures.push("Runtime retry worker 未接线 Workspace Writer 物理释放 lane");
+  }
+  // R01 §3 `Owner expired`：租约到期的 Owner 必须有持久发现者，否则无人收口。
+  if (!retryWorker.includes("runDueExpiredOwnerRecoveries")) {
+    failures.push("Runtime retry worker 未接线 Owner 过期收口 lane");
+  }
+  // R01 §4：job-worker 必须真的同时跑 Job admission 与 JobCommand 两条 lane，
+  // 只在测试里调用消费者不算接线。
+  if (
+    !jobWorker.includes("admitQueuedJob") ||
+    !jobWorker.includes("scanQueuedJobsWithoutInvocation") ||
+    !jobWorker.includes("runDueJobCommands")
+  ) {
+    failures.push("job-worker 未接线 Job admission 与 JobCommand 两条 lane");
+  }
+  // R05 §5 `stuck gate` / `releasing 资源` + R09 §2 步骤 8：安全点解冻是**持久工作**，
+  // 必须由常驻维护 lane 续做（含 Crash 后的 Gate 收口），不能只在 finally 里调用后吞异常。
+  if (!retryWorker.includes("runCheckpointMaintenanceLane")) {
+    failures.push("Runtime retry worker 未接线 Checkpoint 维护 lane");
   }
   return { passed: failures.length === 0, failures };
 }
@@ -203,11 +480,11 @@ export function checkAgentRevisionAuthorityGate(
       path === "lib/persistence/schema/agents.ts" ||
       path === "lib/control-plane-client/contracts/agent.ts" ||
       path.startsWith("lib/agents/") ||
-      path.startsWith("app/admin/api/v1/agents/") ||
-      path.startsWith("app/admin/api/v1/agent-revisions/") ||
-      path.startsWith("app/gateway/v1/agent-calls/") ||
-      path === "app/admin/api/v1/agents/route.ts" ||
-      path === "app/gateway/v1/agent-calls/route.ts";
+      path.startsWith("app/admin/api/agents/") ||
+      path.startsWith("app/admin/api/agent-revisions/") ||
+      path.startsWith("app/gateway/agent-calls/") ||
+      path === "app/admin/api/agents/route.ts" ||
+      path === "app/gateway/agent-calls/route.ts";
     if (!isAgentControlPlane || isTest || isSupport) continue;
 
     const productionSource = stripComments(document.source);
@@ -370,8 +647,8 @@ export function checkAgentInvokeAuthorizationGate(
     failures.push("agent.invoke resource types 不是 tenant | agent");
   }
 
-  if (source("app/api/v1/agents/route.ts") !== undefined) {
-    failures.push("员工 /api/v1/agents 双轨入口仍存在");
+  if (source("app/api/agents/route.ts") !== undefined) {
+    failures.push("员工 /api/agents 双轨入口仍存在");
   }
 
   for (const document of documents) {
@@ -387,14 +664,14 @@ export function checkAgentInvokeAuthorizationGate(
     }
   }
 
-  const turnRoute = source("app/api/v1/threads/[thread_id]/turns/route.ts") ?? "";
+  const turnRoute = source("app/api/threads/[threadId]/turns/route.ts") ?? "";
   const authorizationIndex = turnRoute.indexOf("requireAgentInvokeScope(");
   const idempotencyIndex = turnRoute.indexOf("enforceIdempotency(");
   if (authorizationIndex < 0 || idempotencyIndex < 0 || authorizationIndex > idempotencyIndex) {
     failures.push("Turn agent selection 未在幂等/写入前经过 requireAgentInvokeScope");
   }
 
-  const catalogRoute = source("app/api/v1/catalog/options/route.ts") ?? "";
+  const catalogRoute = source("app/api/catalog/options/route.ts") ?? "";
   if (
     !catalogRoute.includes("resolveActionScopeCoverage(") ||
     !catalogRoute.includes("agentInvokeAuthorization") ||
@@ -408,7 +685,7 @@ export function checkAgentInvokeAuthorizationGate(
       continue;
     }
     if (/['"]\/api\/v1\/agents['"]/.test(stripComments(document.source))) {
-      failures.push(`客户端仍消费员工 /api/v1/agents：${document.path}`);
+      failures.push(`客户端仍消费员工 /api/agents：${document.path}`);
     }
   }
 
@@ -460,7 +737,7 @@ export function collectDeprecatedArchitectureViolations(
  *
  * 覆盖：
  * - Thread.primaryAgentId / primary_agent_id 作为身份字段（Thread 不绑主 Agent）
- * - CreateThread 正式 route app/api/v1/threads/route.ts 可执行代码出现 agent_id
+ * - CreateThread 正式 route app/api/threads/route.ts 可执行代码出现 agent_id
  *   字段即违规（不区分 required/optional）
  * - DEFAULT_AGENT_KEY / seedDefaultAgent（无默认 Agent fallback）
  * - defaultAgentId（新建不默认选中 Agent）
@@ -479,7 +756,7 @@ const ARCHITECTURE_RULE_DEFINITIONS = new Set([
 ]);
 
 /** CreateThread 正式 route：其可执行代码只要出现 agent_id 字段即违规。 */
-const CREATE_THREAD_ROUTE = "app/api/v1/threads/route.ts";
+const CREATE_THREAD_ROUTE = "app/api/threads/route.ts";
 
 /** Harness Agent 边界规则模式。 */
 const HARNESS_AGENT_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
@@ -775,8 +1052,7 @@ export function collectExecutionBoundaryViolations(
 
 // ─── Resume 结果真实性 ────────────────────────────────────
 
-const RESOLVE_ROUTE_PATH =
-  "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
+const RESOLVE_ROUTE_PATH = "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts";
 const A2A_TRANSPORT_PATH = "lib/agents/calls/transport/a2a/a2a-client.ts";
 
 export interface ResumeGateResult {
@@ -889,7 +1165,7 @@ export function checkDispatchRecoveryAuthorityGate(
   // Resume dispatched=false 显式 switch；Hosted local transport 必须真实 dispatch。
   const resolveRoute = docOrFail(
     documents,
-    "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+    "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts",
     failures,
   );
   if (resolveRoute) {
@@ -1273,7 +1549,7 @@ export function checkFinalClosureBoundaryGate(
   const harnessToolApplication = stripComments(
     source("lib/capability/application/execute-harness-tool-call.ts"),
   );
-  const gatewayToolRoute = stripComments(source("app/gateway/v1/tool-calls/route.ts"));
+  const gatewayToolRoute = stripComments(source("app/gateway/tool-calls/route.ts"));
   if (
     !harnessToolApplication.includes("applyToolCall") ||
     !gatewayToolRoute.includes("applyToolCall")
@@ -1313,7 +1589,7 @@ export function checkFinalClosureBoundaryGate(
     failures.push("Knowledge production search 仍存在 tenant-only 入口");
   }
 
-  const gateway = stripComments(source("app/gateway/v1/capability-actions/route.ts"));
+  const gateway = stripComments(source("app/gateway/capability-actions/route.ts"));
   if (!gateway.includes("recoverTrustedExecutionSubject(binding, principal.tenantId)")) {
     failures.push("External Capability Gateway 未从 Binding 恢复可信 Subject");
   }
@@ -1327,11 +1603,11 @@ export function checkFinalClosureBoundaryGate(
     "export interface StartInvocationResponse",
     requestStart,
   );
-  const requestBody =
+  const request =
     requestStart >= 0 && requestEnd > requestStart
       ? runtimeClient.slice(requestStart, requestEnd)
       : "";
-  if (/\b(?:subjectId|subject_id|executionSubject|execution_subject)\s*[?:]/.test(requestBody)) {
+  if (/\b(?:subjectId|subject_id|executionSubject|execution_subject)\s*[?:]/.test(request)) {
     failures.push("Runtime Start 请求体重新成为 Subject Authority");
   }
 
@@ -1362,18 +1638,39 @@ export function checkFinalClosureBoundaryGate(
   const resumeEnd = hosted.indexOf("async handleSteer(", resumeStart);
   const resumeBlock =
     resumeStart >= 0 && resumeEnd > resumeStart ? hosted.slice(resumeStart, resumeEnd) : "";
-  const hostedApplication = stripComments(
-    source("lib/runtime/application/production-resume-harness-invocation.ts"),
-  );
+  // 冻结 file-plan：production-resume-harness-invocation.ts / resume-harness-invocation.ts
+  // 已按 MERGE_AND_REPLACE 合并为唯一生产 Resume（lib/runtime/application/runtime-resume.ts），
+  // 真实 Hosted resume 模式断言落在合并后的目标文件。
+  const runtimeResume = stripComments(source("lib/runtime/application/runtime-resume.ts"));
+  // 判据维护说明（A03）：Resume 已从"跑一轮就返回"改为"pending 不结束 Supervisor ——
+  // 等唤醒后重装 Loop 再跑"（`const result = await running; if (!result.pending) return result;`），
+  // 因此字面量 `return await running` 不再成立。本门禁要守的是**不可退化**这一不变量，
+  // 而不是某一种写法，故改为按语义断言：真的构造 Loop、真的运行它、并且把它**自己的**
+  // 结果返回出去（而不是合成一个只有 ACK 的回执）。任一环节缺失仍在这里报同一行错误。
+  const awaitsLoopOutcome = /const\s+\w+\s*=\s*await\s+running\b/.test(runtimeResume);
+  const returnsLoopOutcome = /return\s+result\b/.test(runtimeResume);
+  // 源码形态可以被改写，行为不能被改写：Resume 的端到端不变量还必须由已登记的真实回归守住
+  // （hosted-adapter-resume = 不依赖旧实例 Map 的 durable 入口；managed-resume-lifecycle =
+  // 暂停→确认→默认命令网关→Resume→同 Attempt 再执行）。两份都在收集清单里才算不退化。
+  const registeredTestFiles = new Set(testCollection.map((test) => test.file));
+  const resumeBehaviorRegressions = [
+    "lib/runtime/adapters/hosted-adapter-resume.integration.test.ts",
+    "lib/runtime/__tests__/managed-resume-lifecycle.db.test.ts",
+  ];
   if (
     !resumeBlock.includes("applicationService.resume(") ||
-    !hostedApplication.includes("new HostedHarnessLoop(") ||
-    !hostedApplication.includes("const running = loop.run()") ||
-    !hostedApplication.includes("return await running") ||
-    !hostedApplication.includes("acquireLease: tryAcquireInvocationExecutionLease") ||
-    !hostedApplication.includes("cancelActiveAgentCalls(")
+    !runtimeResume.includes("new HostedHarnessLoop(") ||
+    !runtimeResume.includes("loop.run()") ||
+    !awaitsLoopOutcome ||
+    !returnsLoopOutcome ||
+    !runtimeResume.includes("getActiveExecutionOwnership(") ||
+    !runtimeResume.includes("cancelActiveAgentCalls(")
   ) {
     failures.push("Hosted Resume 退化为只 ACK");
+  }
+  // 单独一行：源码形态合规、但守它的行为回归被摘掉时，同样是"不可退化"被破坏。
+  if (!resumeBehaviorRegressions.every((file) => registeredTestFiles.has(file))) {
+    failures.push("Hosted Resume 行为回归未登记");
   }
 
   const seen = new Map<string, string>();

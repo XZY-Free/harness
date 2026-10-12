@@ -16,10 +16,15 @@ import {
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
   checkWorkerProductionTopologyGate,
+  collectArchitectureFlagViolations,
+  collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
+  collectDualAuthorityWriteViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
+  collectLegacyScriptViolations,
+  collectProductionTestSupportViolations,
   collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
@@ -30,7 +35,7 @@ const RETIRED_VERSION = `v${11}`;
 const RETIRED_PATTERNS = [
   new RegExp(`/${RETIRED_VERSION}/`, "i"),
   new RegExp(`/${RETIRED_VERSION.toUpperCase()}/`),
-  new RegExp(`${RETIRED_VERSION}-`, "i"),
+  new RegExp(`(?:^|[^A-Za-z0-9])${RETIRED_VERSION}-`, "i"),
   new RegExp(`use${RETIRED_VERSION.toUpperCase()}`),
   new RegExp(`build${RETIRED_VERSION.toUpperCase()}`),
 ];
@@ -170,9 +175,29 @@ function checkExternalRuntimeTransport(): void {
   else fail(`External Runtime Transport 违规：\n  ${result.failures.join("\n  ")}`);
 }
 
+/**
+ * 已退役命名检查的精确例外（CLEAN-08）：
+ * 1. 冻结工程包自身——退役命名清单的定义源，必须能引用历史命名；
+ * 2. 测试 fixture 中的负向字符串（对已退役模块的依赖仍由
+ *    collectRetiredModuleDependencyViolations 单独把关，不放行真实 import）。
+ *
+ * 与 `scripts/repository-architecture.contract.test.ts` 的
+ * `NAMING_GUARD_EXACT_FILES` 保持同一口径：专题02 收尾审查工程包的
+ * manifests 逐条收录改造前的原验收义务，必须写出已退役版本前缀本身。
+ * 只按文件精确匹配，不放行生产源码。
+ */
+const RETIRED_NAMING_EXCEPTIONS = [
+  /^docs\/V12\/02\/snowharness-execution-design\/(?:source-manifest\.json|engineering-design\.md|test-matrix\.json|sections\/(?:naming-inventory|residual-removal|cleanliness-checklist|test-matrix|naming-rules)\.md)$/,
+  /^docs\/topic02\/专题02固定关闭检查表\/(?:固定检查表\.md|固定检查表\.json|sources\/原专题02基础验收矩阵\.json)$/,
+  // 当前阶段回执记录禁用路径的注入反例，按具体证据文件放行，不放行生产源码。
+  /^docs\/topic02\/evidence\/artifacts\/(?:核查与修复回执\.json|审查进度\.md)$/,
+  /\.test\.tsx?$/,
+];
+
 function checkRetiredNaming(): void {
   const violations = sourceFiles().flatMap((file) => {
     const repositoryPath = relative(ROOT, file);
+    if (RETIRED_NAMING_EXCEPTIONS.some((pattern) => pattern.test(repositoryPath))) return [];
     const source = readFileSync(file, "utf8");
     return RETIRED_PATTERNS.some(
       (pattern) => pattern.test(`/${repositoryPath}`) || pattern.test(source),
@@ -185,6 +210,44 @@ function checkRetiredNaming(): void {
     return;
   }
   pass("已退役版本命名归零");
+}
+
+function checkCanonicalNaming(): void {
+  const violations = collectCanonicalNamingViolations(productionDocuments());
+  if (violations.length > 0) {
+    fail(`生产架构版本路径或兼容 Symbol：${violations.join(", ")}`);
+    return;
+  }
+  pass("生产架构版本路径与兼容 Symbol 归零");
+}
+
+function checkConfigurationAndScriptNames(): void {
+  const flags = collectArchitectureFlagViolations(productionDocuments());
+  if (flags.length > 0) fail(`生产配置存在阶段 Feature Flag：${flags.join(", ")}`);
+  else pass("生产配置无阶段 Feature Flag");
+
+  const scriptFiles = [
+    "package.json",
+    ...filesUnder(resolve(ROOT, ".github/workflows")).map((file) => relative(ROOT, file)),
+  ];
+  const scripts = collectLegacyScriptViolations(
+    scriptFiles.map((path) => ({ path, source: readFileSync(resolve(ROOT, path), "utf8") })),
+  );
+  if (scripts.length > 0) fail(`正式脚本或 CI 仍调用专题阶段脚本：${scripts.join(", ")}`);
+  else pass("正式脚本与 CI 使用职责名称");
+}
+
+function checkProductionTestSupportBoundary(): void {
+  const violations = collectProductionTestSupportViolations(productionDocuments());
+  if (violations.length > 0) fail(`正式执行链依赖测试支撑模块：${violations.join(", ")}`);
+  else pass("正式执行链未依赖测试支撑模块");
+}
+
+function checkDualAuthorityWriteBoundary(): void {
+  const violations = collectDualAuthorityWriteViolations(productionDocuments());
+  if (violations.length > 0)
+    fail(`Runtime 或 Definition 出现第二写入入口：${violations.join(", ")}`);
+  else pass("Runtime 与 Environment Definition 写入边界唯一");
 }
 
 function checkAbsent(paths: readonly string[], title: string): void {
@@ -317,6 +380,8 @@ function checkWorkerProductionTopology(): void {
     "deploy/production/compose.yaml",
     "scripts/workers/worker-entrypoint.ts",
     "lib/runtime/retry/runtime-dispatch-retry-worker.ts",
+    // R01 §4：job-worker 的两条 lane 必须真实接线；不给它文档就等于规则永远读空串。
+    "lib/job/job-worker.ts",
   ];
   const documents = paths.map((path) => ({
     path,
@@ -331,6 +396,10 @@ function main(): void {
   checkMigrationJournal();
   checkSchemaAuthority();
   checkRetiredNaming();
+  checkCanonicalNaming();
+  checkConfigurationAndScriptNames();
+  checkProductionTestSupportBoundary();
+  checkDualAuthorityWriteBoundary();
   checkAbsent(
     [
       "app/api/chat/route.ts",

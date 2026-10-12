@@ -99,7 +99,7 @@ export function projectRuntimeConformanceRun(
     runtime_revision_id: run.runtimeRevisionId,
     runtime_target_digest: run.runtimeTargetDigest,
     runtime_config_digest: run.runtimeConfigDigest,
-    protocol_contract_revision: run.protocolContractRevision,
+    protocol_contract_revision: run.protocolContractDigest,
     overall_result: run.overallResult,
     runner_identity: run.runnerIdentity,
     suite_revision: run.suiteRevision,
@@ -128,7 +128,8 @@ export function projectRuntimeConformanceRun(
 
 /**
  * Candidate Conformance 选择：当前 exact RuntimeRevision 下最新一条
- * 「passed 且六个 publication conformance cases 完整全过」且 digest/协议精确绑定的 Run。
+ * 「passed 且全部 publication conformance cases（声明式 + RuntimeProtocol 行为清单）
+ * 完整全过」且 digest/协议精确绑定的 Run。
  * 排序 completedAt DESC、recordedAt DESC；最新一条可能 failed，绝不能只取 latest row。
  */
 async function selectLatestValidConformanceRun(
@@ -145,7 +146,7 @@ async function selectLatestValidConformanceRun(
     if (run.overallResult !== "passed") continue;
     if (run.runtimeTargetDigest !== revision.runtimeTargetDigest) continue;
     if (run.runtimeConfigDigest !== revision.configHash) continue;
-    if (run.protocolContractRevision !== revision.protocolContractRevision) continue;
+    if (run.protocolContractDigest !== revision.protocolContractDigest) continue;
     const caseResults = await listRuntimeConformanceCaseResults(run.id);
     const complete = validateCompletePublicationConformanceResult(
       caseResults as Parameters<typeof validateCompletePublicationConformanceResult>[0],
@@ -194,7 +195,7 @@ export async function loadRuntimeRevisionAdminProjection(
       run.overallResult === "passed" &&
       run.runtimeTargetDigest === revision.runtimeTargetDigest &&
       run.runtimeConfigDigest === revision.configHash &&
-      run.protocolContractRevision === revision.protocolContractRevision &&
+      run.protocolContractDigest === revision.protocolContractDigest &&
       validateCompletePublicationConformanceResult(
         caseResults as Parameters<typeof validateCompletePublicationConformanceResult>[0],
       ).valid,
@@ -222,7 +223,7 @@ export async function loadRuntimeRevisionAdminProjection(
     revision_no: revision.revisionNo,
     revision_state: revision.revisionState,
     protocol_type: revision.protocolType,
-    protocol_contract_revision: revision.protocolContractRevision,
+    protocol_contract_revision: revision.protocolContractDigest,
     runtime_evidence_kind: revision.runtimeEvidenceKind,
     runtime_target_digest: revision.runtimeTargetDigest,
     endpoint_ref: revision.endpointRef,

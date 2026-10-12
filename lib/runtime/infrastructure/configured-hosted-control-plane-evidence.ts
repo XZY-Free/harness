@@ -178,6 +178,6 @@ function conformanceRequest(input: HostedRuntimeConformanceInput): Record<string
     runtime_revision_id: input.runtimeRevisionId,
     runtime_target_digest: input.runtimeTargetDigest,
     runtime_config_digest: input.runtimeConfigDigest,
-    protocol_contract_revision: input.protocolContractRevision,
+    protocol_contract_digest: input.protocolContractDigest,
   };
 }

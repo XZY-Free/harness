@@ -64,7 +64,7 @@ describe("过程摘要", () => {
     await waitFor(() => expect(history.querySelector(".ha-steps")?.textContent).toBe(liveSteps));
     expect(history.querySelector(".ha-steps")?.textContent).toBe(liveSteps);
     expect(apiFetch).toHaveBeenCalledWith(
-      "/api/v1/threads/thread-1/turns/turn-1/activity",
+      "/api/threads/thread-1/turns/turn-1/activity",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     fireEvent.click(history.querySelector("summary") as HTMLElement);

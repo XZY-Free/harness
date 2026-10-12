@@ -12,7 +12,7 @@
  * 场景11（Hosted Worker 完整 Saga）使用真实 MySQL Gateway 执行 Saga 步骤。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
+import { POST as createRevisionPOST } from "@/app/admin/api/agents/[agentId]/revisions/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
 import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
@@ -67,6 +67,7 @@ import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-suppor
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
@@ -94,6 +95,7 @@ import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import {
   PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
   type RuntimeConformanceReport,
   computeCaseEvidenceDigest,
   computeEvidenceManifestDigest,
@@ -122,6 +124,7 @@ import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/re
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
 import {
   buildDsseConformanceEnvelope,
+  buildTestConformanceCaseEvidence,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
@@ -131,6 +134,7 @@ import {
   installTrustedHostedControlPlaneEvidenceForTest,
   trustedHostedRunnerSigningIdentityForTest,
 } from "@/lib/test-support/trusted-hosted-control-plane-evidence";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -379,7 +383,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolContractDigest: "a2a@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -476,12 +480,12 @@ function buildSignedConformanceReport(
   revisionId: string,
   runtimeTargetDigest: string,
   runtimeConfigDigest: string,
-  protocolContractRevision: string,
+  protocolContractDigest: string,
   overrides: Record<string, unknown> = {},
 ) {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
   const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
-    const evidence = { caseId, passed: true };
+    const evidence = buildTestConformanceCaseEvidence(caseId);
     return {
       caseId,
       passed: true,
@@ -495,8 +499,8 @@ function buildSignedConformanceReport(
     runtimeRevisionId: revisionId,
     runtimeTargetDigest,
     runtimeConfigDigest,
-    protocolContractRevision,
-    suiteRevision: "runtime-conformance@1",
+    protocolContractDigest,
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: RUNNER_IDENTITY,
     testEnvironmentRevision: "isolated-mysql8@1",
@@ -509,12 +513,12 @@ function buildSignedConformanceReport(
   const evidenceManifestDigest =
     (overrides.evidenceManifestDigest as string | undefined) ??
     computeEvidenceManifestDigest({
-      suiteRevision: "runtime-conformance@1",
+      suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
       testEnvironmentRevision: "isolated-mysql8@1",
       runtimeRevisionId: revisionId,
       runtimeTargetDigest,
       runtimeConfigDigest,
-      protocolContractRevision,
+      protocolContractDigest,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
       cases: baseReport.caseResults.map((result) => ({
         caseId: result.caseId,
@@ -531,12 +535,44 @@ function buildSignedConformanceReport(
 // ─── 辅助：插入测试用 Invocation 行 ──────────────────────
 
 async function seedInvocation(tenantId: string, invocationId: string): Promise<void> {
+  // canonical Invocation_subject_shape：subjectType=thread 必须携带 threadId/turnId/triggerItemId。
+  // 先播种 Thread → Turn → ThreadItem(user_message) 链，再挂 Invocation。
+  const threadId = randomUUID();
+  const turnId = randomUUID();
+  const triggerItemId = randomUUID();
+  await db.insert(threadTable).values({
+    id: threadId,
+    tenantId,
+    ownerUserId: DEFAULT_USER_ID,
+  });
+  await db.insert(turnTable).values({
+    id: turnId,
+    threadId,
+    turnSequence: 1,
+    triggerType: "user_message",
+    triggerItemId,
+  });
+  await db.insert(threadItemTable).values({
+    id: triggerItemId,
+    threadId,
+    turnId,
+    itemSequence: 1,
+    itemType: "user_message",
+    authorType: "user",
+    contentJson: { kind: "user_message", text: "e2e acceptance fixture" },
+    contentHash: `sha256:${"0".repeat(64)}`,
+  });
   await db.insert(invocationTable).values({
     id: invocationId,
     tenantId,
+    subjectType: "thread",
+    threadId,
+    turnId,
+    triggerItemId,
     invocationSequence: 1,
     invocationKind: "initial",
     executionState: "queued",
+    inputDigest: `sha256:${"0".repeat(64)}`,
     versionNo: 1,
   });
 }
@@ -606,6 +642,7 @@ async function createBindingFromResolved(params: {
     params.tenantId,
     params.resolution.policyRevisionId,
   );
+  const workspaceBinding = await createNoPlatformWorkspaceBinding(params.tenantId, DEFAULT_USER_ID);
   return createCreateExecutionBinding({ store: mysqlExecutionBindingStore })({
     ...testCapabilityCatalogBindingFields(params.invocationId),
     invocationId: params.invocationId,
@@ -615,13 +652,12 @@ async function createBindingFromResolved(params: {
     modelProvider: "doubao",
     modelId: "doubao-pro",
     modelRevisionRef: null,
-    initialEnvironmentLeaseId: null,
-    workspaceBindingId: null,
+    workspaceBindingId: workspaceBinding.id,
     policyRevisionId: bindingGovernance.policyRevisionId,
     policyRulesDigest: bindingGovernance.policyRulesDigest,
     governanceConfigRevisionId: bindingGovernance.governanceConfigRevisionId,
     governanceConfigDigest: bindingGovernance.governanceConfigDigest,
-    contextCheckpointId: null,
+    environmentMode: "NO_PLATFORM_ENVIRONMENT",
     environmentDefinitionRevisionId: null,
     controlPlaneEvidence: {
       ...(() => {
@@ -742,7 +778,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
       tenantId: tenant.id,
       runtimeId: runtime.id,
       protocolType: "harness_runtime_protocol",
-      protocolContractRevision: "harness-runtime-protocol@1",
+      protocolContractDigest: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://conformance-runtime",
       runtimeArtifactRef: `oci://registry/runtime@sha256:${"a".repeat(64)}`,
@@ -757,7 +793,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
       revision.id,
       revision.runtimeTargetDigest,
       `sha256:${"b".repeat(64)}`,
-      revision.protocolContractRevision,
+      revision.protocolContractDigest,
     );
 
     const record = createRecordRuntimeConformanceRun({
@@ -1882,7 +1918,7 @@ describe("场景20：跨租户访问全部 Fail-closed", () => {
 
     const randomAgentId = "99999999-9999-4999-8999-999999999999";
     const response = await createRevisionPOST(request, {
-      params: Promise.resolve({ agent_id: randomAgentId }),
+      params: Promise.resolve({ agentId: randomAgentId }),
     });
     await assertCrossTenantHidden(response, crossTenantRequestId);
   });
@@ -2144,7 +2180,7 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
       tenantId,
       runtimeId: runtime.id,
       protocolType: "a2a",
-      protocolContractRevision: "a2a@1",
+      protocolContractDigest: "a2a@1",
       runtimeEvidenceKind: "external_endpoint",
       endpointRef: `https://external-runtime-${contentSuffix}.example.com`,
       runtimeArtifactRef: null,
@@ -2159,7 +2195,7 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
       revision.id,
       revision.runtimeTargetDigest,
       revision.configHash,
-      revision.protocolContractRevision,
+      revision.protocolContractDigest,
     );
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,

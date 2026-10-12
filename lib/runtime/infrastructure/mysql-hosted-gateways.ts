@@ -72,7 +72,7 @@ const HOSTED_RUNTIME_CAPABILITIES = ["event_stream"];
 /**
  * Hosted in-process 协议契约版本 — 显式冻结，不再从 protocolType 自动推导。
  */
-const HOSTED_PROTOCOL_CONTRACT_REVISION = "harness-runtime-protocol@1";
+const HOSTED_PROTOCOL_CONTRACT_DIGEST = "harness-runtime-protocol@1";
 const HOSTED_RUNTIME_CONFIG_DIGEST = digest({
   protocolType: "in_process",
   endpointRef: HOSTED_RUNTIME_ENDPOINT,
@@ -169,7 +169,7 @@ function createRuntimeConformanceGateway(
       const [revision] = await db
         .select({
           configHash: runtimeRevisionTable.configHash,
-          protocolContractRevision: runtimeRevisionTable.protocolContractRevision,
+          protocolContractDigest: runtimeRevisionTable.protocolContractDigest,
           runtimeTargetDigest: runtimeRevisionTable.runtimeTargetDigest,
         })
         .from(runtimeRevisionTable)
@@ -183,7 +183,7 @@ function createRuntimeConformanceGateway(
         idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
         runtimeTargetDigest: revision.runtimeTargetDigest,
         runtimeConfigDigest: revision.configHash,
-        protocolContractRevision: revision.protocolContractRevision,
+        protocolContractDigest: revision.protocolContractDigest,
       });
       const run = await recordRuntimeConformanceRun({
         tenantId: command.tenantId,
@@ -411,16 +411,18 @@ async function ensureRuntimeDraft(params: {
     const id = randomUUID();
     await tx.insert(runtimeRevisionTable).values({
       id,
+      tenantId: params.tenantId,
       runtimeId: runtime.id,
       revisionNo: (sequence?.value ?? 0) + 1,
       protocolType: "in_process",
-      protocolContractRevision: HOSTED_PROTOCOL_CONTRACT_REVISION,
+      protocolVersion: 3,
+      protocolContractDigest: HOSTED_PROTOCOL_CONTRACT_DIGEST,
       runtimeEvidenceKind: "hosted_artifact",
       runtimeTargetDigest: computeRuntimeTargetDigest({
         runtimeEvidenceKind: "hosted_artifact",
         runtimeArtifactDigest: params.artifactDigest,
         runtimeConfigDigest: HOSTED_RUNTIME_CONFIG_DIGEST,
-        protocolContractRevision: HOSTED_PROTOCOL_CONTRACT_REVISION,
+        protocolContractDigest: HOSTED_PROTOCOL_CONTRACT_DIGEST,
       }),
       endpointRef: HOSTED_RUNTIME_ENDPOINT,
       runtimeArtifactRef: params.artifactRef,

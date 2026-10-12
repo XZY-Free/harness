@@ -129,7 +129,7 @@ export async function resolveAgentActionBinding(
     agentPublicationRecordId: publicationRecordId,
     protocolFacts: {
       protocolType: snapshot.protocolType,
-      protocolContractRevision: snapshot.protocolContractRevision,
+      protocolContractDigest: snapshot.protocolContractDigest,
     },
     policyRevisionId: policy.policyRevisionId,
     policyRulesDigest: policy.policyRulesDigest,

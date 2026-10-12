@@ -41,20 +41,22 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { lockExecutionRootForProductWrite } from "@/lib/executions/persistence/execution-ownership-store";
 import type {
-  InvocationCommand,
   ThreadEvent,
   ThreadEventActorType,
   ThreadItem,
   ThreadRelation,
 } from "@/lib/persistence/schema/conversation";
 import {
-  invocationCommandTable,
   threadEventTable,
   threadItemTable,
   threadRelationTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
+import type { InvocationCommand } from "@/lib/persistence/schema/executions";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { INVOCATION_TERMINAL_STATES, invocationTable } from "@/lib/persistence/schema/executions";
 import { and, asc, desc, eq } from "drizzle-orm";
 
@@ -370,7 +372,7 @@ export interface RequestCancellationResult {
  * - 终态（completed/failed/cancelled）→ ChildThreadAlreadyTerminalError
  * 4. UPDATE relation_state=cancel_requested
  * 5. 查询子 Thread 当前 active Invocation（running/waiting_user）作为 cancel command 目标
- * 6. INSERT InvocationCommand（commandType=cancel，commandPayloadJson={relation_id, reason_code}）
+ * 6. INSERT InvocationCommand（commandType=cancel，payloadJson={relation_id, reason_code}）
  * 7. allocateEventSequences(父) → INSERT child_thread.cancel_requested Event
  *
  * 注意（§9 行 412-417）：取消请求 ≠ 已取消。本函数仅发起请求 + 入队 cancel command；
@@ -398,7 +400,49 @@ export async function requestChildThreadCancellation(params: {
   const now = new Date();
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE 父 Thread
+    // R04 §2「固定锁图」：执行根（Invocation → 活跃 Ownership）必须早于产品根（Thread/Relation）。
+    // 本路径在第 6 步会为子 Invocation 创建 cancel 命令（内部锁 Ownership），而旧顺序先锁
+    // 父 Thread + relation，与 Runtime 路径「锁 I/O → 写 Thread 事件流」互为反向持锁。
+    // 这里先用不加锁定位读取出子 Invocation，先锁执行根，再 FOR UPDATE 产品根并复验。
+    const [locatedParent] = await tx
+      .select({ id: threadTable.id })
+      .from(threadTable)
+      .where(
+        and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, params.parentThreadId)),
+      )
+      .limit(1);
+    if (!locatedParent) {
+      throw new ThreadNotFoundError(params.parentThreadId);
+    }
+    const [locatedRelation] = await tx
+      .select({ id: threadRelationTable.id, childThreadId: threadRelationTable.childThreadId })
+      .from(threadRelationTable)
+      .where(eq(threadRelationTable.id, params.relationId))
+      .limit(1);
+    if (!locatedRelation) {
+      throw new ThreadNotFoundError(params.relationId);
+    }
+    const [locatedChildInvocation] = await tx
+      .select({ id: invocationTable.id, executionState: invocationTable.executionState })
+      .from(invocationTable)
+      .where(
+        and(
+          eq(invocationTable.tenantId, params.tenantId),
+          eq(invocationTable.threadId, locatedRelation.childThreadId),
+        ),
+      )
+      .orderBy(desc(invocationTable.invocationSequence))
+      .limit(1);
+
+    // 1) 执行根：若子 Invocation 仍在执行，先把 Invocation → 活跃 Ownership 锁住。
+    if (
+      locatedChildInvocation &&
+      !INVOCATION_TERMINAL_STATES.includes(locatedChildInvocation.executionState)
+    ) {
+      await lockExecutionRootForProductWrite(tx, params.tenantId, locatedChildInvocation.id);
+    }
+
+    // 2) SELECT FOR UPDATE 父 Thread
     const [parent] = await tx
       .select()
       .from(threadTable)
@@ -411,7 +455,7 @@ export async function requestChildThreadCancellation(params: {
       throw new ThreadNotFoundError(params.parentThreadId);
     }
 
-    // 2. SELECT relation（锁定行）
+    // 3. SELECT relation（锁定行）+ 复验定位读之间未被改写
     const [relation] = await tx
       .select()
       .from(threadRelationTable)
@@ -422,6 +466,9 @@ export async function requestChildThreadCancellation(params: {
       throw new ThreadNotFoundError(params.relationId);
     }
     if (relation.parentThreadId !== params.parentThreadId) {
+      throw new ThreadNotFoundError(params.relationId);
+    }
+    if (relation.childThreadId !== locatedRelation.childThreadId) {
       throw new ThreadNotFoundError(params.relationId);
     }
 
@@ -472,23 +519,15 @@ export async function requestChildThreadCancellation(params: {
         reason: params.reason ?? null,
         reason_code: params.reasonCode ?? null,
       };
-      const commandPayloadHash = computeEventPayloadHash(commandPayload);
-      await tx.insert(invocationCommandTable).values({
-        id: cancelCommandId,
+      cancelCommandId = await createInvocationCommandInTransaction(tx, {
+        tenantId: params.tenantId,
         invocationId: childInvocation.id,
-        threadId: relation.childThreadId, // cancel command 入队到子 Thread 流
-        turnId: childInvocation.turnId ?? null,
         commandType: "cancel",
-        commandPayloadJson: commandPayload,
-        commandPayloadHash,
-        commandState: "queued",
-        runtimeExecutionRef: null,
-        idempotencyKey: params.idempotencyKey ?? null,
-        errorCode: null,
-        errorMessage: null,
-        dispatchedAt: null,
-        acknowledgedAt: null,
-        failedAt: null,
+        idempotencyKey: params.idempotencyKey ?? `child-cancel:${params.relationId}`,
+        payloadJson: commandPayload,
+        requestedByType: actorType === "user" ? "user" : "service",
+        requestedById: params.actorId ?? "child-thread-cancellation",
+        commandId: cancelCommandId,
       });
     }
 

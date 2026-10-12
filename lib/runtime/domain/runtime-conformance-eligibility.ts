@@ -46,7 +46,7 @@ export interface RuntimeConformanceRunFact {
   /** Runtime Config Digest（缺失 = null）。 */
   runtimeConfigDigest: string | null;
   /** Protocol Contract Revision（缺失 = null）。 */
-  protocolContractRevision: string | null;
+  protocolContractDigest: string | null;
   /** Suite Revision（缺失 = null）。 */
   suiteRevision: string | null;
   /** Conformance 格式（缺失 = null）。 */
@@ -61,7 +61,7 @@ export interface RuntimeConformanceExpectedValues {
   runtimeRevisionId: string;
   runtimeTargetDigest: string | null;
   runtimeConfigDigest: string | null;
-  protocolContractRevision: string | null;
+  protocolContractDigest: string | null;
   /** 允许的 Conformance 格式。 */
   allowedFormats: "standard_dsse"[];
 }
@@ -183,12 +183,12 @@ export function validateRuntimePublicationConformanceEvidence(
 
   // Protocol Contract 一致（期望缺失 → fail-closed）
   if (
-    expected.protocolContractRevision === null ||
-    run.protocolContractRevision !== expected.protocolContractRevision
+    expected.protocolContractDigest === null ||
+    run.protocolContractDigest !== expected.protocolContractDigest
   ) {
     errors.push({
       code: "conformance_protocol_mismatch",
-      message: `Protocol Contract 不一致（Run: ${run.protocolContractRevision}, 期望: ${expected.protocolContractRevision}）`,
+      message: `Protocol Contract 不一致（Run: ${run.protocolContractDigest}, 期望: ${expected.protocolContractDigest}）`,
     });
   }
 

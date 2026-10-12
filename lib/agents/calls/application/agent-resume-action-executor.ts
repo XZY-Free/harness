@@ -81,6 +81,9 @@ export function createAgentResumeActionExecutor(params: {
       }
       const hostActions = readHostActions(disposition.resultJson);
       if (hostActions.length > 0) {
+        if (!context.threadId || !context.turnId) {
+          throw new Error("Agent resume 的 host actions 需要 Thread/Turn 上下文");
+        }
         await projectAgentHostActions({
           tenantId: params.tenantId,
           threadId: context.threadId,

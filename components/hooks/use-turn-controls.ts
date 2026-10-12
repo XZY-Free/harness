@@ -7,8 +7,8 @@
  *   「暂停请求不在 Runtime ack 前宣称已经暂停」
  *
  * 职责：
- * - Steer 运行中 Turn（POST /api/v1/turns/{id}/steer，202 Accepted，异步命令）。
- * - Interrupt（Stop）运行中 Turn（POST /api/v1/turns/{id}/interrupt，202 Accepted，异步命令）。
+ * - Steer 运行中 Turn（POST /api/turns/{id}/steer，202 Accepted，异步命令）。
+ * - Interrupt（Stop）运行中 Turn（POST /api/turns/{id}/interrupt，202 Accepted，异步命令）。
  * - 不在 Runtime ack 前宣称已引导/已暂停：UI 状态固定为 "queued" / "requested"。
  * - 错误转化为 ClientVisibleError。
  *
@@ -117,7 +117,7 @@ export function useTurnControls(turnId: string): UseTurnControlsResult {
       setError(null);
       try {
         const idempotencyKey = generateIdempotencyKey();
-        const resp = await apiFetch(`/api/v1/turns/${turnId}/steer`, {
+        const resp = await apiFetch(`/api/turns/${turnId}/steer`, {
           method: "POST",
           credentials: "include",
           headers: {
@@ -158,7 +158,7 @@ export function useTurnControls(turnId: string): UseTurnControlsResult {
       setError(null);
       try {
         const idempotencyKey = generateIdempotencyKey();
-        const resp = await apiFetch(`/api/v1/turns/${turnId}/interrupt`, {
+        const resp = await apiFetch(`/api/turns/${turnId}/interrupt`, {
           method: "POST",
           credentials: "include",
           headers: {
@@ -199,7 +199,7 @@ export function useTurnControls(turnId: string): UseTurnControlsResult {
     setBusy(true);
     setError(null);
     try {
-      const resp = await apiFetch(`/api/v1/turns/${turnId}/resume`, {
+      const resp = await apiFetch(`/api/turns/${turnId}/resume`, {
         method: "POST",
         credentials: "include",
         headers: {

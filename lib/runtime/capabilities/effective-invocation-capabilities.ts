@@ -15,9 +15,9 @@
 import type { RuntimeRevisionRow } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
-  type RuntimeCapabilitiesResponse,
-  isRuntimeCapabilitiesResponse,
-} from "@/lib/runtime/runtime-client";
+  type RuntimeCapabilities,
+  RuntimeCapabilitiesSchema,
+} from "@/lib/runtime/runtime-protocol";
 
 /** Invocation 级 effective 能力（至少统一表达  五项）。 */
 export interface EffectiveInvocationCapabilities {
@@ -89,6 +89,65 @@ function pass(value: string | undefined): boolean {
 }
 
 /**
+ * capability JSON 的**唯一**形状投影（发布事实与会话快照共用）。
+ *
+ * 同一份 `runtimeCapabilitiesJson` 既出现在 RuntimeRevision（发布事实）上，也被冻结进
+ * RuntimeSessionBinding（会话快照）。两处必须对同一形状给出同一结论：effective 能力是
+ * `published AND session`，若只在发布侧识别某个形状，交集就会退化成全 false。
+ * Hosted 的发布事实正是 `string[]` 能力名列表，会话冻结的就是这份 JSON —— 旧实现只在
+ * 发布侧识别数组形状，于是**一旦建立了会话**（真实生产路径），Hosted 的
+ * cancel/resume/steer/user_action 全部被判为不支持（用户输入后的 Resume 直接 422）。
+ *
+ * 形状不可识别 → fail-closed 全 false（deny），不抛错掩盖为可用。
+ */
+function projectMeasuredCapabilities(json: unknown): RuntimeLevelCapabilities {
+  if (Array.isArray(json)) {
+    return {
+      cancel: true,
+      resume: true,
+      steer: true,
+      user_action: true,
+      streaming: (json as HostedCapabilityNames).includes("event_stream"),
+    };
+  }
+  if (
+    json !== null &&
+    typeof json === "object" &&
+    (json as ExternalCapabilitiesProjection).measured?.features !== undefined
+  ) {
+    const features = (json as ExternalCapabilitiesProjection).measured?.features ?? {};
+    return {
+      cancel: pass(features.cancel),
+      resume: pass(features.resume),
+      steer: pass(features.steer),
+      user_action: pass(features.input_required),
+      streaming: pass(features.streaming_transport),
+    };
+  }
+  if (RuntimeCapabilitiesSchema.safeParse(json).success) {
+    // V12 canonical RuntimeCapabilities 快照（probe 响应同形状）：external 发布事实
+    // 直接声明正式协议形状；resume/steer 为声明式可选能力。
+    const canonical = RuntimeCapabilitiesSchema.parse(json);
+    return {
+      cancel: canonical.features.cancel,
+      resume: canonical.features.resume,
+      steer: canonical.features.steer,
+      user_action: true,
+      streaming:
+        canonical.features.workspaceModes.includes("SHARED_DURABLE") ||
+        canonical.features.workspaceModes.includes("CHECKPOINT_RESTORABLE"),
+    };
+  }
+  return {
+    cancel: false,
+    resume: false,
+    steer: false,
+    user_action: false,
+    streaming: false,
+  };
+}
+
+/**
  * Runtime 层 measured 能力。
  * Hosted（string[] 契约）语义由状态机承载：cancel/resume/user_action 恒可用，
  * streaming 取 event_stream 声明；External 只认 measured.features===pass。
@@ -103,39 +162,7 @@ export function resolveRuntimeLevelCapabilities(
     user_action: false,
     streaming: false,
   };
-  const json = runtimeRevision.runtimeCapabilitiesJson as unknown;
-  let measured: RuntimeLevelCapabilities;
-  if (Array.isArray(json)) {
-    measured = {
-      cancel: true,
-      resume: true,
-      steer: true,
-      user_action: true,
-      streaming: (json as HostedCapabilityNames).includes("event_stream"),
-    };
-  } else if (
-    json !== null &&
-    typeof json === "object" &&
-    (json as ExternalCapabilitiesProjection).measured?.features !== undefined
-  ) {
-    const features = (json as ExternalCapabilitiesProjection).measured?.features ?? {};
-    measured = {
-      cancel: pass(features.cancel),
-      resume: pass(features.resume),
-      steer: pass(features.steer),
-      user_action: pass(features.input_required),
-      streaming: pass(features.streaming_transport),
-    };
-  } else {
-    // 形状不可识别 → fail-closed。
-    measured = {
-      cancel: false,
-      resume: false,
-      steer: false,
-      user_action: false,
-      streaming: false,
-    };
-  }
+  const measured = projectMeasuredCapabilities(runtimeRevision.runtimeCapabilitiesJson);
   return {
     cancel: measured.cancel && protocol.cancel,
     resume: measured.resume && protocol.resume,
@@ -147,22 +174,13 @@ export function resolveRuntimeLevelCapabilities(
 
 /** 把已通过 Runtime Protocol schema 的 session 能力快照投影为控制能力。 */
 export function resolveSessionRuntimeCapabilities(value: unknown): RuntimeLevelCapabilities {
-  if (!isRuntimeCapabilitiesResponse(value)) {
-    return NO_CAPABILITIES;
-  }
-  return {
-    cancel: value.features.cancel,
-    resume: value.features.resume,
-    steer: value.features.steer,
-    user_action: value.features.user_action,
-    streaming: value.features.event_stream,
-  };
+  return projectMeasuredCapabilities(value);
 }
 
 /** 发布时 measured 能力与 start 响应必须一致；不一致时不能建立会话事实。 */
 export function runtimeCapabilitiesMatchPublishedRevision(
   revision: Pick<RuntimeRevisionRow, "protocolType" | "runtimeCapabilitiesJson">,
-  observed: RuntimeCapabilitiesResponse,
+  observed: RuntimeCapabilities,
 ): boolean {
   // Hosted 的发布事实是旧有 string[] capability catalog，并非完整 probe 快照；
   // 会话能力仍持久化并参与 effective 交集，但不能对不等形状做伪精确比较。

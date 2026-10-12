@@ -15,8 +15,9 @@
  * - 新请求立即拒绝；进行中 Invocation 由安全策略决定 cancel 或继续。
  */
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
   type WorkloadTokenRevocation,
   workloadTokenRevocationTable,
@@ -27,8 +28,9 @@ import { and, eq, lt } from "drizzle-orm";
 export async function getRevocationByJti(
   tenantId: string,
   jti: string,
+  executor: DbOrTx = db,
 ): Promise<WorkloadTokenRevocation | null> {
-  const [row] = await db
+  const [row] = await executor
     .select()
     .from(workloadTokenRevocationTable)
     .where(
@@ -42,47 +44,75 @@ export async function getRevocationByJti(
 }
 
 /** 查询 jti 是否已撤销。 */
-export async function isTokenRevoked(tenantId: string, jti: string): Promise<boolean> {
-  const record = await getRevocationByJti(tenantId, jti);
+export async function isTokenRevoked(
+  tenantId: string,
+  jti: string,
+  executor: DbOrTx = db,
+): Promise<boolean> {
+  const record = await getRevocationByJti(tenantId, jti, executor);
   return record !== null;
 }
 
-/** 撤销 Token（幂等：已撤销返回原记录）。 */
-export async function revokeWorkloadToken(params: {
+export interface RevokeWorkloadTokenParams {
   tenantId: string;
   jti: string;
-  tokenType: "runtime" | "gateway" | "service";
+  invocationId: string;
   revokedBy: string;
-  reason: string;
-  expiresAt: Date;
+  reasonCode: string;
+  tokenExpiresAt: Date;
   actor: AuditActor;
   requestId?: string;
-}): Promise<WorkloadTokenRevocation> {
-  // 幂等保护：已撤销返回原记录
-  const existing = await getRevocationByJti(params.tenantId, params.jti);
-  if (existing) {
-    return existing;
-  }
+}
+
+/** 撤销写入与 Event Ingress 共用 Invocation 根锁；调用方负责提交事务。 */
+export async function revokeWorkloadTokenInTransaction(
+  tx: DbOrTx,
+  params: RevokeWorkloadTokenParams,
+): Promise<{ row: WorkloadTokenRevocation; created: boolean }> {
+  // 与 Runtime Event Ingress 使用同一 Invocation 根锁，确定撤销与接纳的提交顺序。
+  // 历史 Token 可指向已删除的 Invocation；此时没有 Event 可接纳，仍允许撤销 JTI。
+  await tx
+    .select({ id: invocationTable.id })
+    .from(invocationTable)
+    .where(
+      and(
+        eq(invocationTable.tenantId, params.tenantId),
+        eq(invocationTable.id, params.invocationId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  const existing = await getRevocationByJti(params.tenantId, params.jti, tx);
+  if (existing) return { row: existing, created: false };
 
   const id = randomUUID();
-  await db.insert(workloadTokenRevocationTable).values({
+  await tx.insert(workloadTokenRevocationTable).values({
     id,
     tenantId: params.tenantId,
     jti: params.jti,
-    tokenType: params.tokenType,
+    invocationId: params.invocationId,
     revokedBy: params.revokedBy,
-    reason: params.reason,
-    expiresAt: params.expiresAt,
+    reasonCode: params.reasonCode,
+    revokedAt: new Date(),
+    tokenExpiresAt: params.tokenExpiresAt,
   });
-
-  const [row] = await db
+  const [inserted] = await tx
     .select()
     .from(workloadTokenRevocationTable)
     .where(eq(workloadTokenRevocationTable.id, id))
     .limit(1);
-  if (!row) {
-    throw new Error(`revokeWorkloadToken: 行未找到（id=${id}）`);
-  }
+  if (!inserted) throw new Error(`revokeWorkloadToken: 行未找到（id=${id}）`);
+  return { row: inserted, created: true };
+}
+
+/** 撤销 Token（幂等：已撤销返回原记录）。 */
+export async function revokeWorkloadToken(
+  params: RevokeWorkloadTokenParams,
+): Promise<WorkloadTokenRevocation> {
+  const { row, created } = await db.transaction((tx) =>
+    revokeWorkloadTokenInTransaction(tx, params),
+  );
+  if (!created) return row;
 
   // 写审计
   await recordAuditEvent({
@@ -92,23 +122,23 @@ export async function revokeWorkloadToken(params: {
     targetId: params.jti,
     after: {
       jti: params.jti,
-      token_type: params.tokenType,
+      invocation_id: params.invocationId,
       revoked_by: params.revokedBy,
-      reason: params.reason,
-      expires_at: params.expiresAt.toISOString(),
+      reason_code: params.reasonCode,
+      token_expires_at: params.tokenExpiresAt.toISOString(),
     },
-    reason: params.reason,
+    reason: params.reasonCode,
     requestId: params.requestId,
   });
 
   return row;
 }
 
-/** 清理过期撤销记录（expiresAt < now）。返回删除行数。 */
+/** 清理过期撤销记录（tokenExpiresAt < now）。返回删除行数。 */
 export async function deleteExpiredRevocations(now: Date = new Date()): Promise<number> {
   const result = await db
     .delete(workloadTokenRevocationTable)
-    .where(lt(workloadTokenRevocationTable.expiresAt, now));
+    .where(lt(workloadTokenRevocationTable.tokenExpiresAt, now));
   // MySQL 返回 affected rows
   return (result as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 0;
 }

@@ -17,12 +17,16 @@
  * - Job 不复活：终态 Job 不能改回 queued
  */
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { workspaceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import { createCancelCommand, createRetryCommand } from "@/lib/job/job-command-queries";
 import {
   completeJob,
@@ -30,6 +34,7 @@ import {
   processCancelCommand,
   processRetryCommand,
 } from "@/lib/job/job-control-queries";
+import { storeJobInputReference } from "@/lib/job/job-input-reference";
 import { createJob, getJobById, updateJobState } from "@/lib/job/job-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -75,10 +80,9 @@ async function createQueuedJob(tenantId: string, agentId: string, options?: { th
     agentId,
     jobType: "evaluation",
     triggerRef: "schedule-001",
-    completionPolicyJson: { type: "all_success" },
+    completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId: options?.threadId,
-    inputRef: "input://batch/001",
-    inputHash: "sha256:abc",
+    inputJson: { task: "batch-001" },
     idempotencyKey: `create-${randomUUID()}`,
   });
 }
@@ -149,7 +153,7 @@ describe("processCancelCommand", () => {
 
     expect(result.outcome).toBe("rejected_unknown_effect");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
+    expect(result.command.lastErrorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
     // Job 状态未变
     const dbJob = await getJobById(fx.tenantId, job.id);
     expect(dbJob?.jobState).toBe("queued");
@@ -180,7 +184,7 @@ describe("processCancelCommand", () => {
 
     expect(result.outcome).toBe("rejected_job_terminal");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_ALREADY_TERMINAL");
+    expect(result.command.lastErrorCode).toBe("JOB_ALREADY_TERMINAL");
   });
 });
 
@@ -214,9 +218,9 @@ describe("processRetryCommand", () => {
     expect(result.replacementJob?.jobState).toBe("queued");
     expect(result.replacementJob?.tenantId).toBe(fx.tenantId);
     expect(result.replacementJob?.agentId).toBe(fx.agentId);
-    expect(result.replacementJob?.inputRef).toBe("input://batch/001"); // reuseInput=true 默认
+    expect(result.replacementJob?.inputRef).toBeNull(); // inline 输入由 replacement 复用
     expect(result.command.commandState).toBe("acknowledged");
-    expect(result.command.replacementJobId).toBe(result.replacementJob?.id);
+    expect(result.command.resultJson).toEqual({ replacementJobId: result.replacementJob?.id });
   });
 
   it("reuseInput=false → replacement Job inputRef 为空", async () => {
@@ -240,7 +244,9 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("retry_created");
     expect(result.replacementJob?.inputRef).toBeNull();
-    expect(result.replacementJob?.inputHash).toBeNull();
+    // canonical schema：Job.inputHash NOT NULL（Job_input_shape check）。
+    // reuseInput=false 时 inputRef 清空、inputJson 置空对象，inputHash 落零值占位摘要。
+    expect(result.replacementJob?.inputHash).toBe(`sha256:${"0".repeat(64)}`);
   });
 
   it("unknown_effect 未核对 → rejected_unknown_effect", async () => {
@@ -264,7 +270,7 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("rejected_unknown_effect");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
+    expect(result.command.lastErrorCode).toBe("JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT");
     expect(result.replacementJob).toBeNull();
   });
 
@@ -290,7 +296,7 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("rejected_override");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_OVERRIDE_NOT_ALLOWED");
+    expect(result.command.lastErrorCode).toBe("JOB_OVERRIDE_NOT_ALLOWED");
     expect(result.replacementJob).toBeNull();
   });
 
@@ -315,7 +321,47 @@ describe("processRetryCommand", () => {
 
     expect(result.outcome).toBe("rejected_input");
     expect(result.command.commandState).toBe("rejected");
-    expect(result.command.errorCode).toBe("JOB_INPUT_NO_LONGER_AVAILABLE");
+    expect(result.command.lastErrorCode).toBe("JOB_INPUT_NO_LONGER_AVAILABLE");
+    expect(result.replacementJob).toBeNull();
+  });
+
+  it("reference 内容变化时默认校验拒绝 retry，不创建 replacement", async () => {
+    const fx = await seedFixture();
+    const { inputRef, inputHash } = await storeJobInputReference({
+      tenantId: fx.tenantId,
+      payload: { task: randomUUID() },
+    });
+    const { job } = await createJob({
+      tenantId: fx.tenantId,
+      agentId: fx.agentId,
+      jobType: "evaluation",
+      triggerRef: "schedule-001",
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
+      inputRef,
+      inputHash,
+    });
+    const running = await advanceToRunning(fx.tenantId, job.id, 1);
+    await advanceToCompleted(fx.tenantId, job.id, running.versionNo);
+    const cmd = await createRetryCommand({
+      tenantId: fx.tenantId,
+      jobId: job.id,
+      requestedBy: fx.ownerId,
+      idempotencyKey: `retry-${randomUUID()}`,
+    });
+    const root = isAbsolute(workspaceConfig.root)
+      ? workspaceConfig.root
+      : resolve(process.cwd(), workspaceConfig.root);
+    await writeFile(
+      join(root, ".snow", "job-inputs", fx.tenantId, inputHash.slice("sha256:".length)),
+      JSON.stringify({ task: "changed" }),
+    );
+
+    const result = await processRetryCommand({
+      tenantId: fx.tenantId,
+      commandId: cmd.command.id,
+    });
+    expect(result.outcome).toBe("rejected_input");
+    expect(result.command.lastErrorCode).toBe("JOB_INPUT_NO_LONGER_AVAILABLE");
     expect(result.replacementJob).toBeNull();
   });
 });

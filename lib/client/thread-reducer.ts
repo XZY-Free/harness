@@ -1,5 +1,3 @@
-import { mergeActionEntries, projectActivityEvent } from "./activity-projection";
-import { makeLocalVisibleError } from "./error-messages";
 /**
  * 员工端 Thread 投影 Reducer。
  *
@@ -24,14 +22,221 @@ import { makeLocalVisibleError } from "./error-messages";
  *
  * response.delta 通过独立 stream.delta action 投影为 pending Agent Item，不推进持久 sequence；
  * 其余 Runtime 私有 transient 事件不进入会话投影。
+ *
+ * A11（执行代际隔离）：
+ * - 临时 Item 的 id 至少包含**完整代际 tuple**（Invocation/Attempt/Ownership/epoch），不再只有
+ *   Turn。同一个 Turn 被后续代际继续使用时，两代正文不可能落进同一条临时正文。
+ * - 分类只用服务端权威基线（`Turn.activeInvocationId` → 当前 active Ownership）：**不**比较
+ *   不同 Invocation 的 epoch 大小（各自从自己的计数开始，数字大小无意义）。
+ * - 基线未覆盖的 Turn → 有界暂存等下一次权威基线；基线明确"无活动执行" → 丢弃。
+ * - 权威换代 → 旧代临时正文随基线变更被移除；snapshot 合并同样只保留与基线一致的临时正文。
  */
+import {
+  type ThreadGenerationBaseline,
+  type ThreadTransientGeneration,
+  compareLeaseEpoch,
+  findAuthoritativeGeneration,
+  isNewerGenerationBaseline,
+  sameThreadGeneration,
+  threadGenerationKey,
+} from "@/lib/runtime/thread-generation";
+import { mergeActionEntries, projectActivityEvent } from "./activity-projection";
+import { makeLocalVisibleError } from "./error-messages";
 import { SSE_DEFAULT_MAX_RETRIES } from "./sse-client";
 import type {
   ClientEvent,
+  ClientGenerationBaseline,
   ClientItem,
+  ClientTransientDelta,
+  ClientTransientGeneration,
   ThreadProjectionAction,
   ThreadProjectionState,
 } from "./types";
+
+/** A11：单个 Turn 的暂存增量上限（有界暂存，防止基线长期不来时无限堆积）。 */
+export const MAX_PENDING_TRANSIENT_PER_TURN = 64;
+
+/** A11：本地临时正文的 Item id 前缀（snapshot 合并据此识别"非服务端 Item"）。 */
+const TRANSIENT_ITEM_PREFIX = "stream-";
+
+/** 线上代际（snake_case）→ 契约代际（camelCase）。 */
+function toContractGeneration(generation: ClientTransientGeneration): ThreadTransientGeneration {
+  return {
+    invocationId: generation.invocation_id,
+    attemptId: generation.attempt_id,
+    ownershipId: generation.ownership_id,
+    leaseEpoch: generation.lease_epoch,
+  };
+}
+
+/** 线上基线 → 契约基线（供共用判定函数使用）。 */
+function toContractBaseline(baseline: ClientGenerationBaseline): ThreadGenerationBaseline {
+  return {
+    threadId: baseline.thread_id,
+    baselineSequence: baseline.baseline_sequence,
+    issuedRevision: baseline.issued_revision,
+    generations: baseline.generations.map((entry) => ({
+      turnId: entry.turn_id,
+      generation: entry.generation ? toContractGeneration(entry.generation) : null,
+    })),
+  };
+}
+
+/** 可空版本：`isNewerGenerationBaseline` 第二参数本身接受 null。 */
+function toNullableContractBaseline(
+  baseline: ClientGenerationBaseline | null,
+): ThreadGenerationBaseline | null {
+  return baseline ? toContractBaseline(baseline) : null;
+}
+
+/**
+ * A11 决策表的唯一实现：一条 transient 相对当前权威基线应当如何处置。
+ *
+ * | 情形 | 结果 |
+ * |---|---|
+ * | 无基线 / 基线未覆盖该 Turn | `stage`（有界暂存，不自作主张拼旧正文） |
+ * | 基线明确该 Turn 无活动执行 | `drop`（迟到 delta 不复活） |
+ * | 与权威 tuple 完全相同 | `apply`（幂等去重后追加到本 tuple 的临时正文） |
+ * | 同 Invocation 同 epoch 但 Owner/Attempt 不同 | `conflict`（协议冲突，停止应用并刷新权威事实） |
+ * | 其余（含同 Invocation 的旧 epoch、同 Turn 的不同 Invocation） | `drop` |
+ */
+export type TransientDeltaDisposition = "apply" | "stage" | "drop" | "conflict";
+
+export function classifyTransientDelta(
+  baseline: ClientGenerationBaseline | null,
+  delta: ClientTransientDelta,
+): TransientDeltaDisposition {
+  const contract = toNullableContractBaseline(baseline);
+  const authoritative = findAuthoritativeGeneration(contract, delta.turn_id);
+  // 未覆盖（含尚未收到基线）：有界暂存，绝不拼进旧正文。
+  if (authoritative === undefined) return "stage";
+  if (authoritative === null) return "drop";
+  const incoming = toContractGeneration(delta.generation);
+  if (sameThreadGeneration(authoritative, incoming)) return "apply";
+  if (authoritative.invocationId === incoming.invocationId) {
+    // 同一 Invocation 内 epoch 可比：epoch 相同却换了 Ownership/Attempt 属协议冲突。
+    if (compareLeaseEpoch(authoritative.leaseEpoch, incoming.leaseEpoch) === 0) return "conflict";
+    // 同 Invocation 的旧 epoch：迟到重放，丢弃。
+    return "drop";
+  }
+  // 同 Turn 的不同 Invocation：由权威活动执行事实判定，绝不比较二者 epoch 大小。
+  return "drop";
+}
+
+/** 临时正文的 Item id：包含完整代际 tuple（不再只有 turn_id）。 */
+export function transientItemId(turnId: string, generation: ClientTransientGeneration): string {
+  return `${TRANSIENT_ITEM_PREFIX}${turnId}:${threadGenerationKey(toContractGeneration(generation))}`;
+}
+
+/** 读回临时 Item 携带的代际；非临时 Item 或结构不合法返回 null。 */
+export function readTransientGeneration(item: ClientItem): ClientTransientGeneration | null {
+  if (!item.id.startsWith(TRANSIENT_ITEM_PREFIX)) return null;
+  if (typeof item.content !== "object" || item.content === null) return null;
+  const raw = (item.content as Record<string, unknown>).generation;
+  if (typeof raw !== "object" || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+  const { invocation_id: invocationId, attempt_id: attemptId, ownership_id: ownershipId } = record;
+  const leaseEpoch = record.lease_epoch;
+  if (typeof invocationId !== "string" || typeof attemptId !== "string") return null;
+  if (typeof ownershipId !== "string" || typeof leaseEpoch !== "string") return null;
+  return {
+    invocation_id: invocationId,
+    attempt_id: attemptId,
+    ownership_id: ownershipId,
+    lease_epoch: leaseEpoch,
+  };
+}
+
+/** 该 Turn 是否已有正式（非 pending）assistant_message —— 终态成立后临时正文必须退出。 */
+function hasCompletedReplyForTurn(items: readonly ClientItem[], turnId: string): boolean {
+  return items.some(
+    (item) =>
+      item.turn_id === turnId &&
+      item.item_type === "assistant_message" &&
+      item.item_state !== "pending",
+  );
+}
+
+/**
+ * 应用一条**已确认**的同代际增量：追加到该 tuple 自己的临时正文（幂等按 transient_id 去重）。
+ *
+ * 返回原数组表示无变化（重复 transient_id / 无正文 / 已有正式回复）。
+ */
+function applyTransientDelta(
+  items: readonly ClientItem[],
+  delta: ClientTransientDelta,
+): readonly ClientItem[] {
+  if (!delta.delta) return items;
+  if (hasCompletedReplyForTurn(items, delta.turn_id)) return items;
+
+  const transientId = transientItemId(delta.turn_id, delta.generation);
+  const existing = items.find((candidate) => candidate.id === transientId);
+  const existingText =
+    existing &&
+    typeof existing.content === "object" &&
+    existing.content !== null &&
+    typeof (existing.content as Record<string, unknown>).text === "string"
+      ? ((existing.content as Record<string, unknown>).text as string)
+      : "";
+  const appliedTransientIds =
+    existing &&
+    typeof existing.content === "object" &&
+    existing.content !== null &&
+    Array.isArray((existing.content as Record<string, unknown>).transient_ids)
+      ? ((existing.content as Record<string, unknown>).transient_ids as string[])
+      : [];
+  if (appliedTransientIds.includes(delta.transient_id)) return items;
+
+  const item: ClientItem = {
+    id: transientId,
+    turn_id: delta.turn_id,
+    item_sequence:
+      existing?.item_sequence ??
+      items.reduce((max, candidate) => Math.max(max, candidate.item_sequence), 0) + 1,
+    item_type: "assistant_message",
+    item_state: "pending",
+    content: {
+      text: `${existingText}${delta.delta}`,
+      generation: { ...delta.generation },
+      transient_ids: [...appliedTransientIds, delta.transient_id],
+    },
+    created_at: existing?.created_at ?? delta.occurred_at,
+  };
+  return insertItemSorted(items, item);
+}
+
+/** 有界暂存：追加一条未确认增量（超上限丢最旧，保持到达顺序）。 */
+function stageTransient(
+  pending: Readonly<Record<string, readonly ClientTransientDelta[]>>,
+  delta: ClientTransientDelta,
+): Readonly<Record<string, readonly ClientTransientDelta[]>> {
+  const current = pending[delta.turn_id] ?? [];
+  const next = [...current, delta];
+  return {
+    ...pending,
+    [delta.turn_id]:
+      next.length > MAX_PENDING_TRANSIENT_PER_TURN
+        ? next.slice(next.length - MAX_PENDING_TRANSIENT_PER_TURN)
+        : next,
+  };
+}
+
+/** 该临时 Item 是否仍属于基线认定的当前代际（基线缺失时保留，换代由新基线证明）。 */
+function isCurrentTransientItem(
+  item: ClientItem,
+  baseline: ClientGenerationBaseline | null,
+): boolean {
+  const generation = readTransientGeneration(item);
+  if (!generation) return false;
+  if (!baseline) return true;
+  const authoritative = baseline.generations.find((entry) => entry.turn_id === item.turn_id);
+  if (!authoritative) return false;
+  if (!authoritative.generation) return false;
+  return sameThreadGeneration(
+    toContractGeneration(authoritative.generation),
+    toContractGeneration(generation),
+  );
+}
 
 /** 创建初始空状态。 */
 export function createInitialState(threadId: string): ThreadProjectionState {
@@ -49,6 +254,8 @@ export function createInitialState(threadId: string): ThreadProjectionState {
     reconnectMax: SSE_DEFAULT_MAX_RETRIES,
     visibleError: null,
     snapshotStatus: "idle",
+    generationBaseline: null,
+    pendingTransients: {},
   };
 }
 
@@ -74,8 +281,10 @@ function isItemEqual(a: ClientItem, b: ClientItem): boolean {
  * 即使内容相同，items 引用变化也会让 ThreadTimeline 整体重绘，视觉上像「刷新了一下」。
  *
  * 合并策略：
- * - 保留现有 transient items（id 以 `stream-` 开头），它们不在服务端 snapshot 中。
- * 但如果 snapshot 中已有同 turn_id 的 assistant_message（AI 回复已完成），
+ * - 保留仍然**属于当前权威代际**的 transient items（id 以 `stream-` 开头），它们不在服务端
+ *   snapshot 中。A11：换代后旧代的临时正文不得被 snapshot 合并带回来，因此由调用方传入
+ *   `keepTransient` 判定（基线未到时保留，基线证明换代后移除）。
+ * - 如果 snapshot 中已有同 turn_id 的 assistant_message（AI 回复已完成），
  * 移除对应的 transient item，避免重复显示。
  * - 对 snapshot 中的 item，如果与现有 item 投影等价，保留旧引用。
  * - 新增或变化的 item 用新引用。
@@ -84,6 +293,7 @@ function isItemEqual(a: ClientItem, b: ClientItem): boolean {
 function mergeSnapshotItems(
   snapshotItems: readonly ClientItem[],
   prevItems: readonly ClientItem[],
+  keepTransient: (item: ClientItem) => boolean,
 ): readonly ClientItem[] {
   const prevById: Record<string, ClientItem> = {};
   for (const item of prevItems) {
@@ -102,7 +312,10 @@ function mergeSnapshotItems(
   // 保留 transient items（stream-xxx），它们是前端 stream.delta 投影的 pending assistant_message。
   // 如果 snapshot 中已有同 turn_id 的完成 assistant_message，移除 transient item 避免重复。
   const transientItems = prevItems.filter(
-    (item) => item.id.startsWith("stream-") && !completedTurnIds.has(item.turn_id),
+    (item) =>
+      item.id.startsWith(TRANSIENT_ITEM_PREFIX) &&
+      !completedTurnIds.has(item.turn_id) &&
+      keepTransient(item),
   );
 
   const merged: ClientItem[] = [];
@@ -244,9 +457,14 @@ function applyEventToItems(
     case "item.updated": {
       const item = extractItemFromPayload(event.payload);
       if (!item) return null;
+      // A11：正式 assistant_message 成立 → 该 Turn 的**所有代际**临时正文一并退出
+      // （临时 Item 现在按完整 tuple 分键，不能再只删 `stream-${turn_id}` 这一个键）。
       const withoutTransient =
         item.item_type === "assistant_message"
-          ? state.items.filter((candidate) => candidate.id !== `stream-${item.turn_id}`)
+          ? state.items.filter(
+              (candidate) =>
+                candidate.turn_id !== item.turn_id || readTransientGeneration(candidate) === null,
+            )
           : state.items;
       return insertItemSorted(withoutTransient, item);
     }
@@ -293,8 +511,11 @@ export function threadProjectionReducer(
     case "snapshot.loaded": {
       // W4-1：用 mergeSnapshotItems 合并而非完全替换，保留未变化的 item 引用 +
       // transient items（stream-xxx），避免 resnapshot 导致 ThreadTimeline 整体重绘。
+      // A11：临时正文还必须仍属于当前权威代际 —— 换代后旧代临时前缀不得被 snapshot 带回。
       const sortedSnapshot = [...action.items].sort((a, b) => a.item_sequence - b.item_sequence);
-      const items = mergeSnapshotItems(sortedSnapshot, state.items);
+      const items = mergeSnapshotItems(sortedSnapshot, state.items, (item) =>
+        isCurrentTransientItem(item, state.generationBaseline),
+      );
       const cursorSequence = action.latestEventCursor?.sequence ?? 0;
       return {
         ...state,
@@ -386,53 +607,69 @@ export function threadProjectionReducer(
     }
 
     case "stream.delta": {
-      const event = action.event;
-      if (event.thread_id !== state.threadId || !event.delta) return state;
-      const hasCompletedReply = state.items.some(
-        (item) =>
-          item.turn_id === event.turn_id &&
-          item.item_type === "assistant_message" &&
-          item.item_state !== "pending",
-      );
-      if (hasCompletedReply) return state;
+      const delta = action.event;
+      if (delta.thread_id !== state.threadId) return state;
+      switch (classifyTransientDelta(state.generationBaseline, delta)) {
+        case "apply": {
+          const items = applyTransientDelta(state.items, delta);
+          if (items === state.items) return state;
+          return { ...state, items, itemsById: buildItemsById(items) };
+        }
+        case "stage":
+          return { ...state, pendingTransients: stageTransient(state.pendingTransients, delta) };
+        // drop：迟到旧代际 / 权威判定无活动执行 → 不改变任何正文。
+        // conflict：同 epoch 换 Owner/Attempt → 停止应用（有界权威刷新由客户端发起）。
+        default:
+          return state;
+      }
+    }
 
-      const transientId = `stream-${event.turn_id}`;
-      const existing = state.itemsById[transientId];
-      const existingText =
-        existing &&
-        typeof existing.content === "object" &&
-        existing.content !== null &&
-        typeof (existing.content as Record<string, unknown>).text === "string"
-          ? ((existing.content as Record<string, unknown>).text as string)
-          : "";
-      const appliedTransientIds =
-        existing &&
-        typeof existing.content === "object" &&
-        existing.content !== null &&
-        Array.isArray((existing.content as Record<string, unknown>).transient_ids)
-          ? ((existing.content as Record<string, unknown>).transient_ids as string[])
-          : [];
-      if (appliedTransientIds.includes(event.transient_id)) return state;
-      const item: ClientItem = {
-        id: transientId,
-        turn_id: event.turn_id,
-        item_sequence:
-          existing?.item_sequence ??
-          state.items.reduce((max, candidate) => Math.max(max, candidate.item_sequence), 0) + 1,
-        item_type: "assistant_message",
-        item_state: "pending",
-        content: {
-          text: `${existingText}${event.delta}`,
-          transient_ids: [...appliedTransientIds, event.transient_id],
-        },
-        created_at: existing?.created_at ?? event.occurred_at,
-      };
-      const items = insertItemSorted(state.items, item);
+    case "stream.generation": {
+      const baseline = action.baseline;
+      // 同一条连接上迟到的旧基线不采用（先持久游标、再进程内发号）。
+      if (
+        !isNewerGenerationBaseline(
+          toContractBaseline(baseline),
+          toNullableContractBaseline(state.generationBaseline),
+        )
+      ) {
+        return state;
+      }
+      // 1. 旧代际临时正文随权威换代移除；缺失代际/结构不合法的**临时** Item 一并清除。
+      //    正式 Item（id 不以 stream- 开头）永远不在这里被删。
+      let items: readonly ClientItem[] = state.items.filter(
+        (item) => readTransientGeneration(item) === null || isCurrentTransientItem(item, baseline),
+      );
+      // 2. 重放暂存：只保留仍需等待权威事实的桶，其余按新基线分类处理。
+      const remaining: Record<string, readonly ClientTransientDelta[]> = {};
+      for (const [, deltas] of Object.entries(state.pendingTransients)) {
+        for (const delta of deltas) {
+          const disposition = classifyTransientDelta(baseline, delta);
+          if (disposition === "apply") {
+            items = applyTransientDelta(items, delta);
+          } else if (disposition === "stage") {
+            remaining[delta.turn_id] = [...(remaining[delta.turn_id] ?? []), delta];
+          }
+          // drop / conflict → 丢弃
+        }
+      }
+      const itemsChanged = items !== state.items;
       return {
         ...state,
-        items,
-        itemsById: buildItemsById(items),
+        items: itemsChanged ? items : state.items,
+        itemsById: itemsChanged ? buildItemsById(items) : state.itemsById,
+        generationBaseline: baseline,
+        pendingTransients: remaining,
       };
+    }
+
+    case "stream.generation_reset": {
+      // 新连接：比较基准失效（服务端发号只保证单进程单调，跨连接不可比）。
+      // 只清判定依据与暂存；已显示的临时正文等本连接第一条基线来证明换代。
+      if (state.generationBaseline === null && Object.keys(state.pendingTransients).length === 0) {
+        return state;
+      }
+      return { ...state, generationBaseline: null, pendingTransients: {} };
     }
 
     case "stream.status": {

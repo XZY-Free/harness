@@ -66,7 +66,7 @@ describe("附件元数据与幂等账本事务", () => {
     const responseBody = {
       kind: "attachment",
       attachment_id: f.attachmentId,
-      url: `/api/v1/threads/${f.thread.id}/attachments/${f.attachmentId}`,
+      url: `/api/threads/${f.thread.id}/attachments/${f.attachmentId}`,
       filename: "证明材料.pdf",
       size: 1234,
       type: "application/pdf",

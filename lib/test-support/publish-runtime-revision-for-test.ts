@@ -118,7 +118,7 @@ export async function runPublicationConformanceForTest(params: {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 }): Promise<RuntimeConformanceReport> {
   // 1. 创建真实测试 Adapter（in-process Hosted 参考实现）。
   //    注入进程内捕获型 EventBatchSink：接收并保留真实候选事件，不黑洞、不伪造 ack。
@@ -147,7 +147,7 @@ export async function runPublicationConformanceWithAdapterForTest(params: {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   runtimeAdapter: RuntimeAdapter;
   testEnvironmentRevision: string;
 }): Promise<RuntimeConformanceReport> {
@@ -168,7 +168,7 @@ export async function runPublicationConformanceWithAdapterForTest(params: {
     runtimeRevisionId: params.runtimeRevisionId,
     runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
-    protocolContractRevision: params.protocolContractRevision,
+    protocolContractDigest: params.protocolContractDigest,
     runnerArtifactDigest,
     cases: caseResults.map((result) => ({
       caseId: result.caseId,
@@ -182,7 +182,7 @@ export async function runPublicationConformanceWithAdapterForTest(params: {
     runtimeRevisionId: params.runtimeRevisionId,
     runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
-    protocolContractRevision: params.protocolContractRevision,
+    protocolContractDigest: params.protocolContractDigest,
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest,
     runnerIdentity: RUNNER_IDENTITY,
@@ -218,7 +218,7 @@ export async function publishExternalRuntimeRevisionForTest(params: {
     runtimeRevisionId: revision.id,
     runtimeTargetDigest: revision.runtimeTargetDigest,
     runtimeConfigDigest: revision.configHash,
-    protocolContractRevision: revision.protocolContractRevision,
+    protocolContractDigest: revision.protocolContractDigest,
     runtimeAdapter: params.runtimeAdapter,
     testEnvironmentRevision: params.testEnvironmentRevision ?? "black-box-http-runtime@1",
   });
@@ -304,7 +304,7 @@ export async function publishRuntimeRevisionForTest(params: {
     runtimeRevisionId: revision.id,
     runtimeTargetDigest: revision.runtimeTargetDigest,
     runtimeConfigDigest: revision.configHash,
-    protocolContractRevision: revision.protocolContractRevision,
+    protocolContractDigest: revision.protocolContractDigest,
   });
   assertPublicationConformancePassed(report);
 

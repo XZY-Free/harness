@@ -17,8 +17,19 @@
  * 不需要 MySQL — 纯函数测试。
  */
 import { describe, expect, it } from "vitest";
-import { createInitialState, threadProjectionReducer } from "./thread-reducer";
-import type { ClientEvent, ClientItem, ThreadProjectionState } from "./types";
+import {
+  classifyTransientDelta,
+  createInitialState,
+  threadProjectionReducer,
+} from "./thread-reducer";
+import type {
+  ClientEvent,
+  ClientGenerationBaseline,
+  ClientItem,
+  ClientTransientDelta,
+  ClientTransientGeneration,
+  ThreadProjectionState,
+} from "./types";
 
 function makeItem(overrides: Partial<ClientItem> = {}): ClientItem {
   return {
@@ -55,6 +66,71 @@ function loadedState(
     items,
     latestEventCursor: cursor,
   });
+}
+
+// ─── A11 代际 fixture ──────────────────────────────────────
+
+/** A11 测试用稳定 Turn id。 */
+const TURN = "turn-1";
+
+/** 权威代际：Invocation-1 的第 1 代。 */
+const GEN_A: ClientTransientGeneration = {
+  invocation_id: "invocation-1",
+  attempt_id: "attempt-1",
+  ownership_id: "ownership-1",
+  lease_epoch: "1",
+};
+
+/** 同一 Invocation 的下一租约代（接管后换掉 Attempt/Ownership）。 */
+const GEN_A2: ClientTransientGeneration = {
+  invocation_id: "invocation-1",
+  attempt_id: "attempt-2",
+  ownership_id: "ownership-2",
+  lease_epoch: "2",
+};
+
+/**
+ * 同 Turn 的**全新 Invocation**（Replacement/Regenerate）。
+ *
+ * epoch 从它自己的计数重新开始，因此数值可能比旧 Invocation 更小 —— 这正是
+ * "不能比较不同 Invocation 的 epoch 大小"的原因。
+ */
+const GEN_B: ClientTransientGeneration = {
+  invocation_id: "invocation-2",
+  attempt_id: "attempt-3",
+  ownership_id: "ownership-3",
+  lease_epoch: "1",
+};
+
+/** 构造一条权威代际基线。 */
+function baselineOf(
+  entries: ReadonlyArray<readonly [string, ClientTransientGeneration | null]>,
+  sequence = 10,
+): ClientGenerationBaseline {
+  return {
+    thread_id: "thread-1",
+    baseline_sequence: sequence,
+    issued_revision: 1,
+    generations: entries.map(([turnId, generation]) => ({ turn_id: turnId, generation })),
+  };
+}
+
+/** 构造一条 transient delta。 */
+function deltaOf(
+  transientId: string,
+  turnId: string,
+  generation: ClientTransientGeneration,
+  delta: string,
+  seq: number,
+): ClientTransientDelta {
+  return {
+    transient_id: transientId,
+    thread_id: "thread-1",
+    turn_id: turnId,
+    generation,
+    occurred_at: `2026-07-21T00:00:0${seq}.000Z`,
+    delta,
+  };
 }
 
 describe("threadProjectionReducer", () => {
@@ -310,78 +386,262 @@ describe("threadProjectionReducer", () => {
     });
   });
 
-  describe("stream.delta", () => {
-    it("按 turn 增量拼接临时 Agent 消息", () => {
+  describe("stream.delta（A11 执行代际隔离）", () => {
+    const withBaseline = (
+      state: ThreadProjectionState,
+      baseline: ClientGenerationBaseline,
+    ): ThreadProjectionState =>
+      threadProjectionReducer(state, { type: "stream.generation", baseline });
+
+    const applyDelta = (
+      state: ThreadProjectionState,
+      delta: ClientTransientDelta,
+    ): ThreadProjectionState =>
+      threadProjectionReducer(state, { type: "stream.delta", event: delta });
+
+    /** 某一 Turn 当前全部临时正文（按 items 顺序拼接）。 */
+    const transientText = (state: ThreadProjectionState, turnId: string): string =>
+      state.items
+        .filter((item) => item.turn_id === turnId && item.id.startsWith("stream-"))
+        .map((item) => ((item.content as { text?: string }).text ?? "") as string)
+        .join("");
+
+    it("A11-T02：与权威 tuple 完全相同的 delta 幂等拼接；旧代际迟到 delta 不进入正文", () => {
       const initial = loadedState(
-        [makeItem({ id: "user-1", turn_id: "turn-1", content: { text: "你好" } })],
+        [makeItem({ id: "user-1", turn_id: TURN, content: { text: "你好" } })],
         { sequence: 2, event_id: "evt-2" },
       );
-      const first = threadProjectionReducer(initial, {
-        type: "stream.delta",
-        event: {
-          transient_id: "transient-1",
-          thread_id: "thread-1",
-          turn_id: "turn-1",
-          occurred_at: "2026-07-21T00:00:01.000Z",
-          delta: "你",
-        },
-      });
-      const second = threadProjectionReducer(first, {
-        type: "stream.delta",
-        event: {
-          transient_id: "transient-2",
-          thread_id: "thread-1",
-          turn_id: "turn-1",
-          occurred_at: "2026-07-21T00:00:02.000Z",
-          delta: "好",
-        },
-      });
+      const withGen = withBaseline(initial, baselineOf([[TURN, GEN_A]]));
 
-      expect(second.items).toHaveLength(2);
-      expect(second.items[1]).toMatchObject({
-        id: "stream-turn-1",
-        item_type: "assistant_message",
-        item_state: "pending",
-        content: { text: "你好" },
-      });
+      const first = applyDelta(withGen, deltaOf("t-1", TURN, GEN_A, "你", 1));
+      const second = applyDelta(first, deltaOf("t-2", TURN, GEN_A, "好", 2));
+      expect(transientText(second, TURN)).toBe("你好");
       expect(second.lastAppliedEventSequence).toBe(2);
 
-      const replay = threadProjectionReducer(second, {
-        type: "stream.delta",
-        event: {
-          transient_id: "transient-2",
-          thread_id: "thread-1",
-          turn_id: "turn-1",
-          occurred_at: "2026-07-21T00:00:03.000Z",
-          delta: "好",
-        },
-      });
-      expect(replay).toBe(second);
+      // 幂等：同一 transient_id 重放不改变正文（仅瞬时 id 去重是不够的，见下一个断言）。
+      expect(applyDelta(second, deltaOf("t-2", TURN, GEN_A, "好", 3))).toBe(second);
+
+      // 同 Invocation 的旧 epoch 迟到：不得改变当前临时正文。
+      const staleEpoch = {
+        ...GEN_A,
+        attempt_id: "attempt-0",
+        ownership_id: "ownership-0",
+        lease_epoch: "0",
+      };
+      expect(applyDelta(second, deltaOf("t-3", TURN, staleEpoch, "旧", 4))).toBe(second);
+      expect(transientText(second, TURN)).toBe("你好");
     });
 
-    it("已有该 turn 的正式回复时忽略重放的 delta", () => {
-      const state = loadedState(
-        [
-          makeItem({
-            id: "agent-1",
-            turn_id: "turn-1",
-            item_type: "assistant_message",
-            content: { text: "正式回复" },
-          }),
-        ],
-        null,
+    it("A11-T04：同 Turn 换 Invocation 不以 epoch 大小判定，旧 Invocation 不得混入", () => {
+      // 旧 I1 的 epoch 数值更大（100），新活动 I2 的 epoch 更小（1）——不能按数字比大小。
+      const oldInvocation: ClientTransientGeneration = {
+        invocation_id: "invocation-1",
+        attempt_id: "attempt-old",
+        ownership_id: "ownership-old",
+        lease_epoch: "100",
+      };
+      const newInvocation: ClientTransientGeneration = {
+        invocation_id: "invocation-2",
+        attempt_id: "attempt-new",
+        ownership_id: "ownership-new",
+        lease_epoch: "1",
+      };
+      const initial = loadedState([], null);
+
+      // 权威事实先接纳 I1，输出一段正文。
+      const firstGen = withBaseline(initial, baselineOf([[TURN, oldInvocation]]));
+      const withOldText = applyDelta(
+        firstGen,
+        deltaOf("t-old", TURN, oldInvocation, "旧代正文", 1),
       );
-      const next = threadProjectionReducer(state, {
-        type: "stream.delta",
-        event: {
-          transient_id: "old-delta",
-          thread_id: "thread-1",
-          turn_id: "turn-1",
-          occurred_at: "2026-07-21T00:00:01.000Z",
-          delta: "旧",
-        },
+      expect(transientText(withOldText, TURN)).toBe("旧代正文");
+
+      // 换代：权威活动执行变为 I2 → 旧代临时正文被移除，I2 不因 epoch 更小而失效。
+      const secondGen = withBaseline(withOldText, baselineOf([[TURN, newInvocation]], 11));
+      expect(transientText(secondGen, TURN)).toBe("");
+      const withNewText = applyDelta(
+        secondGen,
+        deltaOf("t-new", TURN, newInvocation, "新代正文", 2),
+      );
+      expect(transientText(withNewText, TURN)).toBe("新代正文");
+
+      // 旧 I1 的迟到 delta 不得混入新代正文（即使它的 epoch 数值更大）。
+      expect(
+        applyDelta(withNewText, deltaOf("t-old-late", TURN, oldInvocation, "旧代残留", 3)),
+      ).toBe(withNewText);
+      expect(transientText(withNewText, TURN)).toBe("新代正文");
+      // 两代正文不共享 item（key 含完整 tuple）。
+      expect(withNewText.items.filter((item) => item.id.startsWith("stream-"))).toHaveLength(1);
+    });
+
+    it("A11-T06：正式终态成立后迟到 delta 不复活临时 Item，且不删除正式消息", () => {
+      const official = makeItem({
+        id: "agent-1",
+        turn_id: TURN,
+        item_type: "assistant_message",
+        content: { text: "正式回复" },
       });
-      expect(next).toBe(state);
+      const state = withBaseline(loadedState([official], null), baselineOf([[TURN, GEN_A]]));
+
+      // 同代际与旧代际的迟到 delta 都不得复活临时正文。
+      expect(applyDelta(state, deltaOf("late-1", TURN, GEN_A, "迟到", 1))).toBe(state);
+      expect(applyDelta(state, deltaOf("late-2", TURN, GEN_A2, "旧代", 2))).toBe(state);
+      // 正式消息原样保留。
+      expect(state.items).toHaveLength(1);
+      expect((state.items[0]?.content as { text: string }).text).toBe("正式回复");
+    });
+
+    it("A11-T08：快照与换代通知乱序——旧 snapshot 合并不得带回旧代临时前缀", () => {
+      const initial = loadedState([], null);
+      // 旧代已显示一段临时正文。
+      const oldGen = withBaseline(initial, baselineOf([[TURN, GEN_A]]));
+      const withOldText = applyDelta(oldGen, deltaOf("t-old", TURN, GEN_A, "旧代正文", 1));
+      expect(transientText(withOldText, TURN)).toBe("旧代正文");
+
+      // 先到换代通知（新代 I2），再到"快照返回"（服务端不含任何临时正文）。
+      const newGen = withBaseline(withOldText, baselineOf([[TURN, GEN_B]], 12));
+      const afterSnapshot = threadProjectionReducer(newGen, {
+        type: "snapshot.loaded",
+        items: [],
+        latestEventCursor: { sequence: 12, event_id: null },
+      });
+      // 旧代临时前缀不被 snapshot 合并带回。
+      expect(transientText(afterSnapshot, TURN)).toBe("");
+
+      // 新代的 delta 正常显示。
+      const withNewText = applyDelta(afterSnapshot, deltaOf("t-new", TURN, GEN_B, "新代正文", 3));
+      expect(transientText(withNewText, TURN)).toBe("新代正文");
+    });
+
+    it("A11：权威基线未覆盖的 Turn 只暂存，不拼进旧正文；基线证明换代后重放", () => {
+      const initial = loadedState([], null);
+      // 基线覆盖 turn-1，但不覆盖 turn-2（连接建立后才创建的 Turn）。
+      const withGen = withBaseline(initial, baselineOf([[TURN, GEN_A]]));
+      const otherTurnDelta = deltaOf("t-other", "turn-2", GEN_A, "新 Turn 正文", 1);
+      const staged = applyDelta(withGen, otherTurnDelta);
+
+      // 未确认的新 tuple：有界暂存，不自作主张拼进任何正文。
+      expect(staged.items).toHaveLength(0);
+      expect(staged.pendingTransients["turn-2"]).toEqual([otherTurnDelta]);
+
+      // 权威快照覆盖该 Turn 后按 exact tuple 重放。
+      const covered = withBaseline(
+        staged,
+        baselineOf(
+          [
+            [TURN, GEN_A],
+            ["turn-2", GEN_A],
+          ],
+          13,
+        ),
+      );
+      expect(transientText(covered, "turn-2")).toBe("新 Turn 正文");
+      expect(covered.pendingTransients["turn-2"]).toBeUndefined();
+    });
+
+    it("A11：基线明确该 Turn 无活动执行 → 迟到 delta 丢弃，暂存整桶清除", () => {
+      const initial = loadedState([], null);
+      const withGen = withBaseline(initial, baselineOf([[TURN, null]]));
+      expect(applyDelta(withGen, deltaOf("t-1", TURN, GEN_A, "迟到", 1))).toBe(withGen);
+
+      // 暂存中的桶在权威判定"无活动执行"后清除（不复活）。
+      const stagedState = applyDelta(
+        withBaseline(initial, baselineOf([])),
+        deltaOf("t-2", TURN, GEN_A, "暂存", 1),
+      );
+      expect(stagedState.pendingTransients[TURN]).toHaveLength(1);
+      const resolved = withBaseline(
+        {
+          ...stagedState,
+          generationBaseline: { ...stagedState.generationBaseline!, baseline_sequence: 1 },
+        },
+        baselineOf([[TURN, null]], 2),
+      );
+      expect(resolved.pendingTransients[TURN]).toBeUndefined();
+      expect(resolved.items).toHaveLength(0);
+    });
+
+    it("A11：同 epoch 换 Owner/Attempt 判为协议冲突（epoch 精确比较，大 epoch 不因精度丢判）", () => {
+      const big = "9007199254740993";
+      const adjacent = "9007199254740992";
+      const authoritative: ClientTransientGeneration = {
+        invocation_id: "invocation-1",
+        attempt_id: "attempt-1",
+        ownership_id: "ownership-1",
+        lease_epoch: big,
+      };
+      const baseline = baselineOf([[TURN, authoritative]]);
+      // 同 Invocation、同 epoch，但换了 Ownership/Attempt → 协议冲突。
+      expect(
+        classifyTransientDelta(baseline, {
+          ...deltaOf("d1", TURN, { ...authoritative, ownership_id: "ownership-x" }, "冲突", 1),
+        }),
+      ).toBe("conflict");
+      // 相邻 epoch（Number 无法区分）是正确的"旧代际" → drop，而不是被误判成冲突。
+      expect(
+        classifyTransientDelta(
+          baseline,
+          deltaOf("d2", TURN, { ...authoritative, lease_epoch: adjacent }, "旧", 2),
+        ),
+      ).toBe("drop");
+      // 冲突的 delta 不改变正文。
+      const state = withBaseline(loadedState([], null), baseline);
+      expect(
+        applyDelta(
+          state,
+          deltaOf("d3", TURN, { ...authoritative, attempt_id: "attempt-x" }, "冲突", 3),
+        ),
+      ).toBe(state);
+    });
+
+    it("A11：迟到的旧基线不被采用（先持久游标、再进程内发号）", () => {
+      const state = withBaseline(loadedState([], null), baselineOf([[TURN, GEN_A]], 10));
+      const older = { ...baselineOf([[TURN, GEN_B]], 9), issued_revision: 99 };
+      expect(withBaseline(state, older)).toBe(state);
+      // 同游标但发号更小 → 也拒绝。
+      const sameSeqLowerRevision = { ...baselineOf([[TURN, GEN_B]], 10), issued_revision: 0 };
+      expect(withBaseline(state, sameSeqLowerRevision)).toBe(state);
+      // 同游标且发号更大 → 采用（接管不一定新增持久事件）。
+      const sameSeqHigherRevision = { ...baselineOf([[TURN, GEN_B]], 10), issued_revision: 2 };
+      expect(
+        withBaseline(state, sameSeqHigherRevision).generationBaseline?.generations[0]?.generation,
+      ).toEqual(GEN_B);
+    });
+
+    it("A11：新连接重置比较基准，但已显示的临时正文等新基线证明换代后才移除", () => {
+      const oldGen = withBaseline(loadedState([], null), baselineOf([[TURN, GEN_A]]));
+      const withOldText = applyDelta(oldGen, deltaOf("t-old", TURN, GEN_A, "旧代正文", 1));
+
+      const reset = threadProjectionReducer(withOldText, { type: "stream.generation_reset" });
+      expect(reset.generationBaseline).toBeNull();
+      // 不预先删除：换代与否由新基线证明。
+      expect(transientText(reset, TURN)).toBe("旧代正文");
+      // 基准重置后，delta 只能暂存（无法判定）。
+      const afterResetDelta = applyDelta(reset, deltaOf("t-x", TURN, GEN_A, "X", 2));
+      expect(afterResetDelta.pendingTransients[TURN]).toHaveLength(1);
+
+      // 新基线证明确实换代 → 旧正文移除，暂存按新基线处理。
+      const newBaseline = withBaseline(afterResetDelta, baselineOf([[TURN, GEN_B]], 20));
+      expect(transientText(newBaseline, TURN)).toBe("");
+      expect(newBaseline.pendingTransients[TURN]).toBeUndefined();
+    });
+
+    it("A11：已持有正式回复的 Turn 不产生临时正文（终态清理）", () => {
+      const state = withBaseline(
+        loadedState(
+          [
+            makeItem({
+              id: "agent-1",
+              turn_id: TURN,
+              item_type: "assistant_message",
+              content: { text: "正式回复" },
+            }),
+          ],
+          null,
+        ),
+        baselineOf([[TURN, GEN_A]]),
+      );
+      expect(applyDelta(state, deltaOf("t-1", TURN, GEN_A, "重放", 1))).toBe(state);
     });
   });
 

@@ -86,7 +86,7 @@ async function seedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "https://caps-runtime.internal",
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(content)}`,
@@ -201,14 +201,17 @@ describe("resolveEffectiveInvocationCapabilities（05 §3 精确公式；专题0
     const { tenantId, ownerId } = await seedTenant();
     const runtimeRevisionId = await seedRuntimeRevision(tenantId, ownerId, projection({}));
     const observed = defaultRuntimeCapabilities();
-    observed.features.resume = false;
+    // V12 协议把 cancel/resume/steer 定为 literal(true)：会话快照只能通过
+    // workspaceModes 收窄（去掉可恢复模式 → streaming 交集为 false）。
+    observed.features.workspaceModes = ["NO_PLATFORM_WORKSPACE", "HOST_AFFINE"];
     const capabilities = await resolveEffectiveInvocationCapabilities({
       tenantId,
       binding: { runtimeRevisionId },
       sessionCapabilitiesJson: observed,
     });
     expect(capabilities.cancel).toBe(true);
-    expect(capabilities.resume).toBe(false);
+    expect(capabilities.resume).toBe(true);
+    expect(capabilities.streaming).toBe(false);
 
     const invalid = await resolveEffectiveInvocationCapabilities({
       tenantId,
@@ -235,7 +238,9 @@ describe("resolveEffectiveInvocationCapabilities（05 §3 精确公式；专题0
         observed,
       ),
     ).toBe(true);
-    observed.features.cancel = false;
+    // V12 协议 features.cancel 为 literal(true)：通过收窄 workspaceModes 使
+    // 会话能力与已发布 measured 不一致（streaming 不交集）→ 不匹配。
+    observed.features.workspaceModes = ["NO_PLATFORM_WORKSPACE", "HOST_AFFINE"];
     expect(
       runtimeCapabilitiesMatchPublishedRevision(
         {

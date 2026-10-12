@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 import mysql from "mysql2/promise";
 import { loadFreshMysqlSchema } from "../lib/db/fresh-schema-loader";
+import { assertFreshSchema } from "./verify-fresh-schema.mts";
 
 const ROOT = process.cwd();
 const EXPECTED_TABLES = JSON.parse(
@@ -95,8 +96,8 @@ async function main(): Promise<void> {
   const { MySqlContainer } = await import("@testcontainers/mysql");
   const distDir = ".next-fresh-db";
   let app: ChildProcess | null = null;
-  console.log("[fresh-db] 启动空 MySQL 8");
-  const container = await new MySqlContainer("mysql:8.0")
+  console.log("[fresh-db] 启动空 MySQL 8.4");
+  const container = await new MySqlContainer("mysql:8.4")
     .withDatabase("snow_fresh")
     .withRootPassword("test")
     .withCommand([
@@ -130,6 +131,7 @@ async function main(): Promise<void> {
 
     const connection = await mysql.createConnection(connectionString);
     try {
+      await assertFreshSchema(connection);
       const [tableRows] = await connection.query<Record<string, string>[]>("SHOW TABLES");
       const tables = tableRows
         .map((row) => String(Object.values(row)[0]))
@@ -139,18 +141,21 @@ async function main(): Promise<void> {
         throw new Error(`Fresh DB table manifest 不一致：actual=${tables.length}`);
       }
       const [columnRows] = await connection.query<mysql.RowDataPacket[]>(
-        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE " +
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE, COLUMN_DEFAULT " +
           "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() " +
-          "AND TABLE_NAME IN ('ExecutionBinding','AgentCall','AgentCallEventIngress','ControlPlaneEventDelivery')",
+          "AND TABLE_NAME IN ('Thread','ExecutionBinding','AgentCall','AgentCallEventIngress','ControlPlaneEventDelivery')",
       );
       const column = (tableName: string, columnName: string) =>
         columnRows.find((row) => row.TABLE_NAME === tableName && row.COLUMN_NAME === columnName);
-      for (const name of [
-        "executionSubjectType",
-        "executionSubjectId",
-        "executionSubjectSource",
-        "executionSubjectFrozenAt",
-      ]) {
+      const threadPermission = column("Thread", "toolPermissionMode");
+      if (
+        threadPermission?.IS_NULLABLE !== "NO" ||
+        threadPermission.COLUMN_TYPE !== "enum('auto','ask','full_access')" ||
+        threadPermission.COLUMN_DEFAULT !== "auto"
+      ) {
+        throw new Error("Fresh DB Thread.toolPermissionMode 必须由 0000 建立并默认 auto");
+      }
+      for (const name of ["principalType", "principalId", "principalSource", "principalFrozenAt"]) {
         if (column("ExecutionBinding", name)?.IS_NULLABLE !== "NO") {
           throw new Error(`Fresh DB trusted subject 列缺失或可空：ExecutionBinding.${name}`);
         }
@@ -218,6 +223,12 @@ async function main(): Promise<void> {
       await connection.end();
     }
 
+    await run(
+      "canonical-seed-thread-job-flow",
+      ["exec", "tsx", "scripts/verify-fresh-db-flow.mts"],
+      env,
+    );
+
     const port = await reservePort();
     const origin = `http://127.0.0.1:${port}`;
     console.log(`[fresh-db] boot ${origin}`);
@@ -230,7 +241,7 @@ async function main(): Promise<void> {
     app.stderr?.on("data", (chunk) => process.stderr.write(chunk));
     const status = await waitForBoot(origin, app);
     console.log(`[fresh-db] boot HTTP ${status}`);
-    console.log("[fresh-db] PASS migrate -> seed -> boot");
+    console.log("[fresh-db] PASS migrate twice -> seed -> Thread/Job flow -> boot");
   } finally {
     await stopChild(app);
     await container.stop();

@@ -5,6 +5,7 @@ import type {
   StoreFileObjectInput,
   StoredFileObject,
 } from "@/lib/files/storage-provider";
+import { workspaceJobInputStorage } from "@/lib/files/workspace-job-input-storage";
 import {
   deleteWorkspaceFile,
   readWorkspaceFileBytes,
@@ -17,6 +18,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 /** 默认单机实现：原文件保存在所属 Thread Workspace，文件名不参与物理路径。 */
 export const workspaceFileStorageProvider: FileStorageProvider = {
   name: "workspace",
+  jobInput: workspaceJobInputStorage,
 
   async store(input: StoreFileObjectInput): Promise<StoredFileObject> {
     if (input.resourceKind !== "attachment" && input.resourceKind !== "artifact") {

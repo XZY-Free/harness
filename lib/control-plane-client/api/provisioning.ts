@@ -24,11 +24,11 @@ export function createProvisioningApiClient(config: ApiClientConfig): Provisioni
 
   return {
     requestProvisioning: (body) =>
-      request<HostedProvisioningRequestDTO>("/admin/api/v1/hosted-provisioning", {
+      request<HostedProvisioningRequestDTO>("/admin/api/hosted-provisioning", {
         method: "POST",
         body: JSON.stringify(body),
       }),
     getProvisioningRequest: (requestId) =>
-      request<HostedProvisioningRequestDTO>(`/admin/api/v1/hosted-provisioning/${requestId}`),
+      request<HostedProvisioningRequestDTO>(`/admin/api/hosted-provisioning/${requestId}`),
   };
 }

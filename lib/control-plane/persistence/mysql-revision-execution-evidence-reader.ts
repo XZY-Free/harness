@@ -212,7 +212,7 @@ async function loadRuntimeEvidence(
           runtimeRevisionId: input.runtimeRevisionId,
           runtimeTargetDigest: runtimeRevisionRow?.runtimeTargetDigest ?? null,
           runtimeConfigDigest: runtimeRevisionRow?.configHash ?? null,
-          protocolContractRevision: runtimeRevisionRow?.protocolContractRevision ?? null,
+          protocolContractDigest: runtimeRevisionRow?.protocolContractDigest ?? null,
           allowedFormats: ["standard_dsse"],
         },
       }

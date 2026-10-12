@@ -164,7 +164,7 @@ export function useThreadInput({
             return false;
           }
           // 运行中：创建 PendingInput
-          const resp = await apiFetch(`/api/v1/threads/${threadId}/pending-inputs`, {
+          const resp = await apiFetch(`/api/threads/${threadId}/pending-inputs`, {
             method: "POST",
             credentials: "include",
             headers: {
@@ -189,7 +189,7 @@ export function useThreadInput({
           attachmentIds.push(uploaded.attachmentId);
         }
         // 空闲：创建正式 Turn
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/turns`, {
+        const resp = await apiFetch(`/api/threads/${threadId}/turns`, {
           method: "POST",
           credentials: "include",
           headers: {

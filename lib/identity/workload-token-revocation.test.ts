@@ -9,6 +9,7 @@
  *
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
+import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
@@ -43,16 +44,17 @@ function buildActor(tenantId: string): AuditActor {
 function buildRevokeParams(opts: {
   tenantId: string;
   jti?: string;
-  tokenType?: "runtime" | "gateway" | "service";
-  expiresAt?: Date;
+  invocationId?: string;
+  reasonCode?: string;
+  tokenExpiresAt?: Date;
 }) {
   return {
     tenantId: opts.tenantId,
     jti: opts.jti ?? "jti-001",
-    tokenType: opts.tokenType ?? ("runtime" as const),
+    invocationId: opts.invocationId ?? randomUUID(),
     revokedBy: "admin-001",
-    reason: "suspicious activity",
-    expiresAt: opts.expiresAt ?? new Date(Date.now() + 60 * 60 * 1000), // 1h 后过期
+    reasonCode: opts.reasonCode ?? "suspicious_activity",
+    tokenExpiresAt: opts.tokenExpiresAt ?? new Date(Date.now() + 60 * 60 * 1000), // 1h 后过期
     actor: buildActor(opts.tenantId),
   };
 }
@@ -70,10 +72,9 @@ describe("revokeWorkloadToken", () => {
     expect(record.id).toBeDefined();
     expect(record.tenantId).toBe(tenant.id);
     expect(record.jti).toBe("jti-001");
-    expect(record.tokenType).toBe("runtime");
     expect(record.revokedBy).toBe("admin-001");
-    expect(record.reason).toBe("suspicious activity");
-    expect(record.expiresAt.getTime()).toBe(params.expiresAt.getTime());
+    expect(record.reasonCode).toBe("suspicious_activity");
+    expect(record.tokenExpiresAt.getTime()).toBe(params.tokenExpiresAt.getTime());
     expect(record.revokedAt).toBeInstanceOf(Date);
   });
 
@@ -96,7 +97,7 @@ describe("revokeWorkloadToken", () => {
     expect(event?.targetId).toBe("jti-001");
     expect(event?.actorType).toBe("user");
     expect(event?.actorId).toBe("admin-001");
-    expect(event?.reason).toBe("suspicious activity");
+    expect(event?.reason).toBe("suspicious_activity");
   });
 
   it("幂等：重复撤销同一 jti 返回原记录（不重复写入）", async () => {
@@ -117,13 +118,13 @@ describe("revokeWorkloadToken", () => {
     expect(events.length).toBe(1);
   });
 
-  it("不同 tokenType 撤销", async () => {
+  it("不同 invocation 各自独立撤销", async () => {
     const tenant = await ensureDefaultTenant();
-    for (const tokenType of ["runtime", "gateway", "service"] as const) {
+    for (const invocationId of [randomUUID(), randomUUID(), randomUUID()]) {
       const record = await revokeWorkloadToken(
-        buildRevokeParams({ tenantId: tenant.id, jti: `jti-${tokenType}`, tokenType }),
+        buildRevokeParams({ tenantId: tenant.id, jti: randomUUID(), invocationId }),
       );
-      expect(record.tokenType).toBe(tokenType);
+      expect(record.invocationId).toBe(invocationId);
     }
   });
 
@@ -142,16 +143,16 @@ describe("revokeWorkloadToken", () => {
     expect(events.length).toBe(2);
   });
 
-  it("expiresAt 透传到记录", async () => {
+  it("tokenExpiresAt 透传到记录", async () => {
     const tenant = await ensureDefaultTenant();
     const future = new Date("2027-01-01T00:00:00Z");
     const record = await revokeWorkloadToken(
-      buildRevokeParams({ tenantId: tenant.id, expiresAt: future }),
+      buildRevokeParams({ tenantId: tenant.id, tokenExpiresAt: future }),
     );
-    expect(record.expiresAt.toISOString()).toBe(future.toISOString());
+    expect(record.tokenExpiresAt.toISOString()).toBe(future.toISOString());
   });
 
-  it("审计事件 after 含 jti / token_type / revoked_by / reason / expires_at", async () => {
+  it("审计事件 after 含 jti / invocation / revoked_by / reason_code / token_expires_at", async () => {
     const tenant = await ensureDefaultTenant();
     await revokeWorkloadToken(buildRevokeParams({ tenantId: tenant.id }));
 
@@ -208,7 +209,7 @@ describe("getRevocationByJti", () => {
     const record = await getRevocationByJti(tenant.id, "jti-find");
     expect(record).not.toBeNull();
     expect(record?.jti).toBe("jti-find");
-    expect(record?.tokenType).toBe("runtime");
+    expect(record?.invocationId).toBeTruthy();
   });
 
   it("跨租户隔离：租户 A 撤销的 jti 在租户 B 不可查", async () => {
@@ -242,7 +243,7 @@ describe("deleteExpiredRevocations", () => {
     const tenant = await ensureDefaultTenant();
     const past = new Date(Date.now() - 60 * 1000); // 1min 前过期
     await revokeWorkloadToken(
-      buildRevokeParams({ tenantId: tenant.id, jti: "jti-expired", expiresAt: past }),
+      buildRevokeParams({ tenantId: tenant.id, jti: "jti-expired", tokenExpiresAt: past }),
     );
 
     const deleted = await deleteExpiredRevocations(new Date());
@@ -257,7 +258,7 @@ describe("deleteExpiredRevocations", () => {
     const tenant = await ensureDefaultTenant();
     const future = new Date(Date.now() + 60 * 60 * 1000); // 1h 后过期
     await revokeWorkloadToken(
-      buildRevokeParams({ tenantId: tenant.id, jti: "jti-valid", expiresAt: future }),
+      buildRevokeParams({ tenantId: tenant.id, jti: "jti-valid", tokenExpiresAt: future }),
     );
 
     const before = new Date(); // now
@@ -274,10 +275,10 @@ describe("deleteExpiredRevocations", () => {
     const future = new Date(Date.now() + 60 * 60 * 1000);
 
     await revokeWorkloadToken(
-      buildRevokeParams({ tenantId: tenant.id, jti: "jti-expired", expiresAt: past }),
+      buildRevokeParams({ tenantId: tenant.id, jti: "jti-expired", tokenExpiresAt: past }),
     );
     await revokeWorkloadToken(
-      buildRevokeParams({ tenantId: tenant.id, jti: "jti-valid", expiresAt: future }),
+      buildRevokeParams({ tenantId: tenant.id, jti: "jti-valid", tokenExpiresAt: future }),
     );
 
     const deleted = await deleteExpiredRevocations(new Date());
@@ -291,7 +292,7 @@ describe("deleteExpiredRevocations", () => {
     const tenant = await ensureDefaultTenant();
     const future = new Date(Date.now() + 60 * 60 * 1000);
     await revokeWorkloadToken(
-      buildRevokeParams({ tenantId: tenant.id, jti: "jti-valid", expiresAt: future }),
+      buildRevokeParams({ tenantId: tenant.id, jti: "jti-valid", tokenExpiresAt: future }),
     );
 
     const deleted = await deleteExpiredRevocations(new Date());
@@ -302,7 +303,7 @@ describe("deleteExpiredRevocations", () => {
     const tenant = await ensureDefaultTenant();
     const future = new Date(Date.now() + 60 * 60 * 1000);
     await revokeWorkloadToken(
-      buildRevokeParams({ tenantId: tenant.id, jti: "jti-future", expiresAt: future }),
+      buildRevokeParams({ tenantId: tenant.id, jti: "jti-future", tokenExpiresAt: future }),
     );
 
     // now 设为 future + 1day，所有记录过期

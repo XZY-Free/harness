@@ -5,14 +5,13 @@ import { getToolCallById } from "@/lib/capability/tool-call-queries";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { recordAuditEvent } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/audit";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
-import { resumeHarnessInvocation } from "@/lib/runtime/application/production-resume-harness-invocation";
-import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { markInvocationLost, readObservedOwner } from "@/lib/runtime/application/runtime-recovery";
+import { resumeHarnessContinuation } from "@/lib/runtime/application/runtime-resume";
 import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
-import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
 import {
   type ExecutionSubject,
   recoverTrustedExecutionSubject,
@@ -31,7 +30,7 @@ import {
 const handler = createInvocationContinuationHandler({
   getAgentCall: (params) => mysqlAgentCallStore.getById(params),
   coordinateWaitingUser: coordinateAgentInputRequired,
-  resumeParent: resumeHarnessInvocation,
+  resumeParent: (params) => resumeHarnessContinuation(params),
   async resumeAgentFromUserAction(params) {
     const [request] = await db
       .select()
@@ -111,12 +110,12 @@ const handler = createInvocationContinuationHandler({
     });
     // 用户回答已由同一 AgentCall/Session 接受；终态事件会另发 resume_parent。
     if (!call || call.state === "running") return;
-    await resumeHarnessInvocation(params);
+    await resumeHarnessContinuation(params);
   },
   getToolCall: (params) =>
     getToolCallById({ tenantId: params.tenantId, toolCallId: params.toolCallId }),
   resumeToolParent: (params) =>
-    resumeHarnessInvocation({
+    resumeHarnessContinuation({
       tenantId: params.tenantId,
       invocationId: params.invocationId,
       sourceType: "tool_call",
@@ -179,25 +178,14 @@ export function createProductionInvocationContinuationWorker(workerId?: string) 
         }
         const invocation = await getInvocationById(event.tenantId, invocationId);
         if (!invocation || isTerminal(invocation.executionState)) return;
-        const sequence = ((await getLatestProducerSequence(event.tenantId, invocationId)) ?? 0) + 1;
-        await ingressEventBatch({
+        await markInvocationLost({
           tenantId: event.tenantId,
           invocationId,
-          producerSequenceStart: sequence,
-          events: [
-            {
-              producer_event_id: `continuation-dead-letter-${event.id}`,
-              producer_sequence: sequence,
-              type: "execution.failed",
-              schema_version: 1,
-              occurred_at: new Date().toISOString(),
-              payload: {
-                error_code: `CONTINUATION_DEAD_LETTER:${errorCode}`,
-                error_summary: errorSummary,
-                manual_intervention_required: true,
-              },
-            },
-          ],
+          reasonCode: `CONTINUATION_DEAD_LETTER:${errorCode}`,
+          errorSummary,
+          // R03 §5：投递失败结论必须携带当时观察到的 Owner tuple。
+          observedOwner: await readObservedOwner({ tenantId: event.tenantId, invocationId }),
+          idempotencyKey: `continuation-dead-letter:${event.id}`,
         });
       },
     },

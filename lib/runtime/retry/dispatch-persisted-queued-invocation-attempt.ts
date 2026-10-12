@@ -1,35 +1,22 @@
-/**
- * 从持久 Authority 重建并重发同一个 queued InvocationAttempt。
- *
- * Worker 只传 attemptId；本服务负责校验冻结 Binding/Revision、选择 Hosted/External
- * Transport、重建 start request，并在 Hosted 接受后显式启动本地执行。
- */
+/** Rebuilds transport from persisted RuntimeRevision and dispatches one Attempt. */
 import { db } from "@/lib/db/client";
-import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
-import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
-import { logger } from "@/lib/logger";
+import { getAttemptById, updateAttemptState } from "@/lib/executions/persistence/attempt-store";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
-import { hostedRuntimeApplicationService } from "@/lib/runtime/application/production-resume-harness-invocation";
-import {
-  OutboundRuntimeAuthError,
-  resolveOutboundRuntimeAuth,
-} from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
-import { RedispatchNotAllowedError, RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { buildGatewayEndpoints } from "@/lib/runtime/gateway-endpoints";
-import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
-import { getAttemptById, updateAttemptState } from "@/lib/runtime/invocation-attempt-queries";
-import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
   dispatchQueuedInvocationAttempt,
   failAttemptAndInvokeRecoveryAuthority,
 } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
+import type { SessionDispatchClaim } from "@/lib/runtime/retry/dispatch-retry-queries";
+import {
+  requireExecutionBinding,
+  resolveBoundExecutionResources,
+  resolveRuntimeTransportFromBinding,
+} from "@/lib/runtime/retry/runtime-transport-from-binding";
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
-import { recoverTrustedExecutionSubject } from "@/lib/runtime/transport/execution-subject";
-import { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
-import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
-import { eq } from "drizzle-orm";
+import type { createHttpHarnessRuntimeTransport } from "@/lib/runtime/transport/http-harness-runtime-transport";
+import { and, eq } from "drizzle-orm";
 
 export interface PersistedAttemptDispatcherDependencies {
   hostedApplicationService?: HostedRuntimeApplicationService;
@@ -39,22 +26,23 @@ export interface PersistedAttemptDispatcherDependencies {
 export function createPersistedQueuedInvocationAttemptDispatcher(
   dependencies: PersistedAttemptDispatcherDependencies = {},
 ) {
-  const hostedService = dependencies.hostedApplicationService ?? hostedRuntimeApplicationService;
-  const createExternalTransport =
-    dependencies.createExternalTransport ?? createHttpHarnessRuntimeTransport;
-
-  return async function dispatchPersistedQueuedInvocationAttempt(attemptId: string) {
-    const attempt = await getAttemptById(attemptId);
+  return async function dispatchPersistedQueuedInvocationAttempt(claim: SessionDispatchClaim) {
+    const attempt = await getAttemptById(claim.attemptId);
     if (!attempt || attempt.attemptState !== "queued") return;
     const [invocation] = await db
       .select()
       .from(invocationTable)
-      .where(eq(invocationTable.id, attempt.invocationId))
+      .where(
+        and(
+          eq(invocationTable.tenantId, claim.tenantId),
+          eq(invocationTable.id, claim.invocationId),
+        ),
+      )
       .limit(1);
     if (!invocation) {
       await db.transaction((tx) =>
         updateAttemptState(tx, attempt.id, "failed", {
-          errorCode: "INVOCATION_NOT_FOUND",
+          errorCode: "InvocationNotFound",
           errorSummary: "Attempt 关联 Invocation 不存在",
         }),
       );
@@ -63,150 +51,72 @@ export function createPersistedQueuedInvocationAttemptDispatcher(
     if (["completed", "failed", "cancelled", "lost"].includes(invocation.executionState)) {
       await db.transaction((tx) =>
         updateAttemptState(tx, attempt.id, "failed", {
-          errorCode: "PARENT_INVOCATION_TERMINAL",
+          errorCode: "InvocationAlreadyTerminal",
           errorSummary: `Parent Invocation 已终态（${invocation.executionState}）`,
         }),
       );
       return;
     }
-
-    const binding = await getExecutionBindingByInvocation(invocation.tenantId, invocation.id);
-    const revision = binding ? await getRuntimeRevisionById(binding.runtimeRevisionId) : null;
-    if (
-      !binding ||
-      !revision ||
-      revision.protocolType !== "harness_runtime_protocol" ||
-      revision.runtimeEvidenceKind !== binding.runtimeEvidenceKind ||
-      revision.runtimeTargetDigest !== binding.runtimeTargetDigest ||
-      revision.configHash !== binding.runtimeConfigDigest
-    ) {
+    let transport: Awaited<ReturnType<typeof resolveRuntimeTransportFromBinding>>;
+    let resources: Awaited<ReturnType<typeof resolveBoundExecutionResources>>;
+    try {
+      const binding = await requireExecutionBinding(invocation.tenantId, invocation.id);
+      transport = await resolveRuntimeTransportFromBinding({
+        tenantId: invocation.tenantId,
+        binding,
+        ...dependencies,
+      });
+      // R01 §5：Transport 只是执行资源的一项。受管 Environment Provisioner 与 Workspace
+      // 执行资源同样只能来自**同一份冻结 Binding**；不解析它们，MANAGED 的重投就会在
+      // 「没有 Provisioner」上直接终态失败 —— 那等于同一份持久意图在请求内联路径可执行、
+      // 在后台恢复路径不可恢复。
+      resources = await resolveBoundExecutionResources({
+        tenantId: invocation.tenantId,
+        binding,
+        purpose: "recovery",
+      });
+    } catch (error) {
       await failAttemptAndInvokeRecoveryAuthority({
         tenantId: invocation.tenantId,
         attempt,
         invocation,
-        errorCode: "RUNTIME_REVISION_INVALID",
-        errorSummary: "冻结的 RuntimeRevision 与 ExecutionBinding 不一致",
-        actorType: "system",
+        errorCode: error instanceof Error ? error.name : "RuntimeTransportMismatch",
+        errorSummary: error instanceof Error ? error.message : String(error),
         now: new Date(),
+        workIdentity: { kind: "dispatch", claim },
       });
       return;
     }
+    const runtimeClient: RuntimeHttpClient = transport.runtimeClient;
     try {
-      recoverTrustedExecutionSubject(binding, invocation.tenantId);
-      const hosted = revision.runtimeEvidenceKind === "hosted_artifact";
-      const endpoint = hosted ? "in-process://hosted" : revision.endpointRef;
-      const auth = hosted
-        ? {
-            mode: "workload_token" as const,
-            token: issueWorkloadToken({
-              type: "runtime",
-              tenantId: invocation.tenantId,
-              invocationId: invocation.id,
-              runtimeRevisionId: revision.id,
-              audience: "runtime",
-              expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-            }),
-          }
-        : await resolveOutboundRuntimeAuth({
-            tenantId: invocation.tenantId,
-            identityMode: revision.identityMode,
-            credentialRefId: revision.credentialRefId,
-          });
-      const resolveTransport = createRuntimeTransportResolver({
-        factories: {
-          harness_runtime_protocol: {
-            hosted_artifact: () =>
-              createInProcessHostedRuntimeClient({
-                tenantId: invocation.tenantId,
-                applicationService: hostedService,
-              }),
-            external_endpoint: ({ endpoint: externalEndpoint, auth: externalAuth }) =>
-              createExternalTransport({ endpoint: externalEndpoint, auth: externalAuth }),
-          },
-        },
-      });
-      const runtimeClient: RuntimeHttpClient = await resolveTransport({
-        protocolType: revision.protocolType,
-        runtimeEvidenceKind: revision.runtimeEvidenceKind,
-        endpoint,
-        auth,
-      });
-      const result = await dispatchQueuedInvocationAttempt({
+      return await dispatchQueuedInvocationAttempt({
         tenantId: invocation.tenantId,
         attemptId: attempt.id,
+        claim,
         runtimeClient,
-        runtimeEndpointResolver: async (frozenBinding) => {
-          const frozenGovernance = await loadFrozenGovernanceConfig(
-            frozenBinding.tenantId,
-            frozenBinding.governanceConfigRevisionId,
-          );
-          const gatewayExpiresAt = Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway;
-          return {
-            runtimeEndpoint: endpoint,
-            auth,
-            gatewayEndpoints: buildGatewayEndpoints({
-              external: revision.runtimeEvidenceKind === "external_endpoint",
-            }),
-            governanceConfig: {
-              revision_id: frozenBinding.governanceConfigRevisionId,
-              config_digest: frozenBinding.governanceConfigDigest,
-              config: frozenGovernance.config as unknown as Record<string, unknown>,
-            },
-            gatewayAccess: {
-              access_token: issueWorkloadToken({
-                type: "gateway",
-                tenantId: frozenBinding.tenantId,
-                invocationId: frozenBinding.invocationId,
-                runtimeRevisionId: frozenBinding.runtimeRevisionId,
-                audience: "gateway",
-                expiresAt: gatewayExpiresAt,
-              }),
-              expires_at: new Date(gatewayExpiresAt).toISOString(),
-            },
-          };
-        },
+        runtimeEndpointResolver: async (frozenBinding) => ({
+          runtimeEndpoint: transport.runtimeEndpoint,
+          auth: transport.auth,
+          callbackEndpoints: buildGatewayEndpoints({
+            external: !transport.hosted,
+            invocationId: frozenBinding.invocationId,
+          }),
+          ...resources,
+        }),
       });
-      if (result.status === "started" && hosted) {
-        const launch = runtimeClient as ReturnType<typeof createInProcessHostedRuntimeClient>;
-        void launch.launchAcceptedInvocation(invocation.id).catch((error) => {
-          logger.error("[runtime-dispatch-retry] Hosted 执行启动失败", {
-            invocationId: invocation.id,
-            error: String(error),
-          });
+    } catch (error) {
+      const current = await getAttemptById(attempt.id);
+      if (current?.attemptState === "queued") {
+        await failAttemptAndInvokeRecoveryAuthority({
+          tenantId: invocation.tenantId,
+          attempt: current,
+          invocation,
+          errorCode: error instanceof Error ? error.name : "RuntimeDispatchFailed",
+          errorSummary: error instanceof Error ? error.message : String(error),
+          now: new Date(),
+          workIdentity: { kind: "dispatch", claim },
         });
       }
-      return result;
-    } catch (error) {
-      if (error instanceof RedispatchNotAllowedError) {
-        const refreshedAttempt = await getAttemptById(attempt.id);
-        if (refreshedAttempt?.attemptState === "queued") {
-          await db.transaction((tx) =>
-            updateAttemptState(tx, attempt.id, "failed", {
-              errorCode: "PARENT_INVOCATION_TERMINAL",
-              errorSummary: "Parent Invocation 已终态",
-            }),
-          );
-        }
-        return;
-      }
-      const refreshedAttempt = await getAttemptById(attempt.id);
-      if (refreshedAttempt?.attemptState !== "queued") throw error;
-      const stableCode =
-        error instanceof RuntimeHttpClientError
-          ? error.stableCode
-          : error instanceof OutboundRuntimeAuthError
-            ? "RUNTIME_CREDENTIAL_INVALID"
-            : "RUNTIME_DISPATCH_CONFIGURATION_INVALID";
-      await failAttemptAndInvokeRecoveryAuthority({
-        tenantId: invocation.tenantId,
-        attempt: refreshedAttempt,
-        invocation,
-        errorCode: stableCode,
-        errorSummary: "Runtime retry 在网络调用前失败",
-        actorType: "system",
-        now: new Date(),
-      });
-      return;
     }
   };
 }

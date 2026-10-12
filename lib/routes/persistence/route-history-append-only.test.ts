@@ -1,111 +1,83 @@
-import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
-import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 
-const NOW = new Date("2026-08-13T00:00:00.000Z");
+const ROOT = process.cwd();
 
-beforeEach(async () => {
-  await resetDatabase(db);
-});
+/** RouteRevision / RouteActivation 历史表唯一写入口是 append；任何 drizzle UPDATE 路径都违规。 */
+const HISTORY_UPDATE_PATTERN = /\.update\(\s*(?:routeRevision|routeActivation)\b/;
 
-function errorChainContains(error: unknown, pattern: RegExp): boolean {
-  const seen = new Set<object>();
-  let current = error;
-  while (typeof current === "object" && current !== null && !seen.has(current)) {
-    seen.add(current);
-    const candidate = current as { message?: unknown; cause?: unknown };
-    if (typeof candidate.message === "string" && pattern.test(candidate.message)) return true;
-    current = candidate.cause;
-  }
-  return false;
+function listSourceFiles(path: string): string[] {
+  if (!existsSyncDir(path)) return [];
+  return readdirSync(path).flatMap((entry) => {
+    const full = join(path, entry);
+    if (["node_modules", ".git", ".next", "dist", "build"].includes(entry)) return [];
+    try {
+      const stat = readdirSync(full, { withFileTypes: true });
+      return stat ? listSourceFiles(full) : [];
+    } catch {
+      return /\.ts$/.test(full) ? [full] : [];
+    }
+  });
 }
 
-async function expectAppendOnlyRejection(
-  operation: Promise<unknown>,
-  table: "RouteRevision" | "RouteActivation",
-): Promise<void> {
-  let caught: unknown;
+function existsSyncDir(path: string): boolean {
   try {
-    await operation;
-  } catch (error) {
-    caught = error;
+    readdirSync(path);
+    return true;
+  } catch {
+    return false;
   }
-  expect(errorChainContains(caught, new RegExp(`${table} is append-only`))).toBe(true);
 }
 
-async function seedRouteHistory() {
-  const tenantId = randomUUID();
-  const routeId = randomUUID();
-  const routeSetId = randomUUID();
-  const routeRevisionId = randomUUID();
-  const routeActivationId = randomUUID();
-
-  await db.insert(routeRevision).values({
-    id: routeRevisionId,
-    tenantId,
-    routeId,
-    routeSetId,
-    routeKey: "append-only-route",
-    revisionNo: 1,
-    agentRevisionId: null,
-    runtimeRevisionId: randomUUID(),
-    trafficAllocationJson: { percentage: 100 },
-    routeGroupId: "primary",
-    selectorDigest: `sha256:${"a".repeat(64)}`,
-    trafficWeight: 100,
-    priorityNo: 1,
-    eligibilityConditionsJson: {},
-    contentDigest: `sha256:${"b".repeat(64)}`,
-    createdByType: "system",
-    createdBy: "append-only-test",
-    validatedAt: NOW,
-    createdAt: NOW,
-  });
-  await db.insert(routeActivation).values({
-    id: routeActivationId,
-    tenantId,
-    routeId,
-    routeRevisionId,
-    routeSetId,
-    activationSequence: 1,
-    activationState: "active",
-    routeSetVersionNo: 1,
-    activatedByType: "system",
-    activatedBy: "append-only-test",
-    reason: "initial activation",
-    requestId: randomUUID(),
-    idempotencyKey: "append-only-test:1",
-    activatedAt: NOW,
+/**
+ * V12 冻结架构：Route 历史表 append-only 不再依赖 DB TRIGGER（drizzle 干净初始迁移
+ * 无法表达 trigger，历史触发器已随干净基线折叠移除）。语义强度不变——由唯一写入口
+ * 在 store 层强制：canonical store 只暴露 appendRevision / appendActivation，
+ * 生产作用域不存在任何对两张历史表的 UPDATE 路径。
+ */
+describe("Route 历史表 append-only 基线约束", () => {
+  it("干净初始迁移不含 TRIGGER，历史表仍由唯一 0000 基线创建", () => {
+    const baseline = readFileSync(join(ROOT, "drizzle/0000_initial_schema.sql"), "utf8");
+    expect(baseline).not.toMatch(/CREATE\s+TRIGGER/i);
+    expect(baseline).not.toContain("prevent_update");
+    expect(baseline).toContain("CREATE TABLE `RouteRevision`");
+    expect(baseline).toContain("CREATE TABLE `RouteActivation`");
   });
 
-  return { routeRevisionId, routeActivationId };
-}
-
-describe("Route 历史表 append-only 数据库约束", () => {
-  it("数据库拒绝 UPDATE RouteRevision 历史", async () => {
-    const fixture = await seedRouteHistory();
-
-    await expectAppendOnlyRejection(
-      db
-        .update(routeRevision)
-        .set({ trafficWeight: 99 })
-        .where(eq(routeRevision.id, fixture.routeRevisionId)),
-      "RouteRevision",
+  it("canonical store 接口只暴露 appendRevision/appendActivation，无历史表 UPDATE 入口", () => {
+    const storeInterface = readFileSync(
+      join(ROOT, "lib/routes/persistence/route-set-activation-store.ts"),
+      "utf8",
+    );
+    expect(storeInterface).toContain("appendRevision(");
+    expect(storeInterface).toContain("appendActivation(");
+    expect(storeInterface).not.toMatch(
+      /update(?:Revision|Activation|RouteRevision|RouteActivation)/,
     );
   });
 
-  it("数据库拒绝 UPDATE RouteActivation 历史", async () => {
-    const fixture = await seedRouteHistory();
-
-    await expectAppendOnlyRejection(
-      db
-        .update(routeActivation)
-        .set({ reason: "mutated" })
-        .where(eq(routeActivation.id, fixture.routeActivationId)),
-      "RouteActivation",
+  it("MySQL store 对历史表只 INSERT（append），从不 UPDATE", () => {
+    const store = readFileSync(
+      join(ROOT, "lib/routes/persistence/mysql-route-set-activation-store.ts"),
+      "utf8",
     );
+    expect(store).toContain("insert(routeRevision)");
+    expect(store).toContain("insert(routeActivation)");
+    expect(HISTORY_UPDATE_PATTERN.test(store)).toBe(false);
+    // DeploymentRoute / RouteSet 投影表是唯一允许 UPDATE 的状态载体。
+    expect(store).toContain("update(deploymentRouteTable)");
+  });
+
+  it("生产作用域（lib/app/scripts）不存在 RouteRevision/RouteActivation 的 UPDATE 路径", () => {
+    const files = [
+      ...listSourceFiles(join(ROOT, "lib")),
+      ...listSourceFiles(join(ROOT, "app")),
+      ...listSourceFiles(join(ROOT, "scripts")),
+    ].filter((file) => !file.endsWith("route-history-append-only.test.ts"));
+    const violations = files.filter((file) =>
+      HISTORY_UPDATE_PATTERN.test(readFileSync(file, "utf8")),
+    );
+    expect(violations).toEqual([]);
   });
 });

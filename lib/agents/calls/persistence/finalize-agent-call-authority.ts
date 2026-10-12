@@ -123,7 +123,7 @@ export async function lockAndValidateAgentCallAuthority(
     snapshot.capabilityDigest !== b.agentCapabilityDigest ||
     snapshot.contextDigest !== b.agentContextDigest ||
     snapshot.protocolType !== b.protocolType ||
-    snapshot.protocolContractRevision !== b.protocolContractRevision
+    snapshot.protocolContractDigest !== b.protocolContractDigest
   ) {
     stale("AgentContractSnapshot 事实已漂移");
   }

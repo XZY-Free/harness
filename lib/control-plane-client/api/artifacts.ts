@@ -37,25 +37,20 @@ export function createArtifactApiClient(config: ApiClientConfig): ArtifactApiCli
         if (value !== undefined) query.set(key, String(value));
       }
       const suffix = query.size > 0 ? `?${query}` : "";
-      return request<ArtifactAttestationListResponse>(
-        `/admin/api/v1/artifact-attestations${suffix}`,
-      );
+      return request<ArtifactAttestationListResponse>(`/admin/api/artifact-attestations${suffix}`);
     },
     get: (attestationId) =>
-      request<ArtifactAttestationDTO>(`/admin/api/v1/artifact-attestations/${attestationId}`),
+      request<ArtifactAttestationDTO>(`/admin/api/artifact-attestations/${attestationId}`),
     verify: (body, opts) =>
-      request<VerifyAttestationResultDTO>("/admin/api/v1/artifact-attestations/verify", {
+      request<VerifyAttestationResultDTO>("/admin/api/artifact-attestations/verify", {
         method: "POST",
         body: JSON.stringify(body),
         headers: { "Idempotency-Key": opts.idempotencyKey },
       }),
     revoke: (attestationId, reason) =>
-      request<ArtifactAttestationDTO>(
-        `/admin/api/v1/artifact-attestations/${attestationId}/revoke`,
-        {
-          method: "POST",
-          body: JSON.stringify({ reason }),
-        },
-      ),
+      request<ArtifactAttestationDTO>(`/admin/api/artifact-attestations/${attestationId}/revoke`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
   };
 }

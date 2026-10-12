@@ -46,7 +46,7 @@ export async function seedPublishedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${artifactDigest}`,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type FinalClosureTestEntry,
   type SourceDocument,
   checkAgentCallFinalizationGate,
   checkAgentCallRuntimeBoundaryGate,
@@ -10,10 +11,15 @@ import {
   checkExternalRuntimeTransportGate,
   checkFinalClosureBoundaryGate,
   checkResumeTruthfulnessGate,
+  collectArchitectureFlagViolations,
+  collectCanonicalNamingViolations,
   collectDeprecatedArchitectureViolations,
+  collectDualAuthorityWriteViolations,
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
+  collectLegacyScriptViolations,
+  collectProductionTestSupportViolations,
   collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
@@ -112,6 +118,126 @@ describe("source history and retired dependency gates", () => {
   });
 });
 
+describe("Topic02 canonical naming injections", () => {
+  it("CLEAN-01: versioned internal paths report exact files; protocolVersion remains legal", () => {
+    expect(
+      collectCanonicalNamingViolations([
+        doc("lib/v11/runtime/client.ts", "export const x = 1;"),
+        doc("lib/runtime/runtime-v3.ts", "export const x = 1;"),
+        doc("lib/runtime/runtime-protocol.ts", "export const protocolVersion = 3;"),
+      ]),
+    ).toEqual(["lib/v11/runtime/client.ts", "lib/runtime/runtime-v3.ts"]);
+  });
+
+  it("CLEAN-02: AST identifiers reject compatibility symbols, not strings or insert models", () => {
+    expect(
+      collectCanonicalNamingViolations([
+        doc("lib/runtime/old-client.ts", "class LegacyRuntime {}"),
+        doc("lib/executions/compat.ts", "type CompatBinding = {};"),
+        doc("lib/runtime/protocol.ts", "interface RuntimeProtocolV3 {}"),
+        doc(
+          "lib/executions/new-invocation.ts",
+          'type NewInvocation = InferInsertModel<typeof invocationTable>; const label = "LegacyRuntime";',
+        ),
+      ]),
+    ).toEqual(["lib/runtime/old-client.ts", "lib/executions/compat.ts", "lib/runtime/protocol.ts"]);
+  });
+});
+
+describe("Topic02 configuration and script injections", () => {
+  it("CLEAN-06: stage flag in config AST or environment declaration is rejected; lease TTL remains valid", () => {
+    expect(
+      collectArchitectureFlagViolations([
+        doc("lib/config.ts", "export const enabled = process.env.ENABLE_V3_RUNTIME;"),
+        doc("lib/env.d.ts", "interface ProcessEnv { ENABLE_V3_RUNTIME?: string }"),
+        doc("lib/runtime/lease.ts", "export const leaseTtlMs = 90000;"),
+      ]),
+    ).toEqual(["lib/config.ts", "lib/env.d.ts"]);
+  });
+
+  it("CLEAN-07: retired package scripts and CI calls report exact files", () => {
+    expect(
+      collectLegacyScriptViolations([
+        doc("package.json", '{"scripts":{"topic01:verify":"tsx scripts/topic-01-verify.ts"}}'),
+        doc(".github/workflows/ci.yml", "run: pnpm topic01:acceptance"),
+        doc(".github/workflows/current.yml", "run: pnpm schema:verify && pnpm acceptance"),
+      ]),
+    ).toEqual(["package.json", ".github/workflows/ci.yml"]);
+  });
+});
+
+describe("Topic02 retired module dependency injections", () => {
+  it("CLEAN-05: static, side-effect, dynamic and re-export imports resolve retired modules", () => {
+    expect(
+      collectRetiredModuleDependencyViolations([
+        doc("lib/runtime/current.ts", 'import "./transport/a2a-transport";'),
+        doc("lib/runtime/current-2.ts", 'await import("./transport/a2a-transport");'),
+        doc("lib/routes/index.ts", 'export * from "./application/upsert-deployment-route";'),
+        doc("lib/runtime/valid.ts", 'import { client } from "./runtime-client";'),
+      ]),
+    ).toEqual(["lib/runtime/current.ts", "lib/runtime/current-2.ts", "lib/routes/index.ts"]);
+  });
+});
+
+describe("Topic02 production dependency boundary", () => {
+  it("CLEAN-09: production imports of test support and unverified Binding helpers fail", () => {
+    expect(
+      collectProductionTestSupportViolations([
+        doc("app/runtime/probe/route.ts", 'import "@/lib/runtime/test-support/fake-runtime";'),
+        doc(
+          "lib/runtime/worker.ts",
+          'await import("../executions/test-support/create-unverified-execution-binding");',
+        ),
+        doc("scripts/workers/entry.ts", 'export * from "@/lib/test-support/fixture";'),
+        doc("scripts/production-wiring.ts", 'require("@/lib/test-support/fixture");'),
+        doc("lib/runtime/test-support/helper.ts", 'import "@/lib/test-support/fixture";'),
+        doc("scripts/e2e-bootstrap.ts", 'import "@/lib/test-support/fixture";'),
+        doc("lib/runtime/worker.test.ts", 'import "@/lib/test-support/fixture";'),
+      ]),
+    ).toEqual([
+      "app/runtime/probe/route.ts",
+      "lib/runtime/worker.ts",
+      "scripts/workers/entry.ts",
+      "scripts/production-wiring.ts",
+    ]);
+  });
+});
+
+describe("Topic02 authority write boundary", () => {
+  it("CLEAN-10: Runtime route writes and second Definition writers fail", () => {
+    expect(
+      collectDualAuthorityWriteViolations([
+        doc(
+          "app/runtime/invocations/route.ts",
+          "await db.update(invocationTable).set({ status: 'x' });",
+        ),
+        doc(
+          "app/runtime/definitions/route.ts",
+          "await db.update(environmentDefinitionTable).set({ displayName: 'x' });",
+        ),
+        doc("app/runtime/raw/route.ts", "await db.execute(sql`UPDATE Invocation SET status='x'`);"),
+        doc(
+          "lib/runtime/second-definition-store.ts",
+          "await tx.insert(environmentDefinitionRevisionTable).values({});",
+        ),
+        doc(
+          "lib/environment/environment-definition-store.ts",
+          "await tx.update(environmentDefinitionTable).set({ displayName: 'x' });",
+        ),
+        doc(
+          "lib/runtime/application/ingress-runtime-events.ts",
+          "await tx.update(invocationTable).set({ status: 'x' });",
+        ),
+      ]),
+    ).toEqual([
+      "app/runtime/invocations/route.ts",
+      "app/runtime/definitions/route.ts",
+      "app/runtime/raw/route.ts",
+      "lib/runtime/second-definition-store.ts",
+    ]);
+  });
+});
+
 describe("checkExternalRuntimeTransportGate", () => {
   const compliant = (): SourceDocument[] => [
     doc(
@@ -183,7 +309,7 @@ describe("Topic 01 final closure boundary gate", () => {
       "return executeHarnessToolCall(input);",
     ),
     doc("lib/capability/application/execute-harness-tool-call.ts", "return applyToolCall(input);"),
-    doc("app/gateway/v1/tool-calls/route.ts", "return applyToolCall(input);"),
+    doc("app/gateway/tool-calls/route.ts", "return applyToolCall(input);"),
     doc(
       "lib/capability/tool-execution-worker.ts",
       "claimNextQueuedToolCall(); ProviderExecutionError; appendToolContinuation();",
@@ -193,7 +319,7 @@ describe("Topic 01 final closure boundary gate", () => {
       "export async function searchKnowledgeEvidence(params: { executionSubject: ExecutionSubject; allowedKnowledgeBaseIds: readonly string[] }): Promise<KnowledgeSearchResult> {}",
     ),
     doc(
-      "app/gateway/v1/capability-actions/route.ts",
+      "app/gateway/capability-actions/route.ts",
       "executionSubject = recoverTrustedExecutionSubject(binding, principal.tenantId);",
     ),
     doc(
@@ -217,9 +343,21 @@ describe("Topic 01 final closure boundary gate", () => {
       "async handleResume() { await applicationService.resume({ invocationId }); } async handleSteer() {}",
     ),
     doc(
-      "lib/runtime/application/production-resume-harness-invocation.ts",
-      "acquireLease: tryAcquireInvocationExecutionLease; const loop = new HostedHarnessLoop({}); const running = loop.run(); return await running; cancelActiveAgentCalls({});",
+      "lib/runtime/application/runtime-resume.ts",
+      "getActiveExecutionOwnership({}); const loop = new HostedHarnessLoop({}); const running = loop.run(); const result = await running; if (!result.pending) return result; cancelActiveAgentCalls({}); return result;",
     ),
+  ];
+
+  /**
+   * A03：Resume 的源码形态可以被改写，"不可退化"这一意图不能 —— 因此真实行为回归必须
+   * 在测试收集清单里（`checkFinalClosureBoundaryGate` 的 resumeBehaviorRegressions）。
+   */
+  const resumeBehaviorTestFiles: FinalClosureTestEntry[] = [
+    {
+      file: "lib/runtime/adapters/hosted-adapter-resume.integration.test.ts",
+      group: "integration",
+    },
+    { file: "lib/runtime/__tests__/managed-resume-lifecycle.db.test.ts", group: "db" },
   ];
 
   it("接受单一 Schema Root、durable continuation 与真实 Hosted resume", () => {
@@ -229,9 +367,22 @@ describe("Topic 01 final closure boundary gate", () => {
       [
         { file: "a.test.ts", group: "unit" },
         { file: "b.test.ts", group: "db" },
+        ...resumeBehaviorTestFiles,
       ],
     );
     expect(result).toEqual({ passed: true, failures: [] });
+  });
+
+  it("Resume 行为回归未登记时失败（源码形态合规也不放行）", () => {
+    const result = checkFinalClosureBoundaryGate(
+      compliant(),
+      new Set(["lib/persistence/schema/example.ts", "lib/persistence/schema/agent-calls.ts"]),
+      [{ file: "a.test.ts", group: "unit" }],
+    );
+    expect(result.passed).toBe(false);
+    expect(result.failures).toEqual(
+      expect.arrayContaining([expect.stringContaining("Hosted Resume 行为回归未登记")]),
+    );
   });
 
   it("同时拒绝第二 Schema Root、越权状态写、固定 Subject、ACK-only 与重复测试", () => {
@@ -243,7 +394,7 @@ describe("Topic 01 final closure boundary gate", () => {
         "db.update(agentCallTable).set({ state: 'completed' })",
       ),
     ].map((item) =>
-      item.path === "app/gateway/v1/capability-actions/route.ts"
+      item.path === "app/gateway/capability-actions/route.ts"
         ? doc(item.path, "executionSubject = { subjectId: 'fixed' }")
         : item.path === "lib/runtime/adapters/hosted-adapter.ts"
           ? doc(
@@ -258,6 +409,8 @@ describe("Topic 01 final closure boundary gate", () => {
       [
         { file: "same.test.ts", group: "unit" },
         { file: "same.test.ts", group: "db" },
+        // 行为回归已登记 ⇒ "只 ACK" 只能由被改坏的 adapter 触发，而不是靠登记缺失兜底。
+        ...resumeBehaviorTestFiles,
       ],
     );
     expect(result.passed).toBe(false);
@@ -484,14 +637,14 @@ describe("checkAgentInvokeAuthorizationGate", () => {
     doc("lib/agents/application/agent-admin-projection.ts", "export function projectAgent() {}"),
     doc("lib/control-plane-client/contracts/agent.ts", "export interface AgentDTO {}"),
     doc(
-      "app/api/v1/threads/[thread_id]/turns/route.ts",
+      "app/api/threads/[threadId]/turns/route.ts",
       "requireAgentInvokeScope(); enforceIdempotency();",
     ),
     doc(
-      "app/api/v1/catalog/options/route.ts",
+      "app/api/catalog/options/route.ts",
       "resolveActionScopeCoverage(); agentInvokeAuthorization; buildEmployeeCatalogEtag();",
     ),
-    doc("components/hooks/use-catalog.ts", 'fetch("/api/v1/catalog/options?resource_type=agent")'),
+    doc("components/hooks/use-catalog.ts", 'fetch("/api/catalog/options?resource_type=agent")'),
   ];
 
   it("正式 agent.invoke/Catalog/Turn 单一路径通过", () => {
@@ -503,7 +656,7 @@ describe("checkAgentInvokeAuthorizationGate", () => {
 
   it("旧员工 Agent endpoint 与 visibility Authority 被拦截", () => {
     const documents = validDocuments();
-    documents.push(doc("app/api/v1/agents/route.ts", "export function GET() {}"));
+    documents.push(doc("app/api/agents/route.ts", "export function GET() {}"));
     documents.push(doc("components/selector.tsx", 'fetch("/api/v1/agents")'));
     documents[1] = doc("lib/persistence/schema/agents.ts", "const visibilityPolicyId = null");
     const result = checkAgentInvokeAuthorizationGate(documents);
@@ -516,7 +669,7 @@ describe("checkAgentInvokeAuthorizationGate", () => {
   it("Turn 授权晚于幂等写入时失败", () => {
     const documents = validDocuments();
     documents[5] = doc(
-      "app/api/v1/threads/[thread_id]/turns/route.ts",
+      "app/api/threads/[threadId]/turns/route.ts",
       "enforceIdempotency(); requireAgentInvokeScope();",
     );
     expect(checkAgentInvokeAuthorizationGate(documents).failures).toContain(
@@ -610,23 +763,19 @@ describe("collectHarnessAgentBoundaryViolations", () => {
     expect(violations).toContain("lib/runtime/thread-snake.ts");
   });
 
-  it("app/api/v1/threads/route.ts 可执行代码出现 agent_id 字段即违规（required）", () => {
+  it("app/api/threads/route.ts 可执行代码出现 agent_id 字段即违规（required）", () => {
     const documents = [
-      doc("app/api/v1/threads/route.ts", "type Body = { agent_id: string; title: string };"),
+      doc("app/api/threads/route.ts", "type Body = { agent_id: string; title: string };"),
     ];
-    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
-      "app/api/v1/threads/route.ts",
-    );
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("app/api/threads/route.ts");
   });
 
-  it("app/api/v1/threads/route.ts 可执行代码出现 agent_id 字段即违规（optional 不豁免）", () => {
-    const documents = [doc("app/api/v1/threads/route.ts", "type Body = { agent_id?: string };")];
-    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
-      "app/api/v1/threads/route.ts",
-    );
+  it("app/api/threads/route.ts 可执行代码出现 agent_id 字段即违规（optional 不豁免）", () => {
+    const documents = [doc("app/api/threads/route.ts", "type Body = { agent_id?: string };")];
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("app/api/threads/route.ts");
   });
 
-  it("agent_id 规则仅针对 app/api/v1/threads/route.ts，不扩大到其他文件", () => {
+  it("agent_id 规则仅针对 CreateThread 正式 route，不扩大到其他文件", () => {
     const documents = [doc("app/api/v1/agents/route.ts", "type Body = { agent_id?: string };")];
     expect(collectHarnessAgentBoundaryViolations(documents)).not.toContain(
       "app/api/v1/agents/route.ts",
@@ -1126,7 +1275,7 @@ describe("collectExecutionBoundaryViolations", () => {
 });
 
 describe("checkResumeTruthfulnessGate", () => {
-  const RESOLVE_ROUTE = "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
+  const RESOLVE_ROUTE = "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts";
   const A2A = "lib/agents/calls/transport/a2a/a2a-client.ts";
 
   it("catch 吞错 + 无 resume_dispatch → 失败", () => {
@@ -1149,7 +1298,7 @@ describe("checkResumeTruthfulnessGate", () => {
       ),
       doc(
         A2A,
-        "async resumeCall(req) { const m = buildA2APublicMessageMetadata(req.requestBody.invocation_context); }",
+        "async resumeCall(req) { const m = buildA2APublicMessageMetadata(req.request.invocation_context); }",
       ),
     ]);
     expect(result).toEqual({ passed: true, failures: [] });
@@ -1164,7 +1313,7 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
     dispatcher: "lib/runtime/dispatcher.ts",
     attemptService: "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
     recovery: "lib/runtime/recovery-queries.ts",
-    resolveRoute: "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+    resolveRoute: "app/api/threads/[threadId]/user-actions/[requestId]/resolve/route.ts",
     commandGateway: "lib/runtime/command-dispatch-gateway.ts",
     inProcess: "lib/runtime/in-process-hosted-runtime.ts",
     hostedAdapter: "lib/runtime/adapters/hosted-adapter.ts",
@@ -1180,7 +1329,7 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
       doc(PATHS.attemptService, "recordAttemptDispatchTransientFailure({});"),
       doc(
         PATHS.recovery,
-        'import { markSessionBindingLostInSession } from "@/lib/runtime/session-binding-queries"; markSessionBindingLostInSession(tx, id);',
+        'import { markSessionBindingLostInSession } from "@/lib/runtime/persistence/runtime-session-store"; markSessionBindingLostInSession(tx, id);',
       ),
       doc(
         PATHS.resolveRoute,
@@ -1226,7 +1375,7 @@ describe("checkDispatchRecoveryAuthorityGate", () => {
       d.path === PATHS.recovery
         ? doc(
             d.path,
-            'import { markSessionBindingLost } from "@/lib/runtime/session-binding-queries";',
+            'import { markSessionBindingLost } from "@/lib/runtime/persistence/runtime-session-store";',
           )
         : d,
     );

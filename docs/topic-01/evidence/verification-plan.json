@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "authority": "docs/topic-01/evidence/verification-plan.json",
-  "resultPath": "docs/topic-01/evidence/acceptance-result.json",
+  "resultPath": "docs/topic-01/evidence/artifacts/acceptance-result.json",
   "baselineSha": "24a8d97b26270100d908b8f6d6c81d019324525e",
   "profiles": {
     "acceptance": [
@@ -55,8 +55,8 @@
       "name": "合同、Schema Authority 与测试收集证据",
       "commands": [
         ["pnpm", "contracts:verify"],
-        ["pnpm", "topic01:schema:verify"],
-        ["pnpm", "topic01:tests:audit"]
+        ["pnpm", "schema:verify"],
+        ["pnpm", "tests:audit"]
       ]
     },
     {
@@ -65,7 +65,7 @@
       "commands": [
         [
           "node",
-          "scripts/topic-01-vitest-stage.mjs",
+          "scripts/vitest-stage.mjs",
           "unit",
           "db",
           "integration",
@@ -75,8 +75,8 @@
     },
     {
       "id": "production-wiring",
-      "name": "生产入口与 Authority 映射",
-      "commands": [["node", "scripts/topic-01-acceptance-contract.mjs", "--production-wiring"]]
+      "name": "生产入口与 Authority 接线（真实源码事实）",
+      "commands": [["pnpm", "production:wiring"]]
     },
     {
       "id": "fresh-db",
@@ -96,17 +96,17 @@
     {
       "id": "e2e-web",
       "name": "Web E2E",
-      "commands": [["node", "scripts/topic-01-playwright-stage.mjs", "e2e-web"]]
+      "commands": [["node", "scripts/playwright-stage.mjs", "e2e-web"]]
     },
     {
       "id": "e2e-desktop",
       "name": "Desktop E2E",
-      "commands": [["node", "scripts/topic-01-playwright-stage.mjs", "e2e-desktop"]]
+      "commands": [["node", "scripts/playwright-stage.mjs", "e2e-desktop"]]
     },
     {
       "id": "e2e-cross-client",
       "name": "Cross-client E2E",
-      "commands": [["node", "scripts/topic-01-playwright-stage.mjs", "e2e-cross-client"]]
+      "commands": [["node", "scripts/playwright-stage.mjs", "e2e-cross-client"]]
     },
     {
       "id": "security",
@@ -116,17 +116,17 @@
     {
       "id": "acceptance-matrix",
       "name": "Topic01 验收矩阵",
-      "commands": [["node", "scripts/topic-01-acceptance-contract.mjs"]]
+      "commands": [["node", "scripts/acceptance-contract.mjs"]]
     },
     {
       "id": "worktree-cleanliness",
       "name": "验收工作区清洁性",
-      "commands": [["node", "scripts/topic-01-worktree-cleanliness.mjs"]]
+      "commands": [["node", "scripts/worktree-cleanliness.mjs"]]
     },
     {
       "id": "final-evidence-integrity",
       "name": "最终证据完整性",
-      "commands": [["node", "scripts/topic-01-evidence-integrity.mjs"]]
+      "commands": [["node", "scripts/evidence-integrity.mjs"]]
     }
   ]
 }

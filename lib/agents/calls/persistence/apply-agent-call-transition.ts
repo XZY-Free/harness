@@ -389,7 +389,7 @@ async function lockAuthority(
     parentThreadId: parent.threadId,
     attempts,
     session,
-    producerSource: `${call.agentId}:${binding.protocolType}:${binding.protocolContractRevision}`,
+    producerSource: `${call.agentId}:${binding.protocolType}:${binding.protocolContractDigest}`,
   };
 }
 

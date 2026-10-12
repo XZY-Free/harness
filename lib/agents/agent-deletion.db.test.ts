@@ -1,5 +1,5 @@
-import * as route from "@/app/admin/api/v1/agents/[agent_id]/route";
-import { POST as ensureRouteSet } from "@/app/admin/api/v1/deployment-route-sets/route";
+import * as route from "@/app/admin/api/agents/[agentId]/route";
+import { POST as ensureRouteSet } from "@/app/admin/api/deployment-route-sets/route";
 import { deleteAgentRegistration } from "@/lib/agents/application/delete-agent-registration";
 import { createAgent, getAgentById, listAgents } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
@@ -65,11 +65,11 @@ async function seed(authorized = true) {
 }
 function remove(id: string, version = 1) {
   return (route as typeof route & { DELETE: typeof route.GET }).DELETE(
-    new Request(`http://localhost/admin/api/v1/agents/${id}`, {
+    new Request(`http://localhost/admin/api/agents/${id}`, {
       method: "DELETE",
       headers: { "If-Match": `"agent-${version}"` },
     }),
-    { params: Promise.resolve({ agent_id: id }) },
+    { params: Promise.resolve({ agentId: id }) },
   );
 }
 it("删除未连接的已配置智能体，保留历史身份并原子记录审计；重试不重复审计", async () => {
@@ -141,7 +141,7 @@ it("审计写入失败时删除和事件都回滚", async () => {
 
 function connect(agentId: string) {
   return ensureRouteSet(
-    new Request("http://localhost/admin/api/v1/deployment-route-sets", {
+    new Request("http://localhost/admin/api/deployment-route-sets", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({

@@ -380,25 +380,23 @@ export function AgentRevisionActions({
                 ? "这个服务需要识别当前员工。勾选它办理业务必须使用的资料，未勾选的资料不会提供。"
                 : "这个服务不要求员工资料，平台不会额外提供。"}
             </p>
-            <div className="block space-y-2">
+            <label htmlFor={`${formId}-profile-requirement`} className="block space-y-2">
               <span className="text-sm">员工资料更新方式</span>
               <Select
                 value={profileRequirement}
-                disabled={!requiresIdentity}
                 onValueChange={(value) => {
-                  const next = value ?? "none";
-                  setProfileRequirement(next);
-                  if (next === "none") setAllowedFields([]);
+                  if (!value) return;
+                  setProfileRequirement(value);
+                  if (value === "none") setAllowedFields([]);
                 }}
               >
-                <SelectTrigger aria-label="员工资料更新方式" className="w-full bg-background">
-                  <SelectValue>
-                    {profileRequirement === "fresh_required"
-                      ? "每次使用前确认资料有效"
-                      : profileRequirement === "stale_allowed"
-                        ? "允许使用上次获取的资料"
-                        : "不提供企业资料"}
-                  </SelectValue>
+                <SelectTrigger
+                  id={`${formId}-profile-requirement`}
+                  aria-label="员工资料更新方式"
+                  disabled={!requiresIdentity}
+                  className="w-full bg-background"
+                >
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent alignItemWithTrigger={false}>
                   <SelectItem value="none" disabled={requiresIdentity}>
@@ -408,7 +406,7 @@ export function AgentRevisionActions({
                   <SelectItem value="fresh_required">每次使用前确认资料有效</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </label>
             {profileRequirement !== "none" && (
               <div className="grid gap-2 sm:grid-cols-2">
                 {projectableFields.map((key) => (

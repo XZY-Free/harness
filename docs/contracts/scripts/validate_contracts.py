@@ -9,6 +9,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from contract_rules import READ_ONLY_POSTS  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCS_ROOT = REPO_ROOT / "docs" / "architecture"
@@ -62,12 +65,13 @@ def validate_openapi() -> int:
     operation_ids: set[str] = set()
     known_error_codes = set(load_json(CONTRACTS / "error-codes.json")["errors"])
     operation_count = 0
-    post_query_exceptions = {
-        "/gateway/v1/context/query",
-        # capability 解析只读返回原文件字节，不创建或变更平台资源；使用 POST 是为避免
-        # 短期 bearer reference 出现在 URL、访问日志和代理缓存键中。
-        "/gateway/v1/attachments/resolve",
-    }
+    # 只读 POST 的例外集合来自与生成器共享的单一事实源，避免"生成器声明一套、
+    # 校验器检查另一套"。key 必须与 OpenAPI 里的真实 path 逐字符一致，否则例外
+    # 会静默失效、门禁误报（历史上带上已退役的 v1 路径前缀时就是这样漏掉的）。
+    post_query_exceptions = set(READ_ONLY_POSTS)
+    for exception_path in post_query_exceptions:
+        if exception_path not in contract["paths"]:
+            fail(f"read-only POST exception is not a real OpenAPI path: {exception_path}")
     for path, path_item in contract["paths"].items():
         if not path.startswith("/"):
             fail(f"invalid OpenAPI path: {path}")
@@ -86,13 +90,21 @@ def validate_openapi() -> int:
                 fail(f"operation has missing/unknown error codes: {operation_id}")
             if "default" not in operation.get("responses", {}):
                 fail(f"operation missing error response: {operation_id}")
-            if method == "post" and path not in post_query_exceptions:
-                headers = {
-                    item["name"].lower()
-                    for item in operation.get("parameters", [])
-                    if item.get("in") == "header"
-                }
-                if "idempotency-key" not in headers:
+            header_names = {
+                item["name"].lower()
+                for item in operation.get("parameters", [])
+                if item.get("in") == "header"
+            }
+            if method == "post" and path in post_query_exceptions:
+                # 例外不是"免检"：只读 POST 必须同时**不**声明幂等语义，否则同一份
+                # 产物里会出现两种相互矛盾的接口语义（历史上 attachments/resolve
+                # 一边被排除、一边声明 IDEMPOTENCY_CONFLICT）。
+                if "idempotency-key" in header_names:
+                    fail(f"read-only POST must not declare Idempotency-Key: {operation_id}")
+                if "IDEMPOTENCY_CONFLICT" in operation_errors:
+                    fail(f"read-only POST must not declare IDEMPOTENCY_CONFLICT: {operation_id}")
+            elif method == "post":
+                if "idempotency-key" not in header_names:
                     fail(f"mutating POST missing Idempotency-Key: {operation_id}")
             if method in {"put", "patch"}:
                 # S01-W02: 可编辑资源必须声明 ETag/If-Match，冲突返回 412。
@@ -173,7 +185,7 @@ def validate_errors() -> int:
     return len(catalog)
 
 
-def _validate_case_list(cases: list, kind: str) -> None:
+def _validate_case_list(cases: list, kind: str, require_evidence_provenance: bool = False) -> None:
     ids = [case.get("id") for case in cases]
     if not ids:
         fail(f"{kind} conformance suite is empty")
@@ -182,12 +194,24 @@ def _validate_case_list(cases: list, kind: str) -> None:
     for case in cases:
         if not case.get("given") or not case.get("when") or len(case.get("expect", [])) < 1:
             fail(f"incomplete {kind} conformance case: {case.get('id')}")
+        if not require_evidence_provenance:
+            continue
+        # 发布/准入必须能追溯到该 case 的实际行为证据：每条 case 都要声明由谁证明，
+        # 以及通过时报告必须携带哪些真实调用回执字段（只写 boolean 不接受）。
+        if case.get("proven_by") not in {"adapter-probe", "platform-integration"}:
+            fail(f"{kind} conformance case {case.get('id')} has invalid proven_by")
+        receipt_keys = case.get("receipt_keys")
+        if not isinstance(receipt_keys, list) or not receipt_keys:
+            fail(f"{kind} conformance case {case.get('id')} must declare receipt_keys")
+        if any(not isinstance(key, str) or not key for key in receipt_keys):
+            fail(f"{kind} conformance case {case.get('id')} has invalid receipt_keys")
 
 
 def validate_conformance() -> int:
     """校验 Runtime Publication Conformance 与 Platform Integration Conformance 两份合同。
 
-    - runtime-conformance.json：RuntimeRevision Publication Gate 的正式套件（6 个协议/Adapter case）。
+    - runtime-conformance.json：RuntimeRevision Publication Gate 的正式套件
+      （6 个声明式 Adapter case + 7 个 RuntimeProtocol required behaviour case）。
     - platform-integration-conformance.json：平台级不变量套件（CI / 集成测试，不阻断 Publication）。
     """
     publication = load_json(CONTRACTS / "runtime-conformance.json")
@@ -196,7 +220,7 @@ def validate_conformance() -> int:
     publication_cases = publication.get("required_cases", [])
     integration_cases = integration.get("required_cases", [])
 
-    _validate_case_list(publication_cases, "runtime publication")
+    _validate_case_list(publication_cases, "runtime publication", require_evidence_provenance=True)
     _validate_case_list(integration_cases, "platform integration")
 
     # Publication 套件不得把平台级不变量（Route/Binding/Event Ingress/Tool/Memory/

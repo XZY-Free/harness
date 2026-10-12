@@ -71,7 +71,7 @@ describe("resolveAgentActionBinding（判别 target 冻结）", () => {
               id: "contract-1",
               capabilityDigest: D("b"),
               protocolType: "a2a",
-              protocolContractRevision: "a2a-0.3.0",
+              protocolContractDigest: "a2a-0.3.0",
             };
           },
         }),

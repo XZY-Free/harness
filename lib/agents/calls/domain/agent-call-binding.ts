@@ -70,7 +70,7 @@ export interface AgentCallBindingConfigInput {
   /** 协议类型（如 a2a）。 */
   protocolType: string;
   /** 协议合同修订（来自 AgentContractSnapshot，权威）。 */
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 
   // ─── policy / governance（真正相关证据）─────────────────
   policyRevisionId: string;
@@ -170,7 +170,7 @@ export function assertAgentCallBindingEvidence(input: AgentCallBindingConfigInpu
   if (isBlankString(input.networkZone)) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结 networkZone");
   }
-  if (isBlankString(input.protocolType) || isBlankString(input.protocolContractRevision)) {
+  if (isBlankString(input.protocolType) || isBlankString(input.protocolContractDigest)) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结 protocol 事实");
   }
   if (!AGENT_IDENTITY_MODES.includes(input.identityMode)) {

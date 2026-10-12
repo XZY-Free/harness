@@ -6,6 +6,7 @@
     "baselineSha",
     "diffRange",
     "localAcceptanceSha",
+    "runId",
     "remoteHeadSha",
     "githubCi",
     "profile",
@@ -24,6 +25,7 @@
     "baselineSha": { "type": "string", "minLength": 40 },
     "diffRange": { "type": "string", "minLength": 1 },
     "localAcceptanceSha": { "type": "string", "minLength": 40 },
+    "runId": { "type": "string", "pattern": "^[0-9a-f]{12}-[0-9]+-[0-9]+$" },
     "remoteHeadSha": { "type": ["string", "null"] },
     "githubCi": { "enum": ["pending", "passed", "failed"] },
     "profile": { "type": "string", "minLength": 1 },
@@ -48,6 +50,50 @@
       }
     },
     "acceptanceIdResults": { "type": "array" },
-    "stages": { "type": "array" }
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "startedAt", "finishedAt", "durationMs", "status", "commands"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "startedAt": { "type": "string", "minLength": 1 },
+          "finishedAt": { "type": ["string", "null"] },
+          "durationMs": { "type": ["integer", "null"] },
+          "status": { "enum": ["running", "passed", "failed"] },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "command",
+                "startedAt",
+                "finishedAt",
+                "durationMs",
+                "exitCode",
+                "signal",
+                "recordChecksum"
+              ],
+              "properties": {
+                "command": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "startedAt": { "type": "string", "minLength": 1 },
+                "finishedAt": { "type": "string", "minLength": 1 },
+                "durationMs": { "type": ["integer", "null"] },
+                "exitCode": { "type": ["integer", "null"] },
+                "signal": { "type": ["string", "null"] },
+                "recordChecksum": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
   }
 }

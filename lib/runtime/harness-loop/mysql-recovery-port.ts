@@ -1,9 +1,9 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
+import { getInvocationById } from "@/lib/executions/persistence/invocation-store";
 import { getUserActionRequestsByInvocation } from "@/lib/permission/user-action-queries";
 import { threadItemTable } from "@/lib/persistence/schema/conversation";
-import { getIngressByInvocation } from "@/lib/runtime/event-ingress-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { getIngressByInvocation } from "@/lib/runtime/application/ingress-runtime-events";
 import { and, asc, eq } from "drizzle-orm";
 import { HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA, parseHarnessNextAction } from "./action-schema";
 import {
@@ -35,8 +35,10 @@ export function createMySqlHarnessLoopRecoveryPort(
       >();
       for (const row of ingress) {
         if (!row.candidateType.startsWith("harness.action.")) continue;
-        const envelope = asRecord(row.payloadJson);
-        const parsed = HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA.safeParse(envelope?.payload);
+        // Event Ingress 将 RuntimeEvent.payload 原样持久化到 payloadJson（见
+        // ingress-runtime-events.ts），这里读取的就是 payload 本身，不存在 envelope 包装。
+        const persistedPayload = asRecord(row.payloadJson);
+        const parsed = HARNESS_ACTION_EVENT_PAYLOAD_SCHEMA.safeParse(persistedPayload);
         if (!parsed.success) {
           throw new HarnessLoopError(
             "HARNESS_LOOP_STATE_RECOVERY_FAILED",
@@ -135,7 +137,12 @@ export function createMySqlHarnessLoopRecoveryPort(
           invocation.executionState === "waiting_user" && options.resumeWaitingUser
             ? "running"
             : invocation.executionState,
-        nextProducerSequence: Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1,
+        nextProducerSequence: String(
+          ingress.reduce(
+            (max, row) => (row.producerSequence > max ? row.producerSequence : max),
+            0n,
+          ) + 1n,
+        ),
         actionHistory,
         observations: [
           ...actionHistory.flatMap((entry) =>

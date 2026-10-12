@@ -1,21 +1,8 @@
-/**
- * schema：Workload Token 撤销表（S12-W05）。
- *
- * 事实源：docs/architecture/security.md §5、
- * docs/architecture/api-and-events.md 。
- *
- * 用途：记录已撤销的 Workload Token jti。route handler 在身份解析时查询此表，
- * 命中则拒绝（401 AUTHENTICATION_REQUIRED）。
- *
- * 语义：
- * - jti 在 Token 颁发时生成（randomUUID），decodeWorkloadToken 校验 jti 必填。
- * - 撤销是幂等的：重复撤销同一 jti 返回原记录。
- * - 过期的撤销记录可由清理任务删除（expiresAt < now）。
- */
+/** Workload credential revocation; this table does not grant execution authority. */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-import { datetime, index, mysqlTable, text, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { datetime, index, mysqlTable, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const workloadTokenRevocationTable = mysqlTable(
   "WorkloadTokenRevocation",
@@ -27,27 +14,21 @@ export const workloadTokenRevocationTable = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    /** Token jti（UUID），撤销后所有使用此 jti 的 Token 立即失效。 */
-    jti: varchar("jti", { length: 64 }).notNull(),
-    /** Token 类型（runtime/gateway/service），用于审计与过滤。 */
-    tokenType: varchar("tokenType", { length: 16 }).notNull(),
-    /** 撤销操作者（userIdentityId / serviceId / admin）。 */
+    jti: varchar("jti", { length: 36 }).notNull(),
+    invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    reasonCode: varchar("reasonCode", { length: 64 }).notNull(),
     revokedBy: varchar("revokedBy", { length: 128 }).notNull(),
-    /** 撤销原因。 */
-    reason: text("reason").notNull(),
-    /** Token 原始过期时间；过期的撤销记录可由清理任务删除。 */
-    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }).notNull(),
-    revokedAt: datetime("revokedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
+    revokedAt: datetime("revokedAt", { mode: "date", fsp: 6 }).notNull(),
+    tokenExpiresAt: datetime("tokenExpiresAt", { mode: "date", fsp: 6 }).notNull(),
   },
   (t) => ({
-    tenantJtiUq: uniqueIndex("WorkloadTokenRevocation_tenant_jti_uq").on(t.tenantId, t.jti),
-    tenantRevokedIdx: index("WorkloadTokenRevocation_tenant_revoked_idx").on(
+    tenantIdUq: uniqueIndex("WorkloadTokenRevocation_tenant_id_uq").on(t.tenantId, t.id),
+    jtiUq: uniqueIndex("WorkloadTokenRevocation_tenant_jti_uq").on(t.tenantId, t.jti),
+    invocationIdx: index("WorkloadTokenRevocation_tenant_invocation_idx").on(
       t.tenantId,
-      t.revokedAt,
+      t.invocationId,
     ),
-    expiresIdx: index("WorkloadTokenRevocation_expires_idx").on(t.expiresAt),
+    expiryIdx: index("WorkloadTokenRevocation_expiry_idx").on(t.tokenExpiresAt),
   }),
 );
 

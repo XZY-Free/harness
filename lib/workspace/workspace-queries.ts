@@ -19,6 +19,7 @@
  */
 import { createHash } from "node:crypto";
 import { type DbOrTx, db } from "@/lib/db/client";
+import { device } from "@/lib/persistence/schema/device";
 import {
   WORKSPACE_BINDING_TYPES,
   type Workspace,
@@ -27,8 +28,8 @@ import {
   type WorkspaceAttachmentUse,
   type WorkspaceBinding,
   type WorkspaceBindingInsert,
-  type WorkspaceBindingState,
   type WorkspaceBindingType,
+  type WorkspaceContinuityMode,
   type WorkspaceInsert,
   type WorkspaceKind,
   type WorkspaceLifecycleState,
@@ -37,7 +38,7 @@ import {
   workspaceAttachmentUse,
   workspaceBinding,
 } from "@/lib/persistence/schema/workspace";
-import { and, eq, isNotNull, lt, ne } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt, ne } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
@@ -239,54 +240,153 @@ export async function archiveWorkspace(
 // ─── WorkspaceBinding CRUD ─────────────────────────────────
 
 export interface CreateWorkspaceBindingInput {
+  /**
+   * 稳定身份（可选）。
+   *
+   * 提供时表示「该 Binding 的身份由调用方派生、可重复解析」：插入走幂等语义
+   * （重复插入不报错，回读已存在行）。用于语义完全由租户级事实决定的退化契约，
+   * 使重复/并发解析落到同一行，而不是每次铸造一条新记录。
+   */
+  id?: string;
   tenantId: string;
-  workspaceId: string;
-  bindingType: WorkspaceBindingType;
-  deviceId?: string;
-  environmentDefinitionId?: string;
-  locationRef: string;
-  locationFingerprint?: string;
+  workspaceId?: string | null;
+  bindingType?: WorkspaceBindingType | null;
+  continuityMode: WorkspaceContinuityMode;
+  deviceId?: string | null;
+  locationRef?: string | null;
+  storageScopeDigest?: string | null;
+  backendKind?: string | null;
+  hostIdentity?: string | null;
+  storageIdentity?: string | null;
+  accessMode?: string | null;
+  filesystemSemantics?: unknown;
+  checkpointPolicy?: unknown;
+  contractDigest: string;
+  createdBy: string;
 }
 
 export async function createWorkspaceBinding(
   input: CreateWorkspaceBindingInput,
 ): Promise<WorkspaceBinding> {
   if (!input.tenantId) throw new WorkspaceValidationError("tenantId 不能为空");
-  if (!isWorkspaceBindingType(input.bindingType)) {
+  if (input.bindingType && !isWorkspaceBindingType(input.bindingType)) {
     throw new WorkspaceValidationError(`非法 bindingType: ${input.bindingType}`);
   }
-  if (!input.locationRef) throw new WorkspaceValidationError("locationRef 不能为空");
+
+  const isNoPlatformWorkspace = input.continuityMode === "NO_PLATFORM_WORKSPACE";
+  if (isNoPlatformWorkspace) {
+    if (
+      input.workspaceId ||
+      input.bindingType ||
+      input.deviceId ||
+      input.locationRef ||
+      input.storageScopeDigest ||
+      input.backendKind ||
+      input.hostIdentity ||
+      input.storageIdentity ||
+      input.accessMode ||
+      input.checkpointPolicy
+    ) {
+      throw new WorkspaceValidationError("NO_PLATFORM_WORKSPACE 不得携带平台资源定位");
+    }
+  } else if (
+    !input.workspaceId ||
+    !input.bindingType ||
+    !input.locationRef ||
+    !input.backendKind ||
+    !input.storageIdentity ||
+    !input.accessMode
+  ) {
+    throw new WorkspaceValidationError(
+      "平台 WorkspaceBinding 必须提供 workspaceId、bindingType、locationRef、backendKind、storageIdentity 和 accessMode",
+    );
+  }
+
+  if (input.accessMode && input.accessMode !== "read" && input.accessMode !== "read_write") {
+    throw new WorkspaceValidationError(`非法 WorkspaceBinding accessMode: ${input.accessMode}`);
+  }
+  if (input.continuityMode === "HOST_AFFINE" && !input.hostIdentity) {
+    throw new WorkspaceValidationError("HOST_AFFINE WorkspaceBinding 必须提供 hostIdentity");
+  }
+  if (input.continuityMode === "CHECKPOINT_RESTORABLE" && !input.checkpointPolicy) {
+    throw new WorkspaceValidationError(
+      "CHECKPOINT_RESTORABLE WorkspaceBinding 必须提供 checkpointPolicy",
+    );
+  }
+  if (input.continuityMode !== "CHECKPOINT_RESTORABLE" && input.checkpointPolicy) {
+    throw new WorkspaceValidationError(
+      "非 CHECKPOINT_RESTORABLE WorkspaceBinding 不得携带 checkpointPolicy",
+    );
+  }
 
   // Desktop binding 必须同时有 deviceId 和 locationRef。
-  if (input.bindingType === "desktop") {
+  if (input.continuityMode === "HOST_AFFINE") {
     if (!input.deviceId) {
-      throw new WorkspaceValidationError("Desktop binding 必须同时提供 deviceId");
+      throw new WorkspaceValidationError("HOST_AFFINE WorkspaceBinding 必须同时提供 deviceId");
     }
   } else {
     // Cloud/Remote/Sandbox 不允许有 deviceId（避免误绑定具体设备）。
     if (input.deviceId) {
-      throw new WorkspaceValidationError(
-        `${input.bindingType} binding 不允许设置 deviceId（仅 desktop 允许）`,
-      );
+      throw new WorkspaceValidationError(`${input.continuityMode} binding 不允许设置 deviceId`);
     }
   }
 
   // 校验 Workspace 存在且同租户。
-  const ws = await getWorkspaceById(input.tenantId, input.workspaceId);
-  if (!ws) throw new WorkspaceNotFoundError(`Workspace ${input.workspaceId} 不存在`);
-  if (ws.lifecycleState === "deleted") {
-    throw new WorkspaceValidationError("已删除的 Workspace 不能添加 binding");
+  const workspaceId = input.workspaceId;
+  if (workspaceId) {
+    const ws = await getWorkspaceById(input.tenantId, workspaceId);
+    if (!ws) throw new WorkspaceNotFoundError(`Workspace ${workspaceId} 不存在`);
+    if (ws.lifecycleState === "deleted") {
+      throw new WorkspaceValidationError("已删除的 Workspace 不能添加 binding");
+    }
   }
 
   const insert: WorkspaceBindingInsert = {
+    ...(input.id ? { id: input.id } : {}),
     tenantId: input.tenantId,
-    workspaceId: input.workspaceId,
-    bindingType: input.bindingType,
+    workspaceId: input.workspaceId ?? null,
+    bindingType: input.bindingType ?? null,
+    continuityMode: input.continuityMode,
     deviceId: input.deviceId ?? null,
-    environmentDefinitionId: input.environmentDefinitionId ?? null,
-    locationRef: input.locationRef,
-    locationFingerprint: input.locationFingerprint ?? computeLocationFingerprint(input.locationRef),
+    locationRef: input.locationRef ?? null,
+    storageScopeDigest:
+      input.storageScopeDigest ??
+      (input.locationRef ? computeLocationFingerprint(input.locationRef) : null),
+    backendKind: input.backendKind ?? null,
+    hostIdentity: input.hostIdentity ?? null,
+    storageIdentity: input.storageIdentity ?? null,
+    accessMode: input.accessMode ?? null,
+    filesystemSemantics: input.filesystemSemantics ?? {
+      kind: "unknown",
+      caseSensitive: true,
+      symlinks: true,
+      permissions: true,
+      hardlinks: false,
+      specialFiles: false,
+      xattrsAcl: false,
+      mtime: "preserved",
+    },
+    checkpointPolicy: input.checkpointPolicy ?? null,
+    contractDigest: input.contractDigest,
+    createdBy: input.createdBy,
   };
+
+  if (input.id) {
+    // 稳定身份：并发/重复解析必须落到同一行。`ON DUPLICATE KEY UPDATE` 让后到者安静
+    // 落在已存在行上（把主键写成自身即无副作用），再用派生 id 回读 ——
+    // 结果是**与解析次数无关**的确定值，这正是退化契约需要的语义。
+    await db
+      .insert(workspaceBinding)
+      .values(insert)
+      .onDuplicateKeyUpdate({ set: { id: input.id } });
+    const [stabilized] = await db
+      .select()
+      .from(workspaceBinding)
+      .where(and(eq(workspaceBinding.tenantId, input.tenantId), eq(workspaceBinding.id, input.id)))
+      .limit(1);
+    if (!stabilized) throw new WorkspaceNotFoundError("WorkspaceBinding 幂等创建后回查失败");
+    return stabilized;
+  }
 
   await db.insert(workspaceBinding).values(insert);
   // 回查最新一条（没有唯一约束，按 createdAt desc）。
@@ -296,15 +396,74 @@ export async function createWorkspaceBinding(
     .where(
       and(
         eq(workspaceBinding.tenantId, input.tenantId),
-        eq(workspaceBinding.workspaceId, input.workspaceId),
-        eq(workspaceBinding.locationRef, input.locationRef),
-        eq(workspaceBinding.bindingType, input.bindingType),
+        input.workspaceId
+          ? eq(workspaceBinding.workspaceId, input.workspaceId)
+          : isNull(workspaceBinding.workspaceId),
+        input.locationRef
+          ? eq(workspaceBinding.locationRef, input.locationRef)
+          : isNull(workspaceBinding.locationRef),
+        eq(workspaceBinding.continuityMode, input.continuityMode),
       ),
     )
     .orderBy(workspaceBinding.createdAt)
     .limit(1);
   if (!row) throw new WorkspaceNotFoundError("WorkspaceBinding 创建后回查失败");
   return row;
+}
+
+/**
+ * 解析 Workspace **声明的正式当前合同**（`Workspace.defaultBindingId`）。
+ *
+ * 与桌面专用解析（`desktop-workspace-queries.resolveWorkspaceBindingId`）的区别：这里
+ * 不预设 Workspace 的 profile。声明了 Workspace 的执行必须携带它真实声明的合同
+ * （R01 §1「能力目录 / ExecutionBinding / 真正运行资源引用同一 Workspace 契约」），
+ * 因此 Desktop 与云端/远端/Sandbox 一律按 `defaultBindingId` 解析 —— 只有
+ * Desktop 解析器的入口会让云端合同**永远解析不出**，从而被静默降级成
+ * NO_PLATFORM_WORKSPACE 合同（那正是 R01 §1 要删除的降级）。
+ *
+ * `HOST_AFFINE`（桌面个人目录）额外要求绑定设备仍可用：R07 §4 只允许同持久 Host，
+ * 设备撤销即该合同当前不可执行 —— 判定为「解析不出」，由调用方 fail closed
+ * （MANAGED 执行）或降级 Workspace 能力（无平台环境的执行），而不是把不可写目录
+ * 当成本机可写目录。
+ */
+export async function resolveDeclaredWorkspaceBinding(
+  tenantId: string,
+  workspaceId: string,
+  ownerUserId: string,
+): Promise<WorkspaceBinding | null> {
+  const [row] = await db
+    .select({ binding: workspaceBinding, deviceState: device.deviceState })
+    .from(workspace)
+    .innerJoin(
+      workspaceBinding,
+      and(
+        eq(workspaceBinding.id, workspace.defaultBindingId),
+        eq(workspaceBinding.workspaceId, workspace.id),
+        eq(workspaceBinding.tenantId, workspace.tenantId),
+      ),
+    )
+    .leftJoin(
+      device,
+      and(eq(device.id, workspaceBinding.deviceId), eq(device.tenantId, workspaceBinding.tenantId)),
+    )
+    .where(
+      and(
+        eq(workspace.tenantId, tenantId),
+        eq(workspace.id, workspaceId),
+        eq(workspace.ownerUserId, ownerUserId),
+        eq(workspace.lifecycleState, "active"),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  const binding = row.binding;
+  if (binding.continuityMode === "HOST_AFFINE") {
+    if (!binding.deviceId || row.deviceState !== "active") return null;
+    return binding;
+  }
+  // 云端/远端/Sandbox 合同不允许携带设备（创建时即被拒绝），携带即为不可信事实。
+  if (binding.deviceId) return null;
+  return binding;
 }
 
 export async function getWorkspaceBindingById(
@@ -323,7 +482,7 @@ export async function listWorkspaceBindings(
   tenantId: string,
   workspaceId: string,
   options?: {
-    bindingState?: WorkspaceBindingState;
+    continuityMode?: WorkspaceContinuityMode;
     bindingType?: WorkspaceBindingType;
     limit?: number;
   },
@@ -334,12 +493,8 @@ export async function listWorkspaceBindings(
     eq(workspaceBinding.workspaceId, workspaceId),
   ];
 
-  if (options?.bindingState) {
-    conditions.push(eq(workspaceBinding.bindingState, options.bindingState));
-  } else {
-    // 默认排除 revoked。
-    conditions.push(ne(workspaceBinding.bindingState, "revoked"));
-  }
+  if (options?.continuityMode)
+    conditions.push(eq(workspaceBinding.continuityMode, options.continuityMode));
   if (options?.bindingType) {
     conditions.push(eq(workspaceBinding.bindingType, options.bindingType));
   }
@@ -351,38 +506,9 @@ export async function listWorkspaceBindings(
     .limit(limit);
 }
 
-export async function updateWorkspaceBindingState(
-  tenantId: string,
-  id: string,
-  newState: WorkspaceBindingState,
-  expectedVersionNo: string,
-): Promise<WorkspaceBinding> {
-  const current = await getWorkspaceBindingById(tenantId, id);
-  if (!current) throw new WorkspaceNotFoundError(`WorkspaceBinding ${id} 不存在`);
-  if (current.versionNo !== expectedVersionNo) {
-    throw new WorkspaceVersionConflictError(
-      "WorkspaceBinding 版本号不匹配",
-      expectedVersionNo,
-      current.versionNo,
-    );
-  }
-  if (current.bindingState === "revoked" && newState !== "revoked") {
-    throw new WorkspaceValidationError("已撤销的 binding 不能恢复");
-  }
-
-  await db
-    .update(workspaceBinding)
-    .set({
-      bindingState: newState,
-      lastVerifiedAt: newState === "active" ? new Date() : current.lastVerifiedAt,
-      updatedAt: new Date(),
-      versionNo: crypto.randomUUID(),
-    })
-    .where(and(eq(workspaceBinding.tenantId, tenantId), eq(workspaceBinding.id, id)));
-
-  const updated = await getWorkspaceBindingById(tenantId, id);
-  if (!updated) throw new WorkspaceNotFoundError("WorkspaceBinding 更新后回查失败");
-  return updated;
+/** Continuity contract is immutable; lifecycle is represented by the owning Workspace. */
+export async function updateWorkspaceBindingState(): Promise<never> {
+  throw new WorkspaceValidationError("WorkspaceBinding 是不可变 Continuity Contract，不能更新状态");
 }
 
 // ─── WorkspaceAttachment CRUD ──────────────────────────────
@@ -480,11 +606,6 @@ export async function createWorkspaceAttachment(
   const binding = await getWorkspaceBindingById(input.tenantId, input.workspaceBindingId);
   if (!binding) {
     throw new WorkspaceNotFoundError(`WorkspaceBinding ${input.workspaceBindingId} 不存在`);
-  }
-  if (binding.bindingState !== "active") {
-    throw new WorkspaceValidationError(
-      `WorkspaceBinding 状态非 active（当前 ${binding.bindingState}），不能挂载 Attachment`,
-    );
   }
 
   const insert: WorkspaceAttachmentInsert = {

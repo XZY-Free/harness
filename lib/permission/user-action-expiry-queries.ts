@@ -6,6 +6,7 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { updateInvocationState } from "@/lib/executions/persistence/invocation-store";
 import { classifyUserActionExpiry } from "@/lib/permission/user-action-expiry-policy";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
@@ -15,7 +16,6 @@ import {
   type UserActionRequest,
   userActionRequestTable,
 } from "@/lib/persistence/schema/user-action-request";
-import { updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { and, asc, eq, isNotNull, lte } from "drizzle-orm";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -106,15 +106,25 @@ async function expireLockedUserActionRequest(
     return { expired: false, request, reason: "not_due" };
   }
 
-  // Thread is the event-stream lock. Invocation/Turn and the child authority
-  // are all closed before the UAR transition is committed.
-  const [thread] = await tx
+  // R04 §2「固定锁图」：执行根与必需子执行事实 **先于** 产品根：
+  // `Invocation → … → 必需子执行事实（AgentCall）→ Thread/Turn/Item 映射`。
+  //
+  // 旧顺序是「Thread → AgentCall → Invocation → Turn」：Thread 先于 Invocation，
+  // 而 Runtime 路径是「锁 I/O → 写 Thread 事件流」（`allocateEventSequences` 对 Thread 行
+  // 取 X 锁），两条真实路径互等即构成死锁环。这里把 Invocation 与 AgentCall 全部提前，
+  // Thread/Turn/Item 顺延到其后再锁。
+  const [invocation] = await tx
     .select()
-    .from(threadTable)
-    .where(and(eq(threadTable.tenantId, request.tenantId), eq(threadTable.id, request.threadId)))
+    .from(invocationTable)
+    .where(
+      and(
+        eq(invocationTable.tenantId, request.tenantId),
+        eq(invocationTable.id, request.invocationId),
+      ),
+    )
     .for("update")
     .limit(1);
-  if (!thread) throw new Error(`Thread 不存在或跨租户不可见: ${request.threadId}`);
+  if (!invocation) throw new Error(`Invocation 不存在或跨租户不可见: ${request.invocationId}`);
 
   const policy = classifyUserActionExpiry(request.requestType, request.purpose);
   const prompt = asRecord(request.promptJson);
@@ -148,18 +158,15 @@ async function expireLockedUserActionRequest(
     }
   }
 
-  const [invocation] = await tx
+  // Thread is the event-stream lock. Turn and the child authority are closed before the
+  // UAR transition is committed.
+  const [thread] = await tx
     .select()
-    .from(invocationTable)
-    .where(
-      and(
-        eq(invocationTable.tenantId, request.tenantId),
-        eq(invocationTable.id, request.invocationId),
-      ),
-    )
+    .from(threadTable)
+    .where(and(eq(threadTable.tenantId, request.tenantId), eq(threadTable.id, request.threadId)))
     .for("update")
     .limit(1);
-  if (!invocation) throw new Error(`Invocation 不存在或跨租户不可见: ${request.invocationId}`);
+  if (!thread) throw new Error(`Thread 不存在或跨租户不可见: ${request.threadId}`);
 
   const [turn] = await tx
     .select()

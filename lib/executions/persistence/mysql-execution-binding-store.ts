@@ -44,6 +44,7 @@ import {
 import { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/permission";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
+import { workspaceBinding } from "@/lib/persistence/schema/workspace";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import {
   publicationRecord,
@@ -79,115 +80,153 @@ export const EXECUTION_BINDING_AUTHORITY_LOCK_ORDER = [
   "RouteEligibilityProjection",
 ] as const;
 
+/**
+ * R01 §2：Binding 唯一创建 Authority 的**事务内**入口。
+ *
+ * 需要把 Binding 创建与别的根事实（如 Job 根锁）放进同一个事务的调用方，必须显式传入
+ * 自己已持有的事务 —— 不给 `db` 默认值，避免"看起来在事务里、实际另开一条连接"的假象。
+ * Thread 与 Job 走的都是这一个流程（资格校验 + 逐条行级锁 + TOCTOU 复验 + Insert）。
+ */
+export function createExecutionBindingStoreInTransaction(tx: Transaction): ExecutionBindingStore {
+  return { create: (input) => createExecutionBindingInTransaction(tx, input) };
+}
+
+/**
+ * Binding 唯一创建 Authority 的主体：资格校验 + 锁定证据复验 + Insert 全在同一事务内。
+ */
+export async function createExecutionBindingInTransaction(
+  tx: Transaction,
+  input: StoreExecutionBindingInput,
+): Promise<ExecutionBinding> {
+  // 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
+  const [invocation] = await tx
+    .select({ id: invocationTable.id })
+    .from(invocationTable)
+    .where(
+      and(eq(invocationTable.id, input.invocationId), eq(invocationTable.tenantId, input.tenantId)),
+    )
+    .limit(1)
+    .for("update");
+  if (!invocation) throw evidenceError("Invocation 不存在或租户不匹配");
+
+  const [existing] = await tx
+    .select({ id: executionBindingTable.invocationId })
+    .from(executionBindingTable)
+    .where(eq(executionBindingTable.invocationId, input.invocationId))
+    .limit(1);
+  if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
+
+  // ENV-11：调度器会为无平台环境选择 NO_PLATFORM_WORKSPACE，但共享的 Binding Authority
+  // 也必须拒绝直接提交的混合候选。WorkspaceBinding 是不可变合同，事务内按同租户读取即可。
+  const [workspace] = await tx
+    .select({ continuityMode: workspaceBinding.continuityMode })
+    .from(workspaceBinding)
+    .where(
+      and(
+        eq(workspaceBinding.tenantId, input.tenantId),
+        eq(workspaceBinding.id, input.workspaceBindingId),
+      ),
+    )
+    .limit(1);
+  if (!workspace) throw evidenceError("WorkspaceBindingMissing");
+  if (
+    input.environmentMode === "NO_PLATFORM_ENVIRONMENT" &&
+    workspace.continuityMode !== "NO_PLATFORM_WORKSPACE"
+  ) {
+    throw evidenceError("EnvironmentWorkspaceMismatch");
+  }
+
+  // 2. /: 统一资格校验（tx 必须传入，复用 Store 事务）
+  const evidence = input.controlPlaneEvidence;
+  const eligibility = await validateBindingEligibility(tx, {
+    tenantId: input.tenantId,
+    routeId: input.deploymentRouteId,
+    routeRevisionId: evidence.routeRevisionId,
+    routeActivationId: evidence.routeActivationId,
+    runtimeRevisionId: input.runtimeRevisionId,
+    policyRevisionId: input.policyRevisionId,
+    projectionVersionNo: input.projectionVersionNo,
+    frozenEvidence: {
+      runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+      runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+      conformanceRunId: evidence.conformanceRunId,
+    },
+  });
+  if (!eligibility.valid) {
+    throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
+  }
+
+  // 3. : Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
+  const revisions = await lockAndVerifyRoute(tx, input);
+
+  // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
+  // Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
+  const capabilityManifestDigest = computeCapabilityManifestDigest({
+    runtimeRevisionId: revisions.runtimeRevision.id,
+    runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
+  });
+  if (capabilityManifestDigest !== input.controlPlaneEvidence.capabilityManifestDigest) {
+    throw evidenceError("Capability Manifest Digest 已变化");
+  }
+
+  // 5. Insert
+  await tx.insert(executionBindingTable).values({
+    invocationId: input.invocationId,
+    tenantId: input.tenantId,
+    runtimeRevisionId: input.runtimeRevisionId,
+    deploymentRouteId: input.deploymentRouteId,
+    modelProvider: input.modelProvider,
+    modelId: input.modelId,
+    modelRevisionRef: input.modelRevisionRef,
+    workspaceBindingId: input.workspaceBindingId,
+    policyRevisionId: input.policyRevisionId,
+    policyRulesDigest: input.policyRulesDigest,
+    governanceConfigRevisionId: input.governanceConfigRevisionId,
+    governanceConfigDigest: input.governanceConfigDigest,
+    routeRevisionId: evidence.routeRevisionId,
+    routeActivationId: evidence.routeActivationId,
+    routeContentDigest: evidence.routeContentDigest,
+    runtimeArtifactId: evidence.runtimeArtifactId,
+    runtimeArtifactDigest: evidence.runtimeArtifactDigest,
+    runtimeEvidenceKind: evidence.runtimeEvidenceKind,
+    runtimeConfigDigest: evidence.runtimeConfigDigest,
+    runtimeTargetDigest: evidence.runtimeTargetDigest,
+    capabilityManifestDigest: evidence.capabilityManifestDigest,
+    runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+    runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+    conformanceRunId: evidence.conformanceRunId,
+    resolutionInputDigest: evidence.resolutionInputDigest,
+    projectionVersionNo: input.projectionVersionNo,
+    environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
+    capabilityCatalogJson: input.capabilityCatalogJson,
+    capabilityCatalogDigest: input.capabilityCatalogDigest,
+    capabilityCatalogVersion: input.capabilityCatalogVersion,
+    capabilityCatalogSourceRefs: input.capabilityCatalogSourceRefs,
+    capabilityCatalogCreatedAt: input.capabilityCatalogCreatedAt,
+    principalType: input.principalType,
+    principalId: input.principalId,
+    principalSource: input.principalSource,
+    principalFrozenAt: input.principalFrozenAt,
+    environmentMode: input.environmentMode,
+    configHash: input.configHash,
+    // T33：只落引用列；summaryHash/sourceRangesHash 由 configHash 覆盖并在
+    // 每次 ContextHandle 发放时重新核验，不额外存第二份摘要。
+    initialContextCheckpointId: input.initialContextCompression?.checkpointId ?? null,
+    boundAt: input.boundAt,
+  });
+
+  const [created] = await tx
+    .select()
+    .from(executionBindingTable)
+    .where(eq(executionBindingTable.invocationId, input.invocationId))
+    .limit(1);
+  if (!created) throw new Error("ExecutionBinding 插入后无法回读");
+  return toExecutionBinding(created);
+}
+
+/** 默认入口：自持事务。Thread 调度等不需要与别的根事实同事务的调用方使用。 */
 export const mysqlExecutionBindingStore: ExecutionBindingStore = {
-  create: (input) =>
-    db.transaction(async (tx) => {
-      // 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
-      const [invocation] = await tx
-        .select({ id: invocationTable.id })
-        .from(invocationTable)
-        .where(
-          and(
-            eq(invocationTable.id, input.invocationId),
-            eq(invocationTable.tenantId, input.tenantId),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!invocation) throw evidenceError("Invocation 不存在或租户不匹配");
-
-      const [existing] = await tx
-        .select({ id: executionBindingTable.invocationId })
-        .from(executionBindingTable)
-        .where(eq(executionBindingTable.invocationId, input.invocationId))
-        .limit(1);
-      if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
-
-      // 2. /: 统一资格校验（tx 必须传入，复用 Store 事务）
-      const evidence = input.controlPlaneEvidence;
-      const eligibility = await validateBindingEligibility(tx, {
-        tenantId: input.tenantId,
-        routeId: input.deploymentRouteId,
-        routeRevisionId: evidence.routeRevisionId,
-        routeActivationId: evidence.routeActivationId,
-        runtimeRevisionId: input.runtimeRevisionId,
-        policyRevisionId: input.policyRevisionId,
-        projectionVersionNo: input.projectionVersionNo,
-        frozenEvidence: {
-          runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-          runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
-          conformanceRunId: evidence.conformanceRunId,
-        },
-      });
-      if (!eligibility.valid) {
-        throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
-      }
-
-      // 3. : Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
-      const revisions = await lockAndVerifyRoute(tx, input);
-
-      // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
-      // Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
-      const capabilityManifestDigest = computeCapabilityManifestDigest({
-        runtimeRevisionId: revisions.runtimeRevision.id,
-        runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
-      });
-      if (capabilityManifestDigest !== input.controlPlaneEvidence.capabilityManifestDigest) {
-        throw evidenceError("Capability Manifest Digest 已变化");
-      }
-
-      // 5. Insert
-      await tx.insert(executionBindingTable).values({
-        invocationId: input.invocationId,
-        tenantId: input.tenantId,
-        runtimeRevisionId: input.runtimeRevisionId,
-        deploymentRouteId: input.deploymentRouteId,
-        modelProvider: input.modelProvider,
-        modelId: input.modelId,
-        modelRevisionRef: input.modelRevisionRef,
-        initialEnvironmentLeaseId: input.initialEnvironmentLeaseId,
-        workspaceBindingId: input.workspaceBindingId,
-        policyRevisionId: input.policyRevisionId,
-        policyRulesDigest: input.policyRulesDigest,
-        governanceConfigRevisionId: input.governanceConfigRevisionId,
-        governanceConfigDigest: input.governanceConfigDigest,
-        contextCheckpointId: input.contextCheckpointId,
-        routeRevisionId: evidence.routeRevisionId,
-        routeActivationId: evidence.routeActivationId,
-        routeContentDigest: evidence.routeContentDigest,
-        runtimeArtifactId: evidence.runtimeArtifactId,
-        runtimeArtifactDigest: evidence.runtimeArtifactDigest,
-        runtimeEvidenceKind: evidence.runtimeEvidenceKind,
-        runtimeConfigDigest: evidence.runtimeConfigDigest,
-        runtimeTargetDigest: evidence.runtimeTargetDigest,
-        capabilityManifestDigest: evidence.capabilityManifestDigest,
-        runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
-        runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-        conformanceRunId: evidence.conformanceRunId,
-        resolutionInputDigest: evidence.resolutionInputDigest,
-        projectionVersionNo: input.projectionVersionNo,
-        environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
-        capabilityCatalogJson: input.capabilityCatalogJson,
-        capabilityCatalogDigest: input.capabilityCatalogDigest,
-        capabilityCatalogVersion: input.capabilityCatalogVersion,
-        capabilityCatalogSourceRefs: input.capabilityCatalogSourceRefs,
-        capabilityCatalogCreatedAt: input.capabilityCatalogCreatedAt,
-        executionSubjectType: input.executionSubjectType,
-        executionSubjectId: input.executionSubjectId,
-        executionSubjectSource: input.executionSubjectSource,
-        executionSubjectFrozenAt: input.executionSubjectFrozenAt,
-        configHash: input.configHash,
-        boundAt: input.boundAt,
-      });
-
-      const [created] = await tx
-        .select()
-        .from(executionBindingTable)
-        .where(eq(executionBindingTable.invocationId, input.invocationId))
-        .limit(1);
-      if (!created) throw new Error("ExecutionBinding 插入后无法回读");
-      return toExecutionBinding(created);
-    }),
+  create: (input) => db.transaction((tx) => createExecutionBindingInTransaction(tx, input)),
 };
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -798,7 +837,7 @@ async function lockAndVerifyConformance(
       runtimeRevisionId: runtimeConformanceRun.runtimeRevisionId,
       runtimeTargetDigest: runtimeConformanceRun.runtimeTargetDigest,
       runtimeConfigDigest: runtimeConformanceRun.runtimeConfigDigest,
-      protocolContractRevision: runtimeConformanceRun.protocolContractRevision,
+      protocolContractDigest: runtimeConformanceRun.protocolContractDigest,
       suiteRevision: runtimeConformanceRun.suiteRevision,
       overallResult: runtimeConformanceRun.overallResult,
       conformanceFormat: runtimeConformanceRun.conformanceFormat,
@@ -822,7 +861,7 @@ async function lockAndVerifyConformance(
     .for("update");
 
   validateFrozenConformanceAuthority({
-    run: run ?? null,
+    run: (run as FrozenConformanceRun | undefined) ?? null,
     caseResults,
     expected: {
       conformanceRunId: evidence.conformanceRunId,
@@ -830,11 +869,11 @@ async function lockAndVerifyConformance(
       runtimeRevisionId: input.runtimeRevisionId,
       runtimeTargetDigest: runtimeRevision.runtimeTargetDigest,
       runtimeConfigDigest: evidence.runtimeConfigDigest,
-      protocolContractRevision: runtimeRevision.protocolContractRevision,
+      protocolContractDigest: runtimeRevision.protocolContractDigest,
     },
   });
   if (!run) throw evidenceError("冻结 ConformanceRun 不存在");
-  return run;
+  return run as FrozenConformanceRun;
 }
 
 type FrozenConformanceRun = {
@@ -843,7 +882,7 @@ type FrozenConformanceRun = {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
   suiteRevision: string;
   overallResult: "passed" | "failed" | "error" | "cancelled";
   conformanceFormat: "standard_dsse";
@@ -859,7 +898,7 @@ type FrozenConformanceExpectation = {
   runtimeRevisionId: string;
   runtimeTargetDigest: string;
   runtimeConfigDigest: string;
-  protocolContractRevision: string;
+  protocolContractDigest: string;
 };
 
 export function validateFrozenConformanceAuthority(input: {
@@ -890,7 +929,7 @@ export function validateFrozenConformanceAuthority(input: {
       overallResult: run.overallResult,
       runtimeTargetDigest: run.runtimeTargetDigest,
       runtimeConfigDigest: run.runtimeConfigDigest,
-      protocolContractRevision: run.protocolContractRevision,
+      protocolContractDigest: run.protocolContractDigest,
       suiteRevision: run.suiteRevision,
       conformanceFormat: run.conformanceFormat,
     },
@@ -900,7 +939,7 @@ export function validateFrozenConformanceAuthority(input: {
       runtimeRevisionId: expected.runtimeRevisionId,
       runtimeTargetDigest: expected.runtimeTargetDigest,
       runtimeConfigDigest: expected.runtimeConfigDigest,
-      protocolContractRevision: expected.protocolContractRevision,
+      protocolContractDigest: expected.protocolContractDigest,
       allowedFormats: ["standard_dsse"],
     },
   });
@@ -1151,8 +1190,8 @@ export function toExecutionBinding(
     !!row.capabilityCatalogVersion &&
     Array.isArray(row.capabilityCatalogSourceRefs) &&
     !!row.capabilityCatalogCreatedAt &&
-    !!row.executionSubjectId &&
-    !!row.executionSubjectFrozenAt &&
+    !!row.principalId &&
+    !!row.principalFrozenAt &&
     Number.isInteger(row.projectionVersionNo) &&
     row.projectionVersionNo >= 0;
   if (!runtimeFieldsComplete) {
@@ -1166,23 +1205,22 @@ export function toExecutionBinding(
     modelProvider: row.modelProvider,
     modelId: row.modelId,
     modelRevisionRef: row.modelRevisionRef,
-    initialEnvironmentLeaseId: row.initialEnvironmentLeaseId,
     workspaceBindingId: row.workspaceBindingId,
     policyRevisionId: row.policyRevisionId,
     policyRulesDigest: row.policyRulesDigest,
     governanceConfigRevisionId: row.governanceConfigRevisionId,
     governanceConfigDigest: row.governanceConfigDigest,
-    contextCheckpointId: row.contextCheckpointId,
     environmentDefinitionRevisionId: row.environmentDefinitionRevisionId,
     capabilityCatalogJson: row.capabilityCatalogJson,
     capabilityCatalogDigest: row.capabilityCatalogDigest,
     capabilityCatalogVersion: row.capabilityCatalogVersion,
     capabilityCatalogSourceRefs: [...row.capabilityCatalogSourceRefs],
     capabilityCatalogCreatedAt: row.capabilityCatalogCreatedAt,
-    executionSubjectType: row.executionSubjectType,
-    executionSubjectId: row.executionSubjectId,
-    executionSubjectSource: row.executionSubjectSource,
-    executionSubjectFrozenAt: row.executionSubjectFrozenAt,
+    principalType: row.principalType as "user" | "service",
+    principalId: row.principalId,
+    principalSource: row.principalSource as "authenticated_user" | "trusted_service",
+    principalFrozenAt: row.principalFrozenAt,
+    environmentMode: row.environmentMode as "MANAGED" | "NO_PLATFORM_ENVIRONMENT",
     routeRevisionId: row.routeRevisionId,
     routeActivationId: row.routeActivationId,
     routeContentDigest: row.routeContentDigest,
@@ -1190,7 +1228,7 @@ export function toExecutionBinding(
     runtimeArtifactDigest: row.runtimeArtifactDigest,
     runtimeConfigDigest: row.runtimeConfigDigest,
     runtimeTargetDigest: row.runtimeTargetDigest,
-    runtimeEvidenceKind: row.runtimeEvidenceKind,
+    runtimeEvidenceKind: row.runtimeEvidenceKind as "hosted_artifact" | "external_endpoint",
     capabilityManifestDigest: row.capabilityManifestDigest,
     runtimeAttestationIds: [...row.runtimeAttestationIds],
     runtimePublicationRecordId: row.runtimePublicationRecordId,
@@ -1198,6 +1236,7 @@ export function toExecutionBinding(
     resolutionInputDigest: row.resolutionInputDigest,
     projectionVersionNo: row.projectionVersionNo,
     configHash: row.configHash,
+    initialContextCheckpointId: row.initialContextCheckpointId,
     boundAt: row.boundAt,
   };
 }

@@ -165,7 +165,7 @@ describe("AgentContractRegistrationPanel（合同文件导入）", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [input, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(String(input)).toBe("/admin/api/v1/agent-registrations");
+    expect(String(input)).toBe("/admin/api/agent-registrations");
     expect(new Headers(init.headers).get("idempotency-key")).toBeTruthy();
 
     // wire：恰为 protocol + contract；不得夹带 filename/path/raw_contract/contract_json。

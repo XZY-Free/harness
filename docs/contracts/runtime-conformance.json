@@ -1,9 +1,11 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "contract_kind": "runtime-publication-conformance",
   "required_cases": [
     {
       "id": "capability-manifest-contract",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["protocolVersion", "features", "limits"],
       "given": "a draft RuntimeRevision without any Route or ExecutionBinding",
       "when": "the Publication runner probes the candidate RuntimeAdapter",
       "expect": [
@@ -14,6 +16,8 @@
     },
     {
       "id": "dispatch-acknowledgement",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["response", "authorityMatches"],
       "given": "a draft RuntimeRevision and no business Invocation",
       "when": "startInvocation is invoked exactly once on the candidate adapter",
       "expect": [
@@ -26,6 +30,8 @@
     },
     {
       "id": "cancel-acknowledgement",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["response"],
       "given": "a candidate RuntimeRevision advertised as cancellable",
       "when": "handleCancel is invoked on the candidate adapter",
       "expect": [
@@ -36,6 +42,8 @@
     },
     {
       "id": "steer-capability-consistency",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["declared"],
       "given": "the adapter capability manifest advertises a steer feature",
       "when": "the Publication runner verifies steer",
       "expect": [
@@ -46,6 +54,8 @@
     },
     {
       "id": "resume-capability-consistency",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["declared"],
       "given": "the adapter capability manifest advertises a resume feature",
       "when": "the Publication runner verifies resume",
       "expect": [
@@ -56,14 +66,103 @@
     },
     {
       "id": "session-recovery-declaration",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["declared"],
       "given": "a candidate RuntimeRevision resumes a session",
       "when": "the Publication runner verifies session recovery declaration",
       "expect": [
-        "if features.filesystem_checkpoint is false, the adapter proves it does not advertise filesystem-level recovery",
-        "if features.filesystem_checkpoint is true, the adapter must also advertise features.resume=true",
-        "when filesystem_checkpoint=true, the runner performs a real resume probe carrying a checkpointRef",
-        "when filesystem_checkpoint=true, handleResume must return requires_redispatch=false (no redispatch needed)",
+        "if the workspace profile does not declare CHECKPOINT_RESTORABLE, the runner only verifies it is not advertised",
+        "if CHECKPOINT_RESTORABLE is declared, the runner performs a real resume probe carrying a checkpointRef",
+        "when CHECKPOINT_RESTORABLE is declared, handleResume must return accepted with non-empty remote refs",
         "otherwise the case is fail-closed (the adapter does not claim filesystem-level recovery it cannot provide)"
+      ]
+    },
+    {
+      "id": "heartbeat-semantics",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["call", "acceptedAt", "capabilitiesDigest", "expectedCapabilitiesDigest"],
+      "given": "a candidate RuntimeRevision declaring heartbeat=true",
+      "when": "the Publication runner performs a real startInvocation and inspects the acceptance receipt",
+      "expect": [
+        "features.heartbeat is declared true",
+        "the acknowledgement carries a real acceptedAt inside the [dispatch, ack] window, so the platform can derive a lease expiry and detect stop-after-expiry",
+        "the acknowledgement is bound to the published capability manifest digest computed from (runtimeRevisionId, frozen capability manifest) — the same comparison source used by runtime-start, runtime-resume, ingress-runtime-events and the in-process hosted runtime",
+        "a fixed or fabricated acceptedAt fails the case; platform-side lease renewal and stop-after-expiry are proven by platform integration conformance"
+      ]
+    },
+    {
+      "id": "durable-start-idempotency",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["call", "retryDigestStable", "conflictDigestDiffers"],
+      "given": "a candidate RuntimeRevision started twice with the same intent and once with changed content",
+      "when": "the Publication runner repeats startInvocation with the identical request and then with different inputs",
+      "expect": [
+        "the identical retry yields the same semanticRequestDigest, so the platform Idempotency-Key=start:{ownershipId} never false-conflicts",
+        "the identical retry yields the same remoteSessionRef/remoteExecutionRef, satisfying the protocol rule that a duplicate start returns the original refs",
+        "changed business content yields a different semanticRequestDigest, so a real conflict is detectable",
+        "platform-side intent freezing and StartIntentConflict are proven by platform integration conformance"
+      ]
+    },
+    {
+      "id": "started-event-before-ack",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["call", "transportAcceptanceOnly", "semanticRequestDigest", "retryDigestStable"],
+      "given": "a candidate RuntimeRevision whose execution.started callback may arrive before the HTTP acknowledgement",
+      "when": "the Publication runner inspects the acknowledgement shape and its correlation key",
+      "expect": [
+        "the acknowledgement contains only the protocol's transport-acceptance fields and never claims a run fact",
+        "the same start intent returns the same semanticRequestDigest, so an early callback is correlatable with the acknowledgement",
+        "platform-side Session pre-registration preceding any accepted callback is proven by platform integration conformance"
+      ]
+    },
+    {
+      "id": "exact-replay",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["call", "semanticRequestDigest", "capabilitiesDigest"],
+      "given": "a candidate RuntimeRevision replayed with the exact same start intent",
+      "when": "the Publication runner replays startInvocation with the identical request",
+      "expect": [
+        "the replay yields the same semanticRequestDigest as the original start",
+        "the replay yields the same capabilitiesDigest as the original start and equals the published capability manifest digest, so the original receipt never drifts",
+        "platform-side exact event receipt (eventId/sequence/payloadHash/Attempt/Ownership/Epoch) and rejection of new events from an old owner are proven by platform integration conformance"
+      ]
+    },
+    {
+      "id": "old-epoch-rejection",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["call", "outcome", "targetAuthorityEcho"],
+      "given": "a candidate RuntimeRevision receiving a control command carrying an older lease epoch",
+      "when": "handleSteer is invoked with a stale-generation AuthorityIdentity",
+      "expect": [
+        "the runtime either rejects the command by an authority decision (NotCurrentExecutor / OwnershipExpired / AttemptMismatch / RuntimeSessionMismatch)",
+        "or, if it accepts, the acknowledgement echoes exactly the same target generation and never re-targets the command to another generation",
+        "a rejection for any other reason (control service not wired, transport failure) is inconclusive and fails the case",
+        "platform-side generation fencing in requireCurrentExecutionAuthority is proven by platform integration conformance"
+      ]
+    },
+    {
+      "id": "workspace-profile",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["call", "declaredModes", "acceptedModes", "rejectedModes"],
+      "given": "a candidate RuntimeRevision declaring a workspace profile",
+      "when": "the Publication runner starts the adapter once per declared mode and once with an undeclared mode",
+      "expect": [
+        "every declared workspaceModes entry is accepted by a real startInvocation",
+        "a mode the runtime does not declare is rejected (fail closed), never silently accepted",
+        "a runtime can never pass by declaring all booleans true while accepting profiles it does not declare",
+        "platform-side WorkspaceBinding/Writer transaction and fence evidence is proven by platform integration conformance"
+      ]
+    },
+    {
+      "id": "filesystem-checkpoint",
+      "proven_by": "adapter-probe",
+      "receipt_keys": ["call", "declared", "declaredModes"],
+      "given": "a candidate RuntimeRevision that may or may not declare a checkpoint-restorable workspace",
+      "when": "the Publication runner checks the declared workspace profile and, only when declared, probes resume",
+      "expect": [
+        "when CHECKPOINT_RESTORABLE is not declared, the runner only verifies it is not advertised; the case passes without fabricating a resume call",
+        "when CHECKPOINT_RESTORABLE is declared, the runner performs a real handleResume carrying a checkpointRef and requires an accepted acknowledgement with non-empty remote refs",
+        "the specific snapshot behaviour is only required of a runtime that actually declares the capability"
       ]
     }
   ]

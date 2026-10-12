@@ -14,12 +14,18 @@ import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   computeCaseEvidenceDigest,
   computeEvidenceManifestDigest,
 } from "@/lib/runtime/domain/runtime-conformance-run";
-import { RuntimeArtifactAttestationRequiredError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
+import {
+  RuntimeArtifactAttestationRequiredError,
+  RuntimeConformanceRunInvalidError,
+} from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
 import type {
@@ -35,6 +41,7 @@ import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish
 import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import {
   buildDsseConformanceEnvelope,
+  buildTestConformanceCaseEvidence,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { seedVerifiedRuntimeAttestation } from "@/lib/runtime/test-support/seed-verified-runtime-attestation";
@@ -50,7 +57,10 @@ const RUNNER_IDENTITY = "ci/runtime-conformance";
 
 async function seedRuntimePublicationFixture(
   suffix = "",
-  options?: { evidenceKind?: "hosted_artifact" | "external_endpoint" },
+  options?: {
+    evidenceKind?: "hosted_artifact" | "external_endpoint";
+    failedHeartbeat?: boolean;
+  },
 ) {
   const evidenceKind = options?.evidenceKind ?? "hosted_artifact";
   const tenant = await ensureDefaultTenant();
@@ -71,7 +81,7 @@ async function seedRuntimePublicationFixture(
     tenantId: tenant.id,
     runtimeId: runtime.id,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: evidenceKind,
     endpointRef: "managed://runtime/publication",
     runtimeArtifactRef:
@@ -92,35 +102,40 @@ async function seedRuntimePublicationFixture(
     requestHash: "b".repeat(64),
   });
   const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
-    const evidence = { caseId, passed: true };
+    const heartbeatFailed = options?.failedHeartbeat && caseId === "heartbeat-semantics";
+    const evidence = buildTestConformanceCaseEvidence(
+      caseId,
+      heartbeatFailed ? { passed: false, declaredHeartbeat: false } : {},
+    );
     return {
       caseId,
-      passed: true,
-      reason: null,
+      passed: !heartbeatFailed,
+      reason: heartbeatFailed ? "heartbeat capability missing" : null,
       evidenceDigest: computeCaseEvidenceDigest(evidence),
       evidence,
     };
   });
+  const suiteRevision = PUBLICATION_CONFORMANCE_SUITE_REVISION;
   const report = {
     runId: randomUUID(),
     runtimeRevisionId: revision.id,
     runtimeTargetDigest: revision.runtimeTargetDigest,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-    protocolContractRevision: revision.protocolContractRevision,
-    suiteRevision: "runtime-conformance@1",
+    protocolContractDigest: revision.protocolContractDigest,
+    suiteRevision,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: "ci/runtime-conformance",
     testEnvironmentRevision: "isolated-mysql8@1",
     startedAt: "2026-08-02T01:00:00.000Z",
     completedAt: "2026-08-02T01:00:01.000Z",
-    overallResult: "passed" as const,
+    overallResult: options?.failedHeartbeat ? ("failed" as const) : ("passed" as const),
     evidenceManifestDigest: computeEvidenceManifestDigest({
-      suiteRevision: "runtime-conformance@1",
+      suiteRevision,
       testEnvironmentRevision: "isolated-mysql8@1",
       runtimeRevisionId: revision.id,
       runtimeTargetDigest: revision.runtimeTargetDigest,
       runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-      protocolContractRevision: revision.protocolContractRevision,
+      protocolContractDigest: revision.protocolContractDigest,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
       cases: caseResults.map((result) => ({
         caseId: result.caseId,
@@ -131,7 +146,7 @@ async function seedRuntimePublicationFixture(
     caseResults,
   };
   const dsseEnvelope = buildDsseConformanceEnvelope(report, RUNNER_KEY);
-  await createRecordRuntimeConformanceRun({
+  const recordRun = createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
     verifier: createDSSEConformanceVerifier({
       runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
@@ -154,6 +169,11 @@ async function seedRuntimePublicationFixture(
     requestId: `request-${report.runId}`,
     actor: { actorType: "system", actorId: "test-trusted-runner" },
   });
+  if (options?.failedHeartbeat) {
+    await expect(recordRun).rejects.toThrow("report_evidence_inconsistent");
+  } else {
+    await recordRun;
+  }
   let attestationId: string | null = null;
   if (evidenceKind === "hosted_artifact") {
     const attestation = await createRecordArtifactAttestation({
@@ -264,6 +284,27 @@ function publicationCommand(fixture: Awaited<ReturnType<typeof seedRuntimePublic
 }
 
 describe("RuntimeRevision publication application boundary", () => {
+  it("START-10: signed conformance with failed heartbeat cannot publish the revision", async () => {
+    const fixture = await seedRuntimePublicationFixture("-missing-heartbeat", {
+      failedHeartbeat: true,
+    });
+    const publish = createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore });
+    await expect(
+      publish({ ...publicationCommand(fixture), idempotency: undefined }),
+    ).rejects.toBeInstanceOf(RuntimeConformanceRunInvalidError);
+    expect((await getRuntimeRevisionById(fixture.revision.id))?.revisionState).toBe("draft");
+    expect(
+      (await getRuntimeById(fixture.tenantId, fixture.runtime.id))?.currentRevisionId,
+    ).toBeNull();
+    expect(
+      await getPublicationRecordBySubject({
+        tenantId: fixture.tenantId,
+        subjectType: "runtime_revision",
+        subjectRevisionId: fixture.revision.id,
+      }),
+    ).toBeNull();
+  });
+
   it("显式 Passed Run 发布在同一结果中写入PublicationRecord、Runtime指针、Audit与Outbox", async () => {
     const fixture = await seedRuntimePublicationFixture();
 

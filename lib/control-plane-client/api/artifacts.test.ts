@@ -14,7 +14,7 @@ describe("artifact api client", () => {
 
     await client.list({ artifact_type: "runtime_revision", revoked: false, limit: 20 });
     expect(fetcher.mock.calls[0]?.[0]).toBe(
-      "/admin/api/v1/artifact-attestations?artifact_type=runtime_revision&revoked=false&limit=20",
+      "/admin/api/artifact-attestations?artifact_type=runtime_revision&revoked=false&limit=20",
     );
 
     await client.verify(

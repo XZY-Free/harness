@@ -71,6 +71,30 @@ export function createAgentActionExecutor(
       );
     }
     await throwIfAgentActionCancelled(context.abortSignal);
+    if (!context.authority) {
+      throw new AgentActionExecutionError(
+        "NotCurrentExecutor",
+        "Agent action 缺少 Current Execution Authority",
+      );
+    }
+    if (!context.threadId || !context.turnId) {
+      // R06 §1：Agent 调用的附件归属、host action 投影与业务路由都建立在 Thread 事实
+      // 之上。无 Thread 的 Job 主体下必须**显式**返回"该能力不支持"，既不补假 Thread，
+      // 也不把 Agent 结果无声地投到不存在的 Thread。
+      await throwIfAgentActionCancelled(context.abortSignal);
+      return {
+        observation: {
+          observationType: "agent",
+          summary: "agent.call 需要 Thread 归属，当前执行主体没有 Thread",
+          sourceRefs: [],
+          data: {
+            actionId: action.actionId,
+            agentId: action.payload.agentId,
+            unsupported: "THREAD_REQUIRED",
+          },
+        },
+      };
+    }
 
     try {
       await assertAgentSubjectPermission(
@@ -139,6 +163,7 @@ export function createAgentActionExecutor(
         const created = await createAgentCall({
           tenantId: params.tenantId,
           parentInvocationId: context.invocationId,
+          authority: context.authority,
           agentId: action.payload.agentId,
           actionId: action.actionId,
           transportChannel: params.transportChannel,

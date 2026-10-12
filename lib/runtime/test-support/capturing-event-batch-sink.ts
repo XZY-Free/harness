@@ -8,23 +8,23 @@
  * 仅测试/测试支持使用；生产代码禁止引用。
  */
 import type { EventBatchSink } from "@/lib/runtime/adapters/hosted-adapter";
-import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import type { RuntimeEvent } from "@/lib/runtime/runtime-protocol";
 
 export interface CapturingEventBatchSink {
   sink: EventBatchSink;
   /** 累积接收到的全部真实候选事件。 */
-  events: RuntimeCandidateEvent[];
+  events: RuntimeEvent[];
   /** 单次 sink 调用记录（invocationId + producerSequenceStart）。 */
   calls: Array<{ invocationId: string; producerSequenceStart: number }>;
 }
 
 /** 创建进程内捕获型 EventBatchSink，接收并保留真实候选事件。 */
 export function createCapturingEventBatchSink(): CapturingEventBatchSink {
-  const events: RuntimeCandidateEvent[] = [];
+  const events: RuntimeEvent[] = [];
   const calls: Array<{ invocationId: string; producerSequenceStart: number }> = [];
-  const sink: EventBatchSink = async ({ invocationId, events: batch, producerSequenceStart }) => {
+  const sink: EventBatchSink = async ({ invocationId, events: batch }) => {
     events.push(...batch);
-    calls.push({ invocationId, producerSequenceStart });
+    calls.push({ invocationId, producerSequenceStart: Number(batch[0]?.producerSequence ?? 0) });
   };
   return { sink, events, calls };
 }

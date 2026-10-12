@@ -29,20 +29,19 @@ export function createPublicationApiClient(config: ApiClientConfig): Publication
   return {
     list: (subjectType, subjectRevisionId) =>
       request<PublicationListResponse>(
-        `/admin/api/v1/publications?${new URLSearchParams({
+        `/admin/api/publications?${new URLSearchParams({
           subject_type: subjectType,
           subject_revision_id: subjectRevisionId,
         })}`,
       ),
-    get: (recordId) => request<PublicationRecordDTO>(`/admin/api/v1/publications/${recordId}`),
+    get: (recordId) => request<PublicationRecordDTO>(`/admin/api/publications/${recordId}`),
     listWithdrawals: (subjectType, subjectRevisionId) =>
       request<WithdrawalListResponse>(
-        `/admin/api/v1/withdrawals?${new URLSearchParams({
+        `/admin/api/withdrawals?${new URLSearchParams({
           subject_type: subjectType,
           subject_revision_id: subjectRevisionId,
         })}`,
       ),
-    getWithdrawal: (recordId) =>
-      request<WithdrawalRecordDTO>(`/admin/api/v1/withdrawals/${recordId}`),
+    getWithdrawal: (recordId) => request<WithdrawalRecordDTO>(`/admin/api/withdrawals/${recordId}`),
   };
 }

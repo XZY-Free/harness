@@ -40,11 +40,16 @@ import {
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { db } from "@/lib/db/client";
+import { createAttempt } from "@/lib/executions/persistence/attempt-store";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { acquireExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import {
   type CreateExecutionBindingParams,
+  TEST_EXECUTION_BINDING_EVIDENCE,
   TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
   createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { markAttemptPreparedForTestInTransaction } from "@/lib/executions/test-support/preparation-fixtures";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { getUserIdentityById, upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
@@ -54,7 +59,7 @@ import {
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
-import { invocationTable } from "@/lib/persistence/schema/executions";
+import { executionOwnershipTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { credentialRefTable } from "@/lib/persistence/schema/tool";
 import {
   MAX_TRAFFIC_WEIGHT,
@@ -65,9 +70,16 @@ import type { RouteResolution } from "@/lib/routes/domain/route-resolution-polic
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
+import { protocolDigest } from "@/lib/runtime/runtime-protocol";
+import {
+  applyRuntimeSessionDispatchForTest,
+  createRuntimeSessionBindingForTest,
+  sourceIntentForFixture,
+} from "@/lib/runtime/test-support/session-write-fixtures";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { seedActionPermission } from "@/lib/test-support/seed-action-permission";
+import { createNoPlatformWorkspaceBinding } from "@/lib/workspace/workspace-binding-store";
 import { and, eq } from "drizzle-orm";
 
 /** sha256 指纹 helper（与 resolveOutboundRuntimeAuth 重算逻辑一致）。 */
@@ -266,8 +278,12 @@ export async function seedAgentCallExecutionScenario(options?: {
     displayName: identity.displayName,
   });
   const parentInvocationId = await seedInvocation(tenantId);
+  // 执行链（requireCurrentExecutionAuthority）要求 binding.workspaceBindingId 指向真实
+  // WorkspaceBinding 记录；使用无平台环境的测试工作区。
+  const executionWorkspace = await createNoPlatformWorkspaceBinding(tenantId, "agent-call-test");
   await createExecutionBinding({
     ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
+    workspaceBindingId: executionWorkspace.id,
     runtimeRevisionId: randomUUID(),
     deploymentRouteId: randomUUID(),
     modelProvider: "test",
@@ -292,18 +308,6 @@ export async function seedAgentCallExecutionScenario(options?: {
     pendingQueueVersionNo: 1,
     versionNo: 1,
   });
-
-  // 父 Invocation 置为 running（含 refs）——startAgentCall 期间父必须保持 running 不变。
-  await db
-    .update(invocationTable)
-    .set({
-      executionState: "running",
-      threadId,
-      turnId,
-      runtimeExecutionRef: `rt:${parentInvocationId}`,
-      startedAt: now,
-    })
-    .where(eq(invocationTable.id, parentInvocationId));
 
   // ─── 真实 Agent + published Revision + ContractSnapshot ───
   const agent = await createAgent({
@@ -387,6 +391,18 @@ export async function seedAgentCallExecutionScenario(options?: {
     versionNo: 1,
   });
 
+  // 父 Invocation 置为 running（含 refs）——startAgentCall 期间父必须保持 running 不变。
+  // 必须在 Turn 落库之后执行（Invocation.turnId 有真实 FK → Turn.id）。
+  await db
+    .update(invocationTable)
+    .set({
+      executionState: "running",
+      threadId,
+      turnId,
+      startedAt: now,
+    })
+    .where(eq(invocationTable.id, parentInvocationId));
+
   // ─── 正式 Agent Route → Activation → Projection → Resolver ───
   const routeSet = await createRouteSet({
     tenantId,
@@ -462,7 +478,7 @@ export async function seedAgentCallExecutionScenario(options?: {
         credentialRefId: binding.credentialRefId,
         networkZone: binding.networkZone,
         protocolType: binding.protocolType,
-        protocolContractRevision: binding.protocolContractRevision,
+        protocolContractDigest: binding.protocolContractDigest,
         policyRevisionId: binding.policyRevisionId,
         policyRulesDigest: binding.policyRulesDigest,
         governanceConfigRevisionId: binding.governanceConfigRevisionId,
@@ -630,4 +646,127 @@ export async function waitForCallTerminal(
     }
     await new Promise((r) => setTimeout(r, 50));
   }
+}
+
+/**
+ * 为已存在的 parent Invocation 构造真实 Current Execution Authority：
+ * ExecutionBinding（NO_PLATFORM_ENVIRONMENT + NO_PLATFORM_WORKSPACE，免环境/工作区围栏）
+ * → prepared InvocationAttempt → ExecutionOwnership → active RuntimeSessionBinding，
+ * 并把 Ownership 置为 executing、Invocation 置为 running。
+ * 供 canonical agent.call 执行器的 authorizeRuntimeAction 校验链使用。
+ */
+export async function acquireExecutionAuthorityForInvocation(input: {
+  tenantId: string;
+  invocationId: string;
+}): Promise<{
+  invocationId: string;
+  runtimeRevisionId: string;
+  attemptId: string;
+  ownershipId: string;
+  leaseEpoch: string;
+  sessionBindingId: string;
+}> {
+  // binding 若已由场景种子建立（真实用户主体），复用其 runtimeRevisionId；
+  // 否则自建一份测试绑定。两者只允许存在一份（invocation 1:1 不可变）。
+  const existingBinding = await getExecutionBindingByInvocation(input.tenantId, input.invocationId);
+  const runtimeRevisionId = existingBinding?.runtimeRevisionId ?? randomUUID();
+  if (!existingBinding) {
+    const workspace = await createNoPlatformWorkspaceBinding(input.tenantId, "agent-call-test");
+    await createExecutionBinding({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      runtimeRevisionId,
+      deploymentRouteId: "test-route",
+      modelProvider: "test",
+      modelId: "test-model",
+      workspaceBindingId: workspace.id,
+      environmentDefinitionRevisionId: null,
+      environmentMode: "NO_PLATFORM_ENVIRONMENT",
+      controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
+      projectionVersionNo: 1,
+      executionSubject: {
+        tenantId: input.tenantId,
+        subjectType: "user",
+        subjectId: "agent-call-test-owner",
+      },
+    });
+  }
+  const attempt = await createAttempt({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+  });
+  const evidence = {
+    kind: "test-candidate",
+    invocationId: input.invocationId,
+    attemptId: attempt.id,
+  };
+  const evidenceDigest = protocolDigest(evidence);
+  await db.transaction((tx) =>
+    markAttemptPreparedForTestInTransaction(tx, {
+      attemptId: attempt.id,
+      evidence,
+      digest: evidenceDigest,
+    }),
+  );
+  const acquired = await acquireExecutionOwnership({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+    attemptId: attempt.id,
+    runtimeRevisionId,
+    acquiredByType: "service",
+    acquiredById: "agent-call-test",
+  });
+  const session = await createRuntimeSessionBindingForTest({
+    tenantId: input.tenantId,
+    invocationId: input.invocationId,
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    runtimeRevisionId,
+    leaseEpoch: acquired.ownership.leaseEpoch,
+    intentType: "start",
+    startIntentKey: `start:${acquired.ownership.id}`,
+    ...sourceIntentForFixture({
+      tenantId: input.tenantId,
+      invocationId: input.invocationId,
+      attemptId: attempt.id,
+      intentType: "start",
+    }),
+  });
+  // canonical 约束：bindingState=active 必须冻结语义请求并携带 remote refs + startedEventId。
+  await applyRuntimeSessionDispatchForTest(input.tenantId, session.id, {
+    bindingState: "active",
+    semanticRequestJson: { kind: "agent-call-test" },
+    semanticRequestDigest: `sha256:${"0".repeat(64)}`,
+    remoteSessionRef: "agent-call-test-session",
+    remoteExecutionRef: "agent-call-test-execution",
+    startedEventId: randomUUID(),
+  });
+  await db
+    .update(executionOwnershipTable)
+    .set({
+      executionPhase: "executing",
+      activatedAt: new Date(),
+      activationDigest: `sha256:${"0".repeat(64)}`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(executionOwnershipTable.tenantId, input.tenantId),
+        eq(executionOwnershipTable.id, acquired.ownership.id),
+      ),
+    );
+  await db
+    .update(invocationTable)
+    .set({ executionState: "running", updatedAt: new Date() })
+    .where(
+      and(eq(invocationTable.tenantId, input.tenantId), eq(invocationTable.id, input.invocationId)),
+    );
+  return {
+    invocationId: input.invocationId,
+    runtimeRevisionId,
+    attemptId: attempt.id,
+    ownershipId: acquired.ownership.id,
+    leaseEpoch: String(acquired.ownership.leaseEpoch),
+    sessionBindingId: session.id,
+  };
 }

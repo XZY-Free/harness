@@ -4,6 +4,17 @@ export interface FileStorageProvider {
   store(input: StoreFileObjectInput): Promise<StoredFileObject>;
   read(input: ReadFileObjectInput): Promise<Buffer | null>;
   delete(input: DeleteFileObjectInput): Promise<boolean>;
+  /** 可选能力：无 Thread 的 Job reference 输入。未实现时必须拒绝 reference Job。 */
+  readonly jobInput?: JobInputStorage;
+}
+
+export interface JobInputStorage {
+  store(input: {
+    tenantId: string;
+    digest: string;
+    content: Buffer;
+  }): Promise<{ resourceRef: string }>;
+  read(input: { tenantId: string; resourceRef: string }): Promise<Buffer | null>;
 }
 
 export type FileResourceKind = "attachment" | "artifact";

@@ -724,7 +724,7 @@ export async function listStaleExpiredUserActionRequests(
 /**
  * 列出租户所有 UserActionRequest（按 createdAt 降序，跨租户隔离）。
  *
- * 事实源：S11-W04 管理面排障端点 /admin/api/v1/user-actions 使用本函数跨 invocation 列出租户所有请求。
+ * 事实源：S11-W04 管理面排障端点 /admin/api/user-actions 使用本函数跨 invocation 列出租户所有请求。
  *
  * 选项：
  * - requestState：过滤请求状态（pending / resolved / expired）。

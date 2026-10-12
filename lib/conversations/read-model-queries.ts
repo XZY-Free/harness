@@ -222,7 +222,7 @@ export async function getProjectionHealth(
 /**
  * 跨 owner 列出租户所有 Thread 投影（按 lastActivityAt 降序，跨租户隔离）。
  *
- * 事实源：S11-W04 管理面排障端点 /admin/api/v1/threads 使用本函数跨 owner 列出租户所有 Thread。
+ * 事实源：S11-W04 管理面排障端点 /admin/api/threads 使用本函数跨 owner 列出租户所有 Thread。
  *
  * 选项：
  * - lifecycleState：过滤生命周期状态。

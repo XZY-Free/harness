@@ -28,8 +28,16 @@ export function createHttpHarnessRuntimeTransport(
       client.cancelInvocation({ ...request, runtimeEndpoint: endpoint, auth: params.auth }),
     resumeInvocation: (request) =>
       client.resumeInvocation({ ...request, runtimeEndpoint: endpoint, auth: params.auth }),
+    postEventBatch: (request) =>
+      client.postEventBatch({ ...request, runtimeEndpoint: endpoint, auth: params.auth }),
+    heartbeat: (request) =>
+      client.heartbeat({ ...request, runtimeEndpoint: endpoint, auth: params.auth }),
     steerInvocation: (request) =>
       client.steerInvocation({ ...request, runtimeEndpoint: endpoint, auth: params.auth }),
+    requestSafePoint: (request) =>
+      client.requestSafePoint({ ...request, runtimeEndpoint: endpoint, auth: params.auth }),
+    releaseSafePoint: (request) =>
+      client.releaseSafePoint({ ...request, runtimeEndpoint: endpoint, auth: params.auth }),
   };
 }
 

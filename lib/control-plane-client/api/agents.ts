@@ -1,5 +1,5 @@
 /**
- * Agent API Client — 消费 /admin/api/v1/agents 端点。
+ * Agent API Client — 消费 /admin/api/agents 端点。
  *
  * 使用 control-plane-client/contracts 中的稳定 DTO。
  */
@@ -35,7 +35,7 @@ export interface AgentApiClient {
   /** 获取 AgentRevision 详情。 */
   getRevision(revisionId: string): Promise<AgentRevisionDTO>;
   /**
-   * 登记 Public Agent Contract（07 §4：POST /admin/api/v1/agent-registrations）。
+   * 登记 Public Agent Contract（07 §4：POST /admin/api/agent-registrations）。
    * 只发送 protocol + contract；禁止 URL/Git/源码路径/endpoint/凭证字段。
    */
   registerContract(
@@ -68,32 +68,32 @@ export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
 
   return {
     delete: (agentId, opts) =>
-      request(`/admin/api/v1/agents/${agentId}`, {
+      request(`/admin/api/agents/${agentId}`, {
         method: "DELETE",
         headers: { "If-Match": opts.ifMatch },
       }),
-    list: () => request<AgentListResponse>("/admin/api/v1/agents"),
-    get: (agentId) => request<AgentDTO>(`/admin/api/v1/agents/${agentId}`),
+    list: () => request<AgentListResponse>("/admin/api/agents"),
+    get: (agentId) => request<AgentDTO>(`/admin/api/agents/${agentId}`),
     listRevisions: (agentId) =>
-      request<AgentRevisionListResponse>(`/admin/api/v1/agents/${agentId}/revisions`),
+      request<AgentRevisionListResponse>(`/admin/api/agents/${agentId}/revisions`),
     listContracts: (agentId) =>
-      request<AgentContractListResponse>(`/admin/api/v1/agents/${agentId}/contracts`),
+      request<AgentContractListResponse>(`/admin/api/agents/${agentId}/contracts`),
     getRevision: (revisionId) =>
-      request<AgentRevisionDTO>(`/admin/api/v1/agent-revisions/${revisionId}`),
+      request<AgentRevisionDTO>(`/admin/api/agent-revisions/${revisionId}`),
     registerContract: (body, opts) =>
-      request<RegisterAgentContractResponse>("/admin/api/v1/agent-registrations", {
+      request<RegisterAgentContractResponse>("/admin/api/agent-registrations", {
         method: "POST",
         body: JSON.stringify(body),
         headers: { "Idempotency-Key": opts.idempotencyKey },
       }),
     createRevision: (agentId, body, opts) =>
-      request<AgentRevisionSummaryDTO>(`/admin/api/v1/agents/${agentId}/revisions`, {
+      request<AgentRevisionSummaryDTO>(`/admin/api/agents/${agentId}/revisions`, {
         method: "POST",
         body: JSON.stringify(body),
         headers: { "Idempotency-Key": opts.idempotencyKey },
       }),
     publishRevision: (revisionId, body, opts) =>
-      request<PublishAgentRevisionResponse>(`/admin/api/v1/agent-revisions/${revisionId}/publish`, {
+      request<PublishAgentRevisionResponse>(`/admin/api/agent-revisions/${revisionId}/publish`, {
         method: "POST",
         body: JSON.stringify(body),
         headers: {
@@ -102,16 +102,13 @@ export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
         },
       }),
     withdrawRevision: (revisionId, body, opts) =>
-      request<WithdrawAgentRevisionResponse>(
-        `/admin/api/v1/agent-revisions/${revisionId}/withdraw`,
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-          headers: {
-            "Idempotency-Key": opts.idempotencyKey,
-            "If-Match": opts.ifMatch,
-          },
+      request<WithdrawAgentRevisionResponse>(`/admin/api/agent-revisions/${revisionId}/withdraw`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: {
+          "Idempotency-Key": opts.idempotencyKey,
+          "If-Match": opts.ifMatch,
         },
-      ),
+      }),
   };
 }

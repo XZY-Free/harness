@@ -203,7 +203,7 @@ export function registerIpcHandlers(
       return { ok: false, code: "invalid_directory", message: "所选目录不可用" };
     }
     const displayName = basename(absolutePath);
-    const locationFingerprint = `sha256:${createHash("sha256")
+    const storageScopeDigest = `sha256:${createHash("sha256")
       .update(capabilities.deviceId)
       .update("\0")
       .update(absolutePath)
@@ -219,7 +219,7 @@ export function registerIpcHandlers(
           body: JSON.stringify({
             device_id: capabilities.deviceId,
             display_name: displayName,
-            location_fingerprint: locationFingerprint,
+            storage_scope_digest: storageScopeDigest,
           }),
         },
       );

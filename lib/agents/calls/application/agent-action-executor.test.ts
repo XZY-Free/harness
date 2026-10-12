@@ -5,6 +5,7 @@ import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/re
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
   EXECUTION_FIXTURE_CONTRACT,
+  acquireExecutionAuthorityForInvocation,
   seedAgentCallExecutionScenario,
   waitForCallTerminal,
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
@@ -25,10 +26,10 @@ import { workspaceAttachmentAccessGrant } from "@/lib/persistence/schema/workspa
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { createProductionInvocationContinuationWorker } from "@/lib/runtime/continuation/production-invocation-continuation-worker";
-import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import { ingressRuntimeEvents } from "@/lib/runtime/application/ingress-runtime-events";
 import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
-import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
+import { getLatestProducerSequence } from "@/lib/runtime/application/runtime-recovery";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import {
   createManagedWorkspaceAttachment,
@@ -93,7 +94,12 @@ describe("AgentActionExecutor", () => {
       .where(eq(capabilityUseTable.invocationId, scenario.parentInvocationId));
     scenario.provider.reset();
     scenario.provider.setScenario(providerScenario);
-    return scenario;
+    // canonical executor 要求 context.authority；为 parent Invocation 构造真实执行权威。
+    const authority = await acquireExecutionAuthorityForInvocation({
+      tenantId: scenario.tenantId,
+      invocationId: scenario.parentInvocationId,
+    });
+    return { ...scenario, authority };
   }
 
   it("使用 Harness task 创建 harness_planned AgentCall，并以 actionId 稳定幂等", async () => {
@@ -120,6 +126,7 @@ describe("AgentActionExecutor", () => {
       },
     };
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -223,6 +230,7 @@ describe("AgentActionExecutor", () => {
         },
       },
       {
+        authority: scenario.authority,
         invocationId: scenario.parentInvocationId,
         tenantId: scenario.tenantId,
         threadId: scenario.threadId,
@@ -270,6 +278,7 @@ describe("AgentActionExecutor", () => {
           payload: { agentId: scenario.agentId, task: "不应出站" },
         },
         {
+          authority: scenario.authority,
           invocationId: scenario.parentInvocationId,
           tenantId: scenario.tenantId,
           threadId: scenario.threadId,
@@ -319,6 +328,7 @@ describe("AgentActionExecutor", () => {
           payload: { agentId: scenario.agentId, task: "不得出站" },
         },
         {
+          authority: scenario.authority,
           invocationId: scenario.parentInvocationId,
           tenantId: scenario.tenantId,
           threadId: scenario.threadId,
@@ -366,6 +376,7 @@ describe("AgentActionExecutor", () => {
       payload: { agentId: scenario.agentId, task: "查询当前员工年假余额" },
     };
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -403,6 +414,7 @@ describe("AgentActionExecutor", () => {
       transportChannel: "hosted",
     });
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -453,6 +465,7 @@ describe("AgentActionExecutor", () => {
       payload: action.payload,
     });
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
@@ -460,7 +473,7 @@ describe("AgentActionExecutor", () => {
       actionDigest,
     };
     const sequence =
-      ((await getLatestProducerSequence(scenario.tenantId, scenario.parentInvocationId)) ?? 0) + 1;
+      ((await getLatestProducerSequence(scenario.tenantId, scenario.parentInvocationId)) ?? 0n) + 1n;
     const actionPayload = {
       action_id: action.actionId,
       step_no: action.stepNo,
@@ -471,26 +484,29 @@ describe("AgentActionExecutor", () => {
       target_ref: scenario.agentId,
       action_payload: action.payload,
     };
-    await ingressEventBatch({
+    await ingressRuntimeEvents({
       tenantId: scenario.tenantId,
       invocationId: scenario.parentInvocationId,
-      producerSequenceStart: sequence,
-      events: [
-        {
-          producer_event_id: "test-input-required-proposed",
-          producer_sequence: sequence,
-          type: "harness.action.proposed",
-          schema_version: 1,
-          payload: { ...actionPayload, state: "proposed" },
-        },
-        {
-          producer_event_id: "test-input-required-started",
-          producer_sequence: sequence + 1,
-          type: "harness.action.started",
-          schema_version: 1,
-          payload: { ...actionPayload, state: "started" },
-        },
-      ],
+      batch: {
+        protocolVersion: 3,
+        authority: scenario.authority,
+        events: [
+          {
+            eventId: randomUUID(),
+            producerSequence: String(sequence),
+            type: "harness.action.proposed",
+            schemaVersion: 1,
+            payload: { ...actionPayload, state: "proposed" },
+          },
+          {
+            eventId: randomUUID(),
+            producerSequence: String(sequence + 1n),
+            type: "harness.action.started",
+            schemaVersion: 1,
+            payload: { ...actionPayload, state: "started" },
+          },
+        ],
+      },
     });
 
     const first = await execute(action, context);
@@ -569,6 +585,7 @@ describe("AgentActionExecutor", () => {
         payload: { agentId: scenario.agentId, task: "查询我本人的余额" },
       },
       {
+        authority: scenario.authority,
         invocationId: scenario.parentInvocationId,
         tenantId: scenario.tenantId,
         threadId: scenario.threadId,
@@ -628,6 +645,7 @@ describe("AgentActionExecutor", () => {
       payload: { agentId: scenario.agentId, task: "提交我的年假申请" },
     };
     const context = {
+      authority: scenario.authority,
       invocationId: scenario.parentInvocationId,
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,

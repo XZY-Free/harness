@@ -1,5 +1,5 @@
 /**
- * S10-W02：GET /api/v1/threads/{thread_id}/turns 集成测试（真实 MySQL 8）。
+ * S10-W02：GET /api/threads/{thread_id}/turns 集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - 返回 Turn 列表（按 turn_sequence 升序）。
@@ -8,7 +8,7 @@
  * - 非 owner → 404 隐藏式。
  * - 跨租户（不存在的 thread_id）→ 404 隐藏式。
  */
-import { GET } from "@/app/api/v1/threads/[thread_id]/turns/route";
+import { GET } from "@/app/api/threads/[threadId]/turns/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { createThread } from "@/lib/conversations/thread-queries";
@@ -49,7 +49,7 @@ async function seedContext() {
   return { tenantId: tenant.id, userIdentityId: identity.id, agent };
 }
 
-describe("GET /api/v1/threads/{thread_id}/turns", () => {
+describe("GET /api/threads/{thread_id}/turns", () => {
   it("返回 Turn 列表（按 turn_sequence 升序）", async () => {
     const { tenantId, userIdentityId, agent } = await seedContext();
 
@@ -88,7 +88,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(200);
 
@@ -128,7 +128,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(200);
 
@@ -155,7 +155,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -178,7 +178,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -201,7 +201,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(200);
 
@@ -226,7 +226,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: thread.id }),
+      params: Promise.resolve({ threadId: thread.id }),
     });
     expect(response.status).toBe(404);
     const body = await response.json();
@@ -243,7 +243,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     });
 
     const response = await GET(request, {
-      params: Promise.resolve({ thread_id: "non-existent-thread-id" }),
+      params: Promise.resolve({ threadId: "non-existent-thread-id" }),
     });
     expect(response.status).toBe(404);
     const body = await response.json();

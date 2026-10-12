@@ -1,5 +1,5 @@
 /**
- * CredentialRef API Client — 消费 /admin/api/v1/credential-refs（07 §7）。
+ * CredentialRef API Client — 消费 /admin/api/credential-refs（07 §7）。
  *
  * bearer 模式的 External Runtime 登记只能选择已有 CredentialRef；
  * 禁止 Secret 文本框 / raw secret 传输。
@@ -18,6 +18,6 @@ export interface CredentialRefApiClient {
 export function createCredentialRefApiClient(config: ApiClientConfig): CredentialRefApiClient {
   const request = createControlPlaneRequest(config);
   return {
-    list: () => request<CredentialRefListResponse>("/admin/api/v1/credential-refs"),
+    list: () => request<CredentialRefListResponse>("/admin/api/credential-refs"),
   };
 }

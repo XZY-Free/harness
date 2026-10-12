@@ -2,7 +2,7 @@
  * Agent 控制面合同 — 稳定 DTO。
  *
  * Web 端和桌面端共用此合同消费服务端 API。
- * 合同字段与 /admin/api/v1 wire format (snake_case) 对齐。
+ * 合同字段与 /admin/api wire format (snake_case) 对齐。
  *
  * 禁止：
  * - 页面直接引用数据库 Record；
@@ -171,7 +171,7 @@ export interface AgentContractListResponse {
   total: number;
 }
 
-// ─── Agent Contract 登记（POST /admin/api/v1/agent-registrations） ────
+// ─── Agent Contract 登记（POST /admin/api/agent-registrations） ────
 
 /** 登记请求：顶层恰为 protocol + contract（禁止 URL/Git/源码路径/endpoint/凭证字段）。 */
 export interface RegisterAgentContractRequest {

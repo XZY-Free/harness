@@ -1,11 +1,12 @@
 import {
+  type ExecutionBindingConfigInput,
   ExecutionBindingEvidenceError,
   computeExecutionBindingConfigHash,
 } from "@/lib/executions/domain/execution-binding";
 import { testCapabilityCatalogBindingFields } from "@/lib/executions/test-support/test-capability-catalog";
 import { describe, expect, it } from "vitest";
 
-const EVIDENCE = {
+const evidence = {
   routeRevisionId: "route-revision-1",
   routeActivationId: "route-activation-1",
   routeContentDigest: `sha256:${"1".repeat(64)}`,
@@ -18,10 +19,10 @@ const EVIDENCE = {
   runtimeAttestationIds: ["runtime-attestation-b", "runtime-attestation-a"],
   runtimePublicationRecordId: "runtime-publication-1",
   conformanceRunId: "conformance-run-1",
-  resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  resolutionInputDigest: `sha256:${"6".repeat(64)}`,
 };
 
-function bindingInput() {
+function bindingInput(): ExecutionBindingConfigInput {
   return {
     ...testCapabilityCatalogBindingFields("invocation-1"),
     runtimeRevisionId: "runtime-revision-1",
@@ -29,15 +30,14 @@ function bindingInput() {
     modelProvider: "provider",
     modelId: "model",
     modelRevisionRef: null,
-    initialEnvironmentLeaseId: null,
-    workspaceBindingId: null,
+    workspaceBindingId: "workspace-binding-1",
     policyRevisionId: "policy-revision-1",
     policyRulesDigest: `sha256:${"8".repeat(64)}`,
     governanceConfigRevisionId: "governance-revision-1",
     governanceConfigDigest: `sha256:${"9".repeat(64)}`,
-    contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
-    controlPlaneEvidence: EVIDENCE,
+    environmentMode: "NO_PLATFORM_ENVIRONMENT",
+    controlPlaneEvidence: evidence,
     projectionVersionNo: 1,
   };
 }
@@ -48,13 +48,13 @@ describe("ExecutionBinding domain", () => {
     const second = computeExecutionBindingConfigHash({
       ...bindingInput(),
       controlPlaneEvidence: {
-        ...EVIDENCE,
-        runtimeAttestationIds: [...EVIDENCE.runtimeAttestationIds].reverse(),
+        ...evidence,
+        runtimeAttestationIds: [...evidence.runtimeAttestationIds].reverse(),
       },
     });
     const changed = computeExecutionBindingConfigHash({
       ...bindingInput(),
-      controlPlaneEvidence: { ...EVIDENCE, conformanceRunId: "conformance-run-2" },
+      controlPlaneEvidence: { ...evidence, conformanceRunId: "conformance-run-2" },
     });
 
     expect(first).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -66,17 +66,14 @@ describe("ExecutionBinding domain", () => {
     expect(() =>
       computeExecutionBindingConfigHash({
         ...bindingInput(),
-        controlPlaneEvidence: { ...EVIDENCE, runtimeAttestationIds: [] },
+        controlPlaneEvidence: { ...evidence, runtimeAttestationIds: [] },
       }),
     ).toThrow(ExecutionBindingEvidenceError);
   });
 
   it("projectionVersionNo 必须是非负整数", () => {
     expect(() =>
-      computeExecutionBindingConfigHash({
-        ...bindingInput(),
-        projectionVersionNo: 1.5,
-      }),
+      computeExecutionBindingConfigHash({ ...bindingInput(), projectionVersionNo: 1.5 }),
     ).toThrow(ExecutionBindingEvidenceError);
   });
 });

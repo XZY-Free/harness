@@ -1,16 +1,17 @@
-import { POST as forkPOST } from "@/app/api/v1/threads/[thread_id]/forks/route";
-import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
-import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/route";
-import { POST as regeneratePOST } from "@/app/api/v1/turns/[turn_id]/regenerate/route";
-import { POST as steerPOST } from "@/app/api/v1/turns/[turn_id]/steer/route";
+import { randomUUID } from "node:crypto";
+import { POST as forkPOST } from "@/app/api/threads/[threadId]/forks/route";
+import { POST as createThreadPOST } from "@/app/api/threads/route";
+import { POST as interruptPOST } from "@/app/api/turns/[turnId]/interrupt/route";
+import { POST as regeneratePOST } from "@/app/api/turns/[turnId]/regenerate/route";
+import { POST as steerPOST } from "@/app/api/turns/[turnId]/steer/route";
 /**
  * S04-C06：Fork / Regenerate / Interrupt / Steer API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 4 个 API 路由：
- * - POST /api/v1/threads/{thread_id}/forks — Fork Thread
- * - POST /api/v1/turns/{turn_id}:regenerate — Regenerate Turn
- * - POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn
- * - POST /api/v1/turns/{turn_id}/steer — Steer Turn
+ * - POST /api/threads/{thread_id}/forks — Fork Thread
+ * - POST /api/turns/{turn_id}:regenerate — Regenerate Turn
+ * - POST /api/turns/{turn_id}/interrupt — Interrupt Turn
+ * - POST /api/turns/{turn_id}/steer — Steer Turn
  *
  * 测试环境：APP_ENV=test，显式 Vitest 身份夹具（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
@@ -21,14 +22,14 @@ import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixt
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { TurnState } from "@/lib/persistence/schema/conversation";
 import {
-  invocationCommandTable,
   threadEventTable,
   threadItemTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 employee-api.test.ts 一致）。
@@ -117,6 +118,41 @@ async function transitionTurn(
   if (!result) throw new Error(`Turn 状态转换失败: ${turnId} → ${nextState}`);
 }
 
+/**
+ * 为 Turn 绑定活动 Invocation（interrupt/steer 的 canonical 前置事实：
+ * 活动 Turn 必须绑定同一个 Invocation，命令才能精确投递）。
+ * Invocation 遵守 Invocation_subject_shape：triggerItemId 指向 Turn 的真实触发 Item。
+ */
+async function bindActiveInvocation(
+  tenantId: string,
+  threadId: string,
+  turnId: string,
+): Promise<string> {
+  const turn = await getTurnRow(turnId);
+  if (!turn) throw new Error(`Turn 不存在: ${turnId}`);
+  if (!turn.triggerItemId) throw new Error(`Turn 缺少 triggerItemId: ${turnId}`);
+  const invocationId = randomUUID();
+  await db.insert(invocationTable).values({
+    id: invocationId,
+    tenantId,
+    subjectType: "thread",
+    threadId,
+    turnId,
+    triggerItemId: turn.triggerItemId,
+    invocationSequence: 1,
+    invocationKind: "initial",
+    executionState: turn.turnState === "waiting_user" ? "waiting_user" : "running",
+    inputDigest: `sha256:${"0".repeat(64)}`,
+    startedAt: new Date(),
+    versionNo: 1,
+  });
+  await db
+    .update(turnTable)
+    .set({ activeInvocationId: invocationId, latestInvocationId: invocationId })
+    .where(eq(turnTable.id, turnId));
+  return invocationId;
+}
+
 /** 查询 Turn 的所有事件（按 sequence 升序）。 */
 async function getTurnEvents(turnId: string) {
   return db
@@ -126,9 +162,18 @@ async function getTurnEvents(turnId: string) {
     .orderBy(threadEventTable.eventSequence);
 }
 
-/** 查询 Turn 的 InvocationCommand 记录。 */
+/** 查询 Turn 的 InvocationCommand 记录（V12：命令经 invocationId 关联 Turn）。 */
 async function getTurnCommands(turnId: string) {
-  return db.select().from(invocationCommandTable).where(eq(invocationCommandTable.turnId, turnId));
+  const invocations = await db
+    .select({ id: invocationTable.id })
+    .from(invocationTable)
+    .where(eq(invocationTable.turnId, turnId));
+  const invocationIds = invocations.map((row) => row.id);
+  if (invocationIds.length === 0) return [];
+  return db
+    .select()
+    .from(invocationCommandTable)
+    .where(inArray(invocationCommandTable.invocationId, invocationIds));
 }
 
 /** 查询 Turn 的 ThreadItem 记录。 */
@@ -137,10 +182,10 @@ async function getTurnItems(turnId: string) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /api/v1/threads/{thread_id}/forks — Fork Thread
+// 1. POST /api/threads/{thread_id}/forks — Fork Thread
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads/{thread_id}/forks", () => {
+describe("POST /api/threads/{thread_id}/forks", () => {
   it("成功 Fork Thread → 201 + 子 Thread + 关系 + 事件", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread("fork-thread-001");
@@ -155,7 +200,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(201);
     const body = (await resp.json()) as {
@@ -196,7 +241,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -216,7 +261,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -233,7 +278,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: "non-existent" }),
+      params: Promise.resolve({ threadId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -255,7 +300,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: threadId1 }),
+      params: Promise.resolve({ threadId: threadId1 }),
     });
     expect(resp.status).toBe(422);
     const body = (await resp.json()) as { error: { code: string } };
@@ -275,7 +320,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
       body: { from_turn_id: turnId },
     });
     const resp1 = await forkPOST(req1, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp1.status).toBe(201);
     const body1 = (await resp1.json()) as { thread: { id: string } };
@@ -289,7 +334,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
       body: { from_turn_id: turnId },
     });
     const resp2 = await forkPOST(req2, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp2.status).toBe(201);
     const body2 = (await resp2.json()) as { thread: { id: string } };
@@ -298,10 +343,10 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 2. POST /api/v1/turns/{turn_id}:regenerate — Regenerate Turn
+// 2. POST /api/turns/{turn_id}:regenerate — Regenerate Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
+describe("POST /api/turns/{turn_id}/regenerate", () => {
   it("成功 Regenerate completed Turn → 202 + regenerating 状态 + InvocationCommand", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread("regen-thread-001");
@@ -309,6 +354,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     // 将 Turn 转换到 completed 状态
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
+    const turnBeforeRegen = await getTurnRow(turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -319,7 +365,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as {
@@ -342,11 +388,20 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     expect(turnRow?.preferredAgentId).toBe(agent.id);
     expect(turnRow?.agentUseMode).toBe("preferred");
 
-    // 验证 DB：InvocationCommand 已创建
-    const commands = await getTurnCommands(turnId);
-    expect(commands).toHaveLength(1);
-    expect(commands[0]?.commandType).toBe("regenerate");
-    expect(commands[0]?.commandState).toBe("queued");
+    // 验证 DB：V12 canonical——Regenerate 创建新 Invocation（invocationKind=regenerate），
+    // 不再把产品级 Regenerate 伪装成 InvocationCommand（regenerate-queries.ts）。
+    const [regenInvocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, body.invocation_id))
+      .limit(1);
+    expect(regenInvocation?.invocationKind).toBe("regenerate");
+    expect(regenInvocation?.executionState).toBe("queued");
+    expect(regenInvocation?.turnId).toBe(turnId);
+    expect(regenInvocation?.triggerItemId).not.toBeNull();
+    // replacesInvocationId = Turn.latestInvocationId（调度前为 null 的合法事实）
+    expect(regenInvocation?.replacesInvocationId).toBe(turnBeforeRegen?.latestInvocationId ?? null);
+    expect(await getTurnCommands(turnId)).toHaveLength(0);
 
     // 验证 DB：turn.regeneration_started 事件已写
     const events = await getTurnEvents(turnId);
@@ -364,7 +419,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent" }),
+      params: Promise.resolve({ turnId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -386,7 +441,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -408,7 +463,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -430,7 +485,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -452,7 +507,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
       body: { binding_mode: "loose" },
     });
     const resp1 = await regeneratePOST(req1, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { invocation_id: string };
@@ -466,7 +521,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
       body: { binding_mode: "loose" },
     });
     const resp2 = await regeneratePOST(req2, {
-      params: Promise.resolve({ turn_id: `${turnId}` }),
+      params: Promise.resolve({ turnId: `${turnId}` }),
     });
     expect(resp2.status).toBe(202);
     const body2 = (await resp2.json()) as { invocation_id: string };
@@ -475,15 +530,16 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 3. POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn
+// 3. POST /api/turns/{turn_id}/interrupt — Interrupt Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
+describe("POST /api/turns/{turn_id}/interrupt", () => {
   it("成功 Interrupt running Turn → 202 + 命令入队（Turn 状态未变）", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread("intr-thread-001");
     const turnId = await createTurn(threadId, "intr-turn-001");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -494,7 +550,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as {
@@ -508,7 +564,9 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     expect(body.turn_id).toBe(turnId);
     expect(body.turn_state).toBe("running"); // Turn 状态未变
     expect(body.interrupt_state).toBe("requested");
-    expect(body.command.command_state).toBe("queued");
+    // A09：内联调度不再有「无领取身份」旁路，网关在请求内真实领取刚写入的 `queued` 行
+    // （`allowImmediateQueued`），命令随即推进为 `dispatched`；响应取持久事实，不报派发前快照。
+    expect(body.command.command_state).toBe("dispatched");
     expect(body.already_completed_effects_preserved).toBe(true);
     expect(body.event_id).toEqual(expect.any(String));
 
@@ -519,8 +577,9 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     // 验证 DB：InvocationCommand 已创建
     const commands = await getTurnCommands(turnId);
     expect(commands).toHaveLength(1);
-    expect(commands[0]?.commandType).toBe("interrupt");
-    expect(commands[0]?.commandState).toBe("queued");
+    expect(commands[0]?.commandType).toBe("cancel");
+    // A09：领取事务产生 `dispatched`，库内事实与响应一致。
+    expect(commands[0]?.commandState).toBe("dispatched");
 
     // 验证 DB：turn.interrupt_requested 事件已写
     const events = await getTurnEvents(turnId);
@@ -534,6 +593,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     const turnId = await createTurn(threadId, "intr-turn-002");
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "waiting_user");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -544,7 +604,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as { turn_state: string };
@@ -561,7 +621,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent" }),
+      params: Promise.resolve({ turnId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -582,7 +642,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -605,7 +665,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     });
 
     const resp = await interruptPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -617,6 +677,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     const threadId = await createThread("intr-thread-006");
     const turnId = await createTurn(threadId, "intr-turn-006");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req1 = buildApiRequest({
       audience: "employee",
@@ -626,7 +687,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
       body: { reason_code: "user_requested" },
     });
     const resp1 = await interruptPOST(req1, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { command: { id: string } };
@@ -639,7 +700,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
       body: { reason_code: "user_requested" },
     });
     const resp2 = await interruptPOST(req2, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp2.status).toBe(202);
     const body2 = (await resp2.json()) as { command: { id: string } };
@@ -648,15 +709,16 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 4. POST /api/v1/turns/{turn_id}/steer — Steer Turn
+// 4. POST /api/turns/{turn_id}/steer — Steer Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/turns/{turn_id}/steer", () => {
+describe("POST /api/turns/{turn_id}/steer", () => {
   it("成功 Steer running Turn → 202 + user_guidance Item + 命令入队", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread("steer-thread-001");
     const turnId = await createTurn(threadId, "steer-turn-001");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req = buildApiRequest({
       audience: "employee",
@@ -667,7 +729,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as {
@@ -682,7 +744,8 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     expect(body.turn_state).toBe("running"); // Turn 状态未变
     expect(body.steer_state).toBe("queued");
     expect(body.guidance_item_id).toEqual(expect.any(String));
-    expect(body.command.command_state).toBe("queued");
+    // A09：内联调度在请求内真实领取，命令推进为 `dispatched`（steer_state 仍为入队语义）。
+    expect(body.command.command_state).toBe("dispatched");
     expect(body.event_id).toEqual(expect.any(String));
 
     // 验证 DB：Turn 状态未变（仍为 running）
@@ -699,7 +762,8 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     const commands = await getTurnCommands(turnId);
     expect(commands).toHaveLength(1);
     expect(commands[0]?.commandType).toBe("steer");
-    expect(commands[0]?.commandState).toBe("queued");
+    // A09：领取事务产生 `dispatched`，库内事实与响应一致。
+    expect(commands[0]?.commandState).toBe("dispatched");
 
     // 验证 DB：turn.steer_queued 事件已写
     const events = await getTurnEvents(turnId);
@@ -717,7 +781,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent" }),
+      params: Promise.resolve({ turnId: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -738,7 +802,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -761,7 +825,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -783,7 +847,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     });
 
     const resp = await steerPOST(req, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -795,6 +859,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     const threadId = await createThread("steer-thread-006");
     const turnId = await createTurn(threadId, "steer-turn-006");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     const req1 = buildApiRequest({
       audience: "employee",
@@ -804,7 +869,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
       body: { guidance_text: "引导" },
     });
     const resp1 = await steerPOST(req1, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { guidance_item_id: string };
@@ -817,7 +882,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
       body: { guidance_text: "引导" },
     });
     const resp2 = await steerPOST(req2, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp2.status).toBe(202);
     const body2 = (await resp2.json()) as { guidance_item_id: string };
@@ -848,7 +913,7 @@ describe("跨租户隔离（隐藏式 404）", () => {
     });
 
     const resp = await forkPOST(req, {
-      params: Promise.resolve({ thread_id: "non-existent-tenant" }),
+      params: Promise.resolve({ threadId: "non-existent-tenant" }),
     });
     await assertCrossTenantHidden(resp, requestId);
   });
@@ -863,7 +928,7 @@ describe("跨租户隔离（隐藏式 404）", () => {
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ turn_id: "non-existent-tenant" }),
+      params: Promise.resolve({ turnId: "non-existent-tenant" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -891,7 +956,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { from_turn_id: turnId1 },
     });
     const resp1 = await forkPOST(req1, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp1.status).toBe(201);
 
@@ -904,7 +969,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { from_turn_id: turnId2 }, // 不同 from_turn_id
     });
     const resp2 = await forkPOST(req2, {
-      params: Promise.resolve({ thread_id: threadId }),
+      params: Promise.resolve({ threadId: threadId }),
     });
     expect(resp2.status).toBe(409);
     const body2 = (await resp2.json()) as { error: { code: string } };
@@ -916,6 +981,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
     const threadId = await createThread("idem-steer-thread");
     const turnId = await createTurn(threadId, "idem-steer-turn");
     await transitionTurn(tenantId, turnId, "running");
+    await bindActiveInvocation(tenantId, threadId, turnId);
 
     // 第一次请求
     const req1 = buildApiRequest({
@@ -926,7 +992,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { guidance_text: "第一条引导" },
     });
     const resp1 = await steerPOST(req1, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp1.status).toBe(202);
 
@@ -939,7 +1005,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
       body: { guidance_text: "不同的引导" },
     });
     const resp2 = await steerPOST(req2, {
-      params: Promise.resolve({ turn_id: turnId }),
+      params: Promise.resolve({ turnId: turnId }),
     });
     expect(resp2.status).toBe(409);
     const body2 = (await resp2.json()) as { error: { code: string } };

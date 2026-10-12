@@ -1,9 +1,12 @@
+import type { RuntimeConformanceOverallResult } from "@/lib/runtime/domain/runtime-conformance-run";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   datetime,
   index,
-  mysqlEnum,
+  int,
   mysqlTable,
   text,
   uniqueIndex,
@@ -18,30 +21,33 @@ export const runtimeConformanceRun = mysqlTable(
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
-    protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
+    protocolContractDigest: varchar("protocolContractDigest", { length: 71 }).notNull(),
     suiteRevision: varchar("suiteRevision", { length: 128 }).notNull(),
     runnerArtifactDigest: varchar("runnerArtifactDigest", { length: 71 }).notNull(),
-    runnerIdentity: varchar("runnerIdentity", { length: 255 }).notNull(),
+    runnerIdentity: varchar("runnerIdentity", { length: 256 }).notNull(),
     testEnvironmentRevision: varchar("testEnvironmentRevision", { length: 128 }).notNull(),
-    startedAt: datetime("startedAt", { mode: "date", fsp: 3 }).notNull(),
-    completedAt: datetime("completedAt", { mode: "date", fsp: 3 }).notNull(),
-    overallResult: mysqlEnum("overallResult", ["passed", "failed", "error", "cancelled"]).notNull(),
-    /** : Conformance 签名格式 — DSSE 是唯一格式。 */
-    conformanceFormat: mysqlEnum("conformanceFormat", ["standard_dsse"])
+    startedAt: datetime("startedAt", { mode: "date", fsp: 6 }).notNull(),
+    completedAt: datetime("completedAt", { mode: "date", fsp: 6 }).notNull(),
+    overallResult: varchar("overallResult", { length: 32 })
+      .$type<RuntimeConformanceOverallResult>()
+      .notNull(),
+    conformanceFormat: varchar("conformanceFormat", { length: 32 })
+      .$type<"standard_dsse">()
       .notNull()
       .default("standard_dsse"),
     evidenceManifestDigest: varchar("evidenceManifestDigest", { length: 71 }).notNull(),
     envelopeDigest: varchar("envelopeDigest", { length: 71 }).notNull(),
     envelopeJson: text("envelopeJson").notNull(),
     payloadDigest: varchar("payloadDigest", { length: 71 }).notNull(),
-    signingKeyId: varchar("signingKeyId", { length: 255 }).notNull(),
+    signingKeyId: varchar("signingKeyId", { length: 256 }).notNull(),
     verificationEngine: varchar("verificationEngine", { length: 64 }).notNull(),
     verificationEngineVersion: varchar("verificationEngineVersion", { length: 32 }).notNull(),
-    predicateType: varchar("predicateType", { length: 255 }).notNull(),
-    verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }).notNull(),
-    idempotencyKey: varchar("idempotencyKey", { length: 255 }).notNull(),
+    predicateType: varchar("predicateType", { length: 256 }).notNull(),
+    verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 6 }).notNull(),
+    idempotencyKey: varchar("idempotencyKey", { length: 128 }).notNull(),
+    protocolVersion: int("protocolVersion", { unsigned: true }).notNull(),
     requestId: varchar("requestId", { length: 64 }).notNull(),
-    recordedAt: datetime("recordedAt", { mode: "date", fsp: 3 }).notNull(),
+    recordedAt: datetime("recordedAt", { mode: "date", fsp: 6 }).notNull(),
   },
   (table) => ({
     idempotencyUq: uniqueIndex("RuntimeConformanceRun_idempotency_uq").on(
@@ -57,6 +63,18 @@ export const runtimeConformanceRun = mysqlTable(
       table.tenantId,
       table.evidenceManifestDigest,
     ),
+    overallResultAllowed: check(
+      "RuntimeConformanceRun_overall_result_allowed",
+      sql`\`overallResult\` IN ('passed', 'failed', 'error', 'cancelled')`,
+    ),
+    formatAllowed: check(
+      "RuntimeConformanceRun_format_allowed",
+      sql`\`conformanceFormat\` = 'standard_dsse'`,
+    ),
+    protocolVersionAllowed: check(
+      "RuntimeConformanceRun_protocol_version_allowed",
+      sql`\`protocolVersion\` = 3`,
+    ),
   }),
 );
 
@@ -64,6 +82,7 @@ export const runtimeConformanceCaseResult = mysqlTable(
   "RuntimeConformanceCaseResult",
   {
     id: varchar("id", { length: 36 }).primaryKey().notNull(),
+    tenantId: varchar("tenantId", { length: 36 }).notNull(),
     runId: varchar("runId", { length: 36 })
       .notNull()
       .references(() => runtimeConformanceRun.id),
@@ -74,6 +93,7 @@ export const runtimeConformanceCaseResult = mysqlTable(
   },
   (table) => ({
     runCaseUq: uniqueIndex("RuntimeConformanceCaseResult_run_case_uq").on(
+      table.tenantId,
       table.runId,
       table.caseId,
     ),

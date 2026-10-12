@@ -1,11 +1,13 @@
 import { applyToolCall } from "@/lib/capability/application/apply-tool-call";
 import { getEffectRecordByToolCall } from "@/lib/capability/effect-queries";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
 export interface ExecuteHarnessToolCallInput {
   tenantId: string;
   executionSubject: ExecutionSubject;
   invocationId: string;
+  authority: AuthorityIdentity;
   threadId: string;
   turnId: string;
   toolId: string;
@@ -44,6 +46,7 @@ export async function executeHarnessToolCall(
     tenantId: input.tenantId,
     executionSubject: input.executionSubject,
     invocationId: input.invocationId,
+    authority: input.authority,
     toolId: input.toolId,
     toolSchemaRevisionId: input.toolSchemaRevisionId,
     schemaHash: input.schemaHash,

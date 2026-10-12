@@ -173,7 +173,7 @@ export const agentCallBindingTable = mysqlTable(
     credentialRefId: varchar("credentialRefId", { length: 36 }),
     networkZone: varchar("networkZone", { length: 32 }).notNull(),
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
-    protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
+    protocolContractDigest: varchar("protocolContractDigest", { length: 128 }).notNull(),
     policyRevisionId: varchar("policyRevisionId", { length: 36 }).notNull(),
     policyRulesDigest: varchar("policyRulesDigest", { length: 71 }).notNull(),
     governanceConfigRevisionId: varchar("governanceConfigRevisionId", { length: 36 }).notNull(),

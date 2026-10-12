@@ -4,7 +4,7 @@
  * 覆盖 Batch 3 Gate：
  * - Hosted 证据不降级：runtimeArtifactRef 与 artifact digest 缺一不可；
  * - External Runtime 不伪造 Artifact：external_endpoint 拒绝 runtimeArtifactRef；
- * - protocol 合同明确：protocolContractRevision 必须显式传入，禁止空串/默认值推导。
+ * - protocol 合同明确：protocolContractDigest 必须显式传入，禁止空串/默认值推导。
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -49,7 +49,7 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
         tenantId: tenant.id,
         runtimeId: runtime.id,
         protocolType: "harness_runtime_protocol",
-        protocolContractRevision: "harness-runtime-protocol@1",
+        protocolContractDigest: "harness-runtime-protocol@1",
         runtimeEvidenceKind: "hosted_artifact",
         endpointRef: "managed://runtime/evidence",
         runtimeArtifactRef: null,
@@ -69,7 +69,7 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
         tenantId: tenant.id,
         runtimeId: runtime.id,
         protocolType: "harness_runtime_protocol",
-        protocolContractRevision: "harness-runtime-protocol@1",
+        protocolContractDigest: "harness-runtime-protocol@1",
         runtimeEvidenceKind: "external_endpoint",
         endpointRef: "https://external.example.com/a2a",
         runtimeArtifactRef: HOSTED_REF,
@@ -82,14 +82,14 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
     ).rejects.toThrow(/不得伪造 Runtime Artifact/);
   });
 
-  it("protocolContractRevision 空串 → 拒绝（协议合同必须显式，禁止默认值推导）", async () => {
+  it("protocolContractDigest 空串 → 拒绝（协议合同必须显式，禁止默认值推导）", async () => {
     const { tenant, owner, runtime } = await seedTenantAndRuntime("external");
     await expect(
       createDraftRuntimeRevision({
         tenantId: tenant.id,
         runtimeId: runtime.id,
         protocolType: "harness_runtime_protocol",
-        protocolContractRevision: "  ",
+        protocolContractDigest: "  ",
         runtimeEvidenceKind: "external_endpoint",
         endpointRef: "https://external.example.com/a2a",
         runtimeArtifactRef: null,
@@ -99,7 +99,7 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
         configHash: `sha256:${"b".repeat(64)}`,
         createdBy: owner.id,
       }),
-    ).rejects.toThrow(/protocolContractRevision 必须显式传入/);
+    ).rejects.toThrow(/protocolContractDigest 必须显式传入/);
   });
 
   it("external_endpoint 无 artifactRef 可建 draft，且 runtimeTargetDigest 非 hosted 事实", async () => {
@@ -108,7 +108,7 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
       tenantId: tenant.id,
       runtimeId: runtime.id,
       protocolType: "harness_runtime_protocol",
-      protocolContractRevision: "harness-runtime-protocol@1",
+      protocolContractDigest: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "external_endpoint",
       endpointRef: "https://external.example.com/a2a",
       runtimeArtifactRef: null,

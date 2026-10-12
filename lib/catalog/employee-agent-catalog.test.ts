@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
  * 员工端真实 Agent Catalog 集成测试（RED，tests-only）。
  *
  * 业务切片：员工 Web/Desktop 的真实 Agent 选择器（components/hooks/use-catalog.ts）
- * 调用 GET /api/v1/catalog/options?resource_type=agent&lifecycle_state=enabled，
+ * 调用 GET /api/catalog/options?resource_type=agent&lifecycle_state=enabled，
  * 必须只展示「当前可通过 default 路由执行的 Agent」。
  *
  * 事实链（全部走生产实现，不 mock、不直接插投影、不手调 buildRouteEligibility）：
@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
  *
  * 环境：APP_ENV=test + SNOW_VITEST_IDENTITY_FIXTURE=enabled（员工身份 = DEFAULT_USER，默认租户）。
  */
-import { GET as catalogOptionsGET } from "@/app/api/v1/catalog/options/route";
+import { GET as catalogOptionsGET } from "@/app/api/catalog/options/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
 import { getAgentById } from "@/lib/agents/persistence/agent-queries";

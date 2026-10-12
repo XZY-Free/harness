@@ -14,7 +14,7 @@ describe("new thread client session", () => {
     );
 
     await expect(loadThreadShell(fetchImpl)).resolves.toMatchObject({ viewer_id: "viewer-1" });
-    expect(fetchImpl).toHaveBeenCalledWith("/api/v1/threads", {
+    expect(fetchImpl).toHaveBeenCalledWith("/api/threads", {
       credentials: "include",
       cache: "no-store",
     });
@@ -43,7 +43,7 @@ describe("new thread client session", () => {
     });
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      "/api/v1/threads",
+      "/api/threads",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -55,7 +55,7 @@ describe("new thread client session", () => {
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/threads/thread-1/turns",
+      "/api/threads/thread-1/turns",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -147,7 +147,7 @@ describe("new thread client session", () => {
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      "/api/v1/threads",
+      "/api/threads",
       expect.objectContaining({
         body: JSON.stringify({ title: "检查这个项目", workspace_id: "workspace-1" }),
       }),
@@ -173,7 +173,7 @@ describe("new thread client session", () => {
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/threads/thread-1/turns",
+      "/api/threads/thread-1/turns",
       expect.objectContaining({
         body: JSON.stringify({
           input: { type: "message", text: "我今年还有多少年假？" },
@@ -202,7 +202,7 @@ describe("new thread client session", () => {
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/threads/thread-1/turns",
+      "/api/threads/thread-1/turns",
       expect.objectContaining({
         body: JSON.stringify({ input: { type: "message", text: "帮我总结这段话" } }),
       }),
@@ -257,7 +257,7 @@ describe("new thread client session", () => {
     await expect(session.submit(submission)).resolves.toMatchObject({ id: "thread-1" });
 
     expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(fetchImpl.mock.calls[2]?.[0]).toBe("/api/v1/threads/thread-1/turns");
+    expect(fetchImpl.mock.calls[2]?.[0]).toBe("/api/threads/thread-1/turns");
     expect(fetchImpl.mock.calls[2]?.[1]?.headers).toMatchObject({
       "idempotency-key": "turn-key",
     });

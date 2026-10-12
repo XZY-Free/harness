@@ -1,3 +1,4 @@
+import { ExecutionAuthorityError } from "@/lib/executions/domain/execution-authority";
 /**
  * Runtime API route handler 公共助手。
  *
@@ -28,16 +29,17 @@ import {
 } from "@/lib/identity/workload-token";
 import { isTokenRevoked } from "@/lib/identity/workload-token-revocation-queries";
 import {
+  EventAuthorityConflictError,
   EventPayloadHashConflictError,
+  IngressAuthorityMismatchError,
   IngressInvocationNotFoundError,
   IngressInvocationTerminalError,
-} from "@/lib/runtime/errors";
+  ProducerSequenceGapError,
+} from "@/lib/runtime/application/ingress-runtime-events";
 import {
-  A2AConfirmationProposalConflictError,
   IngressBatchEmptyError,
   IngressCandidateTypeUnsupportedError,
-  IngressSequenceStartMismatchError,
-} from "@/lib/runtime/event-ingress-queries";
+} from "@/lib/runtime/application/ingress-runtime-events";
 
 // ─── 类型再导出（route handlers 统一从此处 import） ────────
 export type { WorkloadTokenClaims };
@@ -112,20 +114,19 @@ export async function ingressErrorToResponse(
       details: { invocation_id: error.invocationId, current_state: error.currentState },
     });
   }
+  if (error instanceof IngressAuthorityMismatchError) {
+    return apiError("ACCESS_DENIED", error.message, { requestId });
+  }
+  if (error instanceof ExecutionAuthorityError) {
+    return apiError("ACCESS_DENIED", error.message, {
+      requestId,
+      details: { code: error.code },
+    });
+  }
   if (error instanceof IngressBatchEmptyError) {
     return apiError("REQUEST_SCHEMA_INVALID", error.message, {
       requestId,
       details: { invocation_id: error.invocationId },
-    });
-  }
-  if (error instanceof IngressSequenceStartMismatchError) {
-    return apiError("REQUEST_SCHEMA_INVALID", error.message, {
-      requestId,
-      details: {
-        invocation_id: error.invocationId,
-        declared_start: error.declaredStart,
-        first_event_sequence: error.firstEventSequence,
-      },
     });
   }
   if (error instanceof IngressCandidateTypeUnsupportedError) {
@@ -137,31 +138,31 @@ export async function ingressErrorToResponse(
       },
     });
   }
-  if (error instanceof A2AConfirmationProposalConflictError) {
-    return apiError("A2A_CONFIRMATION_PROPOSAL_CONFLICT", error.message, {
-      requestId,
-      details: {
-        invocation_id: error.invocationId,
-        action_id: error.actionId,
-        proposal_id: error.proposalId,
-      },
-    });
-  }
   if (error instanceof EventPayloadHashConflictError) {
     return apiError("IDEMPOTENCY_CONFLICT", error.message, {
       requestId,
       details: {
         invocation_id: error.invocationId,
-        producer_event_id: error.producerEventId,
+        producer_event_id: error.eventId,
         producer_sequence: error.producerSequence,
         expected_hash: error.expectedHash,
         actual_hash: error.actualHash,
       },
     });
   }
-  // EventSequenceGapError 来自 conversation 域；按其 name 识别
-  if (error instanceof Error && error.name === "EventSequenceGapError") {
-    return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
+  if (error instanceof EventAuthorityConflictError) {
+    return apiError("IDEMPOTENCY_CONFLICT", error.message, {
+      requestId,
+      details: { invocation_id: error.invocationId, producer_event_id: error.eventId },
+    });
+  }
+  if (error instanceof ProducerSequenceGapError) {
+    return apiError("EVENT_SEQUENCE_GAP", error.message, {
+      requestId,
+      ...(error.acceptedThroughProducerSequence !== undefined
+        ? { details: { acceptedThroughProducerSequence: error.acceptedThroughProducerSequence } }
+        : {}),
+    });
   }
   // TransientSequenceGapError 来自 transient 域
   if (error instanceof Error && error.name === "TransientSequenceGapError") {

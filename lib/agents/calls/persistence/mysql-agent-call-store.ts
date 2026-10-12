@@ -45,6 +45,7 @@ import {
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { userIdentity } from "@/lib/persistence/schema/identity";
+import { authorizeRuntimeAction } from "@/lib/runtime/application/authorize-runtime-action";
 import { and, desc, eq } from "drizzle-orm";
 
 export function createMysqlAgentCallStore(
@@ -57,6 +58,13 @@ export function createMysqlAgentCallStore(
   return {
     finalizeAgentCall: (input) =>
       db.transaction(async (tx) => {
+        if (input.authority) {
+          await authorizeRuntimeAction({
+            tenantId: input.tenantId,
+            authority: input.authority,
+            executor: tx,
+          });
+        }
         await lockAndValidateAgentCallAuthority(tx, input);
         const creationRequestDigest = computeCreationRequestDigest(input);
         // 幂等：同一 (parentInvocationId, logicalCallKey) 已存在 → 返回已存在 call。
@@ -748,7 +756,7 @@ async function doCreate(
     credentialRefId: b.credentialRefId ?? null,
     networkZone: b.networkZone,
     protocolType: b.protocolType,
-    protocolContractRevision: b.protocolContractRevision,
+    protocolContractDigest: b.protocolContractDigest,
     policyRevisionId: b.policyRevisionId,
     policyRulesDigest: b.policyRulesDigest,
     governanceConfigRevisionId: b.governanceConfigRevisionId,
@@ -918,7 +926,7 @@ function toBindingConfig(
     credentialRefId: row.credentialRefId,
     networkZone: row.networkZone,
     protocolType: row.protocolType,
-    protocolContractRevision: row.protocolContractRevision,
+    protocolContractDigest: row.protocolContractDigest,
     policyRevisionId: row.policyRevisionId,
     policyRulesDigest: row.policyRulesDigest,
     governanceConfigRevisionId: row.governanceConfigRevisionId,

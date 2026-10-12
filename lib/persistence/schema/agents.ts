@@ -179,7 +179,7 @@ const SCENARIO_DECLARATIONS = ["declared", "unspecified"] as const;
  * - 合同文件是 request-only 输入：每个合同事实持久化为显式列/子记录，绝不持久化整份源文件、
  *   原始合同对象或整节 JSON（无 rawContract/canonicalProviderDescriptor 类整节 payload 列）。
  * - supportedLocales / resultFields / errorCodes 是字段级数组（对应字段，非整节 payload）。
- * - protocolType / protocolContractRevision 来自登记命令的显式 protocol 字段（合同文件不含
+ * - protocolType / protocolContractDigest 来自登记命令的显式 protocol 字段（合同文件不含
  *   protocol，禁止硬编码默认）。
  * - 快照不可变：登记后不可 UPDATE；同一合同再次显式登记生成新快照。
  */
@@ -206,7 +206,7 @@ export const agentContractSnapshotTable = mysqlTable(
     agentNameEn: varchar("agentNameEn", { length: 256 }),
     /** 登记命令显式提供的协议事实（不来自合同文件）。 */
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
-    protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
+    protocolContractDigest: varchar("protocolContractDigest", { length: 128 }).notNull(),
     scenarioDeclaration: mysqlEnum("scenarioDeclaration", SCENARIO_DECLARATIONS).notNull(),
     applicableScenarios: json("applicableScenarios").$type<string[]>().notNull(),
     excludedScenarios: json("excludedScenarios").$type<string[]>().notNull(),

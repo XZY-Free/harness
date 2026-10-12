@@ -15,7 +15,7 @@ const requestSchema = z
   .object({
     device_id: z.string().trim().min(1).max(128),
     display_name: z.string().trim().min(1).max(256),
-    location_fingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    storage_scope_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   })
   .strict();
 
@@ -40,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
       userId: principal.userIdentityId,
       deviceKey: parsed.data.device_id,
       displayName: parsed.data.display_name,
-      locationFingerprint: parsed.data.location_fingerprint,
+      storageScopeDigest: parsed.data.storage_scope_digest,
     });
     return Response.json({
       ok: true,

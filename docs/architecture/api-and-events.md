@@ -35,10 +35,10 @@ flowchart LR
 ### 2.1 路径与版本
 
 ~~~text
-/api/v1/...                 员工交互接口
-/runtime/v1/...             Runtime 协议
-/admin/api/v1/...           管理控制与观测接口
-/gateway/v1/...             Runtime 到平台的内部网关
+/api/...                 员工交互接口
+/runtime/...             Runtime 协议
+/admin/api/...           管理控制与观测接口
+/gateway/...             Runtime 到平台的内部网关
 ~~~
 
 URL 中的 `v1` 表示资源和命令语义版本。Event payload 另有 `schema_version`，允许在不更换整个 API 版本时演进单个事件。
@@ -111,7 +111,7 @@ Idempotency-Key 至少保留到该命令不可能被客户端合理重放；有�
 
 ### 3.1 创建 Thread
 
-`POST /api/v1/threads`
+`POST /api/threads`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -121,7 +121,7 @@ Idempotency-Key 至少保留到该命令不可能被客户端合理重放；有�
 | parent | Body | object | 否 | 仅 fork/delegate 的受控入口使用；普通创建不传 |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads' \
+curl -X POST 'https://snow.example.com/api/threads' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: 018f-create-report-thread' \
   -H 'Content-Type: application/json' \
@@ -142,7 +142,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads' \
 
 ### 3.2 更新 Thread 默认设置
 
-`PATCH /api/v1/threads/{thread_id}/settings`
+`PATCH /api/threads/{thread_id}/settings`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -153,7 +153,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads' \
 | default_environment_definition_id | Body | string/null | 否 | 默认环境偏好，不是实际 Lease |
 
 ```bash
-curl -X PATCH 'https://snow.example.com/api/v1/threads/thr_01J.../settings' \
+curl -X PATCH 'https://snow.example.com/api/threads/thr_01J.../settings' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'If-Match: "thread-settings-8"' \
   -H 'Content-Type: application/json' \
@@ -180,7 +180,7 @@ Thread 不保存主 Agent，也不保存 primary/default/current/active/preferre
 该指令是 Harness 规划输入，不是必调约束。例如用户选择 HR 后发送“你好”，Harness 可以 0 次 AgentCall 直接回答；询问年假余额时才计划 `agent.call` action。后续改选只影响新 Turn，不修改运行中 Turn、历史 Turn 或已创建 AgentCall。
 ### 3.4 创建 Turn
 
-`POST /api/v1/threads/{thread_id}/turns`
+`POST /api/threads/{thread_id}/turns`
 
 该接口原子接纳用户消息并创建 Turn；调用方不先单独 POST Message。
 
@@ -195,7 +195,7 @@ Thread 不保存主 Agent，也不保存 primary/default/current/active/preferre
 | expected_thread_version | Body | integer | 否 | 可选的界面状态保护，不代替权限校验 |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../turns' \
+curl -X POST 'https://snow.example.com/api/threads/thr_01J.../turns' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: desktop-msg-82d7' \
   -H 'X-Desktop-Device-ID: <bound-device-id>' \
@@ -244,7 +244,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../turns' \
 
 ### 3.5 查询 Item
 
-`GET /api/v1/threads/{thread_id}/items`
+`GET /api/threads/{thread_id}/items`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -255,7 +255,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../turns' \
 | include_superseded | Query | boolean | 否 | 默认 false；排障时可查看旧回答 |
 
 ```bash
-curl 'https://snow.example.com/api/v1/threads/thr_01J.../items?limit=50' \
+curl 'https://snow.example.com/api/threads/thr_01J.../items?limit=50' \
   -H 'Authorization: Bearer <employee-token>'
 ```
 
@@ -289,7 +289,7 @@ Item 列表与 `latest_event_cursor` 在同一一致性读点生成。Item API �
 
 ### 3.6 订阅 Event
 
-`GET /api/v1/threads/{thread_id}/events`
+`GET /api/threads/{thread_id}/events`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -299,7 +299,7 @@ Item 列表与 `latest_event_cursor` 在同一一致性读点生成。Item API �
 | include_transient | Query | boolean | 否 | 默认 true；接收当前连接的 delta/heartbeat |
 
 ```bash
-curl -N 'https://snow.example.com/api/v1/threads/thr_01J.../events' \
+curl -N 'https://snow.example.com/api/threads/thr_01J.../events' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Accept: text/event-stream' \
   -H 'Last-Event-ID: 51'
@@ -318,7 +318,7 @@ data: {"transient":true,"thread_id":"thr_01J...","turn_id":"turn_next","transien
 
 ### 3.7 引导当前 Turn
 
-`POST /api/v1/turns/{turn_id}/steer`
+`POST /api/turns/{turn_id}/steer`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -329,7 +329,7 @@ data: {"transient":true,"thread_id":"thr_01J...","turn_id":"turn_next","transien
 | mode | Body | string | 是 | next_safe_point、interrupt_generation |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J.../steer' \
+curl -X POST 'https://snow.example.com/api/turns/turn_01J.../steer' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: steer-20260715-1' \
   -H 'Content-Type: application/json' \
@@ -354,7 +354,7 @@ Steer 不创建第二个 Turn。接纳事务先创建 pending 状态的 user_gui
 
 ### 3.8 中断当前 Turn
 
-`POST /api/v1/turns/{turn_id}/interrupt`
+`POST /api/turns/{turn_id}/interrupt`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -364,7 +364,7 @@ Steer 不创建第二个 Turn。接纳事务先创建 pending 状态的 user_gui
 | preserve_pending_inputs | Body | boolean | 否 | 默认 true |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J.../interrupt' \
+curl -X POST 'https://snow.example.com/api/turns/turn_01J.../interrupt' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: stop-turn-7' \
   -H 'Content-Type: application/json' \
@@ -386,7 +386,7 @@ curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J.../interrupt' \
 
 ### 3.9 重新生成
 
-`POST /api/v1/turns/{turn_id}/regenerate`
+`POST /api/turns/{turn_id}/regenerate`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -396,7 +396,7 @@ curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J.../interrupt' \
 | reason | Body | string | 否 | 员工补充说明，不复制原 user_message |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J...:regenerate' \
+curl -X POST 'https://snow.example.com/api/turns/turn_01J...:regenerate' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: regenerate-turn-7-2' \
   -H 'Content-Type: application/json' \
@@ -418,7 +418,7 @@ curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J...:regenerate' \
 
 ### 3.10 创建 Fork
 
-`POST /api/v1/threads/{thread_id}/forks`
+`POST /api/threads/{thread_id}/forks`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -429,7 +429,7 @@ curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J...:regenerate' \
 | workspace_mode | Body | string | 是 | reference、checkpoint_copy、none |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_source/forks' \
+curl -X POST 'https://snow.example.com/api/threads/thr_source/forks' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: fork-analysis-b' \
   -H 'Content-Type: application/json' \
@@ -449,7 +449,7 @@ Fork 复制或引用会话内容边界，不默认复制文件系统。`checkpoi
 
 ### 3.11 上传 Thread 原文件
 
-`POST /api/v1/threads/{thread_id}/attachments`
+`POST /api/threads/{thread_id}/attachments`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -458,7 +458,7 @@ Fork 复制或引用会话内容边界，不默认复制文件系统。`checkpoi
 | file | Form | binary | 是 | 原文件；图片上限 10 MB，当前允许的文档上限 20 MB |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../attachments' \
+curl -X POST 'https://snow.example.com/api/threads/thr_01J.../attachments' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: upload-medical-proof-01' \
   -F 'file=@病假证明.pdf;type=application/pdf'
@@ -468,7 +468,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../attachments' \
 {
   "kind": "attachment",
   "attachment_id": "6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
-  "url": "/api/v1/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
+  "url": "/api/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
   "filename": "病假证明.pdf",
   "size": 48231,
   "type": "application/pdf"
@@ -479,7 +479,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../attachments' \
 
 ### 3.11.1 读取 Thread 原文件
 
-`GET /api/v1/threads/{thread_id}/attachments/{attachment_id}`
+`GET /api/threads/{thread_id}/attachments/{attachment_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -487,7 +487,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../attachments' \
 | attachment_id | Path | string | 是 | 已登记的原文件 id |
 
 ```bash
-curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166' \
+curl -L 'https://snow.example.com/api/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166' \
   -H 'Authorization: Bearer <employee-token>' \
   -o '病假证明.pdf'
 ```
@@ -498,7 +498,7 @@ curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../attachments/6f5a7bb1
 
 ### 3.12 读取 Thread 最终产物
 
-`GET /api/v1/threads/{thread_id}/artifacts/{artifact_id}`
+`GET /api/threads/{thread_id}/artifacts/{artifact_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -506,7 +506,7 @@ curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../attachments/6f5a7bb1
 | artifact_id | Path | string | 是 | AI/Tool 已登记的最终产物 id |
 
 ```bash
-curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../artifacts/54ad86f1-59e5-47c3-a55c-3278613a0e92' \
+curl -L 'https://snow.example.com/api/threads/thr_01J.../artifacts/54ad86f1-59e5-47c3-a55c-3278613a0e92' \
   -H 'Authorization: Bearer <employee-token>' \
   -o '月报.xlsx'
 ```
@@ -517,7 +517,7 @@ curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../artifacts/54ad86f1-5
 
 ### 3.13 附加 Workspace 资源
 
-`POST /api/v1/threads/{thread_id}/workspace-attachments`
+`POST /api/threads/{thread_id}/workspace-attachments`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -530,7 +530,7 @@ curl -L 'https://snow.example.com/api/v1/threads/thr_01J.../artifacts/54ad86f1-5
 | expires_at | Body | string | 否 | 临时附加有效期 |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../workspace-attachments' \
+curl -X POST 'https://snow.example.com/api/threads/thr_01J.../workspace-attachments' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: attach-local-sales-xlsx' \
   -H 'X-Desktop-Device-ID: <bound-device-id>' \
@@ -556,7 +556,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../workspace-attac
 
 ### 3.14 移除 Workspace Attachment
 
-`DELETE /api/v1/workspace-attachments/{attachment_id}`
+`DELETE /api/workspace-attachments/{attachment_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -564,7 +564,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../workspace-attac
 | If-Match | Header | string | 是 | Attachment ETag |
 
 ```bash
-curl -X DELETE 'https://snow.example.com/api/v1/workspace-attachments/watt_01J...' \
+curl -X DELETE 'https://snow.example.com/api/workspace-attachments/watt_01J...' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'If-Match: "attachment-3"'
 ```
@@ -581,14 +581,14 @@ curl -X DELETE 'https://snow.example.com/api/v1/workspace-attachments/watt_01J..
 
 ### 3.15 查询 PendingInput
 
-`GET /api/v1/threads/{thread_id}/pending-inputs`
+`GET /api/threads/{thread_id}/pending-inputs`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
 | thread_id | Path | string | 是 | Thread id |
 
 ```bash
-curl 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs' \
+curl 'https://snow.example.com/api/threads/thr_01J.../pending-inputs' \
   -H 'Authorization: Bearer <employee-token>'
 ```
 
@@ -606,7 +606,7 @@ Desktop/Web 恢复 Thread 时读取该列表；admitted 和 removed 输入不返
 
 ### 3.16 创建 PendingInput
 
-`POST /api/v1/threads/{thread_id}/pending-inputs`
+`POST /api/threads/{thread_id}/pending-inputs`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -615,7 +615,7 @@ Desktop/Web 恢复 Thread 时读取该列表；admitted 和 removed 输入不返
 | input | Body | object | 是 | 类型化输入 |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs' \
+curl -X POST 'https://snow.example.com/api/threads/thr_01J.../pending-inputs' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: pending-msg-3' \
   -H 'Content-Type: application/json' \
@@ -638,7 +638,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs'
 
 ### 3.17 编辑 PendingInput
 
-`PATCH /api/v1/pending-inputs/{pending_input_id}`
+`PATCH /api/pending-inputs/{pending_input_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -647,7 +647,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs'
 | input | Body | object | 是 | 新内容；仅 pending 状态可改 |
 
 ```bash
-curl -X PATCH 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
+curl -X PATCH 'https://snow.example.com/api/pending-inputs/pin_01J...' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'If-Match: "pending-1"' \
   -H 'Content-Type: application/json' \
@@ -668,7 +668,7 @@ curl -X PATCH 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 
 ### 3.18 重排 PendingInput
 
-`POST /api/v1/threads/{thread_id}/pending-inputs/reorder`
+`POST /api/threads/{thread_id}/pending-inputs/reorder`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -678,7 +678,7 @@ curl -X PATCH 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 | ordered_ids | Body | string[] | 是 | 当前所有 pending id 的完整顺序 |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs/reorder' \
+curl -X POST 'https://snow.example.com/api/threads/thr_01J.../pending-inputs/reorder' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: reorder-pending-4' \
   -H 'If-Match: "pending-queue-8"' \
@@ -702,7 +702,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs/
 
 ### 3.19 删除 PendingInput
 
-`DELETE /api/v1/pending-inputs/{pending_input_id}`
+`DELETE /api/pending-inputs/{pending_input_id}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -710,7 +710,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs/
 | If-Match | Header | string | 是 | 当前 ETag |
 
 ```bash
-curl -X DELETE 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
+curl -X DELETE 'https://snow.example.com/api/pending-inputs/pin_01J...' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'If-Match: "pending-2"'
 ```
@@ -728,7 +728,7 @@ curl -X DELETE 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 
 ### 3.20 解析用户操作请求
 
-`POST /api/v1/user-action-requests/{request_id}/resolve`
+`POST /api/user-action-requests/{request_id}/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -739,7 +739,7 @@ curl -X DELETE 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 | grant_scope | Body | object | 否 | 仅授权请求且不得超过平台允许范围 |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/user-action-requests/uar_01J...:resolve' \
+curl -X POST 'https://snow.example.com/api/user-action-requests/uar_01J...:resolve' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: approve-refund-preview-1' \
   -H 'Content-Type: application/json' \
@@ -761,7 +761,7 @@ curl -X POST 'https://snow.example.com/api/v1/user-action-requests/uar_01J...:re
 
 ### 3.21 完成 Auth 回调
 
-`GET /api/v1/user-action-requests/{request_id}/auth/callback`
+`GET /api/user-action-requests/{request_id}/auth/callback`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -771,7 +771,7 @@ curl -X POST 'https://snow.example.com/api/v1/user-action-requests/uar_01J...:re
 | employee_session | Cookie | string | 是 | SnowHarness HttpOnly Session；与 state 共同绑定发起授权的员工 |
 
 ```bash
-curl 'https://snow.example.com/api/v1/user-action-requests/uar_auth_01J.../auth/callback?code=<one-time-code>&state=<one-time-state>' \
+curl 'https://snow.example.com/api/user-action-requests/uar_auth_01J.../auth/callback?code=<one-time-code>&state=<one-time-state>' \
   -H 'Cookie: <employee-session>'
 ```
 
@@ -792,7 +792,7 @@ Runtime Protocol 是 SnowHarness 与 Agent 执行器之间的协议，不是员�
 
 ### 4.1 启动 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations`
+`POST {runtime_endpoint}/runtime/invocations`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -810,7 +810,7 @@ Runtime Protocol 是 SnowHarness 与 Agent 执行器之间的协议，不是员�
 | attempt | Body | object | 否 | 仅基础设施重调度时传 attempt_id、attempt_no、retry_reason、checkpoint_ref、新 lease handle 和 producer_sequence_start |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
+curl -X POST 'https://runtime.example.net/runtime/invocations' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: inv_01J:initial' \
   -H 'Content-Type: application/json' \
@@ -820,7 +820,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
     "agent":{"revision_id":"agr_18","agent_artifact_ref":"oci://registry.example/finance@sha256:...","entrypoint":"agent:root","interface_requirements":{"required":["event_stream","dynamic_tools"],"optional":["steer"]}},
     "input_items":[{"id":"item_user_01J...","type":"user_message","content":{"text":"生成月报"}}],
     "context_handle":"ctxh_short_lived",
-    "gateway_endpoints":{"base_url":"https://snow.example.com/gateway/v1"},
+    "gateway_endpoints":{"base_url":"https://snow.example.com/gateway"},
     "workspace":{"default_binding_handle":"wbh_short_lived","attachment_handles":["wah_a_xlsx"]},
     "execution_limits":{"timeout_seconds":1800,"max_tokens":120000,"cost_limit":"20.00 CNY"},
     "trace_context":{"traceparent":"00-...-...-01"}
@@ -842,7 +842,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
 
 ### 4.2 回传 Runtime Event
 
-`POST /runtime/v1/invocations/{invocation_id}/events/batch`
+`POST /runtime/invocations/{invocationId}/events/batch`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -852,7 +852,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
 | events | Body | array | 是 | 1–100 个规范候选事件 |
 
 ```bash
-curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../events:batch' \
+curl -X POST 'https://snow.example.com/runtime/invocations/inv_01J.../events:batch' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: inv_01J-batch-4' \
   -H 'Content-Type: application/json' \
@@ -901,14 +901,14 @@ External Runtime 启动请求中的 `gateway_endpoints` 必须是平台公开的
 |---|---|---|
 | `events` | `POST` | 批量回传 Runtime Candidate Event，进入唯一 `RuntimeEventIngress` |
 | `user_action_requests` | `POST` | 回传单个 `user_action.requested`，创建 `UserActionRequest Authority` 与 Item Projection |
-| `tools` | `POST` | 查询工具/能力目录（`/gateway/v1/tools` 为 `/capabilities/search` 的同逻辑入口） |
+| `tools` | `POST` | 查询工具/能力目录（`/gateway/tools` 为 `/capabilities/search` 的同逻辑入口） |
 | `tool_calls` | `POST` | 提交 ToolCall 意图并执行 Gateway Policy/Permission |
 | `capability_actions` | `POST` | 提交 Harness action（含 `agent.call`） |
 
-`events` 的 URL 为 `/gateway/v1/runtime-events`，请求体包含 `invocation_id`、`producer_sequence_start` 与 `events`；`user_action_requests` 复用同一 envelope 且只接受一个 `user_action.requested` 事件。两条回调都要求 `Authorization: Bearer <gateway_access_token>`、`Idempotency-Key`，并校验 Token 中的 tenant/invocation，随后调用同一个 `ingressEventBatch` 事务，不允许 Runtime 直接写 Item、ThreadEvent 或 UserAction 表。
+`events` 的 URL 为 `/gateway/runtime-events`，请求体包含 `invocation_id`、`producer_sequence_start` 与 `events`；`user_action_requests` 复用同一 envelope 且只接受一个 `user_action.requested` 事件。两条回调都要求 `Authorization: Bearer <gateway_access_token>`、`Idempotency-Key`，并校验 Token 中的 tenant/invocation，随后调用同一个 `ingressEventBatch` 事务，不允许 Runtime 直接写 Item、ThreadEvent 或 UserAction 表。
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/runtime-events' \
+curl -X POST 'https://snow.example.com/gateway/runtime-events' \
   -H 'Authorization: Bearer <gateway-access-token>' \
   -H 'Idempotency-Key: inv_01J:runtime-events:17' \
   -H 'Content-Type: application/json' \
@@ -917,7 +917,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/runtime-events' \
 
 ### 4.3 回传 Transient Event
 
-`POST /runtime/v1/invocations/{invocation_id}/transient-events/batch`
+`POST /runtime/invocations/{invocationId}/transient-events/batch`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -927,7 +927,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/runtime-events' \
 | events | Body | array | 是 | response.delta、heartbeat、tool.log；1–100 条 |
 
 ```bash
-curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../transient-events:batch' \
+curl -X POST 'https://snow.example.com/runtime/invocations/inv_01J.../transient-events:batch' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: inv-01J-transient-41' \
   -H 'Content-Type: application/json' \
@@ -946,7 +946,7 @@ curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../transie
 
 ### 4.4 取消 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/cancel`
+`POST {runtime_endpoint}/runtime/invocations/{invocationId}/cancel`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -956,7 +956,7 @@ curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../transie
 | deadline | Body | string | 是 | Runtime 最晚停止时间 |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:cancel' \
+curl -X POST 'https://runtime.example.net/runtime/invocations/inv_01J...:cancel' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: cancel-inv-01J' \
   -H 'Content-Type: application/json' \
@@ -975,7 +975,7 @@ Runtime 应停止新行动并报告最终状态；无法立即停止时返回 ac
 
 ### 4.5 恢复 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/resume`
+`POST {runtime_endpoint}/runtime/invocations/{invocationId}/resume`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -986,7 +986,7 @@ Runtime 应停止新行动并报告最终状态；无法立即停止时返回 ac
 | checkpoint_ref | Body | string | 否 | Runtime 已丢失内存状态时的受控恢复点 |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:resume' \
+curl -X POST 'https://runtime.example.net/runtime/invocations/inv_01J...:resume' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: icmd_01J...' \
   -H 'Content-Type: application/json' \
@@ -1006,7 +1006,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:resu
 
 ### 4.6 引导 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/steer`
+`POST {runtime_endpoint}/runtime/invocations/{invocationId}/steer`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1017,7 +1017,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:resu
 | mode | Body | string | 是 | next_safe_point、interrupt_generation |
 
 ```bash
-curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:steer' \
+curl -X POST 'https://runtime.example.net/runtime/invocations/inv_01J...:steer' \
   -H 'Authorization: Bearer <workload-token>' \
   -H 'Idempotency-Key: icmd_steer_01J...' \
   -H 'Content-Type: application/json' \
@@ -1037,7 +1037,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:stee
 
 ### 4.7 Runtime 能力发现
 
-`GET {runtime_endpoint}/runtime/v1/capabilities`
+`GET {runtime_endpoint}/runtime/capabilities`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1045,7 +1045,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:stee
 | protocol_version | Query | string | 是 | 平台支持的协议版本 |
 
 ```bash
-curl 'https://runtime.example.net/runtime/v1/capabilities?protocol_version=1' \
+curl 'https://runtime.example.net/runtime/capabilities?protocol_version=1' \
   -H 'Authorization: Bearer <runtime-probe-token>'
 ```
 
@@ -1072,7 +1072,7 @@ curl 'https://runtime.example.net/runtime/v1/capabilities?protocol_version=1' \
 
 ### 5.1 执行 ToolCall
 
-`POST /gateway/v1/tool-calls`
+`POST /gateway/tool-calls`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1085,7 +1085,7 @@ curl 'https://runtime.example.net/runtime/v1/capabilities?protocol_version=1' \
 | arguments | Body | object | 是 | 只含业务参数；无 user/tenant/credential |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/tool-calls' \
+curl -X POST 'https://snow.example.com/gateway/tool-calls' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: op-report-query-7' \
   -H 'Content-Type: application/json' \
@@ -1106,7 +1106,7 @@ Gateway 重新取得当前 Schema 并核对 hash；不一致返回 409 `TOOL_SCH
 
 ### 5.2 核对 Tool Effect
 
-`POST /gateway/v1/tool-calls/{tool_call_id}/reconcile-effect`
+`POST /gateway/tool-calls/{tool_call_id}/reconcile-effect`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1116,7 +1116,7 @@ Gateway 重新取得当前 Schema 并核对 hash；不一致返回 409 `TOOL_SCH
 | verification_mode | Body | string | 是 | 仅 provider_query |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/tool-calls/tc_01J...:reconcile-effect' \
+curl -X POST 'https://snow.example.com/gateway/tool-calls/tc_01J...:reconcile-effect' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: reconcile-op-report-send-7' \
   -H 'Content-Type: application/json' \
@@ -1136,7 +1136,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/tool-calls/tc_01J...:reconcile
 
 ### 5.3 创建 Artifact
 
-`POST /gateway/v1/artifacts`
+`POST /gateway/artifacts`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1148,7 +1148,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/tool-calls/tc_01J...:reconcile
 | file | Form | binary | 是 | Artifact 内容；大小受 Runtime/租户限制 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/artifacts' \
+curl -X POST 'https://snow.example.com/gateway/artifacts' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: artifact-monthly-report-v1' \
   -F 'invocation_id=inv_01J...' \
@@ -1171,14 +1171,14 @@ Artifact 内容进入当前部署的 `FileStorageProvider`；Turn Invocation 可
 
 ### 5.4 解析 Agent 短期附件引用
 
-`POST /gateway/v1/attachments/resolve`
+`POST /gateway/attachments/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
 | reference_id | Body | UUID | 是 | SnowHarness 为当前 AgentCall 与 Turn 附件签发的短期 capability（能力凭证） |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/attachments/resolve' \
+curl -X POST 'https://snow.example.com/gateway/attachments/resolve' \
   -H 'Content-Type: application/json' \
   -d '{"reference_id":"123e4567-e89b-12d3-a456-426614174000"}' \
   -o '授权附件.pdf'
@@ -1192,7 +1192,7 @@ HR Agent 取得原始字节后自行完成业务解析；只有请假业务需�
 
 ### 5.5 查询上下文
 
-`POST /gateway/v1/context/query`
+`POST /gateway/context/query`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1203,7 +1203,7 @@ HR Agent 取得原始字节后自行完成业务解析；只有请假业务需�
 | limits | Body | object | 是 | 每类条数、Token 和敏感级别限制 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
+curl -X POST 'https://snow.example.com/gateway/context/query' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Content-Type: application/json' \
   -d '{"context_handle":"ctxh_short_lived","sources":["knowledge","memory"],"query":"月报口径和员工币种偏好","limits":{"max_items":8,"max_tokens":4000}}'
@@ -1223,7 +1223,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
 
 ### 5.6 发起用户操作请求
 
-`POST /gateway/v1/user-action-requests`
+`POST /gateway/user-action-requests`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1236,7 +1236,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
 | expires_at | Body | string | 否 | 过期时间 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/user-action-requests' \
+curl -X POST 'https://snow.example.com/gateway/user-action-requests' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Idempotency-Key: confirm-batch-send-1' \
   -H 'Content-Type: application/json' \
@@ -1260,23 +1260,23 @@ Runtime 收到 pending 后暂停相关行动，不能在本地自造确认结果
 
 | 管理资源族 | API 根路径 | 写入边界 |
 |---|---|---|
-| Agent | `/admin/api/v1/agents`、`/agent-revisions` | 稳定身份与不可变修订分开；发布后修订只读 |
-| Runtime | `/admin/api/v1/runtimes`、`/runtime-revisions` | 能力探测结果写 RuntimeRevision；Endpoint 只引用 Connection |
-| 路由 | `/admin/api/v1/deployment-routes` | 只影响新 Invocation，更新使用 ETag |
-| Skill | `/admin/api/v1/skills`、`/skill-versions` | 稳定身份与内容版本分开，不触发 AgentRevision |
-| Tool | `/admin/api/v1/tool-providers`、`/tools`、`/tool-schema-revisions` | Schema 和风险差异单独审核 |
-| Knowledge | `/admin/api/v1/knowledge-bases`、`/knowledge-documents` | 文档修订与索引状态分开 |
-| Connection/Credential | `/admin/api/v1/connections`、`/credential-refs` | Credential API 只接收 Vault 写入会话，读响应不返回原值 |
-| Policy | `/admin/api/v1/policy-sets`、`/policy-revisions` | 规则发布后不可改，绑定切换写 AuditEvent |
-| Evaluation | `/admin/api/v1/evaluation-runs`、`/evaluation-results` | 使用测试环境，不修改线上 Invocation |
-| Job | `/admin/api/v1/jobs`、`/jobs/{id}/events` | 后台任务和 JobEvent；结果进入会话必须显式发布 |
-| Observability | `/admin/api/v1/threads`、`/turns`、`/invocations`、`/traces` | 只读投影；内容级别受 RBAC 和采集策略限制 |
+| Agent | `/admin/api/agents`、`/agent-revisions` | 稳定身份与不可变修订分开；发布后修订只读 |
+| Runtime | `/admin/api/runtimes`、`/runtime-revisions` | 能力探测结果写 RuntimeRevision；Endpoint 只引用 Connection |
+| 路由 | `/admin/api/deployment-routes` | 只影响新 Invocation，更新使用 ETag |
+| Skill | `/admin/api/skills`、`/skill-versions` | 稳定身份与内容版本分开，不触发 AgentRevision |
+| Tool | `/admin/api/tool-providers`、`/tools`、`/tool-schema-revisions` | Schema 和风险差异单独审核 |
+| Knowledge | `/admin/api/knowledge-bases`、`/knowledge-documents` | 文档修订与索引状态分开 |
+| Connection/Credential | `/admin/api/connections`、`/credential-refs` | Credential API 只接收 Vault 写入会话，读响应不返回原值 |
+| Policy | `/admin/api/policy-sets`、`/policy-revisions` | 规则发布后不可改，绑定切换写 AuditEvent |
+| Evaluation | `/admin/api/evaluation-runs`、`/evaluation-results` | 使用测试环境，不修改线上 Invocation |
+| Job | `/admin/api/jobs`、`/jobs/{id}/events` | 后台任务和 JobEvent；结果进入会话必须显式发布 |
+| Observability | `/admin/api/threads`、`/turns`、`/invocations`、`/traces` | 只读投影；内容级别受 RBAC 和采集策略限制 |
 
-统一目录使用 `/admin/api/v1/catalog` 查询上述资源，但没有通用 Catalog 写接口；修改动作必须回到对应资源族。
+统一目录使用 `/admin/api/catalog` 查询上述资源，但没有通用 Catalog 写接口；修改动作必须回到对应资源族。
 
 ### 6.1 创建 AgentRevision
 
-`POST /admin/api/v1/agents/{agent_id}/revisions`
+`POST /admin/api/agents/{agentId}/revisions`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1292,7 +1292,7 @@ Runtime 收到 pending 后暂停相关行动，不能在本地自造确认结果
 | agent_contract_snapshot_id | Body | string | 是 | 绑定的不可变 AgentContractSnapshot id（发布权威外部合同；必须属于同租户同 Agent） |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/agents/agt_finance/revisions' \
+curl -X POST 'https://snow.example.com/admin/api/agents/agt_finance/revisions' \
   -H 'Authorization: Bearer <cicd-service-token>' \
   -H 'Idempotency-Key: build-7f3a9c2' \
   -H 'Content-Type: application/json' \
@@ -1323,7 +1323,7 @@ Skill、Tool 和 Knowledge 不作为 AgentRevision 的固定内容清单提交�
 
 ### 6.2 发布 AgentRevision
 
-`POST /admin/api/v1/agent-revisions/{revision_id}/publish`
+`POST /admin/api/agent-revisions/{revisionId}/publish`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1335,7 +1335,7 @@ Skill、Tool 和 Knowledge 不作为 AgentRevision 的固定内容清单提交�
 | artifact_attestation_id | Body | string | 否 | 可选供应链证明；发布权威是绑定的 AgentContractSnapshot |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/agent-revisions/agr_19:publish' \
+curl -X POST 'https://snow.example.com/admin/api/agent-revisions/agr_19:publish' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: publish-agr-19' \
   -H 'If-Match: "agent-revision-19"' \
@@ -1356,7 +1356,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/agent-revisions/agr_19:publi
 
 ### 6.3 更新 DeploymentRoute
 
-`PUT /admin/api/v1/deployment-routes/{route_id}`
+`PUT /admin/api/deployment-routes/{routeId}`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1370,7 +1370,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/agent-revisions/agr_19:publi
 | route_state | Body | string | 是 | enabled、disabled |
 
 ```bash
-curl -X PUT 'https://snow.example.com/admin/api/v1/deployment-routes/route_finance_default' \
+curl -X PUT 'https://snow.example.com/admin/api/deployment-routes/route_finance_default' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'If-Match: "route-set-12"' \
   -H 'Content-Type: application/json' \
@@ -1394,7 +1394,7 @@ Scope 只由 RouteSet 管理，单条 Route 不能覆盖。服务端锁定 Route
 
 ### 6.4 查询实际执行记录
 
-`GET /admin/api/v1/invocations/{invocation_id}/actual-execution-record`
+`GET /admin/api/invocations/{invocationId}/actual-execution-record`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1402,7 +1402,7 @@ Scope 只由 RouteSet 管理，单条 Route 不能覆盖。服务端锁定 Route
 | include | Query | string[] | 否 | capabilities、tools、permissions、trace_summary；受 RBAC 限制 |
 
 ```bash
-curl 'https://snow.example.com/admin/api/v1/invocations/inv_01J.../actual-execution-record?include=capabilities,tools,permissions,trace_summary' \
+curl 'https://snow.example.com/admin/api/invocations/inv_01J.../actual-execution-record?include=capabilities,tools,permissions,trace_summary' \
   -H 'Authorization: Bearer <admin-token>'
 ```
 
@@ -1443,7 +1443,7 @@ curl 'https://snow.example.com/admin/api/v1/invocations/inv_01J.../actual-execut
 
 ### 6.5 管理核对长期未知副作用
 
-`POST /admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect`
+`POST /admin/api/tool-calls/{toolCallId}/reconcile-effect`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1454,7 +1454,7 @@ curl 'https://snow.example.com/admin/api/v1/invocations/inv_01J.../actual-execut
 | reason | Body | string | 是 | 审计原因 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/tool-calls/tc_01J...:reconcile-effect' \
+curl -X POST 'https://snow.example.com/admin/api/tool-calls/tc_01J...:reconcile-effect' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: admin-reconcile-op-7' \
   -H 'Content-Type: application/json' \
@@ -1475,7 +1475,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/tool-calls/tc_01J...:reconci
 
 ### 6.6 订阅 JobEvent
 
-`GET /admin/api/v1/jobs/{job_id}/events`
+`GET /admin/api/jobs/{jobId}/events`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1484,7 +1484,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/tool-calls/tc_01J...:reconci
 | after_sequence | Query | integer | 否 | 无 Last-Event-ID 时的备用游标 |
 
 ```bash
-curl -N 'https://snow.example.com/admin/api/v1/jobs/job_eval_01J.../events' \
+curl -N 'https://snow.example.com/admin/api/jobs/job_eval_01J.../events' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Accept: text/event-stream' \
   -H 'Last-Event-ID: 17'
@@ -1500,7 +1500,7 @@ JobEvent 与 ThreadEvent 使用相同 envelope 规则，但根 id 是 job_id、�
 
 ### 6.7 把 Job 结果发布到会话
 
-`POST /admin/api/v1/jobs/{job_id}/publish-to-thread`
+`POST /admin/api/jobs/{jobId}/publish-to-thread`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1512,7 +1512,7 @@ JobEvent 与 ThreadEvent 使用相同 envelope 规则，但根 id 是 job_id、�
 | display_summary | Body | string | 是 | 员工可见的脱敏摘要 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_eval_01J...:publish-to-thread' \
+curl -X POST 'https://snow.example.com/admin/api/jobs/job_eval_01J...:publish-to-thread' \
   -H 'Authorization: Bearer <admin-token>' \
   -H 'Idempotency-Key: publish-job-eval-88' \
   -H 'Content-Type: application/json' \
@@ -1660,13 +1660,13 @@ Adapter 必须使用同一组规范能力名声明 `event_stream、cancel、resu
 
 | 当前入口 | 入口 |
 |---|---|
-| `/api/chat` | `POST /api/v1/threads/{id}/turns`；不再由一个路由同时保存 Message、启动 Run 和拼 SSE |
-| `/api/threads/{id}/messages` | `GET /api/v1/threads/{id}/items` |
-| `/api/threads/{id}/stream`、RunTranscriptChunk | `GET /api/v1/threads/{id}/events` + transient stream |
+| `/api/chat` | `POST /api/threads/{id}/turns`；不再由一个路由同时保存 Message、启动 Run 和拼 SSE |
+| `/api/threads/{id}/messages` | `GET /api/threads/{id}/items` |
+| `/api/threads/{id}/stream`、RunTranscriptChunk | `GET /api/threads/{id}/events` + transient stream |
 | `/api/threads/{id}/runs/{runId}` | Turn/Invocation 详情；员工端和管理端使用不同响应视图 |
-| `/api/threads/{id}/cancel` | `POST /api/v1/turns/{turnId}/interrupt` |
+| `/api/threads/{id}/cancel` | `POST /api/turns/{turnId}/interrupt` |
 | `/studio/api/threads/{id}/approvals/*` | Employee UserAction resolve + Admin 风险查询；审批不只属于 Studio |
-| `/studio/api/agents` | `/admin/api/v1/agents` 与 Revision 发布接口 |
+| `/studio/api/agents` | `/admin/api/agents` 与 Revision 发布接口 |
 | `/studio/api/skills`、custom-tools、mcp-servers | Admin 能力 API；MCP 配置降为 ToolProvider/Connection 协议类型 |
 | `/studio/api/threads/{id}/context` | Admin 受控诊断视图；Runtime 按需读取走 Gateway Context API |
 | `/api/threads/{id}/workspace/*` | Employee Workspace/Attachment/Artifact API；Desktop 本地操作增加设备签名 |

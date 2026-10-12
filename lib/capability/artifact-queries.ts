@@ -28,9 +28,9 @@ import {
   fileChangeTable,
 } from "@/lib/persistence/schema/file-change";
 import {
-  FILESYSTEM_CHECKPOINT_TYPES,
+  FILESYSTEM_CHECKPOINT_FORMATS,
   type FilesystemCheckpoint,
-  type FilesystemCheckpointType,
+  type FilesystemCheckpointFormat,
   type NewFilesystemCheckpoint,
   filesystemCheckpointTable,
 } from "@/lib/persistence/schema/filesystem-checkpoint";
@@ -43,7 +43,7 @@ import {
   type VisibilityScope,
   artifactTable,
 } from "@/lib/persistence/schema/runtime-artifact";
-import { and, asc, desc, eq, isNotNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ export class FilesystemCheckpointNotFoundError extends Error {
 const VALID_RUNTIME_ARTIFACT_TYPES = new Set<string>(RUNTIME_ARTIFACT_TYPES);
 const VALID_VISIBILITY_SCOPES = new Set<string>(VISIBILITY_SCOPES);
 const VALID_FILE_CHANGE_TYPES = new Set<string>(FILE_CHANGE_TYPES);
-const VALID_FILESYSTEM_CHECKPOINT_TYPES = new Set<string>(FILESYSTEM_CHECKPOINT_TYPES);
+const VALID_FILESYSTEM_CHECKPOINT_FORMATS = new Set<string>(FILESYSTEM_CHECKPOINT_FORMATS);
 
 export function isRuntimeArtifactType(value: string): value is RuntimeArtifactType {
   return VALID_RUNTIME_ARTIFACT_TYPES.has(value);
@@ -119,8 +119,8 @@ export function isFileChangeType(value: string): value is FileChangeType {
   return VALID_FILE_CHANGE_TYPES.has(value);
 }
 
-export function isFilesystemCheckpointType(value: string): value is FilesystemCheckpointType {
-  return VALID_FILESYSTEM_CHECKPOINT_TYPES.has(value);
+export function isFilesystemCheckpointFormat(value: string): value is FilesystemCheckpointFormat {
+  return VALID_FILESYSTEM_CHECKPOINT_FORMATS.has(value);
 }
 
 /**
@@ -602,182 +602,5 @@ export async function linkFileChangeToArtifact(
   return updated;
 }
 
-// ─── createFilesystemCheckpoint ──────────────────────────
-
-export interface CreateFilesystemCheckpointInput {
-  tenantId: string;
-  workspaceBindingId: string;
-  invocationId: string;
-  checkpointType: FilesystemCheckpointType;
-  checkpointRef: string;
-  baseRevisionRef?: string | null;
-  contentHash: string;
-  expiresAt?: Date | null;
-}
-
-/**
- * 创建 FilesystemCheckpoint（文件系统状态恢复点）。
- *
- * 关键校验：
- * - tenantId / workspaceBindingId / invocationId / checkpointRef / contentHash 必填。
- * - contentHash 必须为 sha256: 前缀 + 64 hex。
- * - checkpointRef 必须为受管引用（不接受公网 http(s)://）。
- * - checkpointType 必须为合法枚举值。
- *
- * @throws FilesystemCheckpointValidationError 校验失败
- */
-export async function createFilesystemCheckpoint(
-  input: CreateFilesystemCheckpointInput,
-): Promise<FilesystemCheckpoint> {
-  if (!input.tenantId) throw new FilesystemCheckpointValidationError("tenantId 不能为空");
-  if (!input.workspaceBindingId) {
-    throw new FilesystemCheckpointValidationError("workspaceBindingId 不能为空");
-  }
-  if (!input.invocationId) {
-    throw new FilesystemCheckpointValidationError("invocationId 不能为空");
-  }
-  if (!input.checkpointRef) {
-    throw new FilesystemCheckpointValidationError("checkpointRef 不能为空");
-  }
-  if (input.checkpointRef.length > 512) {
-    throw new FilesystemCheckpointValidationError("checkpointRef 长度不能超过 512");
-  }
-  if (!isValidManagedRef(input.checkpointRef)) {
-    throw new FilesystemCheckpointValidationError(
-      "checkpointRef 必须是受管引用，不接受公网 http(s):// URL",
-    );
-  }
-  if (!isValidContentHash(input.contentHash)) {
-    throw new FilesystemCheckpointValidationError(
-      `contentHash 必须为 sha256: 前缀 + 64 hex: ${input.contentHash}`,
-    );
-  }
-  if (!isFilesystemCheckpointType(input.checkpointType)) {
-    throw new FilesystemCheckpointValidationError(`非法 checkpointType: ${input.checkpointType}`);
-  }
-  if (input.baseRevisionRef !== null && input.baseRevisionRef !== undefined) {
-    if (input.baseRevisionRef.length > 512) {
-      throw new FilesystemCheckpointValidationError("baseRevisionRef 长度不能超过 512");
-    }
-  }
-
-  const row: NewFilesystemCheckpoint = {
-    tenantId: input.tenantId,
-    workspaceBindingId: input.workspaceBindingId,
-    invocationId: input.invocationId,
-    checkpointType: input.checkpointType,
-    checkpointRef: input.checkpointRef,
-    baseRevisionRef: input.baseRevisionRef ?? null,
-    contentHash: input.contentHash,
-    expiresAt: input.expiresAt ?? null,
-  };
-
-  await db.insert(filesystemCheckpointTable).values(row);
-
-  const [created] = await db
-    .select()
-    .from(filesystemCheckpointTable)
-    .where(
-      and(
-        eq(filesystemCheckpointTable.tenantId, input.tenantId),
-        eq(filesystemCheckpointTable.workspaceBindingId, input.workspaceBindingId),
-        eq(filesystemCheckpointTable.invocationId, input.invocationId),
-      ),
-    )
-    .orderBy(desc(filesystemCheckpointTable.createdAt))
-    .limit(1);
-  if (!created) {
-    throw new Error("createFilesystemCheckpoint: 行未找到");
-  }
-  return created;
-}
-
-// ─── FilesystemCheckpoint 查询 ───────────────────────────
-
-/** 按 id 查询 FilesystemCheckpoint（跨租户隔离）。 */
-export async function getFilesystemCheckpointById(
-  tenantId: string,
-  checkpointId: string,
-): Promise<FilesystemCheckpoint | null> {
-  const [row] = await db
-    .select()
-    .from(filesystemCheckpointTable)
-    .where(
-      and(
-        eq(filesystemCheckpointTable.tenantId, tenantId),
-        eq(filesystemCheckpointTable.id, checkpointId),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
-
-/** 列出某 Invocation 的全部 FilesystemCheckpoint（按 createdAt 降序）。 */
-export async function listFilesystemCheckpointsByInvocation(
-  tenantId: string,
-  invocationId: string,
-): Promise<FilesystemCheckpoint[]> {
-  return db
-    .select()
-    .from(filesystemCheckpointTable)
-    .where(
-      and(
-        eq(filesystemCheckpointTable.tenantId, tenantId),
-        eq(filesystemCheckpointTable.invocationId, invocationId),
-      ),
-    )
-    .orderBy(desc(filesystemCheckpointTable.createdAt), desc(filesystemCheckpointTable.id));
-}
-
-/** 列出某 WorkspaceBinding 的 FilesystemCheckpoint（按 createdAt 降序）。 */
-export async function listFilesystemCheckpointsByWorkspaceBinding(
-  tenantId: string,
-  workspaceBindingId: string,
-): Promise<FilesystemCheckpoint[]> {
-  return db
-    .select()
-    .from(filesystemCheckpointTable)
-    .where(
-      and(
-        eq(filesystemCheckpointTable.tenantId, tenantId),
-        eq(filesystemCheckpointTable.workspaceBindingId, workspaceBindingId),
-      ),
-    )
-    .orderBy(desc(filesystemCheckpointTable.createdAt), desc(filesystemCheckpointTable.id));
-}
-
-/** 获取某 WorkspaceBinding 的最近一条 FilesystemCheckpoint（按 createdAt 降序取首条）。 */
-export async function getLatestFilesystemCheckpoint(
-  tenantId: string,
-  workspaceBindingId: string,
-): Promise<FilesystemCheckpoint | null> {
-  const [row] = await db
-    .select()
-    .from(filesystemCheckpointTable)
-    .where(
-      and(
-        eq(filesystemCheckpointTable.tenantId, tenantId),
-        eq(filesystemCheckpointTable.workspaceBindingId, workspaceBindingId),
-      ),
-    )
-    .orderBy(desc(filesystemCheckpointTable.createdAt), desc(filesystemCheckpointTable.id))
-    .limit(1);
-  return row ?? null;
-}
-
-/** 列出已过期的 FilesystemCheckpoint（expiresAt IS NOT NULL AND expiresAt < now；用于清理任务）。 */
-export async function listExpiredFilesystemCheckpoints(
-  tenantId: string,
-  now: Date = new Date(),
-): Promise<FilesystemCheckpoint[]> {
-  return db
-    .select()
-    .from(filesystemCheckpointTable)
-    .where(
-      and(
-        eq(filesystemCheckpointTable.tenantId, tenantId),
-        isNotNull(filesystemCheckpointTable.expiresAt),
-        lt(filesystemCheckpointTable.expiresAt, now),
-      ),
-    );
-}
+// FilesystemCheckpoint 的生产读写位于 lib/workspace/checkpoint-store.ts；
+// Artifact 仓储不再承载旧的 checkpointRef/过期状态模型。

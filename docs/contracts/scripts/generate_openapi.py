@@ -10,6 +10,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from contract_rules import READ_ONLY_POSTS  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCS_ROOT = REPO_ROOT / "docs" / "architecture"
@@ -233,7 +236,7 @@ def parse_parameters(section: list[str]) -> tuple[list[dict[str, Any]], dict[str
 def security_for(path: str) -> list[dict[str, list[str]]]:
     # attachment reference 本身是短期、调用绑定、可撤销的 bearer capability。
     # 外部 Agent 不应额外持有 SnowHarness 内部 Gateway Workload Token。
-    if path == "/gateway/v1/attachments/resolve":
+    if path == "/gateway/attachments/resolve":
         return []
     if path.endswith("/auth/callback"):
         return [{"employeeSession": []}]
@@ -264,32 +267,32 @@ def success_status(method: str, path: str, section: list[str]) -> str:
     if method == "GET":
         return "200"
     status_overrides = {
-        "/api/v1/threads/{thread_id}/change-primary-agent": "200",
-        "/api/v1/turns/{turn_id}/steer": "202",
-        "/api/v1/turns/{turn_id}/interrupt": "202",
-        "/api/v1/turns/{turn_id}/regenerate": "202",
-        "/api/v1/threads/{thread_id}/pending-inputs/reorder": "200",
-        "/api/v1/user-action-requests/{request_id}/resolve": "202",
-        "/runtime/v1/invocations": "202",
-        "/runtime/v1/invocations/{invocation_id}/events/batch": "202",
-        "/runtime/v1/invocations/{invocation_id}/transient-events/batch": "202",
-        "/runtime/v1/invocations/{invocation_id}/cancel": "202",
-        "/runtime/v1/invocations/{invocation_id}/resume": "202",
-        "/runtime/v1/invocations/{invocation_id}/steer": "202",
-        "/gateway/v1/tool-calls/{tool_call_id}/reconcile-effect": "200",
-        "/gateway/v1/context/query": "200",
-        "/admin/api/v1/agent-revisions/{revision_id}/publish": "200",
-        "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": "200",
-        "/admin/api/v1/jobs/{job_id}/publish-to-thread": "201",
-        "/gateway/v1/capabilities/search": "200",
-        "/gateway/v1/child-threads/{child_thread_id}/cancel": "202",
-        "/admin/api/v1/memory-candidates/{candidate_id}/resolve": "200",
-        "/admin/api/v1/jobs/{job_id}/cancel": "202",
-        "/admin/api/v1/jobs/{job_id}/retry": "201",
-        "/admin/api/v1/event-quarantines/{failure_id}/resolve": "202",
-        "/api/v1/threads/{thread_id}/request-execution-environment-change": "202",
-        "/admin/api/v1/artifact-attestations/verify": "200",
-        "/admin/api/v1/legal-holds/release": "200",
+        "/api/threads/{thread_id}/change-primary-agent": "200",
+        "/api/turns/{turn_id}/steer": "202",
+        "/api/turns/{turn_id}/interrupt": "202",
+        "/api/turns/{turn_id}/regenerate": "202",
+        "/api/threads/{thread_id}/pending-inputs/reorder": "200",
+        "/api/user-action-requests/{request_id}/resolve": "202",
+        "/runtime/invocations": "202",
+        "/runtime/invocations/{invocation_id}/events/batch": "202",
+        "/runtime/invocations/{invocation_id}/transient-events/batch": "202",
+        "/runtime/invocations/{invocation_id}/cancel": "202",
+        "/runtime/invocations/{invocation_id}/resume": "202",
+        "/runtime/invocations/{invocation_id}/steer": "202",
+        "/gateway/tool-calls/{tool_call_id}/reconcile-effect": "200",
+        "/gateway/context/query": "200",
+        "/admin/api/agent-revisions/{revisionId}/publish": "200",
+        "/admin/api/tool-calls/{toolCallId}/reconcile-effect": "200",
+        "/admin/api/jobs/{jobId}/publish-to-thread": "201",
+        "/gateway/capabilities/search": "200",
+        "/gateway/child-threads/{child_thread_id}/cancel": "202",
+        "/admin/api/memory-candidates/{candidateId}/resolve": "200",
+        "/admin/api/jobs/{jobId}/cancel": "202",
+        "/admin/api/jobs/{jobId}/retry": "201",
+        "/admin/api/event-quarantines/{failureId}/resolve": "202",
+        "/api/threads/{thread_id}/request-execution-environment-change": "202",
+        "/admin/api/artifact-attestations/verify": "200",
+        "/admin/api/legal-holds/release": "200",
     }
     if path in status_overrides:
         return status_overrides[path]
@@ -310,7 +313,7 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
     if not json_media:
         return
     schema = json_media["schema"]
-    if path == "/api/v1/threads/{thread_id}/turns":
+    if path == "/api/threads/{thread_id}/turns":
         schema["properties"]["agent_use"] = {
             "anyOf": [
                 {
@@ -327,13 +330,13 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
             "description": "Turn 级优先 Agent 指令；省略或 null 不继承历史选择。",
         }
     rules: dict[str, list[dict[str, Any]]] = {
-        "/gateway/v1/user-action-requests": [
+        "/gateway/user-action-requests": [
             {
                 "if": {"properties": {"request_type": {"const": "input"}}, "required": ["request_type"]},
                 "then": {"properties": {"input_schema": {}}, "required": ["input_schema"]},
             }
         ],
-        "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": [
+        "/admin/api/tool-calls/{toolCallId}/reconcile-effect": [
             {
                 "if": {
                     "properties": {
@@ -344,7 +347,7 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
                 "then": {"properties": {"evidence_ref": {}}, "required": ["evidence_ref"]},
             }
         ],
-        "/admin/api/v1/jobs/{job_id}/publish-to-thread": [
+        "/admin/api/jobs/{jobId}/publish-to-thread": [
             {
                 "if": {
                     "properties": {"publish_mode": {"const": "existing_source_turn"}},
@@ -465,7 +468,9 @@ def build_contract() -> dict[str, Any]:
             "RESOURCE_NOT_FOUND",
             "RATE_LIMITED",
         }
-        if item["method"] == "POST" and item["path"] != "/gateway/v1/context/query":
+        # 只读 POST 没有可幂等的副作用，声明 IDEMPOTENCY_CONFLICT 会让调用方误以为
+        # 存在重放语义；该判定与 validate_contracts.py 共用同一份清单（contract_rules）。
+        if item["method"] == "POST" and item["path"] not in READ_ONLY_POSTS:
             common_errors.add("IDEMPOTENCY_CONFLICT")
         if item["method"] in {"PUT", "PATCH"}:
             common_errors.add("ETAG_MISMATCH")

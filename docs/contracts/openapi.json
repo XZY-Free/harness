@@ -35,9 +35,9 @@
     }
   ],
   "paths": {
-    "/api/v1/threads": {
+    "/api/threads": {
       "post": {
-        "operationId": "post_api_v1_threads",
+        "operationId": "post_api_threads",
         "summary": "创建 Thread",
         "tags": [
           "employee"
@@ -144,9 +144,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/settings": {
+    "/api/threads/{thread_id}/settings": {
       "patch": {
-        "operationId": "patch_api_v1_threads_by_thread_id_settings",
+        "operationId": "patch_api_threads_by_thread_id_settings",
         "summary": "更新 Thread 默认设置",
         "tags": [
           "employee"
@@ -293,9 +293,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/turns": {
+    "/api/threads/{thread_id}/turns": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_turns",
+        "operationId": "post_api_threads_by_thread_id_turns",
         "summary": "创建 Turn",
         "tags": [
           "employee"
@@ -578,9 +578,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/items": {
+    "/api/threads/{thread_id}/items": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_items",
+        "operationId": "get_api_threads_by_thread_id_items",
         "summary": "查询 Item",
         "tags": [
           "employee"
@@ -823,9 +823,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/events": {
+    "/api/threads/{thread_id}/events": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_events",
+        "operationId": "get_api_threads_by_thread_id_events",
         "summary": "订阅 Event",
         "tags": [
           "employee"
@@ -901,9 +901,9 @@
         "x-snowharness-event-envelope-schema": "./event-envelope.schema.json"
       }
     },
-    "/api/v1/turns/{turn_id}/steer": {
+    "/api/turns/{turn_id}/steer": {
       "post": {
-        "operationId": "post_api_v1_turns_by_turn_id_steer",
+        "operationId": "post_api_turns_by_turn_id_steer",
         "summary": "引导当前 Turn",
         "tags": [
           "employee"
@@ -1058,9 +1058,9 @@
         }
       }
     },
-    "/api/v1/turns/{turn_id}/interrupt": {
+    "/api/turns/{turn_id}/interrupt": {
       "post": {
-        "operationId": "post_api_v1_turns_by_turn_id_interrupt",
+        "operationId": "post_api_turns_by_turn_id_interrupt",
         "summary": "中断当前 Turn",
         "tags": [
           "employee"
@@ -1194,9 +1194,9 @@
         }
       }
     },
-    "/api/v1/turns/{turn_id}/regenerate": {
+    "/api/turns/{turn_id}/regenerate": {
       "post": {
-        "operationId": "post_api_v1_turns_by_turn_id_regenerate",
+        "operationId": "post_api_turns_by_turn_id_regenerate",
         "summary": "重新生成",
         "tags": [
           "employee"
@@ -1335,9 +1335,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/forks": {
+    "/api/threads/{thread_id}/forks": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_forks",
+        "operationId": "post_api_threads_by_thread_id_forks",
         "summary": "创建 Fork",
         "tags": [
           "employee"
@@ -1492,9 +1492,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/attachments": {
+    "/api/threads/{thread_id}/attachments": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_attachments",
+        "operationId": "post_api_threads_by_thread_id_attachments",
         "summary": "上传 Thread 原文件",
         "tags": [
           "employee"
@@ -1564,7 +1564,7 @@
                 "example": {
                   "kind": "attachment",
                   "attachment_id": "6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
-                  "url": "/api/v1/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
+                  "url": "/api/threads/thr_01J.../attachments/6f5a7bb1-95db-4ba5-a74f-f27f9c16e166",
                   "filename": "病假证明.pdf",
                   "size": 48231,
                   "type": "application/pdf"
@@ -1609,9 +1609,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/attachments/{attachment_id}": {
+    "/api/threads/{thread_id}/attachments/{attachment_id}": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_attachments_by_attachment_id",
+        "operationId": "get_api_threads_by_thread_id_attachments_by_attachment_id",
         "summary": "读取 Thread 原文件",
         "tags": [
           "employee"
@@ -1668,9 +1668,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/artifacts/{artifact_id}": {
+    "/api/threads/{thread_id}/artifacts/{artifact_id}": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_artifacts_by_artifact_id",
+        "operationId": "get_api_threads_by_thread_id_artifacts_by_artifact_id",
         "summary": "读取 Thread 最终产物",
         "tags": [
           "employee"
@@ -1727,9 +1727,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/workspace-attachments": {
+    "/api/threads/{thread_id}/workspace-attachments": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_workspace_attachments",
+        "operationId": "post_api_threads_by_thread_id_workspace_attachments",
         "summary": "附加 Workspace 资源",
         "tags": [
           "employee"
@@ -1876,9 +1876,9 @@
         }
       }
     },
-    "/api/v1/workspace-attachments/{attachment_id}": {
+    "/api/workspace-attachments/{attachment_id}": {
       "delete": {
-        "operationId": "delete_api_v1_workspace_attachments_by_attachment_id",
+        "operationId": "delete_api_workspace_attachments_by_attachment_id",
         "summary": "移除 Workspace Attachment",
         "tags": [
           "employee"
@@ -1956,9 +1956,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/pending-inputs": {
+    "/api/threads/{thread_id}/pending-inputs": {
       "get": {
-        "operationId": "get_api_v1_threads_by_thread_id_pending_inputs",
+        "operationId": "get_api_threads_by_thread_id_pending_inputs",
         "summary": "查询 PendingInput",
         "tags": [
           "employee"
@@ -2074,7 +2074,7 @@
         ]
       },
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_pending_inputs",
+        "operationId": "post_api_threads_by_thread_id_pending_inputs",
         "summary": "创建 PendingInput",
         "tags": [
           "employee"
@@ -2210,9 +2210,9 @@
         }
       }
     },
-    "/api/v1/pending-inputs/{pending_input_id}": {
+    "/api/pending-inputs/{pending_input_id}": {
       "patch": {
-        "operationId": "patch_api_v1_pending_inputs_by_pending_input_id",
+        "operationId": "patch_api_pending_inputs_by_pending_input_id",
         "summary": "编辑 PendingInput",
         "tags": [
           "employee"
@@ -2338,7 +2338,7 @@
         }
       },
       "delete": {
-        "operationId": "delete_api_v1_pending_inputs_by_pending_input_id",
+        "operationId": "delete_api_pending_inputs_by_pending_input_id",
         "summary": "删除 PendingInput",
         "tags": [
           "employee"
@@ -2421,9 +2421,9 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/pending-inputs/reorder": {
+    "/api/threads/{thread_id}/pending-inputs/reorder": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_pending_inputs_reorder",
+        "operationId": "post_api_threads_by_thread_id_pending_inputs_reorder",
         "summary": "重排 PendingInput",
         "tags": [
           "employee"
@@ -2563,9 +2563,9 @@
         }
       }
     },
-    "/api/v1/user-action-requests/{request_id}/resolve": {
+    "/api/user-action-requests/{request_id}/resolve": {
       "post": {
-        "operationId": "post_api_v1_user_action_requests_by_request_id_resolve",
+        "operationId": "post_api_user_action_requests_by_request_id_resolve",
         "summary": "解析用户操作请求",
         "tags": [
           "employee"
@@ -2721,9 +2721,9 @@
         }
       }
     },
-    "/api/v1/user-action-requests/{request_id}/auth/callback": {
+    "/api/user-action-requests/{request_id}/auth/callback": {
       "get": {
-        "operationId": "get_api_v1_user_action_requests_by_request_id_auth_callback",
+        "operationId": "get_api_user_action_requests_by_request_id_auth_callback",
         "summary": "完成 Auth 回调",
         "tags": [
           "employee"
@@ -2840,9 +2840,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations": {
+    "/runtime/invocations": {
       "post": {
-        "operationId": "post_runtime_v1_invocations",
+        "operationId": "post_runtime_invocations",
         "summary": "启动 Invocation",
         "tags": [
           "runtime"
@@ -3028,9 +3028,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/events/batch": {
+    "/runtime/invocations/{invocationId}/events/batch": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_events_batch",
+        "operationId": "post_runtime_invocations_by_invocationId_events_batch",
         "summary": "回传 Runtime Event",
         "tags": [
           "runtime"
@@ -3061,7 +3061,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3200,9 +3200,9 @@
         }
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/transient-events/batch": {
+    "/runtime/invocations/{invocationId}/transient-events/batch": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_transient_events_batch",
+        "operationId": "post_runtime_invocations_by_invocationId_transient_events_batch",
         "summary": "回传 Transient Event",
         "tags": [
           "runtime"
@@ -3233,7 +3233,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3307,9 +3307,9 @@
         }
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/cancel": {
+    "/runtime/invocations/{invocationId}/cancel": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_cancel",
+        "operationId": "post_runtime_invocations_by_invocationId_cancel",
         "summary": "取消 Invocation",
         "tags": [
           "runtime"
@@ -3340,7 +3340,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3425,9 +3425,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/resume": {
+    "/runtime/invocations/{invocationId}/resume": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_resume",
+        "operationId": "post_runtime_invocations_by_invocationId_resume",
         "summary": "恢复 Invocation",
         "tags": [
           "runtime"
@@ -3458,7 +3458,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3552,9 +3552,9 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/steer": {
+    "/runtime/invocations/{invocationId}/steer": {
       "post": {
-        "operationId": "post_runtime_v1_invocations_by_invocation_id_steer",
+        "operationId": "post_runtime_invocations_by_invocationId_steer",
         "summary": "引导 Invocation",
         "tags": [
           "runtime"
@@ -3585,7 +3585,7 @@
           }
         ],
         "responses": {
-          "202": {
+          "200": {
             "description": "成功响应，字段语义以对应规范章节为准。",
             "content": {
               "application/json": {
@@ -3680,9 +3680,9 @@
         ]
       }
     },
-    "/runtime/v1/capabilities": {
+    "/runtime/capabilities": {
       "get": {
-        "operationId": "get_runtime_v1_capabilities",
+        "operationId": "get_runtime_capabilities",
         "summary": "Runtime 能力发现",
         "tags": [
           "runtime"
@@ -3845,9 +3845,9 @@
         ]
       }
     },
-    "/gateway/v1/tool-calls": {
+    "/gateway/tool-calls": {
       "post": {
-        "operationId": "post_gateway_v1_tool_calls",
+        "operationId": "post_gateway_tool_calls",
         "summary": "执行 ToolCall",
         "tags": [
           "gateway"
@@ -3995,9 +3995,9 @@
         }
       }
     },
-    "/gateway/v1/tool-calls/{tool_call_id}/reconcile-effect": {
+    "/gateway/tool-calls/{tool_call_id}/reconcile-effect": {
       "post": {
-        "operationId": "post_gateway_v1_tool_calls_by_tool_call_id_reconcile_effect",
+        "operationId": "post_gateway_tool_calls_by_tool_call_id_reconcile_effect",
         "summary": "核对 Tool Effect",
         "tags": [
           "gateway"
@@ -4148,9 +4148,9 @@
         }
       }
     },
-    "/gateway/v1/artifacts": {
+    "/gateway/artifacts": {
       "post": {
-        "operationId": "post_gateway_v1_artifacts",
+        "operationId": "post_gateway_artifacts",
         "summary": "创建 Artifact",
         "tags": [
           "gateway"
@@ -4282,9 +4282,9 @@
         }
       }
     },
-    "/gateway/v1/attachments/resolve": {
+    "/gateway/attachments/resolve": {
       "post": {
-        "operationId": "post_gateway_v1_attachments_resolve",
+        "operationId": "post_gateway_attachments_resolve",
         "summary": "解析 Agent 短期附件引用",
         "tags": [
           "gateway"
@@ -4312,7 +4312,6 @@
         "x-snowharness-error-codes": [
           "ACCESS_DENIED",
           "AUTHENTICATION_REQUIRED",
-          "IDEMPOTENCY_CONFLICT",
           "RATE_LIMITED",
           "REQUEST_SCHEMA_INVALID",
           "RESOURCE_NOT_FOUND"
@@ -4339,9 +4338,9 @@
         }
       }
     },
-    "/gateway/v1/context/query": {
+    "/gateway/context/query": {
       "post": {
-        "operationId": "post_gateway_v1_context_query",
+        "operationId": "post_gateway_context_query",
         "summary": "查询上下文",
         "tags": [
           "gateway"
@@ -4522,9 +4521,9 @@
         }
       }
     },
-    "/gateway/v1/user-action-requests": {
+    "/gateway/user-action-requests": {
       "post": {
-        "operationId": "post_gateway_v1_user_action_requests",
+        "operationId": "post_gateway_user_action_requests",
         "summary": "发起用户操作请求",
         "tags": [
           "gateway"
@@ -4666,9 +4665,9 @@
         }
       }
     },
-    "/admin/api/v1/agents/{agent_id}/revisions": {
+    "/admin/api/agents/{agentId}/revisions": {
       "post": {
-        "operationId": "post_admin_api_v1_agents_by_agent_id_revisions",
+        "operationId": "post_admin_api_agents_by_agentId_revisions",
         "summary": "创建 AgentRevision",
         "tags": [
           "admin"
@@ -4822,9 +4821,9 @@
         }
       }
     },
-    "/admin/api/v1/agent-revisions/{revision_id}/publish": {
+    "/admin/api/agent-revisions/{revisionId}/publish": {
       "post": {
-        "operationId": "post_admin_api_v1_agent_revisions_by_revision_id_publish",
+        "operationId": "post_admin_api_agent_revisions_by_revisionId_publish",
         "summary": "发布 AgentRevision",
         "tags": [
           "admin"
@@ -4947,9 +4946,9 @@
         }
       }
     },
-    "/admin/api/v1/deployment-routes/{route_id}": {
+    "/admin/api/deployment-routes/{routeId}": {
       "put": {
-        "operationId": "put_admin_api_v1_deployment_routes_by_route_id",
+        "operationId": "put_admin_api_deployment_routes_by_routeId",
         "summary": "更新 DeploymentRoute",
         "tags": [
           "admin"
@@ -5099,9 +5098,9 @@
         }
       }
     },
-    "/admin/api/v1/invocations/{invocation_id}/actual-execution-record": {
+    "/admin/api/invocations/{invocationId}/actual-execution-record": {
       "get": {
-        "operationId": "get_admin_api_v1_invocations_by_invocation_id_actual_execution_record",
+        "operationId": "get_admin_api_invocations_by_invocationId_actual_execution_record",
         "summary": "查询实际执行记录",
         "tags": [
           "admin"
@@ -5436,9 +5435,9 @@
         ]
       }
     },
-    "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": {
+    "/admin/api/tool-calls/{toolCallId}/reconcile-effect": {
       "post": {
-        "operationId": "post_admin_api_v1_tool_calls_by_tool_call_id_reconcile_effect",
+        "operationId": "post_admin_api_tool_calls_by_toolCallId_reconcile_effect",
         "summary": "管理核对长期未知副作用",
         "tags": [
           "admin"
@@ -5597,9 +5596,9 @@
         }
       }
     },
-    "/admin/api/v1/jobs/{job_id}/events": {
+    "/admin/api/jobs/{jobId}/events": {
       "get": {
-        "operationId": "get_admin_api_v1_jobs_by_job_id_events",
+        "operationId": "get_admin_api_jobs_by_jobId_events",
         "summary": "订阅 JobEvent",
         "tags": [
           "admin"
@@ -5665,9 +5664,9 @@
         "x-snowharness-event-envelope-schema": "./event-envelope.schema.json"
       }
     },
-    "/admin/api/v1/jobs/{job_id}/publish-to-thread": {
+    "/admin/api/jobs/{jobId}/publish-to-thread": {
       "post": {
-        "operationId": "post_admin_api_v1_jobs_by_job_id_publish_to_thread",
+        "operationId": "post_admin_api_jobs_by_jobId_publish_to_thread",
         "summary": "把 Job 结果发布到会话",
         "tags": [
           "admin"
@@ -5826,9 +5825,9 @@
         }
       }
     },
-    "/api/v1/catalog/options": {
+    "/api/catalog/options": {
       "get": {
-        "operationId": "get_api_v1_catalog_options",
+        "operationId": "get_api_catalog_options",
         "summary": "查询任务输入区选项",
         "tags": [
           "employee"
@@ -6006,9 +6005,9 @@
         ]
       }
     },
-    "/gateway/v1/capabilities/search": {
+    "/gateway/capabilities/search": {
       "post": {
-        "operationId": "post_gateway_v1_capabilities_search",
+        "operationId": "post_gateway_capabilities_search",
         "summary": "搜索可用能力",
         "tags": [
           "gateway"
@@ -6157,7 +6156,7 @@
                         "data_class": "internal"
                       },
                       "selection_reason_code": "SEMANTIC_MATCH",
-                      "schema_url": "/gateway/v1/tools/tool_sales_query/schema"
+                      "schema_url": "/gateway/tools/tool_sales_query/schema"
                     },
                     {
                       "type": "skill",
@@ -6166,7 +6165,7 @@
                       "current_revision_id": "sv_8",
                       "content_hash": "sha256:31...",
                       "selection_reason_code": "AGENT_DEFAULT_PLUS_QUERY",
-                      "content_url": "/gateway/v1/skills/skill_anomaly_review/content"
+                      "content_url": "/gateway/skills/skill_anomaly_review/content"
                     }
                   ]
                 }
@@ -6236,9 +6235,9 @@
         }
       }
     },
-    "/gateway/v1/tools/{tool_id}/schema": {
+    "/gateway/tools/{tool_id}/schema": {
       "get": {
-        "operationId": "get_gateway_v1_tools_by_tool_id_schema",
+        "operationId": "get_gateway_tools_by_tool_id_schema",
         "summary": "读取 Tool Schema",
         "tags": [
           "gateway"
@@ -6467,9 +6466,9 @@
         ]
       }
     },
-    "/gateway/v1/skills/{skill_id}/content": {
+    "/gateway/skills/{skill_id}/content": {
       "get": {
-        "operationId": "get_gateway_v1_skills_by_skill_id_content",
+        "operationId": "get_gateway_skills_by_skill_id_content",
         "summary": "读取 Skill 内容",
         "tags": [
           "gateway"
@@ -6586,9 +6585,9 @@
         ]
       }
     },
-    "/gateway/v1/capability-actions": {
+    "/gateway/capability-actions": {
       "post": {
-        "operationId": "post_gateway_v1_capability_actions",
+        "operationId": "post_gateway_capability_actions",
         "summary": "提交 Harness 行动",
         "tags": [
           "gateway"
@@ -6764,9 +6763,9 @@
         }
       }
     },
-    "/gateway/v1/child-threads": {
+    "/gateway/child-threads": {
       "post": {
-        "operationId": "post_gateway_v1_child_threads",
+        "operationId": "post_gateway_child_threads",
         "summary": "创建委派 Child Thread",
         "tags": [
           "gateway"
@@ -6938,9 +6937,9 @@
         }
       }
     },
-    "/gateway/v1/child-threads/{child_thread_id}": {
+    "/gateway/child-threads/{child_thread_id}": {
       "get": {
-        "operationId": "get_gateway_v1_child_threads_by_child_thread_id",
+        "operationId": "get_gateway_child_threads_by_child_thread_id",
         "summary": "查询 Child Thread 状态和结果",
         "tags": [
           "gateway"
@@ -7085,9 +7084,9 @@
         ]
       }
     },
-    "/gateway/v1/child-threads/{child_thread_id}/cancel": {
+    "/gateway/child-threads/{child_thread_id}/cancel": {
       "post": {
-        "operationId": "post_gateway_v1_child_threads_by_child_thread_id_cancel",
+        "operationId": "post_gateway_child_threads_by_child_thread_id_cancel",
         "summary": "请求取消 Child Thread",
         "tags": [
           "gateway"
@@ -7212,9 +7211,9 @@
         }
       }
     },
-    "/gateway/v1/memory-candidates": {
+    "/gateway/memory-candidates": {
       "post": {
-        "operationId": "post_gateway_v1_memory_candidates",
+        "operationId": "post_gateway_memory_candidates",
         "summary": "提交 Memory Candidate",
         "tags": [
           "gateway"
@@ -7395,9 +7394,9 @@
         }
       }
     },
-    "/gateway/v1/memory-candidates/{candidate_id}": {
+    "/gateway/memory-candidates/{candidate_id}": {
       "get": {
-        "operationId": "get_gateway_v1_memory_candidates_by_candidate_id",
+        "operationId": "get_gateway_memory_candidates_by_candidate_id",
         "summary": "查询 Memory Candidate",
         "tags": [
           "gateway"
@@ -7495,9 +7494,9 @@
         ]
       }
     },
-    "/admin/api/v1/memory-candidates/{candidate_id}/resolve": {
+    "/admin/api/memory-candidates/{candidateId}/resolve": {
       "post": {
-        "operationId": "post_admin_api_v1_memory_candidates_by_candidate_id_resolve",
+        "operationId": "post_admin_api_memory_candidates_by_candidateId_resolve",
         "summary": "复核 Memory Candidate",
         "tags": [
           "admin"
@@ -7649,9 +7648,9 @@
         }
       }
     },
-    "/gateway/v1/context-checkpoints": {
+    "/gateway/context-checkpoints": {
       "post": {
-        "operationId": "post_gateway_v1_context_checkpoints",
+        "operationId": "post_gateway_context_checkpoints",
         "summary": "提交 Context Checkpoint",
         "tags": [
           "gateway"
@@ -7782,9 +7781,9 @@
         }
       }
     },
-    "/admin/api/v1/jobs/{job_id}": {
+    "/admin/api/jobs/{jobId}": {
       "get": {
-        "operationId": "get_admin_api_v1_jobs_by_job_id",
+        "operationId": "get_admin_api_jobs_by_jobId",
         "summary": "查询 Job",
         "tags": [
           "admin"
@@ -7938,9 +7937,9 @@
         ]
       }
     },
-    "/admin/api/v1/jobs/{job_id}/cancel": {
+    "/admin/api/jobs/{jobId}/cancel": {
       "post": {
-        "operationId": "post_admin_api_v1_jobs_by_job_id_cancel",
+        "operationId": "post_admin_api_jobs_by_jobId_cancel",
         "summary": "请求取消 Job",
         "tags": [
           "admin"
@@ -8068,9 +8067,9 @@
         }
       }
     },
-    "/admin/api/v1/jobs/{job_id}/retry": {
+    "/admin/api/jobs/{jobId}/retry": {
       "post": {
-        "operationId": "post_admin_api_v1_jobs_by_job_id_retry",
+        "operationId": "post_admin_api_jobs_by_jobId_retry",
         "summary": "重新运行终态 Job",
         "tags": [
           "admin"
@@ -8215,9 +8214,9 @@
         }
       }
     },
-    "/admin/api/v1/operations/event-delivery": {
+    "/admin/api/operations/event-delivery": {
       "get": {
-        "operationId": "get_admin_api_v1_operations_event_delivery",
+        "operationId": "get_admin_api_operations_event_delivery",
         "summary": "查询投影交付健康",
         "tags": [
           "admin"
@@ -8379,9 +8378,9 @@
         ]
       }
     },
-    "/admin/api/v1/event-quarantines/{failure_id}/resolve": {
+    "/admin/api/event-quarantines/{failureId}/resolve": {
       "post": {
-        "operationId": "post_admin_api_v1_event_quarantines_by_failure_id_resolve",
+        "operationId": "post_admin_api_event_quarantines_by_failureId_resolve",
         "summary": "解析隔离事件",
         "tags": [
           "admin"
@@ -8509,9 +8508,9 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}/request-execution-environment-change": {
+    "/api/threads/{thread_id}/request-execution-environment-change": {
       "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_request_execution_environment_change",
+        "operationId": "post_api_threads_by_thread_id_request_execution_environment_change",
         "summary": "请求变更执行环境",
         "tags": [
           "employee"
@@ -8651,9 +8650,9 @@
         }
       }
     },
-    "/admin/api/v1/artifact-attestations/verify": {
+    "/admin/api/artifact-attestations/verify": {
       "post": {
-        "operationId": "post_admin_api_v1_artifact_attestations_verify",
+        "operationId": "post_admin_api_artifact_attestations_verify",
         "summary": "验证制品证明",
         "tags": [
           "admin"
@@ -8788,9 +8787,9 @@
         }
       }
     },
-    "/admin/api/v1/legal-holds": {
+    "/admin/api/legal-holds": {
       "post": {
-        "operationId": "post_admin_api_v1_legal_holds",
+        "operationId": "post_admin_api_legal_holds",
         "summary": "创建 Legal Hold",
         "tags": [
           "admin"
@@ -8922,9 +8921,9 @@
         }
       }
     },
-    "/admin/api/v1/legal-holds/release": {
+    "/admin/api/legal-holds/release": {
       "post": {
-        "operationId": "post_admin_api_v1_legal_holds_release",
+        "operationId": "post_admin_api_legal_holds_release",
         "summary": "释放 Legal Hold",
         "tags": [
           "admin"
@@ -9038,9 +9037,9 @@
         }
       }
     },
-    "/api/v1/deletion-requests": {
+    "/api/deletion-requests": {
       "post": {
-        "operationId": "post_api_v1_deletion_requests",
+        "operationId": "post_api_deletion_requests",
         "summary": "创建员工删除请求",
         "tags": [
           "employee"
@@ -9104,7 +9103,7 @@
                   "subject_type": "thread",
                   "subject_id": "thr_01J...",
                   "accepted_at": "2026-07-15T02:00:00.000Z",
-                  "progress_url": "/api/v1/deletion-requests/delreq_01J..."
+                  "progress_url": "/api/deletion-requests/delreq_01J..."
                 }
               }
             }
@@ -9160,9 +9159,9 @@
         }
       }
     },
-    "/api/v1/deletion-requests/{deletion_request_id}": {
+    "/api/deletion-requests/{deletion_request_id}": {
       "get": {
-        "operationId": "get_api_v1_deletion_requests_by_deletion_request_id",
+        "operationId": "get_api_deletion_requests_by_deletion_request_id",
         "summary": "查询员工删除进度",
         "tags": [
           "employee"
@@ -9288,9 +9287,9 @@
         ]
       }
     },
-    "/admin/api/v1/deletion-requests": {
+    "/admin/api/deletion-requests": {
       "post": {
-        "operationId": "post_admin_api_v1_deletion_requests",
+        "operationId": "post_admin_api_deletion_requests",
         "summary": "创建管理员删除请求",
         "tags": [
           "admin"
@@ -9420,9 +9419,9 @@
         }
       }
     },
-    "/admin/api/v1/deletion-requests/{deletion_request_id}": {
+    "/admin/api/deletion-requests/{deletionRequestId}": {
       "get": {
-        "operationId": "get_admin_api_v1_deletion_requests_by_deletion_request_id",
+        "operationId": "get_admin_api_deletion_requests_by_deletionRequestId",
         "summary": "查询管理员删除进度",
         "tags": [
           "admin"
@@ -9591,9 +9590,9 @@
         ]
       }
     },
-    "/admin/api/v1/operations/readiness": {
+    "/admin/api/operations/readiness": {
       "get": {
-        "operationId": "get_admin_api_v1_operations_readiness",
+        "operationId": "get_admin_api_operations_readiness",
         "summary": "查询系统就绪状态",
         "tags": [
           "admin"

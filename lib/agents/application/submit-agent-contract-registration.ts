@@ -1,5 +1,5 @@
 /**
- * submitAgentContractRegistration 应用命令：POST /admin/api/v1/agent-registrations 的登记事务。
+ * submitAgentContractRegistration 应用命令：POST /admin/api/agent-registrations 的登记事务。
  *
  * 与 registerAgentContract（Agent 先在、按 agentId 登记）不同，本命令以合同 agent.id 为身份，
  * 单事务 find-or-create：
@@ -67,7 +67,7 @@ export interface SubmitAgentContractRegistrationResult {
     publicAgentId: string;
     publicAgentVersion: string;
     protocolType: string;
-    protocolContractRevision: string;
+    protocolContractDigest: string;
     contractDigest: string;
     interaction: PublicAgentContractFacts["interaction"];
     capabilities: PublicAgentContractFacts["capabilities"];
@@ -121,7 +121,7 @@ export function projectAgentContractWire(aggregate: AgentContractSnapshotAggrega
     contract_version: h.contractVersion,
     public_agent_version: h.publicAgentVersion,
     protocol_type: h.protocolType,
-    protocol_contract_revision: h.protocolContractRevision,
+    protocol_contract_revision: h.protocolContractDigest,
     contract_digest: h.contractDigest,
     capability_digest: h.capabilityDigest,
     context_digest: h.contextDigest,
@@ -294,7 +294,7 @@ export function createSubmitAgentContractRegistration(dependencies: {
         publicAgentId: rows.header.publicAgentId,
         publicAgentVersion: rows.header.publicAgentVersion,
         protocolType: rows.header.protocolType,
-        protocolContractRevision: rows.header.protocolContractRevision,
+        protocolContractDigest: rows.header.protocolContractDigest,
         contractDigest: rows.header.contractDigest,
         interaction: facts.interaction,
         capabilities: facts.capabilities,

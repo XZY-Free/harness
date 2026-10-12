@@ -15,10 +15,10 @@ import { resetDatabase } from "./mysql-harness";
 describe("api-fixtures: buildApiRequest", () => {
   it("为四类 audience 生成正确路径前缀与 X-Request-ID", () => {
     const cases = [
-      { audience: "employee" as const, prefix: "/api/v1" },
-      { audience: "runtime" as const, prefix: "/runtime/v1" },
-      { audience: "gateway" as const, prefix: "/gateway/v1" },
-      { audience: "admin" as const, prefix: "/admin/api/v1" },
+      { audience: "employee" as const, prefix: "/api" },
+      { audience: "runtime" as const, prefix: "/runtime" },
+      { audience: "gateway" as const, prefix: "/gateway" },
+      { audience: "admin" as const, prefix: "/admin/api" },
     ];
     for (const { audience, prefix } of cases) {
       const req = buildApiRequest({ audience, method: "GET", path: "/threads" });
@@ -62,10 +62,10 @@ describe("api-fixtures: buildApiRequest", () => {
 
   it("AUDIENCE_PREFIX 与四类 audience 一致", () => {
     expect(AUDIENCE_PREFIX).toEqual({
-      employee: "/api/v1",
-      runtime: "/runtime/v1",
-      gateway: "/gateway/v1",
-      admin: "/admin/api/v1",
+      employee: "/api",
+      runtime: "/runtime",
+      gateway: "/gateway",
+      admin: "/admin/api",
     });
   });
 });

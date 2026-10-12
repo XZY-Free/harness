@@ -19,6 +19,6 @@ export function createExecutionApiClient(config: ApiClientConfig): ExecutionApiC
 
   return {
     getBinding: (invocationId) =>
-      request<ExecutionBindingDTO>(`/admin/api/v1/invocations/${invocationId}/execution-binding`),
+      request<ExecutionBindingDTO>(`/admin/api/invocations/${invocationId}/execution-binding`),
   };
 }

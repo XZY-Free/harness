@@ -10,6 +10,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AgentCallBindingConfigInput } from "@/lib/agents/calls/domain/agent-call-binding";
 import { db } from "@/lib/db/client";
 import { bootstrapTenantBaselines } from "@/lib/identity/tenant-bootstrap";
+import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
@@ -29,18 +30,52 @@ export async function seedTenant(overrides?: { id?: string; key?: string }): Pro
   return tenantId;
 }
 
-/** 播种真实 parent Invocation（满足 AgentCall FK）。 */
+/** 播种真实 parent Invocation（满足 AgentCall FK 与 Invocation_subject_shape 约束）。 */
 export async function seedInvocation(
   tenantId: string,
   overrides?: { id?: string },
 ): Promise<string> {
   const id = overrides?.id ?? randomUUID();
+  // canonical Invocation_subject_shape：subjectType=thread 必须携带 threadId/turnId/triggerItemId。
+  // 先播种 Thread → Turn → ThreadItem(user_message) 链，再挂 Invocation。
+  const threadId = randomUUID();
+  const turnId = randomUUID();
+  const triggerItemId = randomUUID();
+  await db.insert(threadTable).values({
+    id: threadId,
+    tenantId,
+    ownerUserId: "agent-call-test-owner",
+  });
+  await db.insert(turnTable).values({
+    id: turnId,
+    threadId,
+    turnSequence: 1,
+    triggerType: "user_message",
+    triggerItemId,
+  });
+  await db.insert(threadItemTable).values({
+    id: triggerItemId,
+    threadId,
+    turnId,
+    itemSequence: 1,
+    itemType: "user_message",
+    authorType: "user",
+    contentJson: { kind: "user_message", text: "agent-call fixture" },
+    contentHash: D("0"),
+  });
   await db.insert(invocationTable).values({
     id,
     tenantId,
+    subjectType: "thread",
+    threadId,
+    turnId,
+    triggerItemId,
+    inputDigest: D("0"),
     invocationSequence: 1,
     invocationKind: "initial",
-    executionState: "queued",
+    // canonical 栅栏：AgentCall 只能在 parent Invocation 为 running 时创建。
+    executionState: "running",
+    startedAt: new Date(),
     versionNo: 1,
   });
   return id;
@@ -69,7 +104,7 @@ export function validBindingConfig(
     credentialRefId: "cred-1",
     networkZone: "private",
     protocolType: "a2a",
-    protocolContractRevision: "a2a-0.3.0",
+    protocolContractDigest: "a2a-0.3.0",
     policyRevisionId: "policy-rev-1",
     policyRulesDigest: D("e"),
     governanceConfigRevisionId: "gov-rev-1",

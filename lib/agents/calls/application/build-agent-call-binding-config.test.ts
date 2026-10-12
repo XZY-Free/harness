@@ -26,7 +26,7 @@ import { describe, expect, it } from "vitest";
 function validProtocolFacts(overrides?: Partial<AgentProtocolFacts>): AgentProtocolFacts {
   return {
     protocolType: "a2a",
-    protocolContractRevision: "a2a-0.3.0",
+    protocolContractDigest: "a2a-0.3.0",
     ...overrides,
   };
 }
@@ -70,7 +70,7 @@ describe("buildAgentCallBindingCandidate", () => {
     expect(config.credentialRefId).toBe(resolution.target.agentCredentialRefId);
     expect(config.networkZone).toBe(resolution.target.agentNetworkZone);
     // 协议事实来自 ContractSnapshot（权威）。
-    expect(config.protocolContractRevision).toBe("a2a-0.3.0");
+    expect(config.protocolContractDigest).toBe("a2a-0.3.0");
     // digest 从 controlPlaneEvidence（kind=agent）提取。
     expect(resolution.controlPlaneEvidence.kind).toBe("agent");
     if (resolution.controlPlaneEvidence.kind !== "agent") return;

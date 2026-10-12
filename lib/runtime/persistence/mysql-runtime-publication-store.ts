@@ -113,7 +113,7 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
          * FOR UPDATE 读取 Passed ConformanceRun 完整结果。
          *
          * 返回包含绑定校验字段（runtimeTargetDigest、runtimeConfigDigest、
-         * protocolContractRevision）的完整 Run，由应用服务校验与 Revision 一致。
+         * protocolContractDigest）的完整 Run，由应用服务校验与 Revision 一致。
          * Case 完整性由 validateCompleteConformanceResult 统一判断。
          */
         async findPassedConformanceRun(params) {
@@ -140,7 +140,7 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             id: run.id,
             runtimeTargetDigest: run.runtimeTargetDigest,
             runtimeConfigDigest: run.runtimeConfigDigest,
-            protocolContractRevision: run.protocolContractRevision,
+            protocolContractDigest: run.protocolContractDigest,
             evidenceManifestDigest: run.evidenceManifestDigest,
             results: rows.map((row) => ({
               caseId: row.caseId as PublicationConformanceCaseId,

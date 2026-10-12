@@ -17,9 +17,9 @@ describe("control plane HTTP client", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    await request("/admin/api/v1/agents");
+    await request("/admin/api/agents");
 
-    expect(fetcher).toHaveBeenCalledWith("/snowharness/admin/api/v1/agents", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith("/snowharness/admin/api/agents", expect.any(Object));
   });
 
   it("合并认证头并直接返回服务端资源", async () => {
@@ -32,12 +32,12 @@ describe("control plane HTTP client", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    await expect(request("/admin/api/v1/agents")).resolves.toEqual({
+    await expect(request("/admin/api/agents")).resolves.toEqual({
       items: [{ id: "agent-1" }],
       total: 1,
     });
     expect(fetcher).toHaveBeenCalledWith(
-      "https://control.example.test/admin/api/v1/agents",
+      "https://control.example.test/admin/api/agents",
       expect.any(Object),
     );
     const init = fetcher.mock.calls[0]?.[1];
@@ -64,7 +64,7 @@ describe("control plane HTTP client", () => {
       ) as unknown as typeof fetch,
     });
 
-    const error = await request("/admin/api/v1/resource").catch((value) => value);
+    const error = await request("/admin/api/resource").catch((value) => value);
     expect(error).toBeInstanceOf(ControlPlaneRequestError);
     expect(error).toMatchObject({
       code: "ETAG_MISMATCH",
@@ -85,7 +85,7 @@ describe("control plane HTTP client", () => {
       ) as unknown as typeof fetch,
     });
 
-    await expect(request("/admin/api/v1/resource")).rejects.toMatchObject({
+    await expect(request("/admin/api/resource")).rejects.toMatchObject({
       code: "INTERNAL_ERROR",
       status: 502,
       retryable: true,

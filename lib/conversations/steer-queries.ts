@@ -35,17 +35,15 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { lockExecutionRootForProductWrite } from "@/lib/executions/persistence/execution-ownership-store";
 import type {
   ThreadEventActorType,
   ThreadItemAuthorType,
   TurnState,
 } from "@/lib/persistence/schema/conversation";
-import {
-  invocationCommandTable,
-  threadItemTable,
-  threadTable,
-  turnTable,
-} from "@/lib/persistence/schema/conversation";
+import { threadItemTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable } from "@/lib/persistence/schema/executions";
 import { eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -133,7 +131,54 @@ export async function queueSteer(params: {
   const contentHash = computeGuidanceHash(content);
 
   const meta = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE Turn
+    // R04 §2「固定锁图」：执行根在前、产品根在后。先做**不加锁**的定位读（保留原有
+    // 错误优先级：NotFound → 状态冲突），再先锁执行根，最后 FOR UPDATE Turn → Thread 并复验。
+    //
+    // 旧顺序「Turn → Thread → 建命令（锁 Ownership）」与 Runtime 路径「锁 I/O → 写 Thread
+    // 事件流」互为反向持锁，构成真实死锁环。
+    const [located] = await tx
+      .select({
+        id: turnTable.id,
+        threadId: turnTable.threadId,
+        turnState: turnTable.turnState,
+        activeInvocationId: turnTable.activeInvocationId,
+      })
+      .from(turnTable)
+      .where(eq(turnTable.id, params.turnId))
+      .limit(1);
+    if (!located) {
+      throw new TurnNotFoundError(params.turnId);
+    }
+    const [locatedThread] = await tx
+      .select({
+        id: threadTable.id,
+        tenantId: threadTable.tenantId,
+        ownerUserId: threadTable.ownerUserId,
+      })
+      .from(threadTable)
+      .where(eq(threadTable.id, located.threadId))
+      .limit(1);
+    if (
+      !locatedThread ||
+      locatedThread.tenantId !== params.tenantId ||
+      locatedThread.ownerUserId !== params.ownerUserId
+    ) {
+      throw new TurnNotFoundError(params.turnId);
+    }
+    if (located.turnState === "waiting_user") {
+      throw new TurnRequiresUserActionError(params.turnId, located.turnState);
+    }
+    if (located.turnState !== "running") {
+      throw new TurnStateConflictError(params.turnId, located.turnState, "steer");
+    }
+    if (!located.activeInvocationId) {
+      throw new TurnStateConflictError(params.turnId, located.turnState, "steer");
+    }
+
+    // 1) 执行根：Invocation → 活跃 Ownership（必须早于 Turn/Thread）。
+    await lockExecutionRootForProductWrite(tx, params.tenantId, located.activeInvocationId);
+
+    // 2) 产品根：Turn → Thread，并复验定位读与加锁读之间未被改写。
     const [turn] = await tx
       .select()
       .from(turnTable)
@@ -141,11 +186,18 @@ export async function queueSteer(params: {
       .for("update")
       .limit(1);
 
-    if (!turn) {
-      throw new TurnNotFoundError(params.turnId);
+    if (
+      !turn ||
+      turn.threadId !== located.threadId ||
+      turn.activeInvocationId !== located.activeInvocationId
+    ) {
+      throw new TurnStateConflictError(
+        params.turnId,
+        turn?.turnState ?? located.turnState,
+        "steer",
+      );
     }
 
-    // SELECT FOR UPDATE Thread（隐藏式 404：跨租户/非 owner → NotFound）
     const [thread] = await tx
       .select()
       .from(threadTable)
@@ -161,7 +213,7 @@ export async function queueSteer(params: {
       throw new TurnNotFoundError(params.turnId);
     }
 
-    // 2. 校验 Turn 状态
+    // 3. 校验 Turn 状态（以加锁读为准）
     // waiting_user → TurnRequiresUserActionError（不能用 Steer 绕过 UserActionRequest）
     if (turn.turnState === "waiting_user") {
       throw new TurnRequiresUserActionError(params.turnId, turn.turnState);
@@ -200,24 +252,15 @@ export async function queueSteer(params: {
     };
     const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
 
-    await tx.insert(invocationCommandTable).values({
-      id: commandId,
-      invocationId: turn.activeInvocationId, // running Turn 必有活动 invocation
-      threadId: thread.id,
-      turnId: turn.id,
+    await createInvocationCommandInTransaction(tx, {
+      tenantId: params.tenantId,
+      invocationId: turn.activeInvocationId,
       commandType: "steer",
-      commandPayloadJson: commandPayload,
-      commandPayloadHash,
-      commandState: "queued",
-      runtimeExecutionRef: null,
       idempotencyKey: params.idempotencyKey,
-      errorCode: null,
-      errorMessage: null,
-      createdAt: now,
-      dispatchedAt: null,
-      acknowledgedAt: null,
-      failedAt: null,
-      updatedAt: now,
+      payloadJson: commandPayload,
+      requestedByType: "user",
+      requestedById: params.ownerUserId,
+      commandId,
     });
 
     // 5. 写 turn.steer_queued Event

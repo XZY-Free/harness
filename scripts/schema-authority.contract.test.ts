@@ -149,7 +149,7 @@ describe("Schema 单一 Authority", () => {
       .join("\n");
     const canonical = canonicalTableNames();
 
-    expect(canonical).toHaveLength(134);
+    expect(canonical).toHaveLength(135);
     expect(runtimeTableNames()).toEqual(canonical);
     expect(migrationTableNames(migration)).toEqual(canonical);
     expect(manifest.counts.canonical).toBe(canonical.length);

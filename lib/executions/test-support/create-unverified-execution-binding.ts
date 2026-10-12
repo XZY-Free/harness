@@ -14,9 +14,12 @@
  * - 启动后不可变：只有 create，没有 update。
  * - Route 更新不修改进行中的 ExecutionBinding（affects_new_invocations_only）。
  */
-import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
-import type { ExecutionBindingControlPlaneEvidence } from "@/lib/executions/domain/execution-binding";
+import {
+  type ExecutionBindingConfigInput,
+  type ExecutionBindingControlPlaneEvidence,
+  computeExecutionBindingConfigHash,
+} from "@/lib/executions/domain/execution-binding";
 import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
 import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import { ExecutionBindingAlreadyExistsError } from "@/lib/runtime/errors";
@@ -49,9 +52,9 @@ export const TEST_EXECUTION_BINDING_EVIDENCE: ExecutionBindingControlPlaneEviden
 export const TEST_EXECUTION_BINDING_REQUIRED_FIELDS = {
   controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
   projectionVersionNo: 1,
-  policyRevisionId: "test-policy-revision",
+  policyRevisionId: "22222222-2222-4222-8222-222222222222",
   policyRulesDigest: `sha256:${"a".repeat(64)}`,
-  governanceConfigRevisionId: "test-governance-revision",
+  governanceConfigRevisionId: "33333333-3333-4333-8333-333333333333",
   governanceConfigDigest: `sha256:${"b".repeat(64)}`,
 } as const;
 
@@ -64,14 +67,13 @@ export interface CreateExecutionBindingParams {
   modelProvider: string;
   modelId: string;
   modelRevisionRef?: string | null;
-  initialEnvironmentLeaseId?: string | null;
-  workspaceBindingId?: string | null;
+  workspaceBindingId?: string;
   policyRevisionId?: string | null;
   policyRulesDigest?: string;
   governanceConfigRevisionId?: string;
   governanceConfigDigest?: string;
-  contextCheckpointId?: string | null;
   environmentDefinitionRevisionId?: string | null;
+  environmentMode?: "MANAGED" | "NO_PLATFORM_ENVIRONMENT";
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
   projectionVersionNo: number;
   executionSubject?: ExecutionSubject;
@@ -86,13 +88,15 @@ export interface BindingConfigHashInput {
   modelProvider: string;
   modelId: string;
   modelRevisionRef: string | null;
-  initialEnvironmentLeaseId: string | null;
-  workspaceBindingId: string | null;
+  workspaceBindingId?: string | null;
   policyRevisionId: string | null;
   policyRulesDigest?: string;
   governanceConfigRevisionId?: string;
   governanceConfigDigest?: string;
-  contextCheckpointId: string | null;
+  environmentDefinitionRevisionId?: string | null;
+  environmentMode?: "MANAGED" | "NO_PLATFORM_ENVIRONMENT";
+  controlPlaneEvidence?: ExecutionBindingControlPlaneEvidence;
+  capabilityCatalogFields?: TestCapabilityCatalogBindingFields;
 }
 
 /**
@@ -104,33 +108,36 @@ export interface BindingConfigHashInput {
  * 返回格式：`sha256:<64hex>`。
  */
 export function computeBindingConfigHash(input: BindingConfigHashInput): string {
-  const normalized: Record<string, unknown> = {
-    contextCheckpointId: input.contextCheckpointId,
-    deploymentRouteId: input.deploymentRouteId,
-    governanceConfigDigest: input.governanceConfigDigest ?? `sha256:${"b".repeat(64)}`,
-    governanceConfigRevisionId: input.governanceConfigRevisionId ?? "test-governance-revision",
-    initialEnvironmentLeaseId: input.initialEnvironmentLeaseId,
-    modelId: input.modelId,
-    modelProvider: input.modelProvider,
-    modelRevisionRef: input.modelRevisionRef,
-    policyRevisionId: input.policyRevisionId,
-    policyRulesDigest: input.policyRulesDigest ?? `sha256:${"a".repeat(64)}`,
+  const catalog =
+    input.capabilityCatalogFields ?? testCapabilityCatalogBindingFields("hash-fixture");
+  const evidence = input.controlPlaneEvidence ?? TEST_EXECUTION_BINDING_EVIDENCE;
+  const current: ExecutionBindingConfigInput = {
     runtimeRevisionId: input.runtimeRevisionId,
-    workspaceBindingId: input.workspaceBindingId,
+    deploymentRouteId: input.deploymentRouteId,
+    modelProvider: input.modelProvider,
+    modelId: input.modelId,
+    modelRevisionRef: input.modelRevisionRef,
+    workspaceBindingId: input.workspaceBindingId ?? "workspace-binding-fixture",
+    policyRevisionId: input.policyRevisionId ?? "22222222-2222-4222-8222-222222222222",
+    policyRulesDigest: input.policyRulesDigest ?? `sha256:${"a".repeat(64)}`,
+    governanceConfigRevisionId:
+      input.governanceConfigRevisionId ?? "33333333-3333-4333-8333-333333333333",
+    governanceConfigDigest: input.governanceConfigDigest ?? `sha256:${"b".repeat(64)}`,
+    environmentDefinitionRevisionId: input.environmentDefinitionRevisionId ?? null,
+    environmentMode: input.environmentMode ?? "NO_PLATFORM_ENVIRONMENT",
+    capabilityCatalogJson: catalog.capabilityCatalogJson,
+    capabilityCatalogDigest: catalog.capabilityCatalogDigest,
+    capabilityCatalogVersion: catalog.capabilityCatalogVersion,
+    capabilityCatalogSourceRefs: catalog.capabilityCatalogSourceRefs,
+    capabilityCatalogCreatedAt: catalog.capabilityCatalogCreatedAt,
+    controlPlaneEvidence: evidence,
+    projectionVersionNo: 1,
+    principalType: catalog.principalType,
+    principalId: catalog.principalId,
+    principalSource: catalog.principalSource,
+    principalFrozenAt: catalog.principalFrozenAt,
   };
-  const sorted = JSON.stringify(sortKeys(normalized));
-  return `sha256:${createHash("sha256").update(sorted, "utf8").digest("hex")}`;
-}
-
-/** 递归排序对象 key，保证 hash 稳定。 */
-function sortKeys(value: unknown): unknown {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(sortKeys);
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-    sorted[key] = sortKeys((value as Record<string, unknown>)[key]);
-  }
-  return sorted;
+  return computeExecutionBindingConfigHash(current);
 }
 
 /**
@@ -145,7 +152,7 @@ function sortKeys(value: unknown): unknown {
  * @throws ExecutionBindingAlreadyExistsError 同一 Invocation 已有 Binding
  */
 export async function createExecutionBinding(
-  params: CreateExecutionBindingParams,
+  params: CreateExecutionBindingParams & Record<string, unknown>,
 ): Promise<ExecutionBinding> {
   // 1. 校验同 invocationId 是否已有 Binding
   const [existing] = await db
@@ -164,13 +171,15 @@ export async function createExecutionBinding(
     modelProvider: params.modelProvider,
     modelId: params.modelId,
     modelRevisionRef: params.modelRevisionRef ?? null,
-    initialEnvironmentLeaseId: params.initialEnvironmentLeaseId ?? null,
     workspaceBindingId: params.workspaceBindingId ?? null,
     policyRevisionId: params.policyRevisionId ?? null,
     policyRulesDigest: params.policyRulesDigest,
     governanceConfigRevisionId: params.governanceConfigRevisionId,
     governanceConfigDigest: params.governanceConfigDigest,
-    contextCheckpointId: params.contextCheckpointId ?? null,
+    environmentDefinitionRevisionId: params.environmentDefinitionRevisionId ?? null,
+    environmentMode:
+      params.environmentMode ??
+      (params.environmentDefinitionRevisionId ? "MANAGED" : "NO_PLATFORM_ENVIRONMENT"),
   });
 
   // 3. INSERT ExecutionBinding（invocationId 为主键，1:1）
@@ -186,13 +195,12 @@ export async function createExecutionBinding(
     modelProvider: params.modelProvider,
     modelId: params.modelId,
     modelRevisionRef: params.modelRevisionRef ?? null,
-    initialEnvironmentLeaseId: params.initialEnvironmentLeaseId ?? null,
-    workspaceBindingId: params.workspaceBindingId ?? null,
-    policyRevisionId: params.policyRevisionId ?? "test-policy-revision",
+    workspaceBindingId: params.workspaceBindingId ?? params.invocationId,
+    policyRevisionId: params.policyRevisionId ?? "22222222-2222-4222-8222-222222222222",
     policyRulesDigest: params.policyRulesDigest ?? `sha256:${"a".repeat(64)}`,
-    governanceConfigRevisionId: params.governanceConfigRevisionId ?? "test-governance-revision",
+    governanceConfigRevisionId:
+      params.governanceConfigRevisionId ?? "33333333-3333-4333-8333-333333333333",
     governanceConfigDigest: params.governanceConfigDigest ?? `sha256:${"b".repeat(64)}`,
-    contextCheckpointId: params.contextCheckpointId ?? null,
     routeRevisionId: params.controlPlaneEvidence.routeRevisionId,
     routeActivationId: params.controlPlaneEvidence.routeActivationId,
     routeContentDigest: params.controlPlaneEvidence.routeContentDigest,
@@ -207,6 +215,9 @@ export async function createExecutionBinding(
     conformanceRunId: params.controlPlaneEvidence.conformanceRunId,
     resolutionInputDigest: params.controlPlaneEvidence.resolutionInputDigest,
     projectionVersionNo: params.projectionVersionNo,
+    environmentMode:
+      params.environmentMode ??
+      (params.environmentDefinitionRevisionId ? "MANAGED" : "NO_PLATFORM_ENVIRONMENT"),
     environmentDefinitionRevisionId: params.environmentDefinitionRevisionId ?? null,
     configHash,
   });

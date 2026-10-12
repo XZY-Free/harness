@@ -266,8 +266,8 @@ async function projectToThreadList(
     }
 
     case "turn.queued":
-    case "turn.running":
-    case "turn.waiting_user":
+    case "turn.started":
+    case "turn.waiting":
     case "turn.completed":
     case "turn.failed":
     case "turn.interrupted":
@@ -278,8 +278,8 @@ async function projectToThreadList(
       // turn.resumed：Resume 命令成功后，Turn 从 waiting_user 回到 running（S05-C04）
       const stateMap: Record<string, string> = {
         "turn.queued": "queued",
-        "turn.running": "running",
-        "turn.waiting_user": "waiting_user",
+        "turn.started": "running",
+        "turn.waiting": "waiting_user",
         "turn.completed": "completed",
         "turn.failed": "failed",
         "turn.interrupted": "interrupted",
@@ -391,7 +391,7 @@ async function projectToThreadList(
       // - invocation.queued/started/waiting_user/completed/failed/cancelled/lost：Invocation 状态机事件
       // - invocation.attempt_*：Attempt 基础设施重调度事件
       // - invocation.resumed：Resume 命令成功后，Invocation 从 waiting_user 回到 running（S05-C04）
-      // Turn 状态由 turn.queued/running/completed 等事件更新，Invocation 状态不冗余到投影表
+      // Turn 状态由 turn.queued/turn.started/turn.completed 等事件更新，Invocation 状态不冗余到投影表
       await tx
         .update(threadListProjectionTable)
         .set({
@@ -481,8 +481,8 @@ async function projectToTurnTimeline(
     }
 
     case "turn.queued":
-    case "turn.running":
-    case "turn.waiting_user":
+    case "turn.started":
+    case "turn.waiting":
     case "turn.completed":
     case "turn.failed":
     case "turn.interrupted":
@@ -492,8 +492,8 @@ async function projectToTurnTimeline(
       // turn.resumed：Resume 命令成功后，Turn 从 waiting_user 回到 running（S05-C04）
       const stateMap: Record<string, string> = {
         "turn.queued": "queued",
-        "turn.running": "running",
-        "turn.waiting_user": "waiting_user",
+        "turn.started": "running",
+        "turn.waiting": "waiting_user",
         "turn.completed": "completed",
         "turn.failed": "failed",
         "turn.interrupted": "interrupted",
@@ -510,10 +510,10 @@ async function projectToTurnTimeline(
       };
 
       // 状态相关的时间戳
-      // turn.resumed 与 turn.running 一样：更新 startedAt（恢复运行时间）
-      if (event.eventType === "turn.running" || event.eventType === "turn.resumed") {
+      // turn.resumed 与 turn.started 一样：更新 startedAt（恢复运行时间）
+      if (event.eventType === "turn.started" || event.eventType === "turn.resumed") {
         updates.startedAt = event.occurredAt;
-      } else if (event.eventType === "turn.waiting_user") {
+      } else if (event.eventType === "turn.waiting") {
         updates.waitingAt = event.occurredAt;
       } else if (
         event.eventType === "turn.completed" ||

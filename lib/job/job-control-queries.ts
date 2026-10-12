@@ -23,6 +23,7 @@ import { db } from "@/lib/db/client";
 import { JobAlreadyTerminalError, JobNotFoundError, JobNotTerminalError } from "@/lib/job/errors";
 import { acknowledgeCommand, rejectCommand } from "@/lib/job/job-command-queries";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
+import { resolveJobInputReference } from "@/lib/job/job-input-reference";
 import { createJob, recordJobResult, updateJobState } from "@/lib/job/job-queries";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
@@ -40,6 +41,30 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Invocation 终态集合（与 runtime 模块一致）。 */
 const INVOCATION_TERMINAL_STATES = ["completed", "failed", "cancelled", "lost"] as const;
+
+async function resolveRetryReferenceInput(input: {
+  tenantId: string;
+  inputRef: string | null;
+  inputHash: string;
+}): Promise<boolean> {
+  if (!input.inputRef) return false;
+  try {
+    await resolveJobInputReference({
+      tenantId: input.tenantId,
+      inputRef: input.inputRef,
+      inputHash: input.inputHash,
+    });
+    return true;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === "InputUnavailable" || error.message === "InputDigestMismatch")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
 
 // ─── processCancelCommand ───────────────────────────────
 
@@ -83,7 +108,7 @@ export interface ProcessCancelCommandResult {
  * 调度器编排 cancel 命令：核对 Invocation/Effect 后才 cancelled。
  *
  * 流程（同事务）：
- * 1. SELECT FOR UPDATE JobCommand + Job
+ * 1. SELECT FOR UPDATE Job（根锁先行）→ SELECT FOR UPDATE JobCommand（复验同 Job 归属）
  * 2. 再次校验 Job 非终态（race condition：可能在 queued 后 Job 已自然终态）
  * → 已终态：rejectCommand(JOB_ALREADY_TERMINAL)
  * 3. 查询所有关联 Invocation（invocationTable.jobId = job.id）
@@ -120,7 +145,23 @@ export async function processCancelCommand(
   const unknownEffectOk = await verifier(cmd.jobId);
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE JobCommand
+    // 1. Job 根锁先行（R06 §4）。
+    //
+    // Job 是本领域所有状态推进的序列化根，全模块只有这一种加锁顺序：
+    // Job → JobCommand → Invocation → Effect facts（见 `consumeTerminalCommand`）。
+    // 若此处先锁 JobCommand 再锁 Job，会与终态消费形成交叉持锁（经典死锁环），
+    // 而 cancel/retry 与终态消费并发正是 R06 §4 要求覆盖的场景。
+    const [job] = await tx
+      .select()
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, cmd.jobId)))
+      .for("update")
+      .limit(1);
+    if (!job) {
+      throw new JobNotFoundError(cmd.jobId);
+    }
+
+    // 2. JobCommand 锁，并复验它确实属于刚锁住的 Job（不按调用方给的 jobId 推断归属）。
     const [current] = await tx
       .select()
       .from(jobCommandTable)
@@ -128,6 +169,7 @@ export async function processCancelCommand(
         and(
           eq(jobCommandTable.tenantId, params.tenantId),
           eq(jobCommandTable.id, params.commandId),
+          eq(jobCommandTable.jobId, job.id),
         ),
       )
       .for("update")
@@ -138,29 +180,12 @@ export async function processCancelCommand(
 
     // 已终态命令直接返回（不应再被调度器处理）
     if (current.commandState === "acknowledged" || current.commandState === "rejected") {
-      // 重新查询 Job 状态以确定 outcome
-      const [job] = await tx
-        .select()
-        .from(jobTable)
-        .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
-        .limit(1);
       return {
-        job: job ?? null,
+        job,
         command: current,
         cancelledEvent: null,
         outcome: "cancelled" as const,
       };
-    }
-
-    // 2. SELECT FOR UPDATE Job
-    const [job] = await tx
-      .select()
-      .from(jobTable)
-      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
-      .for("update")
-      .limit(1);
-    if (!job) {
-      throw new JobNotFoundError(current.jobId);
     }
 
     // race condition：Job 已终态
@@ -239,7 +264,7 @@ export async function processCancelCommand(
       payload: {
         job_id: job.id,
         command_id: current.id,
-        reason_code: current.reasonCode,
+        reason_code: (current.payloadJson as Record<string, unknown> | null)?.reasonCode ?? null,
         cancelled_at: new Date().toISOString(),
       },
       correlationId: params.correlationId,
@@ -280,7 +305,7 @@ export interface ProcessRetryCommandParams {
   unknownEffectVerifier?: (jobId: string) => Promise<boolean> | boolean;
   /**
    * override 字段校验回调：返回 true 表示 override 字段允许；false 表示拒绝。
-   * 默认回调：commandPayloadJson.override 为空时返回 true，非空时返回 false（保守策略）。
+   * 默认回调：payloadJson.override 为空时返回 true，非空时返回 false（保守策略）。
    */
   overrideVerifier?: (
     jobId: string,
@@ -288,7 +313,7 @@ export interface ProcessRetryCommandParams {
   ) => Promise<boolean> | boolean;
   /**
    * 输入可访问性校验回调：返回 true 表示 inputRef 仍可访问；false 表示已不可访问。
-   * 默认回调返回 true（调度器在调用前已通过其他机制校验）。
+   * 默认由当前文件 Provider 读取并复验 reference 内容；inline 输入无需外部读取。
    */
   inputAvailabilityVerifier?: (jobId: string, inputRef: string) => Promise<boolean> | boolean;
   /** 调度器 correlationId（透传到 Event）。 */
@@ -327,7 +352,7 @@ export interface ProcessRetryCommandResult {
  * - retry 不修改原 Job 状态/事件
  * - replacement Job 通过 replaces_job_id 引用原 Job
  * - replacement Job 状态为 queued（由 createJob 默认）
- * - commandPayloadJson.reuse_input / override 透传到 replacement Job
+ * - payloadJson.reuse_input / override 透传到 replacement Job
  */
 export async function processRetryCommand(
   params: ProcessRetryCommandParams,
@@ -344,8 +369,8 @@ export async function processRetryCommand(
     throw new JobNotFoundError(params.commandId);
   }
 
-  // 解析 commandPayloadJson
-  const payload = (cmd.commandPayloadJson ?? {}) as {
+  // 解析持久化 command payload
+  const payload = (cmd.payloadJson ?? {}) as {
     reuse_input?: boolean;
     override?: Record<string, unknown> | null;
     reason_code?: string | null;
@@ -369,13 +394,29 @@ export async function processRetryCommand(
   if (!preJob) {
     throw new JobNotFoundError(cmd.jobId);
   }
-  const inputOk = await (params.inputAvailabilityVerifier ?? (() => true))(
-    cmd.jobId,
-    preJob.inputRef ?? "",
-  );
+  const inputOk = params.inputAvailabilityVerifier
+    ? await params.inputAvailabilityVerifier(cmd.jobId, preJob.inputRef ?? "")
+    : preJob.inputKind !== "reference" ||
+      (await resolveRetryReferenceInput({
+        tenantId: params.tenantId,
+        inputRef: preJob.inputRef,
+        inputHash: preJob.inputHash,
+      }));
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE JobCommand
+    // 1. Job 根锁先行（R06 §4）——顺序与 `consumeTerminalCommand` 及 cancel 完全一致，
+    //    否则 retry 与终态消费并发时会交叉持锁形成死锁。
+    const [job] = await tx
+      .select()
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, cmd.jobId)))
+      .for("update")
+      .limit(1);
+    if (!job) {
+      throw new JobNotFoundError(cmd.jobId);
+    }
+
+    // 2. JobCommand 锁，并复验归属同一 Job。
     const [current] = await tx
       .select()
       .from(jobCommandTable)
@@ -383,6 +424,7 @@ export async function processRetryCommand(
         and(
           eq(jobCommandTable.tenantId, params.tenantId),
           eq(jobCommandTable.id, params.commandId),
+          eq(jobCommandTable.jobId, job.id),
         ),
       )
       .for("update")
@@ -395,39 +437,25 @@ export async function processRetryCommand(
     if (current.commandState === "acknowledged" || current.commandState === "rejected") {
       // 查询 replacement Job（若有）
       let replacementJob: Job | null = null;
-      if (current.replacementJobId) {
+      const replacementJobId =
+        (current.resultJson as { replacementJobId?: string } | null)?.replacementJobId ?? null;
+      if (replacementJobId) {
         const [rj] = await tx
           .select()
           .from(jobTable)
-          .where(eq(jobTable.id, current.replacementJobId))
+          .where(eq(jobTable.id, replacementJobId))
           .limit(1);
         replacementJob = rj ?? null;
       }
       if (!replacementJob) {
         throw new Error("processRetryCommand: 已 acknowledge 命令但 replacement Job 未找到");
       }
-      const [origJob] = await tx
-        .select()
-        .from(jobTable)
-        .where(eq(jobTable.id, current.jobId))
-        .limit(1);
       return {
-        originalJob: origJob,
+        originalJob: job,
         replacementJob,
         command: current,
         outcome: "retry_created" as const,
       };
-    }
-
-    // 2. SELECT FOR UPDATE Job
-    const [job] = await tx
-      .select()
-      .from(jobTable)
-      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
-      .for("update")
-      .limit(1);
-    if (!job) {
-      throw new JobNotFoundError(current.jobId);
     }
 
     // race condition：Job 非终态
@@ -750,10 +778,10 @@ async function acknowledgeCommandInternal(
 
   const updates: Partial<JobCommand> = {
     commandState: "acknowledged",
-    acknowledgedAt: new Date(),
+    completedAt: new Date(),
   };
   if (replacementJobId) {
-    updates.replacementJobId = replacementJobId;
+    updates.resultJson = { replacementJobId };
   }
 
   await tx.update(jobCommandTable).set(updates).where(eq(jobCommandTable.id, commandId));
@@ -797,9 +825,9 @@ async function rejectCommandInternal(
     .update(jobCommandTable)
     .set({
       commandState: "rejected",
-      errorCode,
-      errorSummary,
-      acknowledgedAt: new Date(),
+      lastErrorCode: errorCode,
+      resultJson: { errorSummary },
+      completedAt: new Date(),
     })
     .where(eq(jobCommandTable.id, commandId));
 
@@ -839,12 +867,15 @@ async function createReplacementJobInternal(
     agentId: originalJob.agentId,
     jobType: originalJob.jobType,
     triggerRef: originalJob.triggerRef,
+    creationKey: `${originalJob.creationKey}:replacement:${jobId}`,
     jobState: "queued",
     replacesJobId: originalJob.id,
     threadId: originalJob.threadId,
+    inputKind: reuseInput ? originalJob.inputKind : "inline",
+    inputJson: reuseInput ? originalJob.inputJson : {},
     completionPolicyJson: originalJob.completionPolicyJson,
     inputRef,
-    inputHash,
+    inputHash: inputHash ?? `sha256:${"0".repeat(64)}`,
     lastEventSequence: 0,
     resultRef: null,
     resultHash: null,

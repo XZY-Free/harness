@@ -142,10 +142,7 @@ describe("HarnessLoop", () => {
     const result = await running;
 
     expect(result).toMatchObject({ completed: false, cancelled: true });
-    expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "execution.cancelled",
-    ]);
+    expect(writer.events.map((event) => event.type)).toEqual(["progress", "execution.cancelled"]);
   });
 
   it("执行租约丢失时 fail closed，不冒充用户取消", async () => {
@@ -183,10 +180,7 @@ describe("HarnessLoop", () => {
       errorCode: "INVOCATION_EXECUTION_LEASE_LOST",
     });
     expect(result.cancelled).toBeUndefined();
-    expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "execution.failed",
-    ]);
+    expect(writer.events.map((event) => event.type)).toEqual(["progress", "execution.failed"]);
   });
 
   it("cancel 保留已确认 Effect，且不会发起下一项 side effect", async () => {
@@ -345,11 +339,11 @@ describe("HarnessLoop", () => {
 
     expect(result).toMatchObject({ completed: true, responseText: "制度回答" });
     expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "progress.snapshot",
+      "progress",
+      "progress",
       "harness.action.proposed",
       "harness.action.started",
-      "progress.snapshot",
+      "progress",
       "response.completed",
       "harness.action.completed",
       "execution.completed",
@@ -542,8 +536,8 @@ describe("HarnessLoop", () => {
       responseText: "当前无法读取制度信息。你可以稍后重试，或提供已有资料继续。",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "progress.snapshot",
+      "progress",
+      "progress",
       "harness.action.proposed",
       "harness.action.failed",
       "progress.snapshot",
@@ -590,8 +584,8 @@ describe("HarnessLoop", () => {
         "知识检索暂时不可用，我现在无法确认制度内容。你可以稍后重试，或提供已有制度文件继续。",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "progress.snapshot",
+      "progress",
+      "progress",
       "harness.action.proposed",
       "harness.action.started",
       "harness.action.failed",
@@ -691,11 +685,11 @@ describe("HarnessLoop", () => {
 
     expect(result).toMatchObject({ completed: false, waitingForUser: true });
     expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "progress.snapshot",
+      "progress",
+      "progress",
       "harness.action.proposed",
       "harness.action.started",
-      "user_action.requested",
+      "user-action",
       "harness.action.completed",
     ]);
   });
@@ -765,8 +759,8 @@ describe("HarnessLoop", () => {
       responseText: "企业人力智能助手当前不可用。你可以稍后重试或继续咨询其他问题。",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "progress.snapshot",
+      "progress",
+      "progress",
       "harness.action.proposed",
       "harness.action.failed",
       "progress.snapshot",
@@ -810,8 +804,8 @@ describe("HarnessLoop", () => {
     expect(result).toMatchObject({ completed: false, pending: true });
     expect(result.actionHistory.at(-1)?.state).toBe("started");
     expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "progress.snapshot",
+      "progress",
+      "progress",
       "harness.action.proposed",
       "harness.action.started",
     ]);
@@ -859,8 +853,8 @@ describe("HarnessLoop", () => {
       responseText: "企业人力智能助手当前不可用。你可以稍后重试，当前会话仍可继续使用。",
     });
     expect(writer.events.map((event) => event.type)).toEqual([
-      "progress.snapshot",
-      "progress.snapshot",
+      "progress",
+      "progress",
       "harness.action.proposed",
       "harness.action.started",
       "harness.action.failed",

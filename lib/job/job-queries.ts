@@ -25,14 +25,19 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
+import { parseCompletionPolicy } from "@/lib/job/completion-policy";
 import { JobNotFoundError, JobStateConflictError, JobVersionConflictError } from "@/lib/job/errors";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
+import { computeJobInputDigest } from "@/lib/job/job-input-digest";
+import { resolveJobInputReference } from "@/lib/job/job-input-reference";
 import {
   type Job,
   type JobEvent,
   type JobEventActorType,
+  type JobInputKind,
   type JobState,
   type JobType,
+  jobEventTable,
   jobTable,
 } from "@/lib/persistence/schema/job";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -58,18 +63,30 @@ const STATE_TRANSITIONS: Record<JobState, readonly JobState[]> = {
 /** createJob 入参。 */
 export interface CreateJobParams {
   tenantId: string;
-  agentId: string;
+  /**
+   * 可选 Agent 引用。null/缺省表示该 Job 不需要 Agent——无 Agent 不等于无权限，
+   * service Principal、正式输入、ExecutionBinding 仍是必需事实。
+   */
+  agentId?: string | null;
   jobType: JobType;
   /** 领域触发引用（如 schedule_id、batch_id、deployment_id）。 */
   triggerRef: string;
+  /** Stable business creation identity used to deduplicate scheduler delivery. */
+  creationKey?: string;
   /** 完成策略：all_success / fail_fast / threshold / 自定义。 */
   completionPolicyJson: Record<string, unknown>;
   /** 结果需要进入员工会话时预先关联的 Thread（可选）。 */
   threadId?: string;
   /** retry 时指向原 Job；原 Job 状态/事件不被覆盖。 */
   replacesJobId?: string;
-  /** Job 输入引用（领域服务保证输入仍可访问）。 */
+  /** 当前部署 FileStorageProvider 签发的 Job 输入引用。 */
   inputRef?: string;
+  inputJson?: unknown;
+  inputKind?: JobInputKind;
+  /**
+   * **仅 reference 输入可用**：创建方冻结的内容摘要（定位符不含内容，摘要无法从 inputRef 推导）。
+   * inline 输入必须由 `inputJson` 经规范摘要推导，传入本字段会被拒绝。
+   */
   inputHash?: string;
   createdBy?: string;
   /** Event actor（默认 system，因领域服务触发）。 */
@@ -84,6 +101,13 @@ export interface CreateJobResult {
   job: Job;
   /** 写入的 job.queued Event（sequence=1）。 */
   queuedEvent: JobEvent;
+}
+
+export class JobCreationConflictError extends Error {
+  constructor(public readonly creationKey: string) {
+    super(`Job creationKey 已绑定不同 inputHash：${creationKey}`);
+    this.name = "InputDigestMismatch";
+  }
 }
 
 /**
@@ -104,8 +128,9 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
   if (!params.tenantId) {
     throw new Error("createJob: tenantId 不能为空");
   }
-  if (!params.agentId) {
-    throw new Error("createJob: agentId 不能为空");
+  const agentId = params.agentId ?? null;
+  if (agentId !== null && (typeof agentId !== "string" || agentId.trim().length === 0)) {
+    throw new Error("createJob: agentId 只能为 null 或非空字符串");
   }
   if (!params.triggerRef) {
     throw new Error("createJob: triggerRef 不能为空");
@@ -113,31 +138,114 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
   if (!params.completionPolicyJson) {
     throw new Error("createJob: completionPolicyJson 不能为空");
   }
+  // R06 §5：策略在创建时冻结，且必须是**可判定**的策略。把校验放在创建处（而不是
+  // 等到终态消费时才失败）才能保证"冻结的完成条件"从第一天起就有效——否则会存下
+  // 一个永远无法解释的 Job，终态只能靠猜。
+  parseCompletionPolicy(params.completionPolicyJson);
 
   const actorType: JobEventActorType = params.actorType ?? "system";
   const now = new Date();
   const jobId = randomUUID();
+  const inputKind: JobInputKind = params.inputRef ? "reference" : (params.inputKind ?? "inline");
+  if (inputKind === "reference" && !params.inputRef) {
+    throw new Error("createJob: reference input 必须提供 inputRef");
+  }
+  if (inputKind === "inline" && params.inputRef) {
+    throw new Error("createJob: inline input 不得提供 inputRef");
+  }
+  const inputJson = inputKind === "inline" ? (params.inputJson ?? {}) : null;
+  // A10：Job 输入的摘要必须是**JSON 语义稳定**的。`Job.inputJson` 是 MySQL JSON 列，
+  // 回读时对象键会被服务端规范化重排；若创建时用 `JSON.stringify`（依赖属性插入顺序），
+  // 同一个合法对象 round-trip 后字节序改变就会被判成 `InputDigestMismatch`。
+  // 因此创建、重复接纳（creationKey 比对）与运行时复验共用同一条 RFC 8785 规范化摘要。
+  //
+  // `inputHash` 只对 **reference** 输入开放：定位符本身不含内容，冻结的内容摘要是独立事实
+  // （JOB-07 义务依赖它）。**inline 输入一律拒绝自报摘要**——其 payload 就在行内，
+  // 推导出来的摘要才是可信的，自报 hash 是纯粹的旁路。
+  if (params.inputHash !== undefined && inputKind !== "reference") {
+    throw new Error(
+      "createJob: 只有 reference 输入可声明内容摘要；inline 输入的 inputHash 必须由 inputJson 推导",
+    );
+  }
+  if (inputKind === "reference" && !params.inputHash) {
+    throw new Error("createJob: reference input 必须提供内容摘要");
+  }
+  const inputHash = params.inputHash ?? computeJobInputDigest(inputJson);
+  if (inputKind === "reference") {
+    // 同一 creationKey 的冲突先按已冻结 Job 判定，避免被外部内容变化掩盖。
+    if (params.creationKey) {
+      const [existing] = await db
+        .select({ inputHash: jobTable.inputHash })
+        .from(jobTable)
+        .where(
+          and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.creationKey, params.creationKey)),
+        )
+        .limit(1);
+      if (existing && existing.inputHash !== inputHash) {
+        throw new JobCreationConflictError(params.creationKey);
+      }
+    }
+    if (!params.inputRef) throw new Error("InputUnavailable");
+    await resolveJobInputReference({
+      tenantId: params.tenantId,
+      inputRef: params.inputRef,
+      inputHash,
+    });
+  }
 
   const result = await db.transaction(async (tx) => {
+    // creationKey 来自领域服务的正式业务触发身份（09 §8.2）；未提供时用 Job 自身 id
+    // 满足 NOT NULL/UNIQUE，不形成隐式去重（同 triggerRef 的 replacement Job 必须可创建）。
+    const creationKey = params.creationKey ?? jobId;
+    const [existing] = params.creationKey
+      ? await tx
+          .select()
+          .from(jobTable)
+          .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.creationKey, creationKey)))
+          .for("update")
+          .limit(1)
+      : [];
+    if (existing) {
+      if (existing.inputHash !== inputHash) throw new JobCreationConflictError(creationKey);
+      const [queuedEvent] = await tx
+        .select()
+        .from(jobEventTable)
+        .where(
+          and(
+            eq(jobEventTable.tenantId, params.tenantId),
+            eq(jobEventTable.jobId, existing.id),
+            eq(jobEventTable.eventType, "job.queued"),
+          ),
+        )
+        .orderBy(jobEventTable.eventSequence)
+        .limit(1);
+      if (!queuedEvent)
+        throw new Error(`createJob: 已存在 Job 但缺少 job.queued Event（id=${existing.id}）`);
+      return { job: existing, queuedEvent };
+    }
+
     // 1. INSERT Job
     await tx.insert(jobTable).values({
       id: jobId,
       tenantId: params.tenantId,
-      agentId: params.agentId,
+      agentId,
       jobType: params.jobType,
       triggerRef: params.triggerRef,
+      creationKey,
       jobState: "queued",
       replacesJobId: params.replacesJobId ?? null,
       threadId: params.threadId ?? null,
       completionPolicyJson: params.completionPolicyJson,
+      inputKind,
+      inputJson,
       inputRef: params.inputRef ?? null,
-      inputHash: params.inputHash ?? null,
+      inputHash,
       lastEventSequence: 0,
       resultRef: null,
       resultHash: null,
       errorCode: null,
       errorSummary: null,
-      createdBy: params.createdBy ?? null,
+      createdBy: params.createdBy ?? "system",
       createdAt: now,
       startedAt: null,
       finishedAt: null,
@@ -156,14 +264,16 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
       payload: {
         job_id: jobId,
         tenant_id: params.tenantId,
-        agent_id: params.agentId,
+        agent_id: agentId,
         job_type: params.jobType,
         trigger_ref: params.triggerRef,
         thread_id: params.threadId ?? null,
         replaces_job_id: params.replacesJobId ?? null,
         completion_policy: params.completionPolicyJson,
         input_ref: params.inputRef ?? null,
-        input_hash: params.inputHash ?? null,
+        input_hash: inputHash,
+        input_kind: inputKind,
+        input_json: inputJson,
         created_by: params.createdBy ?? null,
       },
       correlationId: params.correlationId,
@@ -398,7 +508,7 @@ export type {
 /**
  * 跨 agent 列出租户所有 Job（按 createdAt 降序，跨租户隔离）。
  *
- * 事实源：S11-W04 管理面排障端点 /admin/api/v1/jobs 使用本函数。
+ * 事实源：S11-W04 管理面排障端点 /admin/api/jobs 使用本函数。
  *
  * 选项：
  * - jobState：过滤 Job 状态。

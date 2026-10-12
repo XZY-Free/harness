@@ -54,6 +54,12 @@ playwright-report/
 # ─── 文档与方案文件（仅推送工程代码，不上传方案 / 审计 / 设计文档）───
 # docs/ 整个目录：架构、方案、审计报告、周报等
 docs/
+# 例外（受版本管理，需 git add -f，因为父目录已排除）：
+#   docs/topic-01/evidence/ 下的受控基线 —— 验证计划、验收矩阵、schema 证据、
+#   测试清单、跳过用例受控允许清单 skipped-test-registry.json，
+#   以及 scripts/ 下的验收脚本本身。
+# 本地产物（流程自身重写，不得入库）：验收结果与跳过用例记录。
+docs/topic-01/evidence/artifacts/
 # 散落在其他目录的方案 / 调试 / 记忆文档
 .debug/
 .omc/

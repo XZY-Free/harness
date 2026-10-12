@@ -9,12 +9,12 @@
  * - agent_use 非法或旧 agent_selection wire → 400 REQUEST_SCHEMA_INVALID。
  * - CreateThread 无 agent_id（Thread 不绑定 Agent；多余字段不产生绑定）。
  */
-import { GET as getThreadGET } from "@/app/api/v1/threads/[thread_id]/route";
+import { GET as getThreadGET } from "@/app/api/threads/[threadId]/route";
 import {
   POST as createTurnPOST,
   GET as getTurnsGET,
-} from "@/app/api/v1/threads/[thread_id]/turns/route";
-import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
+} from "@/app/api/threads/[threadId]/turns/route";
+import { POST as createThreadPOST } from "@/app/api/threads/route";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
@@ -66,7 +66,7 @@ async function postTurn(
     idempotencyKey: `${key}-turn`,
     body,
   });
-  return createTurnPOST(req, { params: Promise.resolve({ thread_id: threadId }) });
+  return createTurnPOST(req, { params: Promise.resolve({ threadId: threadId }) });
 }
 
 describe("Turn-scoped AgentUseDirective", () => {
@@ -172,7 +172,7 @@ describe("Turn-scoped AgentUseDirective", () => {
     expect(turn?.preferredAgentId).toBe(ctx.agentId);
     expect(turn?.agentUseMode).toBe("preferred");
 
-    const params = { params: Promise.resolve({ thread_id: threadId }) };
+    const params = { params: Promise.resolve({ threadId: threadId }) };
     const detail = await getThreadGET(
       buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}` }),
       params,

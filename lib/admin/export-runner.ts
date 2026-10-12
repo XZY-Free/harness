@@ -21,7 +21,7 @@ import { listEvaluationRunsByTenant } from "@/lib/evaluation/evaluation-queries"
  * 关键约束：
  * - 跨租户隔离：所有 list* 调用按 tenantId 过滤。
  * - 导出同样脱敏并审计：禁采字段（Secret/Cookie/验证码/私钥/隐藏思维链）永不导出。
- * - resultRef 形如 /admin/api/v1/exports/{id}/download，download 端点直接读取该引用返回 NDJSON。
+ * - resultRef 形如 /admin/api/exports/{id}/download，download 端点直接读取该引用返回 NDJSON。
  */
 import { recordAuditEvent } from "@/lib/identity/audit";
 import type { AuditActor } from "@/lib/identity/audit";
@@ -93,7 +93,7 @@ export async function runAdminExport(params: RunAdminExportParams): Promise<RunA
   try {
     const rendered = await renderExportNdjson(exportRecord);
 
-    const resultRef = `/admin/api/v1/exports/${params.exportId}/download`;
+    const resultRef = `/admin/api/exports/${params.exportId}/download`;
     const updated = await updateAdminExportResult({
       tenantId: params.tenantId,
       exportId: params.exportId,

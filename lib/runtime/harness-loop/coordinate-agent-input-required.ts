@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { loadHostControlCapabilityPolicy } from "@/lib/agents/calls/application/host-control-policy";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
@@ -7,27 +7,40 @@ import {
 } from "@/lib/agents/calls/transport/a2a/host-control-contract";
 import { loadAgentCallContract } from "@/lib/agents/calls/transport/agent-call-transport-factory";
 import { agentHostControlConfig } from "@/lib/config";
-import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
+import { authorityIdentity } from "@/lib/executions/domain/execution-authority";
+import { getActiveExecutionOwnership } from "@/lib/executions/persistence/execution-ownership-store";
 import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
 import { agentTable } from "@/lib/persistence/schema/agents";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
+  ProducerSequenceGapError,
   getIngressByInvocation,
   getIngressByProducerEventId,
-  ingressEventBatch,
-} from "@/lib/runtime/event-ingress-queries";
+  ingressRuntimeEvents,
+} from "@/lib/runtime/application/ingress-runtime-events";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import {
   buildConfirmationActionId,
   computeConfirmationProposalSemanticDigest,
 } from "@/lib/runtime/harness-loop/confirmation-proposal-identity";
 import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/mysql-recovery-port";
+import { getRuntimeSessionBindingByOwnership } from "@/lib/runtime/persistence/runtime-session-store";
+import {
+  type RecoverablePauseCheckpointOutcome,
+  takeRecoverablePauseCheckpoint,
+} from "@/lib/workspace/checkpoint-pause";
 import { and, desc, eq } from "drizzle-orm";
 
 export interface CoordinateAgentInputRequiredResult {
   coordinated: boolean;
   disposition?: "resume_parent" | "waiting_user";
   runtimeProducerEventId?: string;
+  /**
+   * R09 §8：CHECKPOINT_RESTORABLE 的 Workspace 在进入可恢复暂停时必须先拿到 Checkpoint。
+   * 非 checkpoint 模式返回 `not_checkpoint_restorable`（显式跳过原因，不是静默）。
+   */
+  checkpoint: RecoverablePauseCheckpointOutcome | null;
 }
 
 interface AgentInputRequiredRuntimePayload {
@@ -120,7 +133,7 @@ export async function coordinateAgentInputRequired(
   callId: string,
 ): Promise<CoordinateAgentInputRequiredResult> {
   const call = await mysqlAgentCallStore.getById({ callId, tenantId });
-  if (!call || call.state !== "waiting_user") return { coordinated: false };
+  if (!call || call.state !== "waiting_user") return { coordinated: false, checkpoint: null };
   if (
     call.sourceType !== "harness_planned" ||
     !call.sourceRef ||
@@ -180,17 +193,19 @@ export async function coordinateAgentInputRequired(
   const parsedHostControls = parseHostControls(payload?.data, "input-required", hostControlPolicy);
   const confirmation =
     parsedHostControls?.kind === "confirmation" ? parsedHostControls.proposal : null;
-  const producerEventId = confirmation
-    ? `agent-input-required:${inputEvent.id}`
-    : `agent-input-required-observation:${inputEvent.id}`;
-  const existing = await getIngressByProducerEventId(tenantId, parent.id, producerEventId);
-  if (existing) {
-    return {
-      coordinated: true,
-      disposition: confirmation ? "waiting_user" : "resume_parent",
-      runtimeProducerEventId: producerEventId,
-    };
-  }
+  const producerEventId = randomUUID();
+  const owner = await getActiveExecutionOwnership({ tenantId, invocationId: parent.id });
+  if (!owner) throw new Error(`Parent Invocation ${parent.id} 缺少 Current ExecutionOwnership`);
+  const session = await getRuntimeSessionBindingByOwnership(tenantId, owner.id);
+  if (!session) throw new Error(`Parent Invocation ${parent.id} 缺少 RuntimeSessionBinding`);
+  const authority = authorityIdentity({
+    invocationId: parent.id,
+    runtimeRevisionId: session.runtimeRevisionId,
+    attemptId: owner.attemptId,
+    ownershipId: owner.id,
+    leaseEpoch: owner.leaseEpoch,
+    sessionBindingId: session.id,
+  });
 
   if (!confirmation) {
     const snapshot = await createMySqlHarnessLoopRecoveryPort(tenantId).load(parent.id);
@@ -222,6 +237,7 @@ export async function coordinateAgentInputRequired(
     await writeRuntimeEventWithRetry({
       tenantId,
       invocationId: parent.id,
+      authority,
       producerEventId,
       type: "harness.action.completed",
       payload: {
@@ -242,6 +258,7 @@ export async function coordinateAgentInputRequired(
       coordinated: true,
       disposition: "resume_parent",
       runtimeProducerEventId: producerEventId,
+      checkpoint: null,
     };
   }
 
@@ -261,43 +278,60 @@ export async function coordinateAgentInputRequired(
   await writeRuntimeEventWithRetry({
     tenantId,
     invocationId: parent.id,
+    authority,
     producerEventId,
-    type: "user_action.requested",
+    type: "user-action",
     payload: { ...runtimePayload },
+  });
+  // §8：暂停事实先落库（它本身是一条正式输入事实，之后必须进锚点），随后立刻
+  // 触发安全点流程——「先拿到 Checkpoint 再宣告 paused」在这里体现为：暂停的
+  // waiting_user 状态与 Checkpoint 指向同一个已提交水位。
+  const checkpoint = await takeRecoverablePauseCheckpoint({
+    tenantId,
+    invocationId: parent.id,
+    requestedById: "agent-input-required",
+    requestedByType: "system",
   });
   return {
     coordinated: true,
     disposition: "waiting_user",
     runtimeProducerEventId: producerEventId,
+    checkpoint,
   };
 }
 
 async function writeRuntimeEventWithRetry(params: {
   tenantId: string;
   invocationId: string;
+  authority: AuthorityIdentity;
   producerEventId: string;
-  type: "harness.action.completed" | "user_action.requested";
+  type: "harness.action.completed" | "user-action";
   payload: Record<string, unknown>;
 }): Promise<void> {
   for (let retry = 0; retry < 3; retry += 1) {
     const ingress = await getIngressByInvocation(params.tenantId, params.invocationId, {
       limit: 500,
     });
-    const sequence = Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1;
+    const sequence =
+      ingress.reduce((max, row) => (row.producerSequence > max ? row.producerSequence : max), 0n) +
+      1n;
     try {
-      await ingressEventBatch({
+      await ingressRuntimeEvents({
         tenantId: params.tenantId,
         invocationId: params.invocationId,
-        producerSequenceStart: sequence,
-        events: [
-          {
-            producer_event_id: params.producerEventId,
-            producer_sequence: sequence,
-            type: params.type,
-            schema_version: 1,
-            payload: params.payload,
-          },
-        ],
+        batch: {
+          protocolVersion: 3,
+          authority: params.authority,
+          events: [
+            {
+              eventId: params.producerEventId,
+              producerSequence: String(sequence),
+              type: params.type,
+              schemaVersion: 1,
+              payload: params.payload,
+            },
+          ],
+        },
       });
       return;
     } catch (error) {
@@ -307,7 +341,7 @@ async function writeRuntimeEventWithRetry(params: {
         params.producerEventId,
       );
       if (raced) return;
-      if (!(error instanceof EventSequenceGapError) || retry === 2) throw error;
+      if (!(error instanceof ProducerSequenceGapError) || retry === 2) throw error;
     }
   }
 }

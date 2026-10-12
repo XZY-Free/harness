@@ -24,7 +24,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { HostedRuntimeApplicationService } from "@/lib/runtime/application/hosted-runtime-application-service";
-import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
+import { expectedCapabilityManifestDigest } from "@/lib/runtime/application/runtime-capability-evidence";
 import type { CapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
 import {
   type HarnessActionExecutors,
@@ -34,10 +34,19 @@ import {
   HarnessLoopError,
   type HarnessLoopRecoveryPort,
 } from "@/lib/runtime/harness-loop/loop";
-import type {
-  RuntimeCapabilitiesResponse,
-  StartInvocationRequestBody,
-} from "@/lib/runtime/runtime-client";
+import {
+  type AuthorityIdentity,
+  type CallbackEndpoints,
+  type CancelResponse,
+  type ExecutionLimits,
+  type RuntimeCapabilities,
+  type RuntimeEvent,
+  type RuntimeStartResponse,
+  type SteerResponse,
+  type Workspace,
+  computeCapabilitiesContractDigest,
+  protocolDigest,
+} from "@/lib/runtime/runtime-protocol";
 
 // ─── GatewayEndpoints 类型 ───────────────────────────────
 
@@ -46,20 +55,7 @@ import type {
  *
  * Runtime 通过这些端点回传事件 / 发送命令。
  */
-export interface GatewayEndpoints {
-  /** 事件回传端点 URL（POST {events}）。 */
-  events: string;
-  /** cancel 命令端点。 */
-  cancel: string;
-  /** resume 命令端点。 */
-  resume: string;
-  /** steer 命令端点。 */
-  steer: string;
-  tools: string;
-  tool_calls: string;
-  user_action_requests: string;
-  capability_actions: string;
-}
+export type GatewayEndpoints = CallbackEndpoints;
 
 // ─── EventIngressClient ─────────────────────────────────
 
@@ -67,7 +63,7 @@ export interface GatewayEndpoints {
  * Event Ingress 客户端接口：Runtime 侧调用以回传候选事件批次。
  *
  * 两种实现：
- * - HTTP：调用平台 /gateway/v1/runtime-events 路由（createHttpEventIngressClient）。
+ * - HTTP：调用平台 /gateway/runtime-events 路由（createHttpEventIngressClient）。
  * - 包装 EventBatchSink：测试用，绕过 HTTP 直接调用 ingressEventBatch 仓储。
  */
 export interface EventIngressClient {
@@ -80,8 +76,8 @@ export interface EventIngressClient {
    */
   postEventBatch(
     invocationId: string,
-    events: RuntimeCandidateEvent[],
-    producerSequenceStart: number,
+    authority: AuthorityIdentity,
+    events: RuntimeEvent[],
   ): Promise<void>;
 }
 
@@ -97,23 +93,22 @@ export interface EventIngressClient {
 export function createHttpEventIngressClient(params: {
   gatewayEndpoints: GatewayEndpoints;
   authToken: string;
-  /** Gateway Workload Token；旧调用方未提供时仅作为兼容回退。 */
-  gatewayAccessToken?: string;
+  authority: AuthorityIdentity;
 }): EventIngressClient {
   return {
-    async postEventBatch(invocationId, events, producerSequenceStart) {
+    async postEventBatch(invocationId, authority, events) {
       const url = params.gatewayEndpoints.events;
       const resp = await fetch(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${params.gatewayAccessToken ?? params.authToken}`,
-          "idempotency-key": `${invocationId}:runtime-events:${producerSequenceStart}`,
+          authorization: `Bearer ${params.authToken}`,
+          "idempotency-key": `${invocationId}:runtime-events:${events[0]?.producerSequence ?? "0"}`,
         },
         body: JSON.stringify({
-          invocation_id: invocationId,
+          protocolVersion: 3,
+          authority: params.authority ?? authority,
           events,
-          producer_sequence_start: producerSequenceStart,
         }),
       });
       if (!resp.ok) {
@@ -141,15 +136,15 @@ export function createHttpEventIngressClient(params: {
  * 路由层通过此接口调用 Adapter，不直接依赖具体实现。
  */
 export interface RuntimeAdapter {
-  /** 探测能力（对应 GET /runtime/v1/capabilities）。 */
-  probeCapabilities(): Promise<RuntimeCapabilitiesResponse>;
-  /** 启动 Invocation 执行 Agent Loop（对应 POST /runtime/v1/invocations）。 */
+  /** 探测能力（对应 GET /runtime/capabilities）。 */
+  probeCapabilities(): Promise<RuntimeCapabilities>;
+  /** 启动 Invocation 执行 Agent Loop（对应 POST /runtime/invocations）。 */
   startInvocation(params: StartInvocationParams): Promise<StartInvocationResult>;
-  /** 处理 cancel 命令（对应 POST /runtime/v1/invocations/{id}:cancel）。 */
+  /** 处理 cancel 命令（对应 POST /runtime/invocations/{id}:cancel）。 */
   handleCancel(params: CancelParams): Promise<CancelResult>;
-  /** 处理 resume 命令（对应 POST /runtime/v1/invocations/{id}:resume）。 */
+  /** 处理 resume 命令（对应 POST /runtime/invocations/{id}:resume）。 */
   handleResume(params: ResumeParams): Promise<ResumeResult>;
-  /** 处理 steer 命令（对应 POST /runtime/v1/invocations/{id}:steer）。 */
+  /** 处理 steer 命令（对应 POST /runtime/invocations/{id}:steer）。 */
   handleSteer(params: SteerParams): Promise<SteerResult>;
   /**
    * 获取最后一次 startInvocation 触发的 loop.run() Promise（测试用 await）。
@@ -164,13 +159,13 @@ export interface RuntimeAdapter {
  * 事件回传 Sink：把候选事件批次回传平台。
  *
  * 两种实现：
- * - HTTP：调用平台 /runtime/v1/invocations/{id}/events/batch 路由（生产默认）。
+ * - HTTP：调用平台 /runtime/invocations/{id}/events/batch 路由（生产默认）。
  * - 直接调用：调用 ingressEventBatch 仓储函数（测试用，绕过 HTTP）。
  */
 export type EventBatchSink = (params: {
   invocationId: string;
-  events: RuntimeCandidateEvent[];
-  producerSequenceStart: number;
+  authority: AuthorityIdentity;
+  events: RuntimeEvent[];
 }) => Promise<void>;
 
 /** 不持久化的 Runtime 增量事件 Sink。 */
@@ -190,6 +185,7 @@ export type TransientEventBatchSink = (params: {
 /** startInvocation 请求参数。 */
 export interface StartInvocationParams {
   invocationId: string;
+  authority?: AuthorityIdentity;
   /** 平台租户 id（Harness Loop 调 AgentCall 时作用域）。 */
   tenantId?: string;
   /** 会话模式 Thread id（Job 模式为 null，不启动 Agent Loop）。 */
@@ -208,23 +204,18 @@ export interface StartInvocationParams {
   contextHandle?: string;
   /** 平台 Gateway 端点（HTTP sink 用）。 */
   gatewayEndpoints: GatewayEndpoints;
-  workspace?: StartInvocationRequestBody["workspace"];
-  executionLimits?: StartInvocationRequestBody["execution_limits"];
-  traceContext?: StartInvocationRequestBody["trace_context"];
+  workspace?: Workspace;
+  executionLimits?: ExecutionLimits;
+  traceContext?: { traceId: string; spanId?: string; parentSpanId?: string };
   /** 平台颁发的 Workload Token（HTTP sink 用）。 */
   authToken: string;
-  /** 平台颁发的 Gateway Workload Token（回调 Gateway 时使用）。 */
-  gatewayAccessToken?: string;
   /** 关联标识（X-Request-Id / traceparent）。 */
   correlationId?: string | null;
 }
 
 /** startInvocation 返回结果。 */
 export interface StartInvocationResult {
-  accepted: boolean;
-  runtime_session_ref: string;
-  runtime_execution_ref: string;
-  capabilities: RuntimeCapabilitiesResponse;
+  response: RuntimeStartResponse;
 }
 
 // ─── 命令处理类型 ──────────────────────────────────────────
@@ -232,6 +223,8 @@ export interface StartInvocationResult {
 /** handleCancel 请求参数。 */
 export interface CancelParams {
   invocationId: string;
+  tenantId?: string;
+  authority?: AuthorityIdentity;
   /** 取消原因（写入 execution.cancelled.payload.reason）。 */
   reason?: string;
   /** 取消发起者（写入 execution.cancelled.payload.cancelled_by）。 */
@@ -244,13 +237,14 @@ export interface CancelParams {
 
 /** handleCancel 返回结果。 */
 export interface CancelResult {
-  cancel_state: "accepted";
-  already_completed_effects_preserved: boolean;
+  response: CancelResponse;
 }
 
 /** handleResume 请求参数。 */
 export interface ResumeParams {
   invocationId: string;
+  tenantId?: string;
+  authority?: AuthorityIdentity;
   /** resume payload（透传给 Runtime）。 */
   resumePayload?: unknown;
   /** 平台 Gateway 端点（HTTP sink 用）。 */
@@ -263,14 +257,14 @@ export interface ResumeParams {
 
 /** handleResume 返回结果。 */
 export interface ResumeResult {
-  resume_state: "accepted";
-  runtime_execution_ref: string;
-  requires_redispatch: boolean;
+  response: RuntimeStartResponse;
 }
 
 /** handleSteer 请求参数。 */
 export interface SteerParams {
   invocationId: string;
+  tenantId?: string;
+  authority?: AuthorityIdentity;
   /** steer payload（透传给 Runtime）。 */
   steerPayload?: unknown;
   /** 平台 Gateway 端点（HTTP sink 用）。 */
@@ -281,9 +275,7 @@ export interface SteerParams {
 
 /** handleSteer 返回结果。 */
 export interface SteerResult {
-  steer_state: "accepted";
-  applies_at: "next_safe_point";
-  generation_interrupted: boolean;
+  response: SteerResponse;
 }
 
 // ─── Hosted 能力声明 ──────────────────────────────────────
@@ -295,35 +287,74 @@ export interface SteerResult {
  * 不支持 dynamic_tools/user_action（本阶段），workspace_types=["cloud"]，
  * 不支持 filesystem_checkpoint。
  */
-export function hostedAdapterCapabilities(): RuntimeCapabilitiesResponse {
-  return {
-    protocol_versions: ["2"],
+export function hostedAdapterCapabilities(): RuntimeCapabilities {
+  const partial = {
+    protocolVersion: 3,
     features: {
-      event_stream: true,
+      heartbeat: true,
+      durableStartIdempotency: true,
+      startedEvent: true,
+      exactReplay: true,
       cancel: true,
       resume: true,
       steer: true,
-      dynamic_tools: false,
-      user_action: false,
-      workspace_types: ["cloud"],
-      filesystem_checkpoint: false,
+      subjectTypes: ["thread", "job"],
+      workspaceModes: ["NO_PLATFORM_WORKSPACE", "HOST_AFFINE", "SHARED_DURABLE"],
+      filesystemSemantics: {
+        kind: "managed-host",
+        caseSensitive: true,
+        symlinks: false,
+        permissions: true,
+        hardlinks: false,
+        specialFiles: false,
+        xattrsAcl: false,
+        mtime: "preserved",
+      },
     },
     limits: {
-      max_invocation_seconds: 600,
-      max_event_bytes: 1_048_576,
+      maxEventBytes: 262_144,
+      maxBatchEvents: 100,
+      maxBatchBytes: 1_048_576,
     },
-    harness_action_protocol: {
-      version: "1",
-      action_types: [
-        "knowledge.search",
-        "tool.call",
-        "agent.call",
-        "agent.resume",
-        "request_user_input",
-        "respond",
-      ],
-    },
+  } as const satisfies Pick<RuntimeCapabilities, "protocolVersion" | "features" | "limits">;
+  return {
+    ...partial,
+    contractDigest: computeCapabilitiesContractDigest(partial),
+    runtimeTargetDigest: protocolDigest({
+      target: "hosted-harness",
+      protocolVersion: 3,
+    }),
   };
+}
+
+function failMissingAuthority(): never {
+  throw new HarnessLoopError(
+    "RUNTIME_AUTHORITY_REQUIRED",
+    "Hosted Runtime adapter 缺少 Execution Authority",
+  );
+}
+
+/**
+ * Hosted start 的语义请求摘要（§7.4）。
+ *
+ * 只覆盖执行语义字段（invocation / subject / inputs / capability / workspace /
+ * limits）；凭据、网端点、trace 与关联标识不进入摘要，保证同一启动意图
+ * 跨重试摘要稳定（START-07）。
+ */
+function hostedStartSemanticDigest(startParams: StartInvocationParams): string {
+  return protocolDigest({
+    intentType: "start",
+    invocationId: startParams.invocationId,
+    tenantId: startParams.tenantId ?? null,
+    threadId: startParams.threadId ?? null,
+    turnId: startParams.turnId ?? null,
+    capabilityDirectives: startParams.capabilityDirectives ?? null,
+    inputItems: startParams.inputItems,
+    contextHandle: startParams.contextHandle ?? null,
+    workspaceBindingId:
+      startParams.workspace?.mode === "BOUND" ? startParams.workspace.bindingId : null,
+    executionLimits: startParams.executionLimits ?? null,
+  });
 }
 
 // ─── HostedHarnessLoop ─────────────────────────────────────
@@ -331,9 +362,13 @@ export function hostedAdapterCapabilities(): RuntimeCapabilitiesResponse {
 /** HostedHarnessLoop 参数。 */
 export interface HostedHarnessLoopParams {
   invocationId: string;
+  authority?: AuthorityIdentity;
   tenantId: string;
+  /** R06 §1：Thread 主体提供 threadId+turnId；Job 主体两者为 null 并给出 jobId。 */
   threadId: string | null;
   turnId: string | null;
+  /** Job 主体的业务标识（无 Thread 的 Job 执行）。 */
+  jobId?: string | null;
   /** 本 Turn 的能力使用提示；preferred 只供 Harness 决策。 */
   capabilityDirectives?: Array<{
     capability_type: "agent";
@@ -342,14 +377,18 @@ export interface HostedHarnessLoopParams {
   }>;
   capabilityCatalog?: CapabilityCatalogSnapshot;
   inputItems: unknown[];
+  /**
+   * 显式执行目标。Job 主体没有 Thread item，目标直接来自 Job 的正式输入事实；
+   * 提供时优先于从 inputItems 推导，避免为了取目标而伪造一个 user_message。
+   */
+  objective?: string;
   contextHandle?: string;
-  workspace?: StartInvocationRequestBody["workspace"];
-  executionLimits?: StartInvocationRequestBody["execution_limits"];
-  traceContext?: StartInvocationRequestBody["trace_context"];
+  workspace?: Workspace;
+  executionLimits?: ExecutionLimits;
+  traceContext?: { traceId: string; spanId?: string; parentSpanId?: string };
   gatewayEndpoints: GatewayEndpoints;
   runtimeEndpoint: string;
   authToken: string;
-  gatewayAccessToken?: string;
   /** 可注入的 Event Ingress 客户端（测试用）；不传则用 HTTP 默认实现。 */
   ingressClient?: EventIngressClient;
   /** 每步只产出一个结构化行动。 */
@@ -389,7 +428,7 @@ export interface HostedHarnessLoopResult {
   /** 稳定失败码。 */
   errorCode?: string;
   /** 已发送的候选事件列表。 */
-  sentEvents: RuntimeCandidateEvent[];
+  sentEvents: RuntimeEvent[];
 }
 
 /**
@@ -420,8 +459,8 @@ function extractUserMessage(inputItems: unknown[]): string {
  */
 export class HostedHarnessLoop {
   private readonly params: HostedHarnessLoopParams;
-  private readonly sentEvents: RuntimeCandidateEvent[] = [];
-  private nextSequence = 1;
+  private readonly sentEvents: RuntimeEvent[] = [];
+  private nextSequence = 1n;
   private nextTransientSequence = 1;
 
   constructor(params: HostedHarnessLoopParams) {
@@ -439,7 +478,7 @@ export class HostedHarnessLoop {
       createHttpEventIngressClient({
         gatewayEndpoints: this.params.gatewayEndpoints,
         authToken: this.params.authToken,
-        gatewayAccessToken: this.params.gatewayAccessToken,
+        authority: this.params.authority ?? failMissingAuthority(),
       });
     const missingDecisionPort: HarnessDecisionPort = {
       async decideNextAction() {
@@ -460,13 +499,29 @@ export class HostedHarnessLoop {
     const loop = new HarnessLoop({
       invocationId: this.params.invocationId,
       tenantId: this.params.tenantId,
-      threadId: this.params.threadId ?? "",
-      turnId: this.params.turnId ?? "",
-      objective: extractUserMessage(this.params.inputItems),
+      authority: this.params.authority ?? failMissingAuthority(),
+      threadId: this.params.threadId ?? null,
+      turnId: this.params.turnId ?? null,
+      jobId: this.params.jobId ?? null,
+      objective: this.params.objective ?? extractUserMessage(this.params.inputItems),
       contextHandle: this.params.contextHandle,
-      workspace: this.params.workspace,
+      workspace: this.params.workspace
+        ? {
+            workspace_binding_id:
+              this.params.workspace.mode === "BOUND" ? this.params.workspace.bindingId : null,
+            workspace_type:
+              this.params.workspace.mode === "BOUND"
+                ? this.params.workspace.continuityMode
+                : "none",
+          }
+        : undefined,
       executionLimits: this.params.executionLimits,
-      traceContext: this.params.traceContext,
+      traceContext: this.params.traceContext
+        ? {
+            trace_id: this.params.traceContext.traceId,
+            span_id: this.params.traceContext.spanId ?? this.params.invocationId,
+          }
+        : undefined,
       capabilityDirectives: this.params.capabilityDirectives,
       capabilityCatalog: this.params.capabilityCatalog,
       decisionPort: this.params.decisionPort ?? missingDecisionPort,
@@ -474,11 +529,11 @@ export class HostedHarnessLoop {
       executors: this.params.actionExecutors ?? {},
       limits: this.params.executionLimits
         ? {
-            maxLoopSteps: this.params.executionLimits.max_loop_steps,
-            maxAgentCalls: this.params.executionLimits.max_agent_calls,
-            maxToolCalls: this.params.executionLimits.max_tool_calls,
-            maxKnowledgeSearches: this.params.executionLimits.max_knowledge_searches,
-            maxConsecutiveSameAction: this.params.executionLimits.max_consecutive_same_action,
+            maxLoopSteps: 12,
+            maxAgentCalls: 3,
+            maxToolCalls: 8,
+            maxKnowledgeSearches: 6,
+            maxConsecutiveSameAction: 2,
           }
         : undefined,
       recoveryPort: this.params.recoveryPort
@@ -488,7 +543,7 @@ export class HostedHarnessLoop {
               if (!snapshot) {
                 throw new Error("Harness Loop recovery snapshot 缺失");
               }
-              this.nextSequence = snapshot.nextProducerSequence;
+              this.nextSequence = BigInt(snapshot.nextProducerSequence);
               return snapshot;
             },
           }
@@ -520,6 +575,23 @@ export class HostedHarnessLoop {
         : undefined,
     });
     const result = await loop.run();
+    // R02 §7：用户等待的**正式暂停**由 Runtime 自报 `execution.suspended`，平台在 Ingress
+    // 处验证安全边界后才落 paused（Attempt=suspended / Owner 释放 / Session 关闭）。
+    //
+    // 判别条件必须是「本轮真的产生了 user-action 请求」：子调用 pending（AgentCall/ToolCall
+    // 仍在跑）**不等于**人工暂停，那种情况由 Supervisor 继续持有任务租约等待子结果。
+    if (result.waitingForUser && this.sentEvents.some((event) => event.type === "user-action")) {
+      const authority = this.params.authority ?? failMissingAuthority();
+      await this.sendEvent(ingressClient, "execution.suspended", {
+        reason: "waiting_user",
+        resumeAnchorDigest: protocolDigest({
+          kind: "runtime-suspension",
+          invocationId: this.params.invocationId,
+          attemptId: authority.attemptId,
+          ownershipId: authority.ownershipId,
+        }),
+      });
+    }
     return {
       completed: result.completed,
       cancelled: result.cancelled,
@@ -541,17 +613,20 @@ export class HostedHarnessLoop {
     payload: Record<string, unknown>,
   ): Promise<void> {
     const seq = this.nextSequence;
-    const event: RuntimeCandidateEvent = {
-      producer_event_id: `hosted-${type}-${randomUUID()}`,
-      producer_sequence: seq,
-      type,
-      schema_version: 1,
-      occurred_at: new Date().toISOString(),
+    const event: RuntimeEvent = {
+      eventId: randomUUID(),
+      producerSequence: String(seq),
+      type: type as RuntimeEvent["type"],
+      schemaVersion: 1,
       payload,
     };
     this.sentEvents.push(event);
-    this.nextSequence = seq + 1;
-    await ingressClient.postEventBatch(this.params.invocationId, [event], seq);
+    this.nextSequence = seq + 1n;
+    await ingressClient.postEventBatch(
+      this.params.invocationId,
+      this.params.authority ?? failMissingAuthority(),
+      [event],
+    );
   }
 }
 
@@ -600,7 +675,7 @@ export interface CreateHostedAdapterParams {
  * @returns RuntimeAdapter 实例
  */
 export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeAdapter {
-  const refPrefix = "hosted";
+  const adapterCapabilities = hostedAdapterCapabilities();
   const state: AdapterState = {
     lastLoopPromise: null,
   };
@@ -621,35 +696,54 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
   function createIngressClient(
     gatewayEndpoints: GatewayEndpoints,
     authToken: string,
-    gatewayAccessToken?: string,
+    authority: AuthorityIdentity,
   ): EventIngressClient {
     if (trackedSink) {
       return {
-        async postEventBatch(invocationId, events, producerSequenceStart) {
-          await trackedSink({ invocationId, events, producerSequenceStart });
+        async postEventBatch(invocationId, eventAuthority, events) {
+          await trackedSink({ invocationId, authority: eventAuthority, events });
         },
       };
     }
-    return createHttpEventIngressClient({ gatewayEndpoints, authToken, gatewayAccessToken });
+    return createHttpEventIngressClient({ gatewayEndpoints, authToken, authority });
   }
 
   return {
-    async probeCapabilities(): Promise<RuntimeCapabilitiesResponse> {
+    async probeCapabilities(): Promise<RuntimeCapabilities> {
       return hostedAdapterCapabilities();
     },
 
     async startInvocation(startParams: StartInvocationParams): Promise<StartInvocationResult> {
-      // 1. 生成 runtime_session_ref + runtime_execution_ref
-      const threadSuffix = startParams.threadId ? startParams.threadId.slice(0, 8) : "noturn";
-      const runtimeSessionRef = `${refPrefix}-${threadSuffix}-${randomUUID()}`;
-      const runtimeExecutionRef = `${refPrefix}-exec-${randomUUID()}`;
+      // 0. R10 §3「真实声明的 Workspace profile」：Runtime 必须对自己**未声明**的
+      //    Workspace 连续性模式 fail closed。capability manifest 是发布准入的唯一
+      //    权威声明；接受一个没声明过的 profile 等于用全部布尔 true 强装通过。
+      const capabilities = adapterCapabilities;
+      if (
+        startParams.workspace?.mode === "BOUND" &&
+        !capabilities.features.workspaceModes.includes(startParams.workspace.continuityMode)
+      ) {
+        throw new HarnessLoopError(
+          "RUNTIME_WORKSPACE_MODE_UNSUPPORTED",
+          `Hosted Runtime 未声明 Workspace 模式：${startParams.workspace.continuityMode}`,
+        );
+      }
+
+      // 1. 解析权威身份；refs 由**冻结的启动身份**确定性派生。
+      //
+      //    §7.5 要求「重复相同启动返回原 refs」：RuntimeSessionBinding 在事务内比对
+      //    首次冻结的 remoteSessionRef/remoteExecutionRef，任何一次重投给出不同值都会
+      //    被判 ProtocolViolation。因此 refs 必须只由 Invocation/Session/Ownership 这些
+      //    不可变事实决定 —— 与 in-process-hosted-runtime.ts 使用同一命名约定。
+      const authority = startParams.authority ?? failMissingAuthority();
+      const runtimeSessionRef = `hosted-session:${authority.sessionBindingId}`;
+      const runtimeExecutionRef = `hosted-execution:${startParams.invocationId}:${authority.ownershipId}`;
 
       // 2. 异步执行 Agent Loop（仅会话模式；Job 模式不启动 Loop）
       if (startParams.threadId && startParams.turnId) {
         const ingressClient = createIngressClient(
           startParams.gatewayEndpoints,
           startParams.authToken,
-          startParams.gatewayAccessToken,
+          authority,
         );
 
         const loopParams: HostedHarnessLoopParams = {
@@ -667,7 +761,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           traceContext: startParams.traceContext,
           runtimeEndpoint: params.platformEndpoint,
           authToken: startParams.authToken,
-          gatewayAccessToken: startParams.gatewayAccessToken,
+          authority: startParams.authority,
           ingressClient,
           decisionPort: params.decisionPort,
           finalResponsePort: params.finalResponsePort,
@@ -676,7 +770,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           transientEventBatchSink: params.transientEventBatchSink,
           modelRef: params.modelRef,
           deadlineAt: new Date(
-            Date.now() + (startParams.executionLimits?.max_invocation_seconds ?? 600) * 1000,
+            Date.now() + (startParams.executionLimits?.executionTimeoutMs ?? 600_000),
           ),
           correlationId: startParams.correlationId,
         };
@@ -694,10 +788,23 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
 
       // 3. 立即返回 accepted + refs + capabilities
       return {
-        accepted: true,
-        runtime_session_ref: runtimeSessionRef,
-        runtime_execution_ref: runtimeExecutionRef,
-        capabilities: hostedAdapterCapabilities(),
+        response: {
+          protocolVersion: 3,
+          authority,
+          semanticRequestDigest: hostedStartSemanticDigest(startParams),
+          accepted: true,
+          remoteSessionRef: runtimeSessionRef,
+          remoteExecutionRef: runtimeExecutionRef,
+          // R02 §3：接纳回执的能力摘要必须是**发布证据**摘要（runtimeRevisionId +
+          // 冻结 capability manifest），与 runtime-start / ingress-runtime-events /
+          // in-process Hosted 同源。probe 响应里的 `contractDigest` 是候选自报的能力
+          // 声明摘要（不含 runtimeRevisionId），不是发布事实，不能当比对源。
+          capabilitiesDigest: expectedCapabilityManifestDigest({
+            runtimeRevisionId: authority.runtimeRevisionId,
+            runtimeCapabilitiesJson: capabilities,
+          }),
+          acceptedAt: Date.now(),
+        },
       };
     },
 
@@ -708,16 +815,23 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           "Hosted cancel 未配置正式应用服务",
         );
       }
+      // R03 §6：Cancel 必须按请求携带的**目标 Authority**关门——不得只给 invocationId
+      // 让应用层再查"现在的 Owner"，否则旧目标的 Cancel 会误杀新代际。
+      const authority = cancelParams.authority ?? failMissingAuthority();
       await params.applicationService.cancel({
         tenantId: params.tenantId ?? "",
         invocationId: cancelParams.invocationId,
         idempotencyKey: `hosted-cancel:${cancelParams.invocationId}`,
+        authority,
         reason: cancelParams.reason,
       });
 
       return {
-        cancel_state: "accepted",
-        already_completed_effects_preserved: true,
+        response: {
+          accepted: true,
+          targetAuthority: authority,
+          stopState: "requested",
+        },
       };
     },
 
@@ -728,16 +842,33 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           "Hosted resume 未配置正式应用服务",
         );
       }
+      const authority = resumeParams.authority ?? failMissingAuthority();
       await params.applicationService.resume({
         tenantId: params.tenantId ?? "",
         invocationId: resumeParams.invocationId,
         idempotencyKey: `hosted-resume:${resumeParams.invocationId}`,
+        authority,
         resumePayload: resumeParams.resumePayload,
       });
       return {
-        resume_state: "accepted",
-        runtime_execution_ref: `${refPrefix}-exec-resume-${randomUUID()}`,
-        requires_redispatch: false,
+        response: {
+          protocolVersion: 3,
+          authority,
+          semanticRequestDigest: protocolDigest({
+            intentType: "resume",
+            invocationId: resumeParams.invocationId,
+            resumePayload: resumeParams.resumePayload ?? null,
+          }),
+          accepted: true,
+          remoteSessionRef: `hosted-session:${authority.sessionBindingId}`,
+          remoteExecutionRef: `hosted-execution:${resumeParams.invocationId}:${authority.ownershipId}`,
+          // 与 start 同一发布事实口径（R02 §3）：Resume 也换新代际，能力摘要不得变。
+          capabilitiesDigest: expectedCapabilityManifestDigest({
+            runtimeRevisionId: authority.runtimeRevisionId,
+            runtimeCapabilitiesJson: adapterCapabilities,
+          }),
+          acceptedAt: Date.now(),
+        },
       };
     },
 
@@ -748,16 +879,25 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           "Hosted steer 未配置正式应用服务",
         );
       }
+      const authority = steerParams.authority ?? failMissingAuthority();
       await params.applicationService.steer({
         tenantId: params.tenantId ?? "",
         invocationId: steerParams.invocationId,
         idempotencyKey: `hosted-steer:${steerParams.invocationId}`,
+        authority,
         steerPayload: steerParams.steerPayload,
       });
       return {
-        steer_state: "accepted",
-        applies_at: "next_safe_point",
-        generation_interrupted: false,
+        response: {
+          accepted: true,
+          commandId: randomUUID(),
+          targetAuthority: authority,
+          inputDigest: protocolDigest({
+            intentType: "steer",
+            invocationId: steerParams.invocationId,
+            steerPayload: steerParams.steerPayload ?? null,
+          }),
+        },
       };
     },
 

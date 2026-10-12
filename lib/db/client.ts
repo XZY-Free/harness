@@ -23,6 +23,10 @@ const poolOptions: mysql.PoolOptions = {
   connectionLimit: Number.parseInt(process.env.SNOW_DB_CONNECTION_LIMIT ?? "10", 10),
   waitForConnections: true,
   queueLimit: Number.parseInt(process.env.SNOW_DB_QUEUE_LIMIT ?? "100", 10),
+  // BIGINT 的 DB→driver 边界必须保留十进制原文；默认 Number 会在 2^53 后舍入。
+  supportBigNumbers: true,
+  // 安全整数仍按 Number 返回（COUNT(*) 等旧调用方依赖此类型）；超出安全范围才返回字符串。
+  bigNumberStrings: false,
 };
 
 const globalForDb = globalThis as unknown as {
@@ -36,6 +40,11 @@ if (!globalForDb.__snowMysqlPool) {
 }
 
 export const db = drizzle(pool, { schema, mode: "default" });
+
+/** 迁移的 MySQL 命名锁与 DDL 必须共用同一条物理连接。 */
+export async function openMigrationConnection(): Promise<mysql.PoolConnection> {
+  return pool.getConnection();
+}
 
 /** 关闭当前测试文件的业务连接池，避免 Vitest 文件隔离造成连接池累积。 */
 export async function closeDbPool(): Promise<void> {

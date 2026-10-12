@@ -1,5 +1,5 @@
 /**
- * EffectRecord + EffectTarget 仓储（阶段 8 S08-C05）。
+ * EffectRecord + EffectTarget 仓储。
  *
  * 事实源：
  * - docs/architecture/persistence.md （effect_record 与 effect_target）、
@@ -8,19 +8,26 @@
  * - docs/architecture/api-and-events.md （Gateway 即时核对）、
  * （Admin 长期核对 + 同事务更新 tool_call.call_state + AuditEvent）。
  * - docs/architecture/capabilities-and-security.md 。
+ * - docs/topic02/nexharness-topic02-closure/repairs/10-topic03-interfaces.md §T32。
  *
  * 关键不变量：
- * - 一条有副作用 ToolCall 恰有一条 EffectRecord（UNIQUE(toolCallId)）。
+ * - Owner 多态（tool_call / job_step）：ownerRef 必须回读真实源对象并通过
+ * tenant / Invocation 校验（见 lib/capability/effect-owner.ts），不看字符串格式。
+ * - UNIQUE(tenantId, ownerKind, ownerRef, operationKey) 是外部操作身份；
+ * tool_call 分支另有 UNIQUE(tenantId, toolOwnerSlot) 兜底「一 ToolCall 一 Effect」。
  * - effect_target 通过 UNIQUE(effectRecordId, targetHash) 防止同目标重复记录。
- * - 总 effect_state 由目标明细派生：confirmed_success / confirmed_partial / confirmed_failure / unknown_effect。
- * - 写入后不可变：effect_type / toolCallId / externalIdempotencyKey 不可修改；
- * 补偿是新的、单独授权 ToolCall，通过 causation 关联原操作，不修改原事实。
- * - reconcile 同事务更新：effect_record + effect_target + tool_call.call_state（）。
+ * - 总 effect_state 由目标明细派生：confirmed_success / confirmed_partial /
+ * confirmed_failure / unknown_effect。
+ * - 写入后不可变：effect_type / ownerKind / ownerRef / invocationId / operationKey /
+ * requestDigest 不可修改；dispatchEvidence 一旦非 null 语义不可覆写。
+ * - reconcile 同事务更新：effect_record + effect_target + tool_call.call_state
+ * （仅 tool_call owner 有 ToolCall 可同步）。
  * - unknown_effect 不能自动重放；partial success 只允许重试明确失败且安全的目标。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  * - MySQL 不支持 .returning()：update + select 两步。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { type ResolvedEffectOwner, resolveEffectOwner } from "@/lib/capability/effect-owner";
 import { getToolCallById, updateToolCallState } from "@/lib/capability/tool-call-queries";
 import { type DbOrTx, db } from "@/lib/db/client";
 import {
@@ -28,6 +35,8 @@ import {
   EFFECT_STATES,
   EFFECT_TARGET_STATES,
   EFFECT_TYPES,
+  type EffectDispatchEvidence,
+  type EffectOwnerKind,
   type EffectRecord,
   type EffectState,
   type EffectTarget,
@@ -40,9 +49,10 @@ import {
   type VerificationMethod,
   effectRecordTable,
   effectTargetTable,
+  toolCallOperationKey,
 } from "@/lib/persistence/schema/effect";
 import { type ToolCall, toolCallTable } from "@/lib/persistence/schema/tool-call";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
@@ -124,12 +134,29 @@ export class EffectVerificationMethodNotAllowedError extends Error {
   }
 }
 
+/**
+ * 派发意图证据已存在且与新提交内容不一致。
+ *
+ * 首次派发证据是外部副作用的代际事实，不允许被后续 Attempt 覆写
+ * （否则「意图已写但可能尚未发出」的保守核对语义会失去依据）。
+ */
+export class EffectDispatchEvidenceImmutableError extends Error {
+  public readonly effectRecordId: string;
+
+  constructor(effectRecordId: string) {
+    super(`EffectRecord ${effectRecordId} 的首次派发意图证据已固定，不可覆写`);
+    this.name = "EffectDispatchEvidenceImmutableError";
+    this.effectRecordId = effectRecordId;
+  }
+}
+
 // ─── 校验辅助 ──────────────────────────────────────────────
 
 const VALID_EFFECT_TYPES = new Set<string>(EFFECT_TYPES);
 const VALID_EFFECT_STATES = new Set<string>(EFFECT_STATES);
 const VALID_TARGET_STATES = new Set<string>(EFFECT_TARGET_STATES);
 const VALID_VERIFICATION_METHODS = new Set<string>(VERIFICATION_METHODS);
+const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 export function isEffectType(value: string): value is EffectType {
   return VALID_EFFECT_TYPES.has(value);
@@ -155,6 +182,31 @@ export function isValidTargetHash(hash: string): boolean {
   if (!hash.startsWith("sha256:")) return false;
   const hex = hash.slice("sha256:".length);
   return /^[0-9a-f]{64}$/.test(hex);
+}
+
+/** requestDigest 语义一致：外部目标 / 连接身份 / 动作与参数的 JCS+SHA256。 */
+export function isValidRequestDigest(digest: string): boolean {
+  return SHA256_DIGEST.test(digest);
+}
+
+/** 计算 requestDigest（对 canonical 输入做 SHA256）。 */
+export function computeEffectRequestDigest(input: unknown): string {
+  const hex = createHash("sha256").update(canonicalize(input), "utf-8").digest("hex");
+  return `sha256:${hex}`;
+}
+
+function canonicalize(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+
+function sortKeys(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sortKeys);
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    result[key] = sortKeys((value as Record<string, unknown>)[key]);
+  }
+  return result;
 }
 
 /**
@@ -203,8 +255,16 @@ export function deriveEffectStateFromTargets(targets: readonly EffectTargetState
 
 export interface CreateEffectRecordInput {
   tenantId: string;
-  /** 所属 ToolCall id（一对一；逻辑外键 → ToolCall.id）。 */
-  toolCallId: string;
+  /** 多态 owner 类别；无默认值，必须显式给出。 */
+  ownerKind: EffectOwnerKind;
+  /** ToolCall.id（tool_call）或 job.step.accepted 的 Ingress id（job_step）。 */
+  ownerRef: string;
+  /** 调用方声明的所属 Invocation；必须与源对象真实归属一致。 */
+  invocationId: string;
+  /** owner 内稳定逻辑外部操作键；tool_call 分支固定为 ToolCall.id。 */
+  operationKey?: string;
+  /** 外部目标 / 连接身份 / 动作与参数的语义 Hash（sha256: + 64 hex）。 */
+  requestDigest: string;
   effectType: EffectType;
   /** 目标数量和脱敏摘要（JSON：{ total, description, ... }）。 */
   targetSummaryJson: unknown;
@@ -217,18 +277,28 @@ export interface CreateEffectRecordInput {
 }
 
 /**
- * 创建 EffectRecord（一条 ToolCall 一条；UNIQUE(toolCallId)）。
+ * 创建 EffectRecord（owner 内逻辑操作身份唯一）。
  *
- * 关键约束：
- * - 同一 toolCallId 已存在 EffectRecord 时抛 EffectValidationError（不返回幂等行）。
- * - targetSummaryJson 必须为非空对象。
+ * 关键行为：
+ * - 单事务：回读真实 owner 源对象 → 校验 tenant/Invocation → 插入。
+ * - 同一 (ownerKind, ownerRef, operationKey) 已存在时抛 EffectValidationError
+ * （不返回幂等行，强制调用方走查询路径）。
+ * - tool_call 分支的 operationKey 固定为 ToolCall.id；不允许调用方自定义，
+ * 否则一个 ToolCall 会出现多个逻辑操作身份。
  * - 不创建 EffectTarget；调用方应紧接着调用 createEffectTargets。
  */
-export async function createEffectRecord(input: CreateEffectRecordInput): Promise<EffectRecord> {
+export async function createEffectRecord(
+  input: CreateEffectRecordInput,
+  tx?: DbOrTx,
+): Promise<EffectRecord> {
   if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
-  if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
+  if (!input.ownerRef) throw new EffectValidationError("ownerRef 不能为空");
+  if (!input.invocationId) throw new EffectValidationError("invocationId 不能为空");
   if (!isEffectType(input.effectType)) {
     throw new EffectValidationError(`非法 effectType: ${input.effectType}`);
+  }
+  if (!isValidRequestDigest(input.requestDigest)) {
+    throw new EffectValidationError("requestDigest 格式非法（需 sha256: + 64 hex）");
   }
   if (!input.targetSummaryJson || typeof input.targetSummaryJson !== "object") {
     throw new EffectValidationError("targetSummaryJson 必须是对象");
@@ -245,36 +315,97 @@ export async function createEffectRecord(input: CreateEffectRecordInput): Promis
     }
   }
 
-  // 幂等回查：同一 toolCallId 已存在时拒绝（不返回已存在行，强制调用方走查询路径）。
-  const existing = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
-  if (existing) {
-    throw new EffectValidationError(
-      `EffectRecord 已存在（toolCallId=${input.toolCallId}）；一对一约束禁止二次创建`,
+  const run = async (source: DbOrTx): Promise<EffectRecord> => {
+    const owner = await resolveEffectOwner(source, {
+      tenantId: input.tenantId,
+      ownerKind: input.ownerKind,
+      ownerRef: input.ownerRef,
+      invocationId: input.invocationId,
+    });
+    const operationKey = resolveOperationKey(owner, input.operationKey);
+    if (operationKey.length > 128) {
+      throw new EffectValidationError("operationKey 长度不能超过 128");
+    }
+    const existing = await findEffectByOwnerKey(
+      source,
+      input.tenantId,
+      input.ownerKind,
+      owner.ownerRef,
+      operationKey,
     );
-  }
+    if (existing) {
+      throw new EffectValidationError(
+        `EffectRecord 已存在（ownerKind=${input.ownerKind}, ownerRef=${owner.ownerRef}, operationKey=${operationKey}）；逻辑操作身份唯一约束禁止二次创建`,
+      );
+    }
 
-  const id = randomUUID();
-  const now = new Date();
-  const insert: NewEffectRecord = {
-    id,
-    tenantId: input.tenantId,
-    toolCallId: input.toolCallId,
-    effectType: input.effectType,
-    targetSummaryJson: input.targetSummaryJson,
-    effectState: input.initialEffectState ?? "not_started",
-    externalIdempotencyKey: input.externalIdempotencyKey ?? null,
-    externalResultRef: input.externalResultRef ?? null,
-    versionNo: 1,
-    createdAt: now,
-    updatedAt: now,
+    const id = randomUUID();
+    const now = new Date();
+    const insert: NewEffectRecord = {
+      id,
+      tenantId: input.tenantId,
+      ownerKind: input.ownerKind,
+      ownerRef: owner.ownerRef,
+      invocationId: owner.invocationId,
+      operationKey,
+      requestDigest: input.requestDigest,
+      effectType: input.effectType,
+      targetSummaryJson: input.targetSummaryJson,
+      effectState: input.initialEffectState ?? "not_started",
+      externalIdempotencyKey: input.externalIdempotencyKey ?? null,
+      externalResultRef: input.externalResultRef ?? null,
+      versionNo: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await source.insert(effectRecordTable).values(insert);
+    const created = await getEffectRecordById(input.tenantId, id, source);
+    if (!created) {
+      throw new EffectNotFoundError("EffectRecord 创建后回查失败");
+    }
+    return created;
   };
 
-  await db.insert(effectRecordTable).values(insert);
-  const created = await getEffectRecordById(input.tenantId, id);
-  if (!created) {
-    throw new EffectNotFoundError("EffectRecord 创建后回查失败");
+  return tx ? run(tx) : db.transaction(run);
+}
+
+function resolveOperationKey(owner: ResolvedEffectOwner, requested?: string): string {
+  if (owner.ownerKind === "tool_call") {
+    // 一 ToolCall 只有一个外部操作身份；不接受调用方另行指定。
+    if (requested && requested !== owner.operationKey) {
+      throw new EffectValidationError(
+        `tool_call owner 的 operationKey 固定为 ToolCall 唯一外部操作身份（${owner.operationKey}），不接受自定义值`,
+      );
+    }
+    return owner.operationKey;
   }
-  return created;
+  if (!requested) {
+    throw new EffectValidationError("job_step owner 必须显式提供 operationKey");
+  }
+  return requested;
+}
+
+async function findEffectByOwnerKey(
+  source: DbOrTx,
+  tenantId: string,
+  ownerKind: EffectOwnerKind,
+  ownerRef: string,
+  operationKey: string,
+): Promise<EffectRecord | null> {
+  const [row] = await source
+    .select()
+    .from(effectRecordTable)
+    .where(
+      and(
+        eq(effectRecordTable.tenantId, tenantId),
+        eq(effectRecordTable.ownerKind, ownerKind),
+        eq(effectRecordTable.ownerRef, ownerRef),
+        eq(effectRecordTable.operationKey, operationKey),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 // ─── createEffectTargets ─────────────────────────────────
@@ -309,12 +440,14 @@ export interface CreateEffectTargetsInput {
  */
 export async function createEffectTargets(
   input: CreateEffectTargetsInput,
+  tx?: DbOrTx,
 ): Promise<EffectTarget[]> {
   if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
   if (!input.effectRecordId) throw new EffectValidationError("effectRecordId 不能为空");
   if (!Array.isArray(input.targets) || input.targets.length === 0) {
     throw new EffectValidationError("targets 必须是非空数组");
   }
+  const source = tx ?? db;
 
   // 校验 + 去重检查
   const seenHashes = new Set<string>();
@@ -354,8 +487,8 @@ export async function createEffectTargets(
     });
   }
 
-  await db.insert(effectTargetTable).values(rows);
-  return db
+  await source.insert(effectTargetTable).values(rows);
+  return source
     .select()
     .from(effectTargetTable)
     .where(eq(effectTargetTable.effectRecordId, input.effectRecordId))
@@ -377,19 +510,39 @@ export async function getEffectRecordById(
   return row ?? null;
 }
 
+/**
+ * 按多态 owner 逻辑操作身份查询 EffectRecord。
+ *
+ * operationKey 省略时返回该 owner 的任意一条（tool_call 分支至多一条）。
+ */
+export async function getEffectRecordByOwner(
+  tenantId: string,
+  ownerKind: EffectOwnerKind,
+  ownerRef: string,
+  operationKey?: string,
+  tx?: DbOrTx,
+): Promise<EffectRecord | null> {
+  const conditions = [
+    eq(effectRecordTable.tenantId, tenantId),
+    eq(effectRecordTable.ownerKind, ownerKind),
+    eq(effectRecordTable.ownerRef, ownerRef),
+  ];
+  if (operationKey) conditions.push(eq(effectRecordTable.operationKey, operationKey));
+  const [row] = await (tx ?? db)
+    .select()
+    .from(effectRecordTable)
+    .where(and(...conditions))
+    .limit(1);
+  return row ?? null;
+}
+
+/** ToolCall owner 的一对一 EffectRecord（沿用旧调用点语义）。 */
 export async function getEffectRecordByToolCall(
   tenantId: string,
   toolCallId: string,
   tx?: DbOrTx,
 ): Promise<EffectRecord | null> {
-  const [row] = await (tx ?? db)
-    .select()
-    .from(effectRecordTable)
-    .where(
-      and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.toolCallId, toolCallId)),
-    )
-    .limit(1);
-  return row ?? null;
+  return getEffectRecordByOwner(tenantId, "tool_call", toolCallId, undefined, tx);
 }
 
 export async function listEffectTargets(
@@ -410,33 +563,47 @@ export async function listEffectTargets(
 }
 
 /**
- * 列出某 Invocation 的全部 EffectRecord（通过 tool_call 联表查询）。
+ * 列出某 Invocation 的全部 EffectRecord（tool_call 与 job_step 两类都可见）。
  *
- * - 按 tool_call.callSequence 升序排列。
- * - 跨租户隔离：tool_call.tenantId + effect_record.tenantId 双重过滤。
+ * 直接按 EffectRecord.invocationId 过滤：不再 INNER JOIN ToolCall，
+ * 否则 job_step Effect（没有 ToolCall）会被静默丢弃。
  */
 export async function listEffectRecordsByInvocation(
   tenantId: string,
   invocationId: string,
+  tx?: DbOrTx,
 ): Promise<EffectRecord[]> {
-  const rows = await db
-    .select({
-      record: effectRecordTable,
-    })
+  return (tx ?? db)
+    .select()
     .from(effectRecordTable)
-    .innerJoin(
-      toolCallTable,
+    .where(
       and(
-        eq(effectRecordTable.toolCallId, toolCallTable.id),
-        eq(effectRecordTable.tenantId, toolCallTable.tenantId),
+        eq(effectRecordTable.tenantId, tenantId),
+        eq(effectRecordTable.invocationId, invocationId),
       ),
     )
-    .where(
-      and(eq(effectRecordTable.tenantId, tenantId), eq(toolCallTable.invocationId, invocationId)),
-    )
-    .orderBy(asc(toolCallTable.callSequence));
+    .orderBy(asc(effectRecordTable.createdAt), asc(effectRecordTable.id));
+}
 
-  return rows.map((r) => r.record);
+/** 列出某 Invocation 处于指定状态的 EffectRecord（Job 收口 / 清理路径使用）。 */
+export async function listEffectRecordsByInvocationState(
+  tenantId: string,
+  invocationId: string,
+  states: readonly EffectState[],
+  tx?: DbOrTx,
+): Promise<EffectRecord[]> {
+  if (states.length === 0) return [];
+  return (tx ?? db)
+    .select()
+    .from(effectRecordTable)
+    .where(
+      and(
+        eq(effectRecordTable.tenantId, tenantId),
+        eq(effectRecordTable.invocationId, invocationId),
+        inArray(effectRecordTable.effectState, [...states]),
+      ),
+    )
+    .orderBy(asc(effectRecordTable.createdAt), asc(effectRecordTable.id));
 }
 
 /**
@@ -454,6 +621,96 @@ export async function listEffectRecordsByState(
     .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.effectState, state)))
     .orderBy(asc(effectRecordTable.createdAt))
     .limit(limit);
+}
+
+// ─── 派发意图（不可覆写） ─────────────────────────────────
+
+export interface RecordEffectDispatchIntentInput {
+  tenantId: string;
+  effectRecordId: string;
+  /** 首次派发的执行身份（十进制字符串保持 BIGINT 精度）。 */
+  authority: EffectDispatchEvidence["authority"];
+  /** 首次派发目标（Provider / Connection / 端点指纹；不含凭据明文）。 */
+  provider: EffectDispatchEvidence["provider"];
+  /** 派发时冻结的请求摘要；必须等于该 EffectRecord 的 requestDigest。 */
+  requestDigest: string;
+  recordedAt?: Date;
+}
+
+/**
+ * 记录「首次外部派发意图」。
+ *
+ * 语义边界：记录的是意图，不是送达。Crash 在意图已写但可能尚未发出时，
+ * 后续接管者必须保守进入核对（unknown_effect），不能自动重复外部写入。
+ *
+ * - 第一次调用写入 dispatchIntentAt + dispatchEvidence。
+ * - 已有值且与本次内容 canonical 相等 → 幂等返回。
+ * - 已有值但内容不同 → EffectDispatchEvidenceImmutableError（不覆写代际事实）。
+ */
+export async function recordEffectDispatchIntent(
+  input: RecordEffectDispatchIntentInput,
+  tx?: DbOrTx,
+): Promise<EffectRecord> {
+  if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
+  if (!input.effectRecordId) throw new EffectValidationError("effectRecordId 不能为空");
+  if (!isValidRequestDigest(input.requestDigest)) {
+    throw new EffectValidationError("requestDigest 格式非法（需 sha256: + 64 hex）");
+  }
+
+  const run = async (source: DbOrTx): Promise<EffectRecord> => {
+    const record = await getEffectRecordById(input.tenantId, input.effectRecordId, source);
+    if (!record) {
+      throw new EffectNotFoundError(
+        `EffectRecord 不存在或跨租户不可见（id=${input.effectRecordId}）`,
+      );
+    }
+    if (record.requestDigest !== input.requestDigest) {
+      throw new EffectValidationError(
+        `派发意图 requestDigest 与 EffectRecord 冻结值不一致（record=${record.requestDigest}, intent=${input.requestDigest}）`,
+      );
+    }
+    const at = input.recordedAt ?? new Date();
+    const evidence: EffectDispatchEvidence = {
+      authority: input.authority,
+      provider: input.provider,
+      requestDigest: input.requestDigest,
+      recordedAt: at.toISOString(),
+    };
+    if (record.dispatchIntentAt || record.dispatchEvidence) {
+      if (record.dispatchEvidence && sameDispatchEvidence(record.dispatchEvidence, evidence)) {
+        return record;
+      }
+      throw new EffectDispatchEvidenceImmutableError(record.id);
+    }
+    await source
+      .update(effectRecordTable)
+      .set({
+        dispatchIntentAt: at,
+        dispatchEvidence: evidence,
+        versionNo: record.versionNo + 1,
+        updatedAt: at,
+      })
+      .where(
+        and(eq(effectRecordTable.tenantId, input.tenantId), eq(effectRecordTable.id, record.id)),
+      );
+    const updated = await getEffectRecordById(input.tenantId, record.id, source);
+    if (!updated) throw new EffectNotFoundError("EffectRecord 派发意图写入后回查失败");
+    return updated;
+  };
+
+  return tx ? run(tx) : db.transaction(run);
+}
+
+function sameDispatchEvidence(a: EffectDispatchEvidence, b: EffectDispatchEvidence): boolean {
+  // 只比较代际事实本身，忽略记录时间（同一意图重试会带来不同 recordedAt）。
+  return (
+    canonicalize({
+      authority: a.authority,
+      provider: a.provider,
+      requestDigest: a.requestDigest,
+    }) ===
+    canonicalize({ authority: b.authority, provider: b.provider, requestDigest: b.requestDigest })
+  );
 }
 
 // ─── reconcileEffect ─────────────────────────────────────
@@ -475,7 +732,8 @@ export type ReconcilePath = "gateway" | "admin";
 
 export interface ReconcileEffectInput {
   tenantId: string;
-  toolCallId: string;
+  /** 目标 EffectRecord；按主键定位，避免依赖任一 owner 分支。 */
+  effectRecordId: string;
   /** 调用路径：gateway（仅 provider_query + operation_id 校验）或 admin（三种 method）。 */
   path: ReconcilePath;
   /** 核对方式。 */
@@ -488,7 +746,7 @@ export interface ReconcileEffectInput {
   externalResultRef?: string | null;
   /** Provider 已脱敏的结果摘要；与 effect/call terminal 在同一事务写入。 */
   resultSummaryJson?: unknown;
-  /** Gateway 路径必填：必须与原 ToolCall.operationId 一致。 */
+  /** Gateway 路径 + tool_call owner 必填：必须与原 ToolCall.operationId 一致。 */
   expectedOperationId?: string;
   /** 调用者标识（用于审计；本仓储不写 AuditEvent，由调用方在更高层补充）。 */
   reconciledBy?: string;
@@ -497,8 +755,8 @@ export interface ReconcileEffectInput {
 export interface ReconcileEffectResult {
   effectRecord: EffectRecord;
   effectTargets: EffectTarget[];
-  /** 核对后的 ToolCall（call_state 可能同步迁移）。 */
-  toolCall: ToolCall;
+  /** 核对后的 ToolCall；job_step owner 没有 ToolCall，固定为 null（不伪造）。 */
+  toolCall: ToolCall | null;
   /** 派生的目标计数（与 API 响应 targets 字段一致）。 */
   targetsCount: {
     total: number;
@@ -509,13 +767,14 @@ export interface ReconcileEffectResult {
 }
 
 /**
- * 核对 ToolCall 副作用（Gateway 即时核对 / Admin 长期核对）。
+ * 核对外部副作用（Gateway 即时核对 / Admin 长期核对）。
  *
  * 关键规则：
- * - path=gateway：仅允许 verification_method=provider_query；expectedOperationId 必填且必须匹配。
- * - path=admin：允许 provider_query / callback_evidence / manual_evidence；不强制 operation_id。
+ * - path=gateway：仅允许 verification_method=provider_query；tool_call owner 必须提供
+ * expectedOperationId 且匹配原 ToolCall.operationId（job_step 没有 operationId，不比对）。
+ * - path=admin：允许 provider_query / callback_evidence / manual_evidence。
  * - EffectRecord 当前状态不能为 confirmed_*（终态不可再 reconcile）；unknown_effect 可多次 reconcile。
- * - 同事务更新：effect_record + effect_target + tool_call.call_state（）。
+ * - 同事务更新：effect_record + effect_target + tool_call.call_state（仅 tool_call owner）。
  * - targetUpdates 中的 targetHash 必须匹配现有 EffectTarget；不存在的抛 EffectTargetNotFoundError。
  * - 派生新 effect_state：confirmed_success → call_state=succeeded；
  * confirmed_failure → call_state=failed；confirmed_partial → call_state=unknown_effect。
@@ -527,7 +786,7 @@ export async function reconcileEffect(
   sourceTx?: DbOrTx,
 ): Promise<ReconcileEffectResult> {
   if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
-  if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
+  if (!input.effectRecordId) throw new EffectValidationError("effectRecordId 不能为空");
   if (input.path !== "gateway" && input.path !== "admin") {
     throw new EffectValidationError(`非法 path: ${input.path}`);
   }
@@ -541,15 +800,12 @@ export async function reconcileEffect(
   if (!allowedMethods.includes(input.verificationMethod)) {
     throw new EffectVerificationMethodNotAllowedError(input.verificationMethod, allowedMethods);
   }
-  if (input.path === "gateway" && !input.expectedOperationId) {
-    throw new EffectValidationError("gateway 路径必须提供 expectedOperationId");
-  }
 
-  // 查询现有 EffectRecord + ToolCall + Targets
-  const record = await getEffectRecordByToolCall(input.tenantId, input.toolCallId, sourceTx);
+  // 查询现有 EffectRecord（+ tool_call owner 的 ToolCall）
+  const record = await getEffectRecordById(input.tenantId, input.effectRecordId, sourceTx);
   if (!record) {
     throw new EffectNotFoundError(
-      `EffectRecord 不存在或跨租户不可见（toolCallId=${input.toolCallId}）`,
+      `EffectRecord 不存在或跨租户不可见（id=${input.effectRecordId}）`,
     );
   }
 
@@ -562,20 +818,28 @@ export async function reconcileEffect(
     throw new EffectAlreadyConfirmedError(record.id, record.effectState);
   }
 
-  const toolCall = await getToolCallById(
-    {
-      tenantId: input.tenantId,
-      toolCallId: input.toolCallId,
-    },
-    sourceTx,
-  );
-  if (!toolCall) {
-    throw new EffectNotFoundError(`ToolCall 不存在或跨租户不可见: ${input.toolCallId}`);
+  const toolCall =
+    record.ownerKind === "tool_call"
+      ? await getToolCallById({ tenantId: input.tenantId, toolCallId: record.ownerRef }, sourceTx)
+      : null;
+  if (record.ownerKind === "tool_call" && !toolCall) {
+    throw new EffectNotFoundError(`ToolCall 不存在或跨租户不可见: ${record.ownerRef}`);
   }
 
-  // Gateway 路径 operation_id 校验
-  if (input.path === "gateway" && input.expectedOperationId !== toolCall.operationId) {
-    throw new EffectOperationMismatchError(input.expectedOperationId ?? "", toolCall.operationId);
+  if (input.path === "gateway") {
+    if (record.ownerKind === "tool_call") {
+      if (!input.expectedOperationId) {
+        throw new EffectValidationError(
+          "gateway 路径的 tool_call Effect 必须提供 expectedOperationId",
+        );
+      }
+      if (input.expectedOperationId !== toolCall?.operationId) {
+        throw new EffectOperationMismatchError(
+          input.expectedOperationId,
+          toolCall?.operationId ?? "",
+        );
+      }
+    }
   }
 
   const existingTargets = await listEffectTargets(input.tenantId, record.id, sourceTx);
@@ -661,14 +925,12 @@ export async function reconcileEffect(
         and(eq(effectRecordTable.tenantId, input.tenantId), eq(effectRecordTable.id, record.id)),
       );
 
-    // 4. 同步更新 ToolCall.call_state（）
+    // 4. 同步更新 ToolCall.call_state（仅 tool_call owner 有 ToolCall）
     // - confirmed_success → succeeded
     // - confirmed_partial → unknown_effect
     // - confirmed_failure → failed
-    // - unknown_effect 保持原状（仍为 unknown_effect 或其他）
-    // - not_started 不应该出现在 reconcile（ EffectRecord 创建时若已有副作用应直接进入 unknown_effect；
-    // 但若所有 target 都是 unknown，新派生状态也是 unknown_effect）
-    let newCallState: typeof toolCall.callState | null = null;
+    // - unknown_effect 保持原状
+    let newCallState: ToolCall["callState"] | null = null;
     if (newEffectState === "confirmed_success") {
       newCallState = "succeeded";
     } else if (newEffectState === "confirmed_failure") {
@@ -676,13 +938,8 @@ export async function reconcileEffect(
     } else if (newEffectState === "confirmed_partial") {
       newCallState = "unknown_effect";
     }
-    // unknown_effect 保持原状；其他情况不迁移
 
-    if (newCallState) {
-      // 直接 DB 更新（不调用 updateToolCallState，因为 reconcile 是状态机的合法路径但
-      // 该函数使用全局 db 而非 tx；此处需在事务内更新以保证原子性）。
-      // 状态机已校验：unknown_effect → succeeded/failed 是合法迁移
-      // （见 tool-call-queries.ts TOOL_CALL_STATE_TRANSITIONS）。
+    if (toolCall && newCallState) {
       const toolCallSetFields: Record<string, unknown> = {
         callState: newCallState,
         updatedAt: now,
@@ -699,9 +956,7 @@ export async function reconcileEffect(
       await tx
         .update(toolCallTable)
         .set(toolCallSetFields)
-        .where(
-          and(eq(toolCallTable.tenantId, input.tenantId), eq(toolCallTable.id, input.toolCallId)),
-        );
+        .where(and(eq(toolCallTable.tenantId, input.tenantId), eq(toolCallTable.id, toolCall.id)));
     }
 
     // 5. 回查最新状态
@@ -714,13 +969,17 @@ export async function reconcileEffect(
       throw new EffectNotFoundError("EffectRecord reconcile 后回查失败");
     }
 
-    const [updatedToolCall] = await tx
-      .select()
-      .from(toolCallTable)
-      .where(eq(toolCallTable.id, input.toolCallId))
-      .limit(1);
-    if (!updatedToolCall) {
-      throw new EffectNotFoundError("ToolCall reconcile 后回查失败");
+    let updatedToolCall: ToolCall | null = null;
+    if (toolCall) {
+      const [row] = await tx
+        .select()
+        .from(toolCallTable)
+        .where(eq(toolCallTable.id, toolCall.id))
+        .limit(1);
+      if (!row) {
+        throw new EffectNotFoundError("ToolCall reconcile 后回查失败");
+      }
+      updatedToolCall = row;
     }
 
     // 计算目标计数
@@ -782,7 +1041,11 @@ export async function markToolCallUnknownEffect(input: {
   if (!record) {
     record = await createEffectRecord({
       tenantId: input.tenantId,
-      toolCallId: input.toolCallId,
+      ownerKind: "tool_call",
+      ownerRef: input.toolCallId,
+      invocationId: toolCall.invocationId,
+      operationKey: toolCallOperationKey(input.toolCallId),
+      requestDigest: toolCall.argumentsHash,
       effectType: input.effectType,
       targetSummaryJson: input.targetSummaryJson,
       externalIdempotencyKey: input.externalIdempotencyKey ?? null,

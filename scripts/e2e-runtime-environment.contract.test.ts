@@ -1,5 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  WORKLOAD_SIGNING_KEY_ID_ENV,
+  WORKLOAD_TOKEN_SIGNING_SECRET_ENV,
+  decodeWorkloadToken,
+  issueWorkloadToken,
+} from "@/lib/identity/workload-token";
+import { loadRuntimeSettings } from "@/lib/runtime/runtime-settings";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -92,6 +99,129 @@ describe("E2E 运行环境契约：.env.test 必须显式声明 RUNTIME_DEFAULT=
 
     it("RUNTIME_DEFAULT 空值必须失败", () => {
       expect(() => assertRuntimeDefaultHost("RUNTIME_DEFAULT=\n", "空值")).toThrow();
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 第二份契约：.env.test 必须让生产 Runtime 设置加载成功，并具备 Workload
+// Token 签发能力。
+//
+// 背景（真实回归，2026-09-18 完整验收在 e2e-web 阶段暴露）：
+// - 2026-09-16 的执行域改动把 Workload Token header 的 keyId 变成签发/验签的
+//   硬性要求：RuntimeSettings.workloadSigningKeyId 无 Schema 默认值（§7.3
+//   fail-closed），lib/identity/workload-token.ts 的 signingKeyId() 缺失即抛错；
+// - 但 .env.test 当时只补了签名密钥、没补 key id；
+// - 后果：e2e Web Server 起得来、页面打得开，只在用户**第一次提交消息**时抛
+//   WorkloadTokenError（错误藏在服务端日志），前端表现为提交后不跳转
+//   /chat/<threadId>，e2e 正式执行链用例只能等到 60s 超时——排查成本极高。
+//
+// 断言强度（不写死键名清单，直接问生产代码）：
+// - 用与 scripts/e2e-start.mts 同构的方式解析仓库根 .env.test；
+// - assert 该 env 能通过 loadRuntimeSettings（任何未来新增的必填设置都会自动纳入）；
+// - assert 该 env 能真实签发并验签一枚 Workload Token（Turn 接纳路径的真实依赖）；
+// - 负向控制：删掉 WORKLOAD_SIGNING_KEY_ID 后，上述两条必须双双失败，
+//   证明这三条断言真的能拦住本次回归，而不是恒真。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** KEY -> 最后取值（与 scripts/e2e-start.mts 的 loadEnvFile 折叠结果一致）。 */
+function toEnvRecord(vars: Vars): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const [key, list] of vars) {
+    const value = list[list.length - 1];
+    if (value !== undefined) record[key] = value;
+  }
+  return record;
+}
+
+/** 断言某份 .env 源码恰好声明一次给定键，且取值非空。 */
+function assertDeclaredOnce(source: string, key: string, context: string): string {
+  const entries = parseEnvVars(source).get(key) ?? [];
+  expect(
+    entries.length,
+    `[${context}] 必须恰好声明一次有效 ${key}（当前 ${entries.length} 次；缺失与重复定义都违反契约）`,
+  ).toBe(1);
+  const value = entries[0] ?? "";
+  expect(value.length, `[${context}] ${key} 不得为空值`).toBeGreaterThan(0);
+  return value;
+}
+
+/**
+ * 在给定 env 下签发并验签一枚 Workload Token。
+ * 只临时覆盖 workload 相关的两个键（生产签发函数直接读 process.env），随后恢复。
+ */
+function issueAndDecodeUnderEnv(env: Readonly<Record<string, string>>): string {
+  const keys = [WORKLOAD_SIGNING_KEY_ID_ENV, WORKLOAD_TOKEN_SIGNING_SECRET_ENV] as const;
+  const saved = keys.map((key) => [key, process.env[key]] as const);
+  try {
+    for (const key of keys) {
+      const value = env[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    const now = Date.now();
+    const token = issueWorkloadToken({
+      contractVersion: 3,
+      type: "execution",
+      tenantId: "00000000-0000-4000-8000-000000000000",
+      invocationId: "00000000-0000-4000-8000-000000000001",
+      runtimeRevisionId: "e2e-env-contract-probe",
+      attemptId: "00000000-0000-4000-8000-000000000002",
+      ownershipId: "00000000-0000-4000-8000-000000000003",
+      leaseEpoch: "1",
+      sessionBindingId: "00000000-0000-4000-8000-000000000004",
+      audience: "runtime",
+      expiresAt: now + 60_000,
+    });
+    return decodeWorkloadToken(token).jti;
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+describe("E2E 运行环境契约：.env.test 必须满足生产 Runtime 设置与 Workload Token 签发", () => {
+  const envTest = readFileSync(ENV_TEST_PATH, "utf8");
+  // 与 e2e-start.mts 的 childEnv 同构：.env.test 基线 + APP_ENV=test。
+  const env: Record<string, string> = {
+    ...toEnvRecord(parseEnvVars(envTest)),
+    APP_ENV: "test",
+  };
+
+  it("恰好声明一次非空 WORKLOAD_SIGNING_KEY_ID（RuntimeSettings 无默认值的必填项）", () => {
+    assertDeclaredOnce(envTest, WORKLOAD_SIGNING_KEY_ID_ENV, ".env.test");
+  });
+
+  it("恰好声明一次非空 SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET（至少 32 字节）", () => {
+    const secret = assertDeclaredOnce(envTest, WORKLOAD_TOKEN_SIGNING_SECRET_ENV, ".env.test");
+    expect(
+      Buffer.byteLength(secret, "utf8"),
+      `[.env.test] ${WORKLOAD_TOKEN_SIGNING_SECRET_ENV} 必须 ≥ 32 字节，否则签发时抛「签名密钥长度不足」`,
+    ).toBeGreaterThanOrEqual(32);
+  });
+
+  it("该 env 必须能加载生产 RuntimeSettings，且 key id 与 .env.test 声明一致", () => {
+    const settings = loadRuntimeSettings(env);
+    expect(settings.workloadSigningKeyId).toBe(env[WORKLOAD_SIGNING_KEY_ID_ENV]);
+  });
+
+  it("该 env 必须能真实签发并验签 Workload Token（Turn 接纳路径的真实依赖）", () => {
+    expect(issueAndDecodeUnderEnv(env)).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+  });
+
+  describe("负向控制：抹掉 WORKLOAD_SIGNING_KEY_ID 后必须失败（证明断言真能拦住本次回归）", () => {
+    const { [WORKLOAD_SIGNING_KEY_ID_ENV]: _removed, ...withoutKeyId } = env;
+
+    it("loadRuntimeSettings 必须拒绝缺失 key id 的 env", () => {
+      expect(() => loadRuntimeSettings(withoutKeyId)).toThrow();
+    });
+
+    it("签发 Workload Token 必须拒绝缺失 key id 的 env", () => {
+      expect(() => issueAndDecodeUnderEnv(withoutKeyId)).toThrow();
     });
   });
 });

@@ -30,6 +30,7 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ALL_SUCCESS_COMPLETION_POLICY } from "@/lib/job/completion-policy";
 import {
   JobAlreadyTerminalError,
   JobCommandAlreadyTerminalError,
@@ -112,8 +113,6 @@ async function createQueuedJob(
     triggerRef?: string;
     threadId?: string;
     replacesJobId?: string;
-    inputRef?: string;
-    inputHash?: string;
     createdBy?: string;
     idempotencyKey?: string;
   },
@@ -123,11 +122,10 @@ async function createQueuedJob(
     agentId,
     jobType: options?.jobType ?? "evaluation",
     triggerRef: options?.triggerRef ?? "schedule-001",
-    completionPolicyJson: { type: "all_success" },
+    completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
     threadId: options?.threadId,
     replacesJobId: options?.replacesJobId,
-    inputRef: options?.inputRef ?? "input://batch/001",
-    inputHash: options?.inputHash ?? "sha256:abc",
+    inputJson: { task: "batch-001" },
     createdBy: options?.createdBy,
     idempotencyKey: options?.idempotencyKey,
   });
@@ -163,11 +161,12 @@ describe("createJob 成功路径", () => {
     expect(result.job.jobType).toBe("evaluation");
     expect(result.job.triggerRef).toBe("schedule-001");
     expect(result.job.jobState).toBe("queued");
-    expect(result.job.completionPolicyJson).toMatchObject({ type: "all_success" });
+    expect(result.job.completionPolicyJson).toMatchObject(ALL_SUCCESS_COMPLETION_POLICY);
     expect(result.job.replacesJobId).toBeNull();
     expect(result.job.threadId).toBeNull();
-    expect(result.job.inputRef).toBe("input://batch/001");
-    expect(result.job.inputHash).toBe("sha256:abc");
+    expect(result.job.inputRef).toBeNull();
+    // A10：inputHash 由实际输入经 RFC 8785 规范化摘要推导，不再由调用方自报。
+    expect(result.job.inputHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(result.job.lastEventSequence).toBe(1);
     expect(result.job.resultRef).toBeNull();
     expect(result.job.resultHash).toBeNull();
@@ -190,9 +189,9 @@ describe("createJob 成功路径", () => {
       trigger_ref: "schedule-001",
       thread_id: null,
       replaces_job_id: null,
-      completion_policy: { type: "all_success" },
-      input_ref: "input://batch/001",
-      input_hash: "sha256:abc",
+      completion_policy: ALL_SUCCESS_COMPLETION_POLICY,
+      input_ref: null,
+      input_hash: result.job.inputHash,
       created_by: null,
     });
     expect(result.queuedEvent.idempotencyKey).toBe("create-001:job-queued");
@@ -215,11 +214,10 @@ describe("createJob 成功路径", () => {
       agentId: fx.agentId,
       jobType: "evaluation",
       triggerRef: "schedule-001",
-      completionPolicyJson: { type: "all_success" },
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       threadId: "thread-001",
       replacesJobId: failed.id,
-      inputRef: "input://batch/001",
-      inputHash: "sha256:abc",
+      inputJson: { task: "batch-001" },
       createdBy: fx.ownerId,
       idempotencyKey: "replace-001",
     });
@@ -246,12 +244,12 @@ describe("createJob 参数校验", () => {
         agentId: fx.agentId,
         jobType: "evaluation",
         triggerRef: "schedule-001",
-        completionPolicyJson: { type: "all_success" },
+        completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       }),
     ).rejects.toThrow(/tenantId 不能为空/);
   });
 
-  it("agentId 为空抛错", async () => {
+  it("agentId 为空字符串抛错（null 才是合法的无 Agent）", async () => {
     const fx = await seedFixture();
     await expect(
       createJob({
@@ -259,9 +257,27 @@ describe("createJob 参数校验", () => {
         agentId: "",
         jobType: "evaluation",
         triggerRef: "schedule-001",
-        completionPolicyJson: { type: "all_success" },
+        completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       }),
-    ).rejects.toThrow(/agentId 不能为空/);
+    ).rejects.toThrow(/agentId 只能为 null 或非空字符串/);
+  });
+
+  it("T31：agentId=null 的可信 service Job 可以创建，不伪造 Agent", async () => {
+    const fx = await seedFixture();
+    const { job } = await createJob({
+      tenantId: fx.tenantId,
+      agentId: null,
+      jobType: "knowledge_build",
+      triggerRef: "schedule:knowledge-build",
+      completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
+      inputJson: { source: "managed" },
+      createdBy: "knowledge-service",
+    });
+    expect(job.agentId).toBeNull();
+    expect(job.jobState).toBe("queued");
+    expect(job.inputHash).toMatch(/^sha256:/);
+    const reloaded = await getJobById(fx.tenantId, job.id);
+    expect(reloaded?.agentId).toBeNull();
   });
 
   it("triggerRef 为空抛错", async () => {
@@ -272,7 +288,7 @@ describe("createJob 参数校验", () => {
         agentId: fx.agentId,
         jobType: "evaluation",
         triggerRef: "",
-        completionPolicyJson: { type: "all_success" },
+        completionPolicyJson: ALL_SUCCESS_COMPLETION_POLICY,
       }),
     ).rejects.toThrow(/triggerRef 不能为空/);
   });
@@ -720,9 +736,8 @@ describe("createCancelCommand", () => {
     expect(result.command.commandType).toBe("cancel");
     expect(result.command.commandState).toBe("queued");
     expect(result.command.idempotencyKey).toBe("cancel-001");
-    expect(result.command.requestedBy).toBe(fx.ownerId);
-    expect(result.command.reasonCode).toBe("user_request");
-    expect(result.command.replacementJobId).toBeNull();
+    expect(result.command.requestedById).toBe(fx.ownerId);
+    expect(result.command.payloadJson).toMatchObject({ reasonCode: "user_request" });
     expect(result.replayed).toBe(false);
 
     // cancel_requested Event
@@ -804,9 +819,8 @@ describe("createRetryCommand", () => {
     expect(result.command.commandType).toBe("retry");
     expect(result.command.commandState).toBe("queued");
     expect(result.command.idempotencyKey).toBe("retry-001");
-    expect(result.command.reasonCode).toBe("transient_error");
-    expect(result.command.replacementJobId).toBeNull(); // S09-C05 在 acknowledge 时回填
-    expect(result.command.commandPayloadJson).toMatchObject({
+    expect(result.command.payloadJson).toMatchObject({ reasonCode: "transient_error" });
+    expect(result.command.payloadJson).toMatchObject({
       reuse_input: true,
       override: null,
       reason_code: "transient_error",
@@ -883,8 +897,8 @@ describe("acknowledgeCommand / rejectCommand", () => {
     });
 
     expect(acked.commandState).toBe("acknowledged");
-    expect(acked.acknowledgedAt).toBeInstanceOf(Date);
-    expect(acked.replacementJobId).toBeNull(); // cancel 无 replacement
+    expect(acked.completedAt).toBeInstanceOf(Date);
+    expect(acked.resultJson).toBeNull(); // cancel 无 replacement
   });
 
   it("acknowledgeCommand：retry 命令 → acknowledged + replacementJobId 回填", async () => {
@@ -908,7 +922,7 @@ describe("acknowledgeCommand / rejectCommand", () => {
     });
 
     expect(acked.commandState).toBe("acknowledged");
-    expect(acked.replacementJobId).toBe(replacementJobId);
+    expect(acked.resultJson).toEqual({ replacementJobId });
   });
 
   it("acknowledgeCommand：终态命令抛 JobCommandAlreadyTerminalError", async () => {
@@ -962,9 +976,9 @@ describe("acknowledgeCommand / rejectCommand", () => {
     });
 
     expect(rejected.commandState).toBe("rejected");
-    expect(rejected.errorCode).toBe("JOB_ALREADY_TERMINAL");
-    expect(rejected.errorSummary).toBe("Job 在 race condition 下已终态");
-    expect(rejected.acknowledgedAt).toBeInstanceOf(Date);
+    expect(rejected.lastErrorCode).toBe("JOB_ALREADY_TERMINAL");
+    expect(rejected.resultJson).toEqual({ errorSummary: "Job 在 race condition 下已终态" });
+    expect(rejected.completedAt).toBeInstanceOf(Date);
   });
 
   it("rejectCommand：终态命令抛 JobCommandAlreadyTerminalError", async () => {

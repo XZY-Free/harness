@@ -31,7 +31,10 @@ import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/m
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
-import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -275,10 +278,12 @@ async function seedRuntimeAuthority(): Promise<RuntimeAuthorityFixture> {
   });
   await db.insert(runtimeRevisionTable).values({
     id: runtimeRevisionId,
+    tenantId,
     runtimeId,
     revisionNo: 1,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@1",
+    protocolVersion: 3,
+    protocolContractDigest: "agent-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     runtimeTargetDigest: runtimeArtifactDigest,
     endpointRef: `connection://${runtimeId}`,
@@ -314,8 +319,9 @@ async function seedRuntimeAuthority(): Promise<RuntimeAuthorityFixture> {
     runtimeRevisionId,
     runtimeTargetDigest: runtimeArtifactDigest,
     runtimeConfigDigest: runtimeConfigDigest,
-    protocolContractRevision: "agent-runtime-protocol@1",
-    suiteRevision: "runtime-conformance@1",
+    protocolVersion: 3,
+    protocolContractDigest: "agent-runtime-protocol@1",
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"f".repeat(64)}`,
     runnerIdentity: "resolver-test-runner",
     testEnvironmentRevision: "mysql8-test@1",
@@ -339,6 +345,7 @@ async function seedRuntimeAuthority(): Promise<RuntimeAuthorityFixture> {
   await db.insert(runtimeConformanceCaseResult).values(
     PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
       id: randomUUID(),
+      tenantId,
       runId: conformanceRunId,
       caseId,
       passed: true,
@@ -431,10 +438,12 @@ async function addRuntimeRoute(
   });
   await db.insert(runtimeRevisionTable).values({
     id: runtimeRevisionId,
+    tenantId: base.tenantId,
     runtimeId,
     revisionNo: 1,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@1",
+    protocolVersion: 3,
+    protocolContractDigest: "agent-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     runtimeTargetDigest: artifactDigest,
     endpointRef: `connection://${runtimeId}`,
@@ -470,8 +479,9 @@ async function addRuntimeRoute(
     runtimeRevisionId,
     runtimeTargetDigest: artifactDigest,
     runtimeConfigDigest: options.conformanceConfigDigest ?? configDigest,
-    protocolContractRevision: "agent-runtime-protocol@1",
-    suiteRevision: "runtime-conformance@1",
+    protocolVersion: 3,
+    protocolContractDigest: "agent-runtime-protocol@1",
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"f".repeat(64)}`,
     runnerIdentity: "resolver-test-runner",
     testEnvironmentRevision: "mysql8-test@1",
@@ -495,6 +505,7 @@ async function addRuntimeRoute(
   await db.insert(runtimeConformanceCaseResult).values(
     PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
       id: randomUUID(),
+      tenantId: base.tenantId,
       runId: conformanceRunId,
       caseId,
       passed: true,

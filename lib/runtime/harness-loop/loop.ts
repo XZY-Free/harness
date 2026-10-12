@@ -1,4 +1,5 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
+import type { AuthorityIdentity } from "@/lib/runtime/runtime-protocol";
 import { ZodError } from "zod";
 import { parseHarnessNextAction } from "./action-schema";
 import {
@@ -82,11 +83,14 @@ export type HarnessActionExecutionResult =
 export interface HarnessActionExecutionContext {
   invocationId: string;
   tenantId: string;
-  threadId: string;
-  turnId: string;
+  /** Thread 主体才有；Job 主体为 null（需要 Thread 的能力应显式返回不支持）。 */
+  threadId: string | null;
+  turnId: string | null;
   actionDigest: string;
   /** 当前 Turn 的原始用户目标；恢复 Agent 时不接受模型自由编造的文本。 */
   objective?: string;
+  /** Runtime generation that is authorized to create this parent Invocation action. */
+  authority?: AuthorityIdentity;
   /** 上游运行时的真实绝对截止；行动内的短等待必须继续取更早值。 */
   deadlineAt?: Date;
   abortSignal?: AbortSignal;
@@ -122,8 +126,18 @@ export interface HarnessLoopRecoveryPort {
 export interface HarnessLoopParams {
   invocationId: string;
   tenantId: string;
-  threadId: string;
-  turnId: string;
+  authority?: AuthorityIdentity;
+  /**
+   * R06 §1：执行主体是**判别联合**。
+   *
+   * Thread 分支提供 threadId + turnId；Job 分支提供 jobId（threadId/turnId 为 null）。
+   * 二者必须恰好满足其一 —— 既不允许多个主体并存，也不允许"都不给"。
+   * 这不只是类型约束：`runHostedInvocation` 不能再把"没有 Thread"静默变成
+   * 永不执行的 pending。
+   */
+  threadId: string | null;
+  turnId: string | null;
+  jobId?: string | null;
   objective: string;
   contextHandle?: string;
   authorizedKnowledgeSourceRefs?: string[];
@@ -178,14 +192,52 @@ const EMPTY_RECOVERY: HarnessLoopRecoverySnapshot = {
   actionHistory: [],
 };
 
+/**
+ * R06 §1：解析并校验 Loop 的执行主体。
+ *
+ * 这里必须 fail-closed：把"缺少 Thread"当成一种正常状态，正是旧实现让无 Thread 的
+ * Job 被静默判定为 pending（既不执行也不失败）的根因。
+ */
+export function resolveHarnessExecutionSubject(input: {
+  threadId: string | null;
+  turnId: string | null;
+  jobId?: string | null;
+}): { kind: "thread"; threadId: string; turnId: string } | { kind: "job"; jobId: string } {
+  const threadId = input.threadId ?? null;
+  const turnId = input.turnId ?? null;
+  const jobId = input.jobId ?? null;
+  if (threadId || turnId) {
+    if (jobId) {
+      throw new HarnessLoopError("HARNESS_SUBJECT_AMBIGUOUS", "Thread 主体与 Job 主体不能同时存在");
+    }
+    if (!threadId || !turnId) {
+      throw new HarnessLoopError(
+        "HARNESS_SUBJECT_INCOMPLETE",
+        "Thread 主体必须同时提供 threadId 与 turnId",
+      );
+    }
+    return { kind: "thread", threadId, turnId };
+  }
+  if (!jobId) {
+    throw new HarnessLoopError(
+      "HARNESS_SUBJECT_MISSING",
+      "必须提供 Thread（threadId+turnId）或 Job（jobId）主体",
+    );
+  }
+  return { kind: "job", jobId };
+}
+
 export class HarnessLoop {
   private readonly params: HarnessLoopParams;
   private readonly limits: HarnessLoopLimits;
+  /** R06 §1：构造时即固定的执行主体，运行期不再回退到"字段缺失"的歧义状态。 */
+  private readonly subject: ReturnType<typeof resolveHarnessExecutionSubject>;
   private observations: HarnessObservation[] = [];
   private actionHistory: HarnessActionHistoryEntry[] = [];
 
   constructor(params: HarnessLoopParams) {
     this.params = params;
+    this.subject = resolveHarnessExecutionSubject(params);
     this.limits = { ...DEFAULT_HARNESS_LOOP_LIMITS };
     for (const [key, value] of Object.entries(params.limits ?? {})) {
       if (typeof value === "number") {
@@ -250,7 +302,8 @@ export class HarnessLoop {
         // 过程透明合同 v2.3：决策开始发射思考进度（落 user_guidance item，历史可重建）。
         // 进度只是展示事实，恢复端不得将其当作用户输入；只有真实持久上下文变化
         // 才应使下面的决策结果失效，单纯调整写入顺序无法建立这一边界。
-        await this.params.eventWriter.write("progress.snapshot", {
+        await this.params.eventWriter.write("progress", {
+          kind: "progress.snapshot",
           message: "正在思考下一步…",
         });
         const beforeDecision = this.durableContextFingerprint();
@@ -277,7 +330,8 @@ export class HarnessLoop {
         }
         this.validateAction(action, nextStepNo);
         // 过程透明合同 v2.3：思考完成，think 携带公开决策摘要（思考行展开的最小单元）
-        await this.params.eventWriter.write("progress.snapshot", {
+        await this.params.eventWriter.write("progress", {
+          kind: "progress.snapshot",
           message: "思考完成",
           think: `决定：${action.shortPurpose || action.actionType}`,
         });
@@ -408,10 +462,11 @@ export class HarnessLoop {
     const execution = await executor(action as never, {
       invocationId: this.params.invocationId,
       tenantId: this.params.tenantId,
-      threadId: this.params.threadId,
-      turnId: this.params.turnId,
+      threadId: this.subject.kind === "thread" ? this.subject.threadId : null,
+      turnId: this.subject.kind === "thread" ? this.subject.turnId : null,
       actionDigest: historyEntry.actionDigest,
       objective: this.params.objective,
+      authority: this.params.authority,
       deadlineAt: this.params.actionDeadlineAt,
       abortSignal: this.params.abortSignal,
     });
@@ -427,7 +482,10 @@ export class HarnessLoop {
       };
     }
     if (execution.waitingForUser) {
-      await this.params.eventWriter.write("user_action.requested", {
+      // R02 §7：只使用 RuntimeProtocol 正式 Event 类型（`user-action`）。旧实现写
+      // `user_action.requested` 是 **ThreadEvent** 的名字，不是协议事件类型——经生产
+      // Ingress 时会被 `RuntimeEventSchema` 直接拒绝（request_user_input 路径整体不可用）。
+      await this.params.eventWriter.write("user-action", {
         request_type: execution.waitingForUser.requestType,
         purpose: execution.waitingForUser.purpose,
         prompt: execution.waitingForUser.prompt,
@@ -525,7 +583,8 @@ export class HarnessLoop {
       await this.writeActionEvent("harness.action.started", historyEntry);
     }
     // 过程透明合同 v2.3：正文生成前发射组织回答进度
-    await this.params.eventWriter.write("progress.snapshot", {
+    await this.params.eventWriter.write("progress", {
+      kind: "progress.snapshot",
       message: "正在组织回答…",
     });
     const agentFailure = this.terminalPreferredAgentFailure();
@@ -753,13 +812,21 @@ export class HarnessLoop {
     };
     const terminalPreferredAgentFailure = this.terminalPreferredAgentFailure();
     return {
-      invocation: {
-        invocationId: this.params.invocationId,
-        tenantId: this.params.tenantId,
-        threadId: this.params.threadId,
-        turnId: this.params.turnId,
-        executionState: "running",
-      },
+      invocation:
+        this.subject.kind === "thread"
+          ? {
+              invocationId: this.params.invocationId,
+              tenantId: this.params.tenantId,
+              threadId: this.subject.threadId,
+              turnId: this.subject.turnId,
+              executionState: "running" as const,
+            }
+          : {
+              invocationId: this.params.invocationId,
+              tenantId: this.params.tenantId,
+              jobId: this.subject.jobId,
+              executionState: "running" as const,
+            },
       objective: this.params.objective,
       context: {
         contextHandle: this.params.contextHandle,

@@ -12,8 +12,8 @@
  * 5. nonce 重放保护（S12-W05）：签名 payload 含 nonce，TTL 内不可重复使用。
  *
  * 涉及的 API 入口（需 Desktop 签名）：
- * - POST /api/v1/threads/{thread_id}/turns（创建 Turn）
- * - POST /api/v1/threads/{thread_id}/workspace-attachments（附加本地资源）
+ * - POST /api/threads/{thread_id}/turns（创建 Turn）
+ * - POST /api/threads/{thread_id}/workspace-attachments（附加本地资源）
  *
  * 事实源：docs/architecture/api-and-events.md 、
  * docs/architecture/persistence.md 、

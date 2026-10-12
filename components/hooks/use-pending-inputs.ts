@@ -6,11 +6,11 @@
  *   S10-W03：「PendingInput 可编辑、删除和排序，尚未正式发送的内容不出现在消息历史」
  *
  * 职责：
- * - 加载 Thread 的 PendingInput 队列（GET /api/v1/threads/{id}/pending-inputs）。
+ * - 加载 Thread 的 PendingInput 队列（GET /api/threads/{id}/pending-inputs）。
  * - 创建 PendingInput（POST，运行中发送消息走此路径）。
- * - 编辑 PendingInput 内容（PATCH /api/v1/pending-inputs/{id}，If-Match 资源 ETag）。
+ * - 编辑 PendingInput 内容（PATCH /api/pending-inputs/{id}，If-Match 资源 ETag）。
  * - 删除 PendingInput（DELETE，If-Match 资源 ETag）。
- * - 重排队列（POST /api/v1/threads/{id}/pending-inputs/reorder，If-Match 队列 ETag）。
+ * - 重排队列（POST /api/threads/{id}/pending-inputs/reorder，If-Match 队列 ETag）。
  * - 维护队列 ETag 与资源 ETag，保证乐观锁正确。
  * - SSE 事件到达时（pending_input.created/updated/removed/reordered）调用 refresh()。
  *
@@ -124,7 +124,7 @@ export function usePendingInputs(threadId: string): UsePendingInputsResult {
     setLoading(true);
     setError(null);
     try {
-      const resp = await apiFetch(`/api/v1/threads/${threadId}/pending-inputs`, {
+      const resp = await apiFetch(`/api/threads/${threadId}/pending-inputs`, {
         credentials: "include",
         cache: "no-store",
       });
@@ -166,7 +166,7 @@ export function usePendingInputs(threadId: string): UsePendingInputsResult {
       setError(null);
       try {
         const idempotencyKey = generateIdempotencyKey();
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/pending-inputs`, {
+        const resp = await apiFetch(`/api/threads/${threadId}/pending-inputs`, {
           method: "POST",
           credentials: "include",
           headers: {
@@ -223,7 +223,7 @@ export function usePendingInputs(threadId: string): UsePendingInputsResult {
       setBusy(true);
       setError(null);
       try {
-        const resp = await apiFetch(`/api/v1/pending-inputs/${pendingInputId}`, {
+        const resp = await apiFetch(`/api/pending-inputs/${pendingInputId}`, {
           method: "PATCH",
           credentials: "include",
           headers: {
@@ -276,7 +276,7 @@ export function usePendingInputs(threadId: string): UsePendingInputsResult {
     setBusy(true);
     setError(null);
     try {
-      const resp = await apiFetch(`/api/v1/pending-inputs/${pendingInputId}`, {
+      const resp = await apiFetch(`/api/pending-inputs/${pendingInputId}`, {
         method: "DELETE",
         credentials: "include",
         headers: {
@@ -324,7 +324,7 @@ export function usePendingInputs(threadId: string): UsePendingInputsResult {
       setBusy(true);
       setError(null);
       try {
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/pending-inputs/reorder`, {
+        const resp = await apiFetch(`/api/threads/${threadId}/pending-inputs/reorder`, {
           method: "POST",
           credentials: "include",
           headers: {

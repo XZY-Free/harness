@@ -19,6 +19,7 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
 import { POLICY_SET_KEY, loadFrozenPolicyRevision } from "@/lib/permission/policy-queries";
+import type { ToolPermissionMode } from "@/lib/permission/tool-permission-mode";
 import {
   agentContractCapabilityTable,
   agentContractInvocationContextTable,
@@ -36,10 +37,10 @@ import {
   buildCapabilityCatalogSnapshot,
 } from "./capability-catalog";
 
-export async function buildProductionCapabilityCatalog(input: {
+/** 能力目录解析的公共输入（Thread 与 Job 共用同一套事实读取）。 */
+interface CapabilityCatalogInput {
   tenantId: string;
   invocationId: string;
-  threadId: string;
   workspaceBindingId?: string | null;
   workspaceUnavailable?: boolean;
   preferredAgentId: string | null;
@@ -50,7 +51,58 @@ export async function buildProductionCapabilityCatalog(input: {
   resolveRoute: RouteResolver;
   routeScopeKey?: string;
   now?: Date;
-}): Promise<BuiltCapabilityCatalog> {
+}
+
+/**
+ * 目录事实的**业务主体**范围。
+ *
+ * - Agent 解析按业务主体路由：Thread 用 `threadId`，无 Thread 的 Job 用 `jobId`。
+ * - 工具执行目标（仅 `builtin.shell`）需要 Thread 事实，因此显式携带 `toolThreadId`；
+ *   缺失时不猜测目标，而是按既有机制记 unavailable fact 排除该工具（不伪造执行环境）。
+ */
+interface CapabilityCatalogScope {
+  businessKey: { threadId?: string; jobId?: string };
+  toolThreadId: string | null;
+  toolPermissionMode?: ToolPermissionMode;
+}
+
+export async function buildProductionCapabilityCatalog(
+  input: CapabilityCatalogInput & { threadId: string },
+): Promise<BuiltCapabilityCatalog> {
+  const thread = await getThreadById(input.tenantId, input.threadId);
+  if (!thread) throw new Error("CAPABILITY_CATALOG_THREAD_MISSING");
+  return buildCapabilityCatalog(input, {
+    businessKey: { threadId: input.threadId },
+    toolThreadId: input.threadId,
+    toolPermissionMode: thread.toolPermissionMode,
+  });
+}
+
+/**
+ * Job 主体（R01 §5）：无 Thread 的 Job 也必须拿到真实冻结能力目录，
+ * 不能退化成空合同或纯文本回答。
+ *
+ * Job 关联了 Thread 时（结果需要进入员工会话）复用该 Thread 的工具执行目标事实；
+ * 完全不关联 Thread 时 `toolThreadId` 为 null，需要本地执行环境的工具会被显式记为
+ * unavailable 而不是被静默丢弃。
+ */
+export async function buildProductionCapabilityCatalogForJob(
+  input: CapabilityCatalogInput & { jobId: string; threadId?: string | null },
+): Promise<BuiltCapabilityCatalog> {
+  const toolThreadId = input.threadId ?? null;
+  const thread = toolThreadId ? await getThreadById(input.tenantId, toolThreadId) : null;
+  if (toolThreadId && !thread) throw new Error("CAPABILITY_CATALOG_THREAD_MISSING");
+  return buildCapabilityCatalog(input, {
+    businessKey: { jobId: input.jobId },
+    toolThreadId,
+    toolPermissionMode: thread?.toolPermissionMode,
+  });
+}
+
+async function buildCapabilityCatalog(
+  input: CapabilityCatalogInput,
+  scope: CapabilityCatalogScope,
+): Promise<BuiltCapabilityCatalog> {
   if (input.executionSubject.tenantId !== input.tenantId || !input.executionSubject.subjectId) {
     throw new Error("CAPABILITY_CATALOG_SUBJECT_TENANT_MISMATCH");
   }
@@ -61,8 +113,8 @@ export async function buildProductionCapabilityCatalog(input: {
     `runtime-revision:${input.runtimeRevisionId}`,
     `policy-revision:${input.policyRevisionId}`,
   ];
-  const agentCandidate = await loadPreferredAgent(input, sourceRefs, unavailableFacts);
-  const tools = await loadAuthorizedTools(input, sourceRefs, unavailableFacts);
+  const agentCandidate = await loadPreferredAgent(input, scope, sourceRefs, unavailableFacts);
+  const tools = await loadAuthorizedTools(input, scope, sourceRefs, unavailableFacts);
   const knowledgeSources = (
     await listDiscoverableKnowledgeBases({
       tenantId: input.tenantId,
@@ -78,10 +130,8 @@ export async function buildProductionCapabilityCatalog(input: {
       description: base.description ?? "",
     };
   });
-  const thread = await getThreadById(input.tenantId, input.threadId);
-  if (!thread) throw new Error("CAPABILITY_CATALOG_THREAD_MISSING");
   return buildCapabilityCatalogSnapshot({
-    toolPermissionMode: thread.toolPermissionMode,
+    toolPermissionMode: scope.toolPermissionMode,
     invocationId: input.invocationId,
     preferredAgentId: input.preferredAgentId,
     agentCandidate,
@@ -94,7 +144,8 @@ export async function buildProductionCapabilityCatalog(input: {
 }
 
 async function loadPreferredAgent(
-  input: Parameters<typeof buildProductionCapabilityCatalog>[0],
+  input: CapabilityCatalogInput,
+  scope: CapabilityCatalogScope,
   sourceRefs: string[],
   unavailableFacts: string[],
 ): Promise<CapabilityCatalogAgent | null> {
@@ -106,7 +157,7 @@ async function loadPreferredAgent(
       agentId: input.preferredAgentId,
       resolveRoute: input.resolveRoute,
       routeScopeKey: input.routeScopeKey ?? "default",
-      businessKey: { threadId: input.threadId },
+      businessKey: scope.businessKey,
     });
   } catch (error) {
     if (error instanceof AgentActionUnavailableError) {
@@ -180,7 +231,8 @@ async function loadPreferredAgent(
 }
 
 async function loadAuthorizedTools(
-  input: Parameters<typeof buildProductionCapabilityCatalog>[0],
+  input: CapabilityCatalogInput,
+  scope: CapabilityCatalogScope,
   sourceRefs: string[],
   unavailableFacts: string[],
 ): Promise<CapabilityCatalogTool[]> {
@@ -254,11 +306,11 @@ async function loadAuthorizedTools(
       }
       const executionTarget =
         executorKind === "builtin.shell"
-          ? input.workspaceUnavailable
+          ? input.workspaceUnavailable || scope.toolThreadId === null
             ? null
             : await resolveToolExecutionTarget({
                 tenantId: input.tenantId,
-                threadId: input.threadId,
+                threadId: scope.toolThreadId,
                 workspaceBindingId: input.workspaceBindingId ?? null,
                 ownerUserId: input.executionSubject.subjectId,
               })

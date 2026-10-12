@@ -45,6 +45,7 @@ import {
 import {
   type TestRunnerKey,
   buildDsseConformanceEnvelope,
+  buildTestConformanceCaseEvidence,
   buildTestConformanceReport,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
@@ -59,7 +60,7 @@ const TARGET_DIGEST = computeRuntimeTargetDigest({
   runtimeEvidenceKind: "hosted_artifact",
   runtimeArtifactDigest: DIGEST_A,
   runtimeConfigDigest: DIGEST_B,
-  protocolContractRevision: "harness-runtime-protocol@1",
+  protocolContractDigest: "harness-runtime-protocol@1",
 });
 
 const DIGEST_C = `sha256:${"c".repeat(64)}`;
@@ -112,7 +113,7 @@ async function seedRevision() {
     tenantId,
     runtimeId: runtime.id,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "connection://trusted-runner-test",
     runtimeArtifactRef: `oci://registry/runtime@${DIGEST_A}`,
@@ -135,8 +136,8 @@ function buildDsseEnvelope(
     // 真实结构化证据：可通过 evidenceVariant 注入区分字段（如 probe_ref），
     // 使不同 Run 的 evidence / evidenceDigest / evidenceManifestDigest 真实不同。
     const evidence = evidenceVariant
-      ? { caseId, passed: true, probe_ref: evidenceVariant }
-      : { caseId, passed: true };
+      ? buildTestConformanceCaseEvidence(caseId, { probe_ref: evidenceVariant })
+      : buildTestConformanceCaseEvidence(caseId);
     return {
       caseId,
       passed: true,
@@ -150,7 +151,7 @@ function buildDsseEnvelope(
     runtimeRevisionId: revisionId,
     runtimeTargetDigest: TARGET_DIGEST,
     runtimeConfigDigest: DIGEST_B,
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolContractDigest: "harness-runtime-protocol@1",
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: DIGEST_C,
     runnerIdentity: RUNNER_IDENTITY,
@@ -170,7 +171,7 @@ function buildDsseEnvelope(
       runtimeRevisionId: baseReport.runtimeRevisionId,
       runtimeTargetDigest: baseReport.runtimeTargetDigest,
       runtimeConfigDigest: baseReport.runtimeConfigDigest,
-      protocolContractRevision: baseReport.protocolContractRevision,
+      protocolContractDigest: baseReport.protocolContractDigest,
       runnerArtifactDigest: baseReport.runnerArtifactDigest,
       cases: baseReport.caseResults.map((result) => ({
         caseId: result.caseId,
@@ -495,7 +496,7 @@ type CallerTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /** 在调用方事务内联插入一个与 TARGET_DIGEST/DIGEST_B 事实一致的 draft RuntimeRevision。 */
 async function insertDraftRevisionInTx(
   tx: CallerTx,
-  params: { runtimeId: string; createdBy: string },
+  params: { tenantId: string; runtimeId: string; createdBy: string },
 ) {
   const id = randomUUID();
   const [maxRow] = await tx
@@ -505,10 +506,12 @@ async function insertDraftRevisionInTx(
   const revisionNo = (maxRow?.maxNo ?? 0) + 1;
   await tx.insert(runtimeRevisionTable).values({
     id,
+    tenantId: params.tenantId,
     runtimeId: params.runtimeId,
     revisionNo,
     protocolType: "harness_runtime_protocol",
-    protocolContractRevision: "harness-runtime-protocol@1",
+    protocolVersion: 3,
+    protocolContractDigest: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     runtimeTargetDigest: TARGET_DIGEST,
     endpointRef: "connection://caller-tx-runner",
@@ -550,6 +553,7 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
     let insertedRevisionId = "";
     await db.transaction(async (tx) => {
       const revisionId = await insertDraftRevisionInTx(tx, {
+        tenantId,
         runtimeId: runtime.id,
         createdBy: ownerId,
       });
@@ -595,6 +599,7 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
     await expect(
       db.transaction(async (tx) => {
         const revisionId = await insertDraftRevisionInTx(tx, {
+          tenantId,
           runtimeId: runtime.id,
           createdBy: ownerId,
         });
@@ -633,6 +638,7 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
     await expect(
       db.transaction(async (tx) => {
         const revisionId = await insertDraftRevisionInTx(tx, {
+          tenantId,
           runtimeId: runtime.id,
           createdBy: ownerId,
         });
@@ -670,6 +676,7 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
     await expect(
       db.transaction(async (tx) => {
         const revisionId = await insertDraftRevisionInTx(tx, {
+          tenantId,
           runtimeId: runtime.id,
           createdBy: ownerId,
         });
@@ -707,6 +714,7 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
     await expect(
       db.transaction(async (tx) => {
         const revisionId = await insertDraftRevisionInTx(tx, {
+          tenantId,
           runtimeId: runtime.id,
           createdBy: ownerId,
         });
@@ -739,7 +747,7 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
       tenantId,
       runtimeId: runtime.id,
       protocolType: "harness_runtime_protocol",
-      protocolContractRevision: "harness-runtime-protocol@1",
+      protocolContractDigest: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://revision-a",
       runtimeArtifactRef: `oci://registry/runtime@${DIGEST_A}`,
@@ -753,7 +761,7 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
       tenantId,
       runtimeId: runtime.id,
       protocolType: "harness_runtime_protocol",
-      protocolContractRevision: "harness-runtime-protocol@1",
+      protocolContractDigest: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://revision-b",
       runtimeArtifactRef: `oci://registry/runtime@${DIGEST_A}`,

@@ -31,7 +31,7 @@ function validConfig(
     credentialRefId: "cred-1",
     networkZone: "private",
     protocolType: "a2a",
-    protocolContractRevision: "a2a-0.3.0",
+    protocolContractDigest: "a2a-0.3.0",
     policyRevisionId: "policy-rev-1",
     policyRulesDigest: D("e"),
     governanceConfigRevisionId: "gov-rev-1",
@@ -96,7 +96,7 @@ describe("AgentCallBinding 不可变冻结", () => {
       AgentCallBindingEvidenceError,
     );
     expect(() =>
-      assertAgentCallBindingEvidence(validConfig({ protocolContractRevision: "" })),
+      assertAgentCallBindingEvidence(validConfig({ protocolContractDigest: "" })),
     ).toThrow(AgentCallBindingEvidenceError);
     expect(() => assertAgentCallBindingEvidence(validConfig({ endpointRef: "   " }))).toThrow(
       AgentCallBindingEvidenceError,

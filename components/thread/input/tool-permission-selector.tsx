@@ -48,7 +48,7 @@ export function ToolPermissionSelector({
     setLoadError(null);
     try {
       // 当前版本号可能已被执行事件推进；提交前读 Authority，PATCH 仍以 CAS 防竞态。
-      const response = await apiFetch(`/api/v1/threads/${threadId}`, { cache: "no-store" });
+      const response = await apiFetch(`/api/threads/${threadId}`, { cache: "no-store" });
       if (!response.ok) throw new Error("无法读取会话设置，请重试。");
       const current = (await response.json()) as ClientThreadResponse;
       if (

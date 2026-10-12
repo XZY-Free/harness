@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 /**
- * POST /admin/api/v1/agents/{agent_id}/revisions — AgentContractSnapshot 绑定先行冻结（预期 RED）。
+ * POST /admin/api/agents/{agentId}/revisions — AgentContractSnapshot 绑定先行冻结（预期 RED）。
  *
  * 冻结不变量（AgentContractSnapshot 权威切片）：
  * - 新 Revision 流只接受 wire key agent_contract_snapshot_id；agent_descriptor_snapshot_id
@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
  * DB 级覆盖使用真实 AgentContractSnapshot 行（seedAgentContractSnapshot），
  * 不 mock 预计算结论。
  */
-import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
+import { POST as createRevisionPOST } from "@/app/admin/api/agents/[agentId]/revisions/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { hrAgentContract } from "@/lib/agents/test-support/hr-agent-contract";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
@@ -86,7 +86,7 @@ function buildPost(agentId: string, body: unknown, idempotencyKey: string) {
       idempotencyKey,
       body,
     }),
-    { params: Promise.resolve({ agent_id: agentId }) },
+    { params: Promise.resolve({ agentId: agentId }) },
   );
 }
 
@@ -98,7 +98,7 @@ async function countRevisions(agentId: string): Promise<number> {
   return rows.length;
 }
 
-describe("POST /admin/api/v1/agents/{agent_id}/revisions（AgentContractSnapshot 绑定）", () => {
+describe("POST /admin/api/agents/{agentId}/revisions（AgentContractSnapshot 绑定）", () => {
   let tenantId: string;
   let userIdentityId: string;
   let agentId: string;

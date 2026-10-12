@@ -7,7 +7,7 @@
  * 不同 Transport 内部可以使用不同 wire protocol，但必须产出同一 SnowHarness
  * 归一化 Runtime Event（经 Transport Mapper → RuntimeEventIngress，04 §6）。
  *
- * 端口形状与 RuntimeHttpClient 五端点一致（probe/start/cancel/resume/steer）；
+ * 端口形状与 RuntimeHttpClient 一致（probe/start/cancel/resume/steer/safe-point）；
  * Transport 实现不得暴露 framework 分支或 callCapability 式旁路。
  *
  * A2A 不是 Runtime 协议：A2A 是外部 Agent 能力调用协议，属于 AgentCall Transport，

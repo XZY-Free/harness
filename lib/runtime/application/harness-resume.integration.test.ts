@@ -1,197 +1,467 @@
+/**
+ * Resume Harness Invocation（V12 resumeHarnessInvocation）行为测试。
+ *
+ * V12 变化：旧 createResumeHarnessInvocation 的可注入租约工厂已被
+ * ExecutionOwnership 执行权模型取代——活跃 Owner 即唯一执行权凭证，
+ * resume 复用当前 Owner/SessionBinding 的 Authority 启动 Hosted Loop。
+ * 本文件按当前 API 保留原有场景语义：
+ * - 单执行器：新鲜 Owner 存活时启动 Loop；Owner 释放后 resume 被拒绝；
+ * - 父 Invocation 终态 → handled_noop，不触碰执行权；
+ * - user_pause 来源恢复 waiting_user 快照；
+ * - Owner 续约失败 → 向 Loop 发出 fail-closed 中止信号。
+ */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
-import type { RuntimeRevisionRow } from "@/lib/persistence/schema/runtimes";
-import { buildCapabilityCatalogSnapshot } from "@/lib/runtime/harness-loop/capability-catalog";
-import { describe, expect, it, vi } from "vitest";
-import { createResumeHarnessInvocation } from "./resume-harness-invocation";
+import type {
+  ExecutionBinding,
+  ExecutionOwnership,
+  Invocation,
+  RuntimeSessionBinding,
+} from "@/lib/persistence/schema/executions";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-function fixture(runtimeEvidenceKind: "hosted_artifact" | "external_endpoint" = "hosted_artifact") {
-  const catalog = buildCapabilityCatalogSnapshot({
-    invocationId: "invocation-1",
-    preferredAgentId: null,
-    agentCandidate: null,
-    tools: [],
-    knowledgeSources: [],
-    sourceRefs: ["route:1"],
-    now: new Date("2026-01-01T00:00:00Z"),
-  });
+/**
+ * 未被打桩的 `setTimeout`（模块求值时捕获）。
+ *
+ * 用例会在假时钟下等待**真实**数据库事务完成，`vi.advanceTimersByTimeAsync` 只推进假时钟、
+ * 不推进真实 IO，因此这里必须有一个不会被 `vi.useFakeTimers()` 替换的让出点。
+ */
+const realSetTimeout = globalThis.setTimeout;
+
+const mocks = vi.hoisted(() => {
+  /**
+   * A03：Hosted Supervisor 的「工作身份」是 RuntimeSessionBinding 行上的**行锁 CAS**，
+   * 不是进程内 Map。夹具必须同样记账——否则「重复交付不再起第二个 Loop」会因为模块被
+   * 替换成「领取永远成功」而失去判别力（进程内 `liveRunners` 去重与跨进程领取是两件事，
+   * 后者必须由行锁证明）。
+   *
+   * 记账口径跟着真实实现走：**一个代际最多分配一次 claim**，且 claimId 一经写入不可清零。
+   * 因此释放只写"已退休"墓碑（`released: true`），不把该代际变回"从未领取"——否则夹具会
+   * 放过真实实现明令禁止的"过期/释放后在同代际换执行者"。
+   */
+  const supervisorClaims = new Map<string, { claimId: string; released: boolean }>();
+  const claimRuntimeSessionSupervisor = vi.fn(
+    async (_tx: unknown, input: { id: string; claimId: string; instanceId: string }) => {
+      const held = supervisorClaims.get(input.id);
+      if (held !== undefined) {
+        const replayable = held.claimId === input.claimId && !held.released;
+        return {
+          claimed: replayable,
+          reason: replayable ? "granted" : held.released ? "retired" : "held",
+          session: null,
+        };
+      }
+      supervisorClaims.set(input.id, { claimId: input.claimId, released: false });
+      return { claimed: true, reason: "granted", session: null };
+    },
+  );
+  /**
+   * A03-03：Hosted 的 Owner 与 claim 只能**同事务**续。默认实现把这条准入如实表达出来：
+   * 只有当前 claim 未退休且 nonce 相符才算续租成功；需要观察失权路径的用例再覆盖它。
+   */
+  const renewHostedExecutionLease = vi.fn(
+    async (input: { authority: { sessionBindingId: string }; claimId: string }) => {
+      const held = supervisorClaims.get(input.authority.sessionBindingId);
+      const renewed = held !== undefined && held.claimId === input.claimId && !held.released;
+      return {
+        renewed,
+        reason: renewed ? "renewed" : "claim_superseded",
+        leaseExpiresAt: renewed ? new Date() : null,
+        ownership: null,
+        session: null,
+      };
+    },
+  );
+  const releaseRuntimeSessionSupervisor = vi.fn(
+    async (_tx: unknown, input: { id: string; claimId: string }) => {
+      const held = supervisorClaims.get(input.id);
+      if (!held || held.claimId !== input.claimId) return false;
+      held.released = true;
+      return true;
+    },
+  );
+  return {
+    getInvocationById: vi.fn<() => Promise<Invocation>>(),
+    getExecutionBindingByInvocation: vi.fn<() => Promise<ExecutionBinding>>(),
+    getActiveExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
+    getRuntimeSessionBindingByOwnership: vi.fn<() => Promise<RuntimeSessionBinding>>(),
+    getRuntimeSessionBindingById: vi.fn<() => Promise<RuntimeSessionBinding>>(),
+    getRuntimeRevisionById: vi.fn(),
+    renewExecutionOwnership: vi.fn<() => Promise<ExecutionOwnership>>(),
+    hostedLoopOptions: [] as Array<Record<string, unknown>>,
+    hostedLoopResult: {
+      completed: true,
+      responseText: "完成",
+      sentEvents: [],
+      pending: false,
+      waitingForUser: false,
+    },
+    hostedLoopResolveOnAbort: false,
+    supervisorClaims,
+    claimRuntimeSessionSupervisor,
+    renewHostedExecutionLease,
+    releaseRuntimeSessionSupervisor,
+  };
+});
+
+vi.mock("@/lib/executions/persistence/invocation-store", () => ({
+  getInvocationById: mocks.getInvocationById,
+  getAttemptById: vi.fn(),
+}));
+vi.mock("@/lib/executions/persistence/execution-binding-queries", () => ({
+  getExecutionBindingByInvocation: mocks.getExecutionBindingByInvocation,
+}));
+vi.mock("@/lib/executions/persistence/execution-ownership-store", () => ({
+  getActiveExecutionOwnership: mocks.getActiveExecutionOwnership,
+  renewExecutionOwnership: mocks.renewExecutionOwnership,
+  // A03：Hosted 心跳改走联合续租；交接事务还要按真实事务类型关 Owner 并读数据库时间。
+  // 模块被整体替换时不给出这些导出，会以 "No ... export" 直接炸掉——那是模块错误，
+  // 不是对执行权行为的判别。
+  renewHostedExecutionLease: mocks.renewHostedExecutionLease,
+  closeExecutionOwnership: vi.fn(),
+  closeExecutionOwnershipInTransaction: vi.fn(),
+  getAuthorityDatabaseTime: vi.fn(async () => new Date()),
+  lockInvocationRootIfExists: vi.fn(async () => ({ id: "invocation-1" })),
+  lockExecutionRootForProductWrite: vi.fn(),
+  requireCurrentExecutionOwnership: vi.fn(),
+}));
+vi.mock("@/lib/runtime/persistence/runtime-session-store", () => ({
+  getRuntimeSessionBindingByOwnership: mocks.getRuntimeSessionBindingByOwnership,
+  getRuntimeSessionBindingById: mocks.getRuntimeSessionBindingById,
+  // A03：Hosted 分支的领取 / 续期 / 释放全部落在这三个函数上。模块被整体替换时
+  // 必须一并给出——否则真实实现会以 "No ... export" 直接炸掉，测试退化成模块错误，
+  // 而不是对执行权行为的判别。
+  claimRuntimeSessionSupervisorInTransaction: mocks.claimRuntimeSessionSupervisor,
+  releaseRuntimeSessionSupervisorInTransaction: mocks.releaseRuntimeSessionSupervisor,
+  markRuntimeSessionLostInTransaction: vi.fn(async (_tx: unknown, input: { id: string }) =>
+    // 与真实实现一致：收口同时写 claim 墓碑，让该代际不可能再被领取。
+    (() => {
+      const held = mocks.supervisorClaims.get(input.id);
+      if (held) held.released = true;
+      return null;
+    })(),
+  ),
+}));
+vi.mock("@/lib/runtime/persistence/runtime-revision-queries", () => ({
+  getRuntimeRevisionById: mocks.getRuntimeRevisionById,
+}));
+vi.mock("@/lib/runtime/adapters/hosted-adapter", () => ({
+  HostedHarnessLoop: class {
+    options: Record<string, unknown>;
+    constructor(options: Record<string, unknown>) {
+      this.options = options;
+      mocks.hostedLoopOptions.push(options);
+    }
+    run() {
+      if (mocks.hostedLoopResolveOnAbort) {
+        return new Promise<{ completed: boolean; responseText: string; sentEvents: [] }>(
+          (resolve) => {
+            const signal = (this.options as { abortSignal: AbortSignal }).abortSignal;
+            const finish = () =>
+              resolve({
+                completed: false,
+                responseText: "",
+                sentEvents: [],
+              });
+            // AbortSignal 是**电平**语义：已中止的信号不会再补发事件。A03 之后心跳
+            // 先于排他领取启动，续约失败可能发生在 Loop 被构造之前——此时生产 Loop
+            // 必须先查 `aborted` 再决定是否等待。夹具同样必须如此，否则「先中止、
+            // 后建 Loop」会被误判成永久挂起。
+            if (signal.aborted) {
+              finish();
+              return;
+            }
+            signal.addEventListener("abort", finish, { once: true });
+          },
+        );
+      }
+      return Promise.resolve(mocks.hostedLoopResult);
+    }
+  },
+}));
+vi.mock("@/lib/conversations/turn-queries", () => ({
+  getTurnById: vi.fn(async () => ({ id: "turn-1" })),
+}));
+vi.mock("@/lib/workspace/workspace-queries", () => ({
+  getWorkspaceBindingById: vi.fn(async () => ({
+    id: "workspace-1",
+    continuityMode: "NO_PLATFORM_WORKSPACE",
+    contractDigest: `sha256:${"0".repeat(64)}`,
+  })),
+}));
+vi.mock("@/lib/runtime/harness-loop/configured-model-ports", () => ({
+  configuredDecisionPort: vi.fn(() => ({ decideNextAction: async () => null })),
+  configuredFinalResponsePort: vi.fn(() => ({ generateFinalResponse: async () => "" })),
+}));
+vi.mock("@/lib/runtime/harness-loop/mysql-recovery-port", () => ({
+  createMySqlHarnessLoopRecoveryPort: vi.fn(() => ({ load: async () => null })),
+}));
+
+import { frozenCapabilityCatalogForInvocation } from "@/lib/test-support/frozen-capability-catalog";
+import { resumeHarnessInvocation } from "./runtime-resume";
+
+function fixture(executionState: Invocation["executionState"]) {
   const invocation = {
     id: "invocation-1",
     tenantId: "tenant-1",
-    executionState: "running",
+    executionState,
+    threadId: "thread-1",
+    turnId: "turn-1",
+    triggerItemId: null,
+    lastProducerSequence: 1n,
   } as Invocation;
   const binding = {
-    invocationId: invocation.id,
-    tenantId: invocation.tenantId,
+    invocationId: "invocation-1",
+    tenantId: "tenant-1",
     runtimeRevisionId: "runtime-revision-1",
-    runtimeEvidenceKind,
+    runtimeEvidenceKind: "hosted_artifact",
     runtimeTargetDigest: "sha256:runtime-target",
-    capabilityCatalogJson: catalog.snapshot,
-    capabilityCatalogDigest: catalog.digest,
-    executionSubjectType: "user",
-    executionSubjectId: "user-1",
-    executionSubjectSource: "authenticated_user",
-    executionSubjectFrozenAt: new Date("2026-01-01T00:00:00Z"),
+    workspaceBindingId: "workspace-1",
+    modelId: "test-model",
+    environmentMode: "NO_PLATFORM_ENVIRONMENT",
+    // R01 §1：执行主体必须来自 Binding 冻结的可信 principal 事实。
+    principalType: "user",
+    principalId: "user-1",
+    principalSource: "authenticated_user",
+    principalFrozenAt: new Date(0),
+    // R01 §5：Hosted 执行必须从 Binding 冻结的能力目录装配，夹具给出一份可重验的空目录。
+    ...frozenCapabilityCatalogForInvocation("invocation-1"),
   } as ExecutionBinding;
-  const runtimeRevision = {
-    id: "runtime-revision-1",
-    endpointRef: runtimeEvidenceKind === "external_endpoint" ? "https://runtime.example" : "",
-    runtimeEvidenceKind,
-    runtimeTargetDigest: "sha256:runtime-target",
-    protocolType: "harness_runtime_protocol",
-  } as RuntimeRevisionRow;
-  return { invocation, binding, runtimeRevision };
+  const ownership = {
+    id: "ownership-1",
+    attemptId: "attempt-1",
+    leaseEpoch: 1n,
+    executionPhase: "executing",
+  } as ExecutionOwnership;
+  const session = {
+    id: "session-1",
+    invocationId: "invocation-1",
+    attemptId: "attempt-1",
+    ownershipId: "ownership-1",
+    runtimeRevisionId: "runtime-revision-1",
+    leaseEpoch: 1n,
+    bindingState: "active",
+    startIntentKey: "start:ownership-1",
+    semanticRequestDigest: null,
+    remoteSessionRef: null,
+    remoteExecutionRef: null,
+    transportAcknowledgement: null,
+  } as RuntimeSessionBinding;
+  return { invocation, binding, ownership, session };
 }
 
-describe("Resume Harness Invocation", () => {
-  it("重复 resume 只能有一个执行器取得 lease 并启动 Loop", async () => {
-    const f = fixture();
-    let releaseRun: (() => void) | undefined;
-    const runBlocked = new Promise<void>((resolve) => {
-      releaseRun = resolve;
-    });
-    const runHosted = vi.fn(async () => {
-      await runBlocked;
-      return { completed: true, responseText: "完成", sentEvents: [] };
-    });
-    let leaseAvailable = true;
-    const releaseLease = vi.fn(async () => undefined);
-    const resume = createResumeHarnessInvocation({
-      loadInvocation: async () => f.invocation,
-      loadBinding: async () => f.binding,
-      loadRuntimeRevision: async () => f.runtimeRevision,
-      acquireLease: async () => {
-        if (!leaseAvailable) return null;
-        leaseAvailable = false;
-        return { id: "lease-1" };
-      },
-      releaseLease,
-      renewLease: vi.fn(async () => true),
-      runHosted,
-      resumeExternal: vi.fn(),
-    });
+function stubAuthority(f: ReturnType<typeof fixture>) {
+  mocks.getInvocationById.mockResolvedValue(f.invocation);
+  mocks.getExecutionBindingByInvocation.mockResolvedValue(f.binding);
+  mocks.getActiveExecutionOwnership.mockResolvedValue(f.ownership);
+  mocks.getRuntimeSessionBindingByOwnership.mockResolvedValue(f.session);
+  mocks.getRuntimeSessionBindingById.mockResolvedValue(f.session);
+  mocks.getRuntimeRevisionById.mockResolvedValue({
+    id: "runtime-revision-1",
+    tenantId: "tenant-1",
+    runtimeEvidenceKind: "hosted_artifact",
+  });
+  mocks.renewExecutionOwnership.mockResolvedValue(f.ownership);
+}
 
-    const first = resume({
+/**
+ * R02 §2：Hosted 分支必须携带 Start/Resume 的准确 authority —— 测试从夹具的
+ * Owner/Session 事实推导，手工抄字段会在代际变更时静默失真。
+ */
+function authorityOf(f: ReturnType<typeof fixture>) {
+  return {
+    invocationId: f.invocation.id,
+    runtimeRevisionId: f.binding.runtimeRevisionId,
+    attemptId: f.ownership.attemptId,
+    ownershipId: f.ownership.id,
+    leaseEpoch: String(f.ownership.leaseEpoch),
+    sessionBindingId: f.session.id,
+  };
+}
+
+beforeEach(() => {
+  mocks.supervisorClaims.clear();
+  mocks.claimRuntimeSessionSupervisor.mockClear();
+  mocks.renewHostedExecutionLease.mockClear();
+  mocks.renewHostedExecutionLease.mockImplementation(async (input) => {
+    const held = mocks.supervisorClaims.get(input.authority.sessionBindingId);
+    const renewed = held !== undefined && held.claimId === input.claimId && !held.released;
+    return {
+      renewed,
+      reason: renewed ? "renewed" : "claim_superseded",
+      leaseExpiresAt: renewed ? new Date() : null,
+      ownership: null,
+      session: null,
+    };
+  });
+  mocks.releaseRuntimeSessionSupervisor.mockClear();
+  mocks.hostedLoopOptions.length = 0;
+  mocks.hostedLoopResolveOnAbort = false;
+  mocks.hostedLoopResult = {
+    completed: true,
+    responseText: "完成",
+    sentEvents: [],
+    pending: false,
+    waitingForUser: false,
+  };
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("Resume Harness Invocation", () => {
+  it("重复 resume 只能有一个执行器：活跃 Owner 存活时启动 Loop，释放后拒绝重入", async () => {
+    const f = fixture("running");
+    stubAuthority(f);
+
+    const first = await resumeHarnessInvocation({
       tenantId: "tenant-1",
       invocationId: "invocation-1",
       agentCallId: "call-1",
       sourceVersion: 2,
+      authority: authorityOf(f),
     });
-    await vi.waitFor(() => expect(runHosted).toHaveBeenCalledOnce());
+    expect(first).toMatchObject({ status: "resumed", completed: true });
+    expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // A03：执行权来自 Session 上的**排他领取**，不是进程内 Map 的副作用。
+    expect(mocks.claimRuntimeSessionSupervisor).toHaveBeenCalledTimes(1);
+    const claimArgs = mocks.claimRuntimeSessionSupervisor.mock.calls[0]?.[1] as {
+      tenantId: string;
+      id: string;
+      claimId: string;
+      instanceId: string;
+    };
+    expect(claimArgs).toMatchObject({ tenantId: "tenant-1", id: "session-1" });
+    // A03-01：领取 nonce 每次新建，且**不是** PID/owner 字符串这类可复用标识。
+    expect(claimArgs.claimId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(claimArgs.claimId).not.toContain("ownership-1");
+    // 实例身份来自本进程的启动 id（生产默认值由 `workerInstanceId()` 给出）。
+    expect(claimArgs.instanceId).toMatch(/^worker-instance:/);
+
+    // Owner 已释放（无活跃 ExecutionOwnership）→ 同一 Invocation 不能再次取得执行权。
+    mocks.getActiveExecutionOwnership.mockResolvedValue(null as unknown as ExecutionOwnership);
     await expect(
-      resume({
+      resumeHarnessInvocation({
         tenantId: "tenant-1",
         invocationId: "invocation-1",
         sourceType: "user_action",
         agentCallId: "uar-1",
         sourceVersion: 1,
+        authority: authorityOf(f),
       }),
-    ).rejects.toMatchObject({ code: "INVOCATION_EXECUTION_LEASE_BUSY" });
-    releaseRun?.();
-    await expect(first).resolves.toMatchObject({ status: "resumed", completed: true });
-    expect(runHosted).toHaveBeenCalledOnce();
-    expect(releaseLease).toHaveBeenCalledWith({ invocationId: "invocation-1", leaseId: "lease-1" });
+    ).rejects.toThrow("NotCurrentExecutor");
+    expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // 被拒的第二次交付在进入领取之前就失败了，不得留下第二个工作身份。
+    expect(mocks.claimRuntimeSessionSupervisor).toHaveBeenCalledTimes(1);
   });
 
-  it("父 Invocation 已终态时 handled-no-op，不重新获取租约", async () => {
-    const f = fixture();
-    f.invocation.executionState = "completed";
-    const acquireLease = vi.fn();
-    const resume = createResumeHarnessInvocation({
-      loadInvocation: async () => f.invocation,
-      loadBinding: async () => f.binding,
-      loadRuntimeRevision: async () => f.runtimeRevision,
-      acquireLease,
-      releaseLease: vi.fn(),
-      renewLease: vi.fn(async () => true),
-      runHosted: vi.fn(),
-      resumeExternal: vi.fn(),
-    });
+  it("父 Invocation 已终态时 handled-no-op，不重新获取执行权", async () => {
+    const f = fixture("completed");
+    mocks.getInvocationById.mockResolvedValue(f.invocation);
+    const getOwnership = vi.fn();
+    mocks.getActiveExecutionOwnership.mockImplementation(getOwnership);
 
     await expect(
-      resume({
+      resumeHarnessInvocation({
         tenantId: "tenant-1",
         invocationId: "invocation-1",
         agentCallId: "call-1",
         sourceVersion: 2,
       }),
     ).resolves.toEqual({ status: "handled_noop", invocationId: "invocation-1" });
-    expect(acquireLease).not.toHaveBeenCalled();
+    expect(getOwnership).not.toHaveBeenCalled();
   });
 
-  it("用户暂停后把恢复来源传给 Hosted Loop，允许它执行 waiting_user 快照", async () => {
-    const f = fixture();
-    f.invocation.executionState = "waiting_user";
-    const runHosted = vi.fn(async () => ({
-      completed: true,
-      responseText: "继续完成",
-      sentEvents: [],
-    }));
-    const resume = createResumeHarnessInvocation({
-      loadInvocation: async () => f.invocation,
-      loadBinding: async () => f.binding,
-      loadRuntimeRevision: async () => f.runtimeRevision,
-      acquireLease: async () => ({ id: "lease-1" }),
-      releaseLease: vi.fn(async () => undefined),
-      renewLease: vi.fn(async () => true),
-      runHosted,
-      resumeExternal: vi.fn(),
-    });
+  it("用户暂停后恢复 waiting_user 快照，Loop 只启动一次", async () => {
+    const f = fixture("waiting_user");
+    stubAuthority(f);
 
     await expect(
-      resume({
+      resumeHarnessInvocation({
         tenantId: "tenant-1",
         invocationId: "invocation-1",
         sourceType: "user_pause",
         agentCallId: "resume-1",
         sourceVersion: 1,
+        authority: authorityOf(f),
       }),
     ).resolves.toMatchObject({ status: "resumed", completed: true });
-    expect(runHosted).toHaveBeenCalledWith(expect.objectContaining({ sourceType: "user_pause" }));
+    expect(mocks.hostedLoopOptions).toHaveLength(1);
+    expect(mocks.hostedLoopOptions[0]).toMatchObject({
+      invocationId: "invocation-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
   });
 
-  it("执行租约续约失败时向 Hosted Loop 发出 fail-closed 中止信号", async () => {
-    const f = fixture();
-    let observedReason: unknown;
-    const runHosted = vi.fn(
-      async ({ abortSignal }: { abortSignal: AbortSignal }) =>
-        await new Promise<{
-          completed: false;
-          responseText: string;
-          sentEvents: [];
-        }>((resolve) => {
-          abortSignal.addEventListener(
-            "abort",
-            () => {
-              observedReason = abortSignal.reason;
-              resolve({ completed: false, responseText: "", sentEvents: [] });
-            },
-            { once: true },
-          );
-        }),
-    );
-    const resume = createResumeHarnessInvocation({
-      loadInvocation: async () => f.invocation,
-      loadBinding: async () => f.binding,
-      loadRuntimeRevision: async () => f.runtimeRevision,
-      acquireLease: async () => ({ id: "lease-1" }),
-      releaseLease: vi.fn(async () => undefined),
-      renewLease: vi.fn(async () => false),
-      leaseHeartbeatIntervalMs: 1,
-      runHosted,
-      resumeExternal: vi.fn(),
-    });
+  it("R02 §2：同一 generation 最多一个 Supervisor，重复交付不再起第二个 Loop", async () => {
+    const f = fixture("running");
+    stubAuthority(f);
+    // 让第一个 Loop 保持存活（只在 abort 时结束），模拟长任务进行中。
+    mocks.hostedLoopResolveOnAbort = true;
 
+    const first = resumeHarnessInvocation({
+      tenantId: "tenant-1",
+      invocationId: "invocation-1",
+      agentCallId: "call-1",
+      sourceVersion: 1,
+      authority: authorityOf(f),
+    });
+    await vi.waitFor(() => expect(mocks.hostedLoopOptions).toHaveLength(1));
+
+    // 同一代际（同 authority）再次交付：不得起第二个 Loop，直接回答"仍在跑"。
     await expect(
-      resume({
+      resumeHarnessInvocation({
         tenantId: "tenant-1",
         invocationId: "invocation-1",
+        sourceType: "agent_call",
         agentCallId: "call-1",
         sourceVersion: 1,
+        authority: authorityOf(f),
       }),
-    ).resolves.toMatchObject({ status: "resumed", completed: false });
-    expect(observedReason).toMatchObject({ code: "INVOCATION_EXECUTION_LEASE_LOST" });
+    ).resolves.toMatchObject({ status: "resumed", completed: false, pending: true });
+    expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // 同一代际的重复交付必须由「已在运行」直接消化：不得再产生第二次领取。
+    expect(mocks.claimRuntimeSessionSupervisor).toHaveBeenCalledTimes(1);
+
+    // 收尾：中止存活 Loop，让第一个 promise 结束后再退出用例。
+    const options = mocks.hostedLoopOptions[0] as { abortSignal: AbortSignal };
+    options.abortSignal.dispatchEvent(new Event("abort"));
+    await expect(first).resolves.toMatchObject({ status: "resumed", completed: false });
+  });
+
+  it("执行权续约失败时向 Hosted Loop 发出 fail-closed 中止信号", async () => {
+    const f = fixture("running");
+    stubAuthority(f);
+    mocks.hostedLoopResolveOnAbort = true;
+    // A03：取得 claim 之后 Owner 只经联合续租延长，因此这条失权路径必须打在联合续租上
+    // （打在裸 Owner 续租上等于什么都没测到）。
+    mocks.renewHostedExecutionLease.mockRejectedValue(new Error("lease renew failed"));
+
+    vi.useFakeTimers();
+    const promise = resumeHarnessInvocation({
+      tenantId: "tenant-1",
+      invocationId: "invocation-1",
+      agentCallId: "call-1",
+      sourceVersion: 1,
+      authority: authorityOf(f),
+    });
+    // A03：领取本身是一条**真实**数据库事务（期限按 DB 时间计算），假时钟不会推进它，
+    // 因此先让真实事件循环跑完领取。"Loop 已被构造"正是"claim 已取得"的可观察信号——
+    // 取得 claim 之前心跳走的是派发阶段续租，推进时钟只会打到另一条路径上。
+    for (let i = 0; i < 2_000 && mocks.hostedLoopOptions.length === 0; i += 1) {
+      await new Promise((resolve) => realSetTimeout(resolve, 1));
+    }
+    expect(mocks.hostedLoopOptions).toHaveLength(1);
+    // 心跳续约间隔 20s：推进时钟触发（此时的）联合续租失败 → abort。
+    await vi.advanceTimersByTimeAsync(20_000);
+    await expect(promise).resolves.toMatchObject({ status: "resumed", completed: false });
+    // 中止信号是**电平**事实：直接读 `aborted` / `reason`，不依赖"监听器恰好在
+    // 事件之后注册"。续约失败意味着该代际已失去执行权，Loop 不得再推进。
+    const options = mocks.hostedLoopOptions[0] as { abortSignal: AbortSignal } | undefined;
+    expect(options?.abortSignal.aborted).toBe(true);
+    expect((options?.abortSignal.reason as Error | undefined)?.message).toBe("OwnershipExpired");
   });
 
   it("Agent failed/cancelled 以结构化 Observation 交回 Harness，不直接完成父级", () => {

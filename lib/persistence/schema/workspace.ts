@@ -19,11 +19,14 @@ import { threadTable } from "@/lib/persistence/schema/conversation";
 import { device } from "@/lib/persistence/schema/device";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
+  check,
   datetime,
   foreignKey,
   index,
   int,
+  json,
   mysqlEnum,
   mysqlTable,
   text,
@@ -61,6 +64,14 @@ export type WorkspaceLifecycleState = (typeof WORKSPACE_LIFECYCLE_STATES)[number
  */
 export const WORKSPACE_BINDING_TYPES = ["desktop", "cloud", "remote", "sandbox"] as const;
 export type WorkspaceBindingType = (typeof WORKSPACE_BINDING_TYPES)[number];
+
+export const WORKSPACE_CONTINUITY_MODES = [
+  "HOST_AFFINE",
+  "SHARED_DURABLE",
+  "CHECKPOINT_RESTORABLE",
+  "NO_PLATFORM_WORKSPACE",
+] as const;
+export type WorkspaceContinuityMode = (typeof WORKSPACE_CONTINUITY_MODES)[number];
 
 /**
  * WorkspaceBinding 状态。
@@ -146,6 +157,7 @@ export const workspace = mysqlTable(
     deletedAt: datetime("deletedAt", { mode: "date", fsp: 3 }),
   },
   (t) => ({
+    tenantIdUq: uniqueIndex("Workspace_tenant_id_uq").on(t.tenantId, t.id),
     // 租户内 workspaceKey 唯一。
     tenantKeyUq: uniqueIndex("Workspace_tenant_key_uq").on(t.tenantId, t.workspaceKey),
     tenantOwnerIdx: index("Workspace_tenant_owner_idx").on(t.tenantId, t.ownerUserId),
@@ -165,49 +177,59 @@ export const workspaceBinding = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    /** 所属 Workspace（DB 级 FK → Workspace.id ON DELETE CASCADE）。 */
-    workspaceId: varchar("workspaceId", { length: 36 })
-      .notNull()
-      .references(() => workspace.id),
-    bindingType: mysqlEnum("bindingType", WORKSPACE_BINDING_TYPES).notNull(),
-    /**
-     * 设备 id（仅 desktop binding 必填；DB 级 FK → Device.id）。
-     * Cloud/Remote/Sandbox 不绑定具体设备，为 null。
-     */
+    workspaceId: varchar("workspaceId", { length: 36 }).references(() => workspace.id),
+    continuityMode: varchar("continuityMode", { length: 32 })
+      .$type<WorkspaceContinuityMode>()
+      .notNull(),
+    bindingType: varchar("bindingType", { length: 16 }).$type<WorkspaceBindingType>(),
     deviceId: varchar("deviceId", { length: 36 }).references(() => device.id),
-    /** 环境定义 id（逻辑外键 → EnvironmentDefinition.id；运行时校验兼容性）。 */
-    environmentDefinitionId: varchar("environmentDefinitionId", { length: 36 }),
-    /**
-     * 位置引用（受管引用，不是绝对路径）：
-     * - desktop：相对 device 的本地路径指纹（如 sha256(device_root + relative_path)）。
-     * - cloud：对象存储 bucket + key。
-     * - remote：远程主机别名 + 路径指纹。
-     * - sandbox：沙盒容器内路径指纹。
-     */
-    locationRef: varchar("locationRef", { length: 512 }).notNull(),
-    /** 位置指纹（sha256: 前缀；用于跨环境一致性校验，不暴露原路径）。 */
-    locationFingerprint: varchar("locationFingerprint", { length: 128 }),
-    bindingState: mysqlEnum("bindingState", WORKSPACE_BINDING_STATES).notNull().default("active"),
-    /** 最近一次校验时间（设备在线 + 路径可访问）。 */
-    lastVerifiedAt: datetime("lastVerifiedAt", { mode: "date", fsp: 3 }),
-    /** 并发版本号（ETag/If-Match 乐观锁）。 */
-    versionNo: varchar("versionNo", { length: 64 })
+    locationRef: varchar("locationRef", { length: 512 }),
+    storageScopeDigest: varchar("storageScopeDigest", { length: 71 }),
+    backendKind: varchar("backendKind", { length: 32 }),
+    hostIdentity: varchar("hostIdentity", { length: 512 }),
+    storageIdentity: varchar("storageIdentity", { length: 71 }),
+    accessMode: varchar("accessMode", { length: 32 }),
+    filesystemSemantics: json("filesystemSemantics").notNull(),
+    checkpointPolicy: json("checkpointPolicy"),
+    contractDigest: varchar("contractDigest", { length: 71 }).notNull(),
+    createdBy: varchar("createdBy", { length: 128 }).notNull(),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 6 })
       .notNull()
-      .$defaultFn(() => randomUUID()),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
+      .default(sql`CURRENT_TIMESTAMP(6)`),
   },
   (t) => ({
-    tenantWorkspaceIdx: index("WorkspaceBinding_tenant_workspace_idx").on(
+    tenantIdUq: uniqueIndex("WorkspaceBinding_tenant_id_uq").on(t.tenantId, t.id),
+    tenantWorkspaceIdx: index("WorkspaceBinding_tenant_workspace_created_idx").on(
       t.tenantId,
       t.workspaceId,
+      t.createdAt,
     ),
-    tenantDeviceIdx: index("WorkspaceBinding_tenant_device_idx").on(t.tenantId, t.deviceId),
-    tenantStateIdx: index("WorkspaceBinding_tenant_state_idx").on(t.tenantId, t.bindingState),
+    tenantScopeIdx: index("WorkspaceBinding_tenant_scope_idx").on(t.tenantId, t.storageScopeDigest),
+    continuityAllowed: check(
+      "WorkspaceBinding_continuity_allowed",
+      sql`\`continuityMode\` IN ('HOST_AFFINE', 'SHARED_DURABLE', 'CHECKPOINT_RESTORABLE', 'NO_PLATFORM_WORKSPACE')`,
+    ),
+    accessModeAllowed: check(
+      "WorkspaceBinding_access_mode_allowed",
+      sql`\`accessMode\` IN ('read', 'read_write') OR \`accessMode\` IS NULL`,
+    ),
+    workspaceFk: foreignKey({
+      name: "WorkspaceBinding_tenant_workspace_fk",
+      columns: [t.tenantId, t.workspaceId],
+      foreignColumns: [workspace.tenantId, workspace.id],
+    }),
+    continuityShape: check(
+      "WorkspaceBinding_continuity_shape",
+      sql`(\`continuityMode\` = 'NO_PLATFORM_WORKSPACE' AND \`workspaceId\` IS NULL AND \`bindingType\` IS NULL AND \`deviceId\` IS NULL AND \`locationRef\` IS NULL AND \`storageScopeDigest\` IS NULL AND \`backendKind\` IS NULL AND \`hostIdentity\` IS NULL AND \`storageIdentity\` IS NULL AND \`accessMode\` IS NULL AND JSON_UNQUOTE(JSON_EXTRACT(\`filesystemSemantics\`, '$.kind')) = 'none' AND \`checkpointPolicy\` IS NULL) OR (\`continuityMode\` <> 'NO_PLATFORM_WORKSPACE' AND \`workspaceId\` IS NOT NULL AND \`bindingType\` IS NOT NULL AND \`locationRef\` IS NOT NULL AND \`storageScopeDigest\` IS NOT NULL AND \`backendKind\` IS NOT NULL AND \`storageIdentity\` IS NOT NULL AND \`accessMode\` IS NOT NULL)`,
+    ),
+    hostAffineShape: check(
+      "WorkspaceBinding_host_affine_shape",
+      sql`\`continuityMode\` <> 'HOST_AFFINE' OR \`hostIdentity\` IS NOT NULL`,
+    ),
+    checkpointShape: check(
+      "WorkspaceBinding_checkpoint_shape",
+      sql`(\`continuityMode\` = 'CHECKPOINT_RESTORABLE' AND \`checkpointPolicy\` IS NOT NULL) OR (\`continuityMode\` <> 'CHECKPOINT_RESTORABLE' AND \`checkpointPolicy\` IS NULL)`,
+    ),
   }),
 );
 

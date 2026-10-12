@@ -32,9 +32,14 @@ interface EmployeePrincipal {
 
 interface WorkloadPrincipal {
   tenantId: string;
-  callerType: string;
-  serviceId: string | null;
-  invocationId: string | null;
+  callerType: "workload";
+  invocationId: string;
+}
+
+interface ServicePrincipal {
+  tenantId: string;
+  callerType: "service";
+  serviceId: string;
 }
 
 /** 审计执行者（与 idempotency caller 对齐，但用 actorType 语义）。 */
@@ -146,17 +151,19 @@ export function actorFromPrincipal(principal: EmployeePrincipal): AuditActor {
 }
 
 /**
- * 从 runtime/gateway/admin Service/Workload Token 主体提取审计执行者。
+ * 从执行凭据或独立 Service Identity 提取审计执行者。
  *
  * - service → actorId = serviceId
  * - workload（runtime/gateway）→ actorId = invocationId
  *
  * @throws service 缺失 serviceId 或 runtime/gateway 缺失 invocationId 时抛错
  */
-export function actorFromWorkloadPrincipal(principal: WorkloadPrincipal): AuditActor {
+export function actorFromWorkloadPrincipal(
+  principal: WorkloadPrincipal | ServicePrincipal,
+): AuditActor {
   if (principal.callerType === "service") {
     if (!principal.serviceId) {
-      throw new Error("actorFromWorkloadPrincipal: service Token 缺失 serviceId");
+      throw new Error("actorFromWorkloadPrincipal: Service Identity 缺失 serviceId");
     }
     return {
       tenantId: principal.tenantId,
@@ -164,19 +171,14 @@ export function actorFromWorkloadPrincipal(principal: WorkloadPrincipal): AuditA
       actorId: principal.serviceId,
     };
   }
-  if (principal.callerType === "workload") {
-    if (!principal.invocationId) {
-      throw new Error("actorFromWorkloadPrincipal: runtime/gateway Token 缺失 invocationId");
-    }
-    return {
-      tenantId: principal.tenantId,
-      actorType: "workload",
-      actorId: principal.invocationId,
-    };
+  if (!principal.invocationId) {
+    throw new Error("actorFromWorkloadPrincipal: execution credential 缺失 invocationId");
   }
-  throw new Error(
-    `actorFromWorkloadPrincipal: 不支持的 callerType=${principal.callerType as string}`,
-  );
+  return {
+    tenantId: principal.tenantId,
+    actorType: "workload",
+    actorId: principal.invocationId,
+  };
 }
 
 /** 计算内容 sha256 hex（用于 before/after hash）。null/undefined 返回 null（创建/删除操作）。 */

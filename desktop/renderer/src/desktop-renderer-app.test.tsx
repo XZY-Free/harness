@@ -217,7 +217,7 @@ describe("DesktopRendererApp", () => {
     });
     expect(apiFetch).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/threads",
+      "/api/threads",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ title: "分析销售数据" }),
@@ -225,7 +225,7 @@ describe("DesktopRendererApp", () => {
     );
     expect(apiFetch).toHaveBeenNthCalledWith(
       3,
-      `/api/v1/threads/${createdThreadId}/turns`,
+      `/api/threads/${createdThreadId}/turns`,
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -280,7 +280,7 @@ describe("DesktopRendererApp", () => {
     await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(3));
     expect(apiFetch).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/threads",
+      "/api/threads",
       expect.objectContaining({
         body: JSON.stringify({ title: "分析销售数据", workspace_id: "workspace-1" }),
       }),

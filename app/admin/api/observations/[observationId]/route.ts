@@ -1,0 +1,61 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+} from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import { getObservationById } from "@/lib/observability/observation-queries";
+/**
+ * GET /admin/api/observations/{observationId} — Observation 单资源详情（S11-W05）。
+ *
+ * 行为：
+ * - 解析 admin 主体（读操作，无需专门 action scope）。
+ * - 校验 Observation 存在且属于当前租户（跨租户隐藏为 404）。
+ * - 投影为 snake_case；content_json 为已脱敏内容（contains_secret 强制 false）。
+ *
+ * 错误映射：
+ * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
+ * - Observation 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
+ */
+
+export const dynamic = "force-dynamic";
+
+interface RouteContext {
+  params: Promise<{ observationId: string }>;
+}
+
+export async function GET(request: Request, context: RouteContext): Promise<Response> {
+  const requestId = getRequestId(request);
+  const { observationId } = await context.params;
+
+  let principal: AdminPrincipal;
+  try {
+    principal = await resolveAdminPrincipalAsync(request.headers);
+  } catch (err) {
+    const authResp = adminAuthErrorResponse(err, requestId);
+    if (authResp) return authResp;
+    throw err;
+  }
+
+  const observation = await getObservationById(principal.tenantId, observationId);
+  if (!observation) {
+    return resourceNotFound(requestId, `Observation 不存在或无权访问: ${observationId}`);
+  }
+
+  const body = {
+    id: observation.id,
+    tenant_id: observation.tenantId,
+    traceId: observation.traceId,
+    spanId: observation.spanId,
+    invocationId: observation.invocationId,
+    kind: observation.kind,
+    content_mode: observation.contentMode,
+    content: observation.contentJson,
+    contains_secret: observation.containsSecret,
+    redaction_summary: observation.redactionSummary,
+    observed_at: observation.observedAt.toISOString(),
+    created_at: observation.createdAt.toISOString(),
+  };
+
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+}

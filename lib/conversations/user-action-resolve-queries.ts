@@ -39,6 +39,9 @@ import {
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { createInvocationCommandInTransaction } from "@/lib/executions/application/create-invocation-command";
+import { lockExecutionRootForProductWrite } from "@/lib/executions/persistence/execution-ownership-store";
+import { updateInvocationState } from "@/lib/executions/persistence/invocation-store";
 import { issueGrant } from "@/lib/permission/permission-queries";
 import { expireUserActionRequest } from "@/lib/permission/user-action-expiry-queries";
 import {
@@ -52,15 +55,17 @@ import {
 } from "@/lib/permission/user-action-queries";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import {
-  type InvocationCommand,
   type Thread,
   type ThreadEvent,
   type ThreadEventActorType,
-  invocationCommandTable,
   threadItemTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
+import {
+  type InvocationCommand,
+  invocationCommandTable,
+} from "@/lib/persistence/schema/executions";
 import { type Invocation, invocationTable } from "@/lib/persistence/schema/executions";
 import {
   ALLOWED_RESOLUTIONS_BY_TYPE,
@@ -68,7 +73,6 @@ import {
   type UserActionResolution,
   userActionRequestTable,
 } from "@/lib/persistence/schema/user-action-request";
-import { updateInvocationState } from "@/lib/runtime/invocation-queries";
 import Ajv, { type ValidateFunction } from "ajv";
 import { and, eq, sql } from "drizzle-orm";
 
@@ -260,18 +264,12 @@ export async function resolveGenericUserAction(
         validateInputResponseAgainstSchema(request.inputSchemaJson, params.responseRedactedJson);
       }
 
-      // 2. SELECT FOR UPDATE Thread（锁定事件流 + 乐观锁基线）
-      const [thread] = await tx
-        .select()
-        .from(threadTable)
-        .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, request.threadId)))
-        .for("update")
-        .limit(1);
-      if (!thread) {
-        throw new ThreadNotFoundError(request.threadId);
-      }
-
-      // 3. SELECT FOR UPDATE Invocation（必须 waiting_user）
+      // 2. SELECT FOR UPDATE Invocation（必须 waiting_user）
+      //
+      // R04 §2 固定锁图：**执行根（Invocation/Attempt/Ownership/Session/Lease）先于产品根
+      // （Thread/Turn/Item 映射）**。旧顺序是「Thread → Invocation」，而 Runtime 路径是
+      // 「锁 I/O → 写 Thread 事件流」（`allocateEventSequences` 会对 Thread 行取 X 锁），
+      // 两条真实路径互等即构成死锁环。这里把 Invocation 提前，Thread 顺延到其后再锁。
       const [invocation] = await tx
         .select()
         .from(invocationTable)
@@ -290,6 +288,23 @@ export async function resolveGenericUserAction(
         throw new UserActionStateError(
           `Invocation ${request.invocationId} executionState=${invocation.executionState}，仅 waiting_user 可 resolve`,
         );
+      }
+
+      // 2b. 执行根的 Ownership 段也必须早于产品根：本函数稍后（第 6 步）会创建
+      // InvocationCommand，其内部对**活跃 Ownership** 取 FOR UPDATE。若留到 Thread/Item 之后再取，
+      // 就与「守卫持 O → 写 Thread 事件流」形成反向持锁。这里把 `Invocation → Ownership`
+      // 这段一次性锁满（下游对同一行再取锁不会等待）。
+      await lockExecutionRootForProductWrite(tx, params.tenantId, invocation.id);
+
+      // 3. SELECT FOR UPDATE Thread（锁定事件流 + 乐观锁基线）
+      const [thread] = await tx
+        .select()
+        .from(threadTable)
+        .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, request.threadId)))
+        .for("update")
+        .limit(1);
+      if (!thread) {
+        throw new ThreadNotFoundError(request.threadId);
       }
 
       // 4. 原子 UPDATE UserActionRequest: pending → resolved
@@ -580,23 +595,15 @@ export async function resolveGenericUserAction(
           (request.requestType === "confirmation" &&
             request.purpose === "a2a_confirmation" &&
             (params.resolution === "approve" || params.resolution === "deny")));
-      await tx.insert(invocationCommandTable).values({
-        id: resumeCommandId,
+      await createInvocationCommandInTransaction(tx, {
+        tenantId: params.tenantId,
         invocationId: invocation.id,
-        threadId: thread.id,
-        turnId: request.turnId,
         commandType: "resume",
-        commandPayloadJson: resumePayload,
-        commandPayloadHash: resumePayloadHash,
-        // Agent UAR 先由 durable continuation 恢复同一外部 Agent；父 Runtime 不能抢跑。
-        commandState: durableAgentResume ? "acknowledged" : "queued",
-        runtimeExecutionRef: null,
-        idempotencyKey: params.idempotencyKey ?? null,
-        errorCode: null,
-        errorMessage: null,
-        dispatchedAt: null,
-        acknowledgedAt: durableAgentResume ? now : null,
-        failedAt: null,
+        idempotencyKey: params.idempotencyKey ?? `resume:${request.id}`,
+        payloadJson: resumePayload,
+        requestedByType: "user",
+        requestedById: params.resolvedBy,
+        commandId: resumeCommandId,
       });
 
       if (durableAgentResume && agentCallId) {

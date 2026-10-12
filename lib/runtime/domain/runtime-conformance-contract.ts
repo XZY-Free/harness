@@ -19,11 +19,20 @@
  * 事实源：docs/contracts/runtime-conformance.json
  */
 
-/** Publication Conformance 套件修订号（Protocol/Adapter 合同语义，非研究编号）。 */
-export const PUBLICATION_CONFORMANCE_SUITE_REVISION = "runtime-conformance@1";
+import {
+  RUNTIME_PROTOCOL_CONFORMANCE_CASES,
+  RUNTIME_PROTOCOL_RECEIPT_KEYS,
+  type RuntimeProtocolConformanceCase,
+} from "@/lib/runtime/protocol-conformance";
 
-/** Publication Conformance 的唯一 Case 全集（6 个，严格唯一、全部必过）。 */
-export const PUBLICATION_CONFORMANCE_CASES = [
+/** Publication Conformance 套件修订号（Protocol/Adapter 合同语义，非研究编号）。 */
+export const PUBLICATION_CONFORMANCE_SUITE_REVISION = "runtime-conformance@2";
+
+/**
+ * Adapter 边界上的声明式用例（原有 6 条）：能力清单合同、dispatch/cancel/steer/
+ * resume ack、session 恢复声明。
+ */
+export const PUBLICATION_DECLARATION_CASE_IDS = [
   "capability-manifest-contract",
   "dispatch-acknowledgement",
   "cancel-acknowledgement",
@@ -32,7 +41,32 @@ export const PUBLICATION_CONFORMANCE_CASES = [
   "session-recovery-declaration",
 ] as const;
 
-export type PublicationConformanceCaseId = (typeof PUBLICATION_CONFORMANCE_CASES)[number];
+export type PublicationDeclarationCaseId = (typeof PUBLICATION_DECLARATION_CASE_IDS)[number];
+
+/**
+ * Publication Conformance 的唯一 Case 全集（13 个，严格唯一、全部必过）。
+ *
+ * 由「声明式用例」与「RuntimeProtocol 行为清单」**组合**而成，不再各自维护一份
+ * 平行 case 列表 —— R10 §3 的「旧 Publication case 全集与新协议 required behavior
+ * 清单脱节」由此闭合：行为清单是唯一权威，发布准入必须逐条追溯到实际调用回执。
+ */
+export const PUBLICATION_CONFORMANCE_CASES = [
+  ...PUBLICATION_DECLARATION_CASE_IDS,
+  ...RUNTIME_PROTOCOL_CONFORMANCE_CASES,
+] as const;
+
+export type PublicationConformanceCaseId =
+  | PublicationDeclarationCaseId
+  | RuntimeProtocolConformanceCase;
+
+/**
+ * 每个行为 case 必须携带的真实调用回执字段。
+ *
+ * 声明式用例的回执要求（`response` / `declared` 等）由 Runner 的证据对象承载；
+ * 行为 case 的要求直接复用 RuntimeProtocol 的机器清单，避免第二份定义。
+ */
+export const PUBLICATION_BEHAVIOR_RECEIPT_KEYS: Record<RuntimeProtocolConformanceCase, string[]> =
+  RUNTIME_PROTOCOL_RECEIPT_KEYS;
 
 export interface PublicationConformanceCaseResult {
   caseId: PublicationConformanceCaseId;
