@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { expect, test } from "@playwright/test";
+import { type Locator, type Page, expect, test } from "@playwright/test";
 import { E2E_PORT } from "../playwright.config";
 import { authenticateDesktopWindow, launchDesktopApp } from "./support/launch-desktop";
 
@@ -19,6 +19,41 @@ async function capture(page: import("@playwright/test").Page, name: string): Pro
   if (!captureUi) return;
   mkdirSync(captureDir, { recursive: true });
   await page.screenshot({ path: resolve(captureDir, name), fullPage: true });
+}
+
+/**
+ * 侧栏中**本会话自己的**「需要用户输入」链接。
+ *
+ * 必须同时限定 role/name 与 href：只按 name 匹配会在共享库（同文件重试、同组其他用例留下的
+ * 会话）里命中别的会话 —— 重试时匹配数从 1 变 2、3，直接变成 strict mode violation，
+ * 把首次失败淹没在定位噪声里。role 断言同时保留「侧栏把该状态暴露给可访问性树」这一语义。
+ */
+function sidebarNeedsInputLink(scope: Page, threadPath: string): Locator {
+  return scope
+    .getByRole("link", { name: /需要用户输入/ })
+    .and(scope.locator(`a[href="${threadPath}"]`));
+}
+
+/**
+ * 在「侧栏可见」的前提下执行断言。
+ *
+ * 窄窗口下桌面侧栏默认折叠为 drawer，折叠态 aside 是 `aria-hidden`，其中的链接不会进入
+ * 可访问性树（role 定位直接找不到）；宽屏下按钮名为「收起侧栏」，这里天然 no-op。
+ * 断言后**恢复折叠状态**，避免影响紧随其后的窄宽度响应式断言（否则 `aside` 宽度不为 0）。
+ * 范式与 `desktop-auth-flow.spec.ts`（先展开再操作）一致。
+ */
+async function withVisibleDesktopSidebar(window: Page, assert: () => Promise<void>): Promise<void> {
+  const expand = window.getByRole("button", { name: "展开侧栏" });
+  const wasCollapsed = await expand.isVisible().catch(() => false);
+  if (wasCollapsed) await expand.click();
+  try {
+    await assert();
+  } finally {
+    if (wasCollapsed) {
+      const collapse = window.getByRole("button", { name: "收起侧栏" });
+      if (await collapse.isVisible().catch(() => false)) await collapse.click();
+    }
+  }
 }
 
 function e2eRuntimeDescriptorPath(): string {
@@ -189,7 +224,7 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
       timeout: 90_000,
     });
     await expect(webPanel.getByText("年假", { exact: true })).toBeHidden();
-    await expect(page.getByRole("link", { name: /需要用户输入/ })).toBeVisible();
+    await expect(sidebarNeedsInputLink(page, `/chat/${scenario.threadId}`)).toBeVisible();
     await capture(page, "01-web-confirmation-collapsed.png");
 
     await webPanel.getByRole("button", { name: "查看操作详情" }).click();
@@ -203,7 +238,11 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
     await expect(desktopPanel.getByText("提交请假申请", { exact: true })).toBeVisible({
       timeout: 90_000,
     });
-    await expect(desktopWindow.getByRole("link", { name: /需要用户输入/ })).toBeVisible();
+    await withVisibleDesktopSidebar(desktopWindow, async () => {
+      await expect(
+        sidebarNeedsInputLink(desktopWindow, `/desktop/chat/${scenario.threadId}`),
+      ).toBeVisible();
+    });
 
     for (const size of [
       { width: 1280, height: 900 },
@@ -251,7 +290,7 @@ test("外部 Agent confirmation：Web 展示 → Desktop 审批 → Web 收敛 �
     await expect(
       page.getByRole("region", { name: "用户操作记录" }).getByText("已同意"),
     ).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByRole("link", { name: /需要用户输入/ })).toHaveCount(0);
+    await expect(sidebarNeedsInputLink(page, `/chat/${scenario.threadId}`)).toHaveCount(0);
     await capture(page, "05-web-confirmation-resolved.png");
 
     const [resolvedFirst] = await harness.db
