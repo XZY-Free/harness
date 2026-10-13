@@ -20,6 +20,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # workspace-lock 原生 provider：宿主（开发机 / 运行镜像 / CI）必须先构建
+      # （与 Dockerfile、docker/worker/Dockerfile 一致）；vitest 工作区用例自阶段 3 起依赖它。
+      - name: Build workspace-lock native provider
+        run: pnpm build:workspace-lock
       - name: Install browser and Desktop runtime dependencies
         run: |
           pnpm exec playwright install --with-deps chromium
