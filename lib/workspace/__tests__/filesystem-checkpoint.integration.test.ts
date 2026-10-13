@@ -581,6 +581,31 @@ async function readGate(invocationId: string): Promise<{
     : null;
 }
 
+/**
+ * xattr/ACL 核查用例可运行的平台：与生产侧 `assertNoUnsupportedMetadata` 的 darwin/linux
+ * 分支一一对应（其余平台生产代码本身就拒绝生成快照，用例前提不成立）。
+ */
+const supportsMetadataProbe = process.platform === "darwin" || process.platform === "linux";
+
+/**
+ * 给文件打一个**真实**扩展属性标记：macOS 用系统自带 `xattr`，Linux 用 `attr` 包的
+ * `setfattr`（CI 与生产镜像安装同一组工具）。返回退出码，让调用方对"标记失败"保持
+ * fail-closed 断言，而不是把"没打上"当成"没有属性"。
+ */
+function markExtendedXattr(file: string, name: string, value: string): number | null {
+  if (process.platform === "darwin") return spawnSync("xattr", ["-w", name, value, file]).status;
+  // Linux 的扩展属性必须落在 user 命名空间，否则普通用户无法设置。
+  return spawnSync("setfattr", ["-n", `user.${name}`, "-v", value, file]).status;
+}
+
+/** 同上的 ACL 版本：macOS 用 `chmod +a`，Linux 用 `acl` 包的 `setfacl`。 */
+function markExtendedAcl(file: string): number | null {
+  const username = userInfo().username;
+  if (process.platform === "darwin")
+    return spawnSync("chmod", ["+a", `user:${username} allow read`, file]).status;
+  return spawnSync("setfacl", ["-m", `u:${username}:r`, file]).status;
+}
+
 describe("FilesystemCheckpoint integration", () => {
   let temporaryRoot: string;
 
@@ -2269,15 +2294,15 @@ describe("FilesystemCheckpoint integration", () => {
     }
   });
 
-  it.skipIf(process.platform !== "darwin")(
+  it.skipIf(!supportsMetadataProbe)(
     "CHECKPOINT-08: 源文件带实际 xattr 时生成快照必须拒绝，不能静默丢掉属性",
     async () => {
       try {
         const ctx = await setupCheckpointFixture(temporaryRoot);
         const source = path.join(ctx.writerRoot, "extended.txt");
         await writeFile(source, "attribute matters", "utf8");
-        const marked = spawnSync("xattr", ["-w", "com.snowharness.checkpoint", "present", source]);
-        expect(marked.status).toBe(0);
+        const marked = markExtendedXattr(source, "com.snowharness.checkpoint", "present");
+        expect(marked).toBe(0);
         await expect(ctx.commit()).rejects.toThrow(/不支持 xattr/);
         expect(await countCheckpoints(ctx.invocationId)).toBe(0);
       } finally {
@@ -2286,15 +2311,15 @@ describe("FilesystemCheckpoint integration", () => {
     },
   );
 
-  it.skipIf(process.platform !== "darwin")(
+  it.skipIf(!supportsMetadataProbe)(
     "CHECKPOINT-08: 源文件带实际 ACL 时生成快照必须拒绝，不能静默丢掉权限",
     async () => {
       try {
         const ctx = await setupCheckpointFixture(temporaryRoot);
         const source = path.join(ctx.writerRoot, "acl.txt");
         await writeFile(source, "access matters", "utf8");
-        const marked = spawnSync("chmod", ["+a", `user:${userInfo().username} allow read`, source]);
-        expect(marked.status).toBe(0);
+        const marked = markExtendedAcl(source);
+        expect(marked).toBe(0);
         await expect(ctx.commit()).rejects.toThrow(/不支持 ACL/);
         expect(await countCheckpoints(ctx.invocationId)).toBe(0);
       } finally {
