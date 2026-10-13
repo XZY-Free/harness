@@ -25,7 +25,9 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           node node_modules/electron/install.js
           sudo apt-get update
-          sudo apt-get install -y ripgrep xvfb gnome-keyring dbus-x11
+          # attr/acl 提供 getfattr/getfacl：Snapshot 元数据核查（xattr/ACL 探测）的 Linux 前置，
+          # 与 Dockerfile 生产镜像的供应保持一致。
+          sudo apt-get install -y ripgrep xvfb gnome-keyring dbus-x11 attr acl
       - name: Run the shared verification plan
         run: pnpm acceptance
         env:
