@@ -24,6 +24,13 @@ jobs:
       # （与 Dockerfile、docker/worker/Dockerfile 一致）；vitest 工作区用例自阶段 3 起依赖它。
       - name: Build workspace-lock native provider
         run: pnpm build:workspace-lock
+      # 环境闭环验收（真实容器）的候选镜像前置：测试按 debian→node→socat→mysql 顺序
+      # 取首个可用镜像，必须备好非 mysql 的候选——mysql:8.0 自带 VOLUME /var/lib/mysql，
+      # 会引入匿名卷挂载而使 isolatedFromHost 隔离校验必然失败。
+      - name: Pull environment test container images
+        run: |
+          docker pull node:24-alpine
+          docker pull alpine/socat:latest
       - name: Install browser and Desktop runtime dependencies
         run: |
           pnpm exec playwright install --with-deps chromium
