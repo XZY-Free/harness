@@ -187,6 +187,36 @@ async function prepareAndActivate(input: {
   return { acquired, activated, candidate };
 }
 
+/** 进程组内是否仍有存活成员（真实 signal 0 探测；EPERM 说明存在但无权操作）。 */
+function processGroupAlive(processGroupId: number): boolean {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * 收掉某个受管 Writer 的**整个进程组**，并等到组真的清空。
+ *
+ * 受管 Writer 是 detached 进程组：wrapper 当组长，它启动的用户命令留在同一组里。
+ * 只杀组长会把「持续写盘」的用户命令留成孤儿 —— 它会在 `rm` 遍历之后用
+ * `appendFileSync(路径)` 把刚被删掉的活动文件**重建**出来，删树随即以
+ * `ENOTEMPTY` 失败（Linux CI 实测竞争，见 WORKSPACE-07）。因此删树前必须先确认组已清空。
+ */
+async function stopManagedWriterGroup(processGroupId: number): Promise<void> {
+  try {
+    process.kill(-processGroupId, "SIGKILL");
+  } catch {
+    // 组已不存在（Broker 已确认退出）时无需重复发送信号。
+  }
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline && processGroupAlive(processGroupId)) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 describe("Workspace continuity integration", () => {
   let temporaryRoot = "";
 
@@ -197,6 +227,7 @@ describe("Workspace continuity integration", () => {
   });
 
   it("WORKSPACE-01: after a runtime process death the same host restores files and mints the next legal generation", async () => {
+    let runtimePid: number | null = null;
     try {
       const { binding } = await createTestBinding({
         root: temporaryRoot,
@@ -227,6 +258,7 @@ describe("Workspace continuity integration", () => {
         cwd: firstRun.activated.grant.root,
         activityPath: activityFile,
       });
+      runtimePid = runtime.pid;
       const activityDeadline = Date.now() + 8_000;
       while (Date.now() < activityDeadline) {
         if ((await stat(activityFile).catch(() => null))?.size) break;
@@ -298,6 +330,9 @@ describe("Workspace continuity integration", () => {
         "durable bytes",
       );
     } finally {
+      // 组长在用例中途被 SIGKILL（模拟 Runtime 进程死亡），同组的用户命令仍可能在写盘：
+      // 删树前先收掉整组，否则孤儿会把活动文件重新建出来（ENOTEMPTY）。
+      if (runtimePid !== null) await stopManagedWriterGroup(runtimePid);
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
@@ -701,13 +736,8 @@ describe("Workspace continuity integration", () => {
         );
       expect(invocation?.executionState).not.toBe("running");
     } finally {
-      if (oldPid !== null) {
-        try {
-          process.kill(oldPid, "SIGKILL");
-        } catch {
-          // Broker 已确认旧进程退出时无需重复发送信号。
-        }
-      }
+      // 旧 Writer 的用户命令持续写盘：必须整组收掉并等组清空，再删树（否则活动文件被重建 → ENOTEMPTY）。
+      if (oldPid !== null) await stopManagedWriterGroup(oldPid);
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
