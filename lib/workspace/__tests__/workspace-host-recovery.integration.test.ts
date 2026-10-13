@@ -9,7 +9,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { db } from "@/lib/db/client";
@@ -49,70 +48,7 @@ import {
 } from "@/lib/workspace/workspace-writer";
 import { runWorkspaceWriterRelease } from "@/lib/workspace/workspace-writer-release";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-
-/**
- * 【临时诊断】WORKSPACE-08 专用无损探针。
- *
- * 目标：定位 CI 上稳定复现的 `read ECONNRESET @ Pipe.onStreamRead`
- * （db 组收尾 unhandled error；归因在本测试执行窗口）。
- *
- * 原则：只打印、不改变任何行为（uncaught 先记录、再原样继续 emit）。
- * 定位完成后本函数与调用点一起移除。
- */
-type AnyEmit = (this: unknown, type: string | symbol, ...args: unknown[]) => boolean;
-
-function installUncaughtDiagnostics(): () => void {
-  const originalProcessEmit = process.emit as unknown as AnyEmit;
-  const originalSocketEmit = Socket.prototype.emit as unknown as AnyEmit;
-  const log = (line: string): void => {
-    // 直写 stderr：绕过 console 拦截，确保在出错路径中也可靠落地
-    process.stderr.write(`${line}\n`);
-  };
-
-  const patchedProcessEmit: AnyEmit = function patchedProcessEmit(type, ...args) {
-    if (type === "uncaughtException") {
-      const err = args[0] as NodeJS.ErrnoException | undefined;
-      const stack = String(err?.stack ?? "")
-        .split("\n")
-        .slice(0, 4)
-        .join(" / ");
-      log(
-        `[DIAG-UNCAUGHT] msg=${err?.message} code=${err?.code} errno=${err?.errno} syscall=${err?.syscall} stack=${stack}`,
-      );
-    }
-    return originalProcessEmit.apply(this, [type, ...args]);
-  };
-
-  const patchedSocketEmit: AnyEmit = function patchedSocketEmit(type, ...args) {
-    if (type === "error") {
-      const err = args[0] as NodeJS.ErrnoException | undefined;
-      const socket = this as Socket;
-      log(
-        `[DIAG-SOCKET-ERROR] ctor=${socket.constructor.name} code=${err?.code} syscall=${err?.syscall} listeners=${socket.listenerCount("error")} msg=${err?.message}`,
-      );
-    }
-    return originalSocketEmit.apply(this, [type, ...args]);
-  };
-
-  process.emit = patchedProcessEmit as unknown as typeof process.emit;
-  Socket.prototype.emit = patchedSocketEmit as unknown as typeof Socket.prototype.emit;
-
-  const onDisconnect = (): void => {
-    log("[DIAG-CHANNEL] disconnect event fired");
-  };
-  process.once("disconnect", onDisconnect);
-  log(
-    `[DIAG-CHANNEL] install: connected=${process.connected} hasChannel=${Boolean(process.channel)}`,
-  );
-
-  return () => {
-    process.emit = originalProcessEmit as unknown as typeof process.emit;
-    Socket.prototype.emit = originalSocketEmit as unknown as typeof Socket.prototype.emit;
-    process.off("disconnect", onDisconnect);
-    log(`[DIAG-CHANNEL] restore: connected=${process.connected}`);
-  };
-}
+import { beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000000";
 
@@ -208,17 +144,6 @@ async function createBindingAtRoot(input: {
 describe("Workspace host recovery integration", () => {
   let root = "";
   let backend: WorkspaceBackend;
-  // 【临时诊断】文件级安装：覆盖错误可能出现的整个执行窗口（定位后随探针一起移除）。
-  let restoreUncaughtDiagnostics: (() => void) | null = null;
-
-  beforeAll(() => {
-    restoreUncaughtDiagnostics = installUncaughtDiagnostics();
-  });
-
-  afterAll(() => {
-    restoreUncaughtDiagnostics?.();
-    restoreUncaughtDiagnostics = null;
-  });
 
   beforeEach(async () => {
     await resetDatabase(db);

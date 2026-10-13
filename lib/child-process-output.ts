@@ -1,18 +1,21 @@
 /**
- * 子进程输出排空（跨域进程工具）。
+ * 子进程 stdio 管道工具（跨域进程工具）。
  *
- * 多处生产代码与测试支撑代码都会「接走并排空」子进程的 stdout/stderr
- * （受管 Writer 的换代、崩溃注入 helper、fresh-db 的 boot 冒烟等），
- * 目的是避免管道写满把子进程卡住。
+ * 我们持有的子进程管道有两类，风险方向不同但根因相同 —— 对端（子进程）会被
+ * 信号终止：受管 Writer 换代、crash 注入 helper、清理、以及测试里的显式强杀。
  *
- * 为什么不能只 resume / 挂 data 而不监听 error：
- * Node 在 Linux 上用 AF_UNIX socketpair 实现子进程 stdio。子进程被信号终止
- * （受管 Writer 换代、crash 注入、清理）时，若接收队列里仍有未读数据，
- * 读端可能收到 `read ECONNRESET`；没有 error 监听的流会把它升级为进程级
- * uncaughtException——一次正常的换代/清理就会打翻整个进程。macOS 的内核对
- * 同样场景通常给 EOF，因此该缺口只在 Linux（CI）偶发暴露。
+ * 1. **输出流**（stdout/stderr）：必须被消费，否则管道写满会把子进程卡住；
+ *    消费时同时要容忍来源死亡引发的读错误（`drainChildProcessOutput`）。
+ * 2. **放行通道**（受管 Writer 的私有 fd）：我们只往里写令牌，但 `spawn` 建立的
+ *    stdio 管道在父进程侧**立即开始读取**（用于感知对端关闭），因此它同样暴露在读端，
+ *    同样需要容忍对端死亡（`tolerateChannelPeerDeath`）。
  *
- * 语义：来源死亡引发的读错误 = 排空结束；流此后无内容可读，错误不再上抛。
+ * 为什么读错误会逃逸成进程级事故：
+ * Node 在 Linux 上用 AF_UNIX socketpair 实现子进程 stdio。子进程被信号终止时，
+ * 若接收队列里仍有未读数据（最典型的就是「令牌已写入、wrapper 还没读到就被杀」），
+ * 读端会收到 `read ECONNRESET`；macOS 的内核对同样场景通常给 EOF，因此该缺口只在
+ * Linux（CI）暴露。没有 error 监听的流会把它升级为 uncaughtException ——
+ * 一次正常的换代/清理/受控崩溃就能打翻整个进程。
  */
 
 /** 提供 stdout/stderr 读流的来源（`ChildProcess` 天然满足）。 */
@@ -37,4 +40,20 @@ export function drainChildProcessOutput(source: ChildProcessOutputSource): void 
     });
     stream.resume();
   }
+}
+
+/**
+ * 容忍放行通道的对端死亡：通道是**写**通道，但它同时被 Node 当作读流启动，
+ * 对端被强杀时会在读端产生 `read ECONNRESET`（Linux；macOS 给 EOF），
+ * 在写端产生 EPIPE。两者都不是本进程的故障：wrapper 在读到令牌之前就被杀掉，
+ * 正是「用户任务从未开始」的受控崩溃窗口（wrapper 的 41/42 退出码语义）。
+ *
+ * 是否放行成功不由这条管道回答 —— 写方失败按「未放行」处理，读者无内容可读；
+ * 因此这里只吸收错误，不改变任何通道语义。
+ */
+export function tolerateChannelPeerDeath(channel: NodeJS.EventEmitter | null | undefined): void {
+  if (!channel) return;
+  channel.on("error", () => {
+    // 对端已死：通道不再可用，无需（也无法）做任何补救。
+  });
 }

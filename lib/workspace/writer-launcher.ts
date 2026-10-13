@@ -32,7 +32,7 @@ import { randomUUID } from "node:crypto";
 import { type FileHandle, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { Writable } from "node:stream";
-import { drainChildProcessOutput } from "@/lib/child-process-output";
+import { drainChildProcessOutput, tolerateChannelPeerDeath } from "@/lib/child-process-output";
 import {
   WRITER_GO_CHANNEL_FD,
   type WriterBootstrapPayload,
@@ -214,6 +214,10 @@ export function launchManagedWriterProcess(input: {
   // wrapper 的输出由 Broker 接走并排空（避免管道写满把 wrapper 卡住）；
   // 排空同时把子进程被换代终止时的读错误按结束处理（见 helper 文档）。
   drainChildProcessOutput(child);
+  // 放行通道只写令牌，但 Node 在父进程侧同样立即开读：wrapper 在读到令牌之前被强杀
+  // （受控崩溃窗口 —— 41/42 正是"用户任务从未开始"的语义）时，Linux 会在读端给出
+  // `read ECONNRESET`。没有 error 监听就是一次进程级 uncaughtException。
+  tolerateChannelPeerDeath(channel);
   child.unref();
 
   let settled = false;
