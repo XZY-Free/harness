@@ -2320,7 +2320,11 @@ describe("FilesystemCheckpoint integration", () => {
         await writeFile(source, "access matters", "utf8");
         const marked = markExtendedAcl(source);
         expect(marked).toBe(0);
-        await expect(ctx.commit()).rejects.toThrow(/不支持 ACL/);
+        // 拒绝理由有平台差异：Linux 把 POSIX ACL 存成 `system.posix_acl_access` 扩展属性，
+        // 先执行的 xattr 探针会命中（结论同样成立）；macOS 的 ACL 不落在 xattr 里，
+        // 只能由 ACL 探针发现。两个平台都必须拒绝生成快照。
+        const aclRejection = process.platform === "darwin" ? /不支持 ACL/ : /不支持 (xattr|ACL)/;
+        await expect(ctx.commit()).rejects.toThrow(aclRejection);
         expect(await countCheckpoints(ctx.invocationId)).toBe(0);
       } finally {
         await rm(temporaryRoot, { recursive: true, force: true });
