@@ -1,6 +1,7 @@
 /** START-03/05: run the real Start and recovery Worker in separate platform processes. */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { drainChildProcessOutput } from "@/lib/child-process-output";
 
 const ENTRY_FLAG = "--durable-start-crash-entry";
 
@@ -116,6 +117,8 @@ export function spawnDurableStartCrashProcess(config: Config) {
     doneReject = reject;
   });
   void done.catch(() => undefined);
+  // 排空输出并把「来源死亡」的读错误按结束处理（见 helper 文档）。
+  drainChildProcessOutput(child);
   child.stdout?.on("data", (chunk: Buffer) => {
     stdout += chunk.toString();
     const lines = stdout.split("\n");

@@ -23,6 +23,7 @@
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { drainChildProcessOutput } from "@/lib/child-process-output";
 
 /** 子进程入口标记：只有带上它才执行真实的 Supervisor，避免被当作普通 import。 */
 const ENTRY_FLAG = "--supervisor-process-entry";
@@ -208,6 +209,8 @@ export async function spawnSupervisorProcess(
   const ready = new Promise<{ pid: number; instanceId: string }>((resolve) => {
     readyResolve = resolve;
   });
+  // 排空输出并把「来源死亡」的读错误按结束处理（见 helper 文档）。
+  drainChildProcessOutput(child);
   const report = new Promise<SupervisorProcessReport>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(

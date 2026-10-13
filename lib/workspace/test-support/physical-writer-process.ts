@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { drainChildProcessOutput } from "@/lib/child-process-output";
 import type { WorkspaceWriterIdentity } from "@/lib/workspace/workspace-host";
 
 /** 进程是否存活（真实 signal 0 探测；EPERM 说明存在但无权操作）。 */
@@ -138,6 +139,8 @@ export async function startWriterBrokerProbe(
   );
   let stdout = "";
   let stderr = "";
+  // 排空输出并把「来源死亡」的读错误按结束处理（见 helper 文档）。
+  drainChildProcessOutput(child);
   child.stdout?.on("data", (chunk: Buffer) => {
     stdout += chunk.toString();
   });

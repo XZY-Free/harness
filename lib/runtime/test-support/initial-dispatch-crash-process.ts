@@ -1,6 +1,7 @@
 /** R2/R3 崩溃窗口夹具：真实初次 dispatcher 在已提交边界等待，由父测试 SIGKILL。 */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { drainChildProcessOutput } from "@/lib/child-process-output";
 
 const ENTRY_FLAG = "--initial-dispatch-crash-entry";
 
@@ -125,6 +126,8 @@ export function spawnInitialDispatchCrashProcess(
     barrierReject = reject;
   });
   void barrier.catch(() => undefined);
+  // 排空输出并把「来源死亡」的读错误按结束处理（见 helper 文档）。
+  drainChildProcessOutput(child);
   child.stdout?.on("data", (chunk: Buffer) => {
     stdout += chunk.toString();
     for (const line of stdout.split("\n")) {

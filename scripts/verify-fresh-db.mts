@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import mysql from "mysql2/promise";
+import { drainChildProcessOutput } from "../lib/child-process-output";
 import { loadFreshMysqlSchema } from "../lib/db/fresh-schema-loader";
 import { assertFreshSchema } from "./verify-fresh-schema.mts";
 
@@ -237,6 +238,8 @@ async function main(): Promise<void> {
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    // 排空输出（转发到本进程）并把「来源死亡」的读错误按结束处理（见 helper 文档）。
+    drainChildProcessOutput(app);
     app.stdout?.on("data", (chunk) => process.stdout.write(chunk));
     app.stderr?.on("data", (chunk) => process.stderr.write(chunk));
     const status = await waitForBoot(origin, app);

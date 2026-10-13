@@ -1,6 +1,7 @@
 /** 在真实 Backend 已释放资源、Lease 终态尚未写入时停止清理进程。 */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { drainChildProcessOutput } from "@/lib/child-process-output";
 
 const ENTRY_FLAG = "--environment-cleanup-crash-entry";
 
@@ -60,6 +61,8 @@ export function spawnEnvironmentCleanupCrashProcess(config: Config) {
     resolveReleased = resolve;
     rejectReleased = reject;
   });
+  // 排空输出并把「来源死亡」的读错误按结束处理（见 helper 文档）。
+  drainChildProcessOutput(child);
   child.stdout?.on("data", (chunk: Buffer) => {
     stdout += chunk.toString("utf8");
     let newline = stdout.indexOf("\n");

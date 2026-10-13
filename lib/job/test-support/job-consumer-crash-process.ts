@@ -1,6 +1,7 @@
 /** JOB-08: consume a persisted JobCommand in an independent platform process. */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { drainChildProcessOutput } from "@/lib/child-process-output";
 
 const ENTRY_FLAG = "--job-consumer-crash-entry";
 
@@ -27,6 +28,8 @@ export function spawnJobConsumerCrashProcess(tenantId: string, commandId: string
   );
   if (child.pid === undefined) throw new Error("JobCommand 子进程未启动");
   let stderr = "";
+  // 排空输出并把「来源死亡」的读错误按结束处理（见 helper 文档）。
+  drainChildProcessOutput(child);
   child.stderr?.on("data", (chunk: Buffer) => {
     stderr += chunk.toString();
   });
