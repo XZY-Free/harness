@@ -7,8 +7,58 @@
  *
  * 服务端只依赖 action_code + resource_scope 判断；UI 菜单权限不能代替服务端 action_code。
  * 空 allowlist、未知 action、无法解析 scope 全部拒绝。
+ *
+ * 消费方模型 v4：action code 与 resource scope type 是两侧协议枚举（与 HTTP
+ * 状态码同理）——本文件为 nexharness 侧保留的协议词表；评测算法本体在 auth-center。
  */
-import { ResourceScopeError, type ResourceScopeType } from "@/lib/identity/resource-scope";
+
+/** Resource Scope 类型全集（方案 资源 Scope 列表；协议词表）。 */
+export const RESOURCE_SCOPE_TYPES = [
+  "agent",
+  "team",
+  "environment",
+  "provider",
+  "tool",
+  "tenant",
+  "policy",
+  "connection",
+  "principal",
+  "workspace",
+  "organization",
+  "job_type",
+  "owner",
+  "consumer",
+  "artifact_type",
+  "project",
+  "data_class",
+  "self",
+  "time_range",
+  "runtime",
+  "skill",
+  "knowledge_base",
+  "knowledge_document",
+  // S12-W05：Workload Token 撤销按 Invocation 维度授权
+  "invocation",
+] as const;
+
+export type ResourceScopeType = (typeof RESOURCE_SCOPE_TYPES)[number];
+
+const RESOURCE_SCOPE_TYPE_SET: ReadonlySet<string> = new Set(RESOURCE_SCOPE_TYPES);
+
+/** 判断 scope type 是否在协议目录内。 */
+export function isKnownResourceScopeType(type: string): type is ResourceScopeType {
+  return RESOURCE_SCOPE_TYPE_SET.has(type);
+}
+
+/** Resource Scope 解析/校验错误（协议错误类）。 */
+export class ResourceScopeError extends Error {
+  constructor(
+    public readonly code: "malformed_scope" | "unknown_scope_type" | "scope_type_mismatch",
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 /** 稳定管理动作目录（方案 + 最低动作集）。 */
 export const ACTION_CODES = [
@@ -167,10 +217,6 @@ export const ACTION_RESOURCE_TYPES: Record<ActionCode, readonly ResourceScopeTyp
   "analytics.read": ["tenant"],
   "audit.read": ["tenant"],
 };
-
-// Re-export 供外部统一从 action-codes 引入（authorization 等模块）。
-export type { ResourceScopeType } from "@/lib/identity/resource-scope";
-export { ResourceScopeError } from "@/lib/identity/resource-scope";
 
 /**
  * 校验 action_code 与 resource scope type 是否匹配方案目录。

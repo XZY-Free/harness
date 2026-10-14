@@ -1,6 +1,5 @@
 import { createServer } from "node:http";
 import { db } from "@/lib/db/client";
-import { assertIdentityExtensionsReady } from "@/lib/identity/identity-extension-bootstrap";
 import { logger } from "@/lib/logger";
 import {
   type DurableWorkerRole,
@@ -52,7 +51,6 @@ export async function checkWorkerDatabase(role: DurableWorkerRole): Promise<void
 
 export async function runProductionWorkerProcess(roleOverride?: string): Promise<void> {
   const role = parseDurableWorkerRole(roleOverride ?? process.env.WORKER_ROLE ?? process.argv[2]);
-  await assertIdentityExtensionsReady();
   await checkWorkerDatabase(role);
   const worker = createProductionWorkerRole(role);
   const now = new Date();
@@ -77,7 +75,6 @@ export async function runProductionWorkerProcess(roleOverride?: string): Promise
     }
     if (request.url === "/ready") {
       try {
-        await assertIdentityExtensionsReady();
         await checkWorkerDatabase(role);
         databaseReadWrite = true;
       } catch {

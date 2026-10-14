@@ -1,34 +1,27 @@
 import { AppearanceSetting } from "@/components/studio/appearance-setting";
-import { StudioGatePage } from "@/components/studio/gate-page";
-import { PermissionManager } from "@/components/studio/permission-manager";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { listPermissionManagement } from "@/lib/identity/permission-management";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
- * Agent Studio Settings 页（关口02 02-2c）。
+ * Agent Studio Settings 页（消费方模型 v4 改造）。
  *
- * 页级守卫 `user.manage`。Settings 只管理已有用户的角色模板绑定（物化为 grant）：
- * 不创建/删除用户，不创建/删除角色模板，不编辑权限。
- * 外观（主题）偏好为浏览器本地设置，随侧栏改版 v3 从导航槽位迁入本页。
- * server component 取 users + 角色模板 + 当前用户 id，传给 client manager。
+ * 成员与权限（用户 / 角色 / 授权解释器）已整体迁移至统一身份中心 auth-center
+ * 的控制台（/console/settings）——本页保留浏览器本地的外观偏好，并为成员与
+ * 权限提供跳转入口。页面不再持有任何身份数据与门禁逻辑（权威在 auth-center）。
  */
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
-  const gate = await requireStudioPagePermission("user.manage");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-
-  const view = await listPermissionManagement(gate.principal.tenantId);
+export default function SettingsPage() {
+  const authCenterBase = (process.env.NEX_AUTH_CENTER_URL ?? "").replace(/\/+$/, "");
+  const consoleUrl = authCenterBase ? `${authCenterBase}/console/settings` : "";
 
   return (
     <StudioPage
       title="平台设置"
-      description="管理成员、用户组和后台角色。资产使用范围在各资产详情中配置。"
+      description="外观偏好保存在本浏览器；成员与权限在统一身份中心（auth-center）管理。"
     >
       <div className="space-y-8">
         <StudioSettingsSection
@@ -41,9 +34,25 @@ export default async function SettingsPage() {
         </StudioSettingsSection>
         <StudioSettingsSection
           title="成员与权限"
-          description="默认员工能力与后台管理职责分别配置。"
+          description="用户、用户组、后台角色与授权解释器已迁移至统一身份中心，变更立即在本平台生效。"
         >
-          <PermissionManager initial={view} currentUserId={gate.principal.userIdentityId} />
+          <StudioSettingsRow
+            title="统一身份中心管理台"
+            description="登录、用户目录、角色与权限的唯一权威。"
+          >
+            {consoleUrl ? (
+              <a
+                href={consoleUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center rounded-[10px] border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                前往管理台 ↗
+              </a>
+            ) : (
+              <span className="text-xs text-muted-foreground">未配置身份中心地址</span>
+            )}
+          </StudioSettingsRow>
         </StudioSettingsSection>
       </div>
     </StudioPage>

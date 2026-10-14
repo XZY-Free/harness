@@ -19,7 +19,6 @@ import {
   datetime,
   decimal,
   index,
-  int,
   mysqlEnum,
   mysqlTable,
   text,
@@ -100,91 +99,6 @@ export const userIdentity = mysqlTable(
 
 export type UserIdentity = InferSelectModel<typeof userIdentity>;
 export type NewUserIdentity = InferInsertModel<typeof userIdentity>;
-
-// ─── Local authentication ───────────────────────────────────
-
-/**
- * 本地登录凭证。UserIdentity 仍是唯一用户事实源，本表只保存认证所需的账号索引、
- * 密码摘要与失败锁定状态，不复制姓名、状态或组织资料。
- */
-export const localCredential = mysqlTable(
-  "LocalCredential",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    userIdentityId: varchar("userIdentityId", { length: 36 })
-      .notNull()
-      .references(() => userIdentity.id),
-    normalizedAccount: varchar("normalizedAccount", { length: 128 }).notNull(),
-    passwordHash: varchar("passwordHash", { length: 512 }).notNull(),
-    failedLoginCount: int("failedLoginCount").notNull().default(0),
-    lockedUntil: datetime("lockedUntil", { mode: "date", fsp: 3 }),
-    passwordChangedAt: datetime("passwordChangedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    tenantAccountUq: uniqueIndex("LocalCredential_tenant_account_uq").on(
-      t.tenantId,
-      t.normalizedAccount,
-    ),
-    userUq: uniqueIndex("LocalCredential_user_uq").on(t.userIdentityId),
-  }),
-);
-
-export type LocalCredential = InferSelectModel<typeof localCredential>;
-export type NewLocalCredential = InferInsertModel<typeof localCredential>;
-
-/**
- * 可撤销登录会话。客户端持有随机令牌，数据库只保存 SHA-256 摘要；退出和改密均可立即撤销。
- */
-export const AUTH_SESSION_KINDS = ["authenticated", "password_enrollment"] as const;
-export type AuthSessionKind = (typeof AUTH_SESSION_KINDS)[number];
-
-export const authSession = mysqlTable(
-  "AuthSession",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    userIdentityId: varchar("userIdentityId", { length: 36 })
-      .notNull()
-      .references(() => userIdentity.id),
-    tokenHash: varchar("tokenHash", { length: 64 }).notNull(),
-    sessionKind: mysqlEnum("sessionKind", AUTH_SESSION_KINDS).notNull().default("authenticated"),
-    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }).notNull(),
-    revokedAt: datetime("revokedAt", { mode: "date", fsp: 3 }),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    tokenUq: uniqueIndex("AuthSession_token_uq").on(t.tokenHash),
-    userExpiryIdx: index("AuthSession_user_expiry_idx").on(
-      t.tenantId,
-      t.userIdentityId,
-      t.expiresAt,
-    ),
-  }),
-);
-
-export type AuthSession = InferSelectModel<typeof authSession>;
-export type NewAuthSession = InferInsertModel<typeof authSession>;
 
 // ─── Enterprise user profile facts ───────────────────────────
 

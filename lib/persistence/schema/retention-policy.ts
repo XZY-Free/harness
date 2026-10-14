@@ -1,6 +1,9 @@
 /**
  * schema：数据保留策略与 Legal Hold（S12-W06）。
  *
+ * nexharness 过渡引用：本 2 表的 DDL 与迁移归 auth-center；本文件暂留定义，
+ * 仅供恢复演练核对（lib/identity/recovery-consistency-checker.ts）同库只读查询。
+ *
  * 事实源：docs/architecture/security.md §6
  * （为 Thread/Event/Trace/Audit/Artifact/Memory/Knowledge/Job/安全记录定义独立保留策略；
  * Legal Hold 明确对象范围、原因、创建人、批准人、有效期和解除审计）。

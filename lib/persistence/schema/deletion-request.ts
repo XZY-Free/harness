@@ -1,6 +1,9 @@
 /**
  * schema：可验证删除请求与步骤（S12-W07）。
  *
+ * nexharness 过渡引用：本 2 表的 DDL 与迁移归 auth-center；本文件暂留定义，
+ * 仅供恢复演练核对（lib/identity/recovery-consistency-checker.ts）同库只读查询。
+ *
  * 事实源：docs/architecture/security.md §7
  * （删除请求生成独立生命周期，先解析对象关系与 Legal Hold，再进入各存储 Adapter；
  * 覆盖 MySQL、对象存储、向量/检索、Trace/Log 和缓存；

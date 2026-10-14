@@ -42,8 +42,9 @@ desktop/release/
 # 本地工具状态
 .playwright-cli/
 
-# ─── 文档（本地留存，不入库）───
-docs/
+# ─── 文档（本地留存，不入库；拆分方案 docs/split/ 例外入库）───
+docs/*
+!docs/split/
 # 散落在其他目录的方案 / 调试 / 记忆文档
 .debug/
 .workbuddy/

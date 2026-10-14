@@ -30,7 +30,6 @@ import {
   EnterpriseUserContextRequirementError,
   loadEnterpriseUserAccessPolicy,
 } from "@/lib/identity/enterprise-user-access-policy";
-import { getIdentityExtensions } from "@/lib/identity/identity-extension-bootstrap";
 import { prepareEnterpriseUserContext } from "@/lib/identity/prepare-enterprise-user-context";
 import { OutboundCredentialError } from "@/lib/identity/resolve-outbound-credential";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
@@ -139,7 +138,6 @@ export function createAgentActionExecutor(
           params.tenantId,
           resolved.agentRevisionId,
         );
-        const identityExtensions = await getIdentityExtensions();
         const enterpriseUserContextCandidate =
           enterprisePolicy.profileRequirement === "none"
             ? undefined
@@ -148,7 +146,6 @@ export function createAgentActionExecutor(
                   tenantId: params.tenantId,
                   userIdentityId: params.executionSubject.subjectId,
                   policy: enterprisePolicy,
-                  source: identityExtensions.profileSource,
                   deadlineAt: context.deadlineAt,
                   signal: context.abortSignal,
                 })

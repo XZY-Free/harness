@@ -1,4 +1,3 @@
-import { AgentAccessManager } from "@/components/studio/agent-access-manager";
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
@@ -58,6 +57,8 @@ export default async function AgentDetailsPage({
     agent.ownerUserId === gate.principal.userIdentityId ||
     (await hasStudioAction(gate.principal, "user.manage"));
   const fields = requirements?.enterprise_user_context?.allowed_fields ?? [];
+  const authCenterBase = (process.env.NEX_AUTH_CENTER_URL ?? "").replace(/\/+$/, "");
+  const accessConsoleUrl = authCenterBase ? `${authCenterBase}/console/agents/${id}` : "";
   return (
     <StudioPage
       title={agent.displayName}
@@ -106,7 +107,31 @@ export default async function AgentDetailsPage({
           </p>
         </div>
       </section>
-      {canManageAccess && <AgentAccessManager agentId={id} />}
+      {canManageAccess && (
+        <section
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-5 py-4"
+          aria-label="访问设置"
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">使用范围与协作权限</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              已迁移至统一身份中心（auth-center），变更立即生效。
+            </p>
+          </div>
+          {accessConsoleUrl ? (
+            <a
+              href={accessConsoleUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 shrink-0 items-center rounded-[10px] border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              前往配置 ↗
+            </a>
+          ) : (
+            <span className="text-xs text-muted-foreground">未配置身份中心地址</span>
+          )}
+        </section>
+      )}
       <section aria-labelledby="capabilities-title">
         <h2 id="capabilities-title" className="text-lg font-semibold">
           能为员工做什么
