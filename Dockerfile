@@ -6,9 +6,11 @@
 # 指定部署环境构建：
 #   docker build --build-arg APP_ENV=test -t nexharness:test nexharness/
 #
-# ⚠️ CNB 流水线的 build context 可能是仓库根（python-service/）——届时把下面所有
-#    COPY 源路径统一加 `nexharness/` 前缀即可（见迁移 #12 接 CNB）。本文件先保证
-#    本地 context=本目录时可独立构建、可验证。
+# ⚠️ CNB 接线的 build context 随部署形态而定（见 docs/split/04-cnb-接线方案.md）：
+#    - 沿用 python-service 仓子目录模式（context = 仓库根 python-service/）时，
+#      将下面所有 COPY 源路径统一加 `<子目录>/` 前缀；
+#    - 独立构建源（context = 仓根）时，保持现状即可。
+#    本文件先保证本地/独立 context 可构建、可验证。
 
 # 部署环境标识：development | test | production（默认 production）
 ARG APP_ENV=production
