@@ -25,7 +25,6 @@ import {
   type AgentRow,
   agentTable,
 } from "@/lib/persistence/schema/agents";
-import { resourceAccessPolicy } from "@/lib/persistence/schema/authorization";
 import { and, eq, isNull } from "drizzle-orm";
 
 /** 创建稳定 Agent 身份。 */
@@ -48,14 +47,7 @@ export async function createAgent(params: {
       ownerUserId: params.ownerUserId,
       lifecycleState: params.lifecycleState ?? "draft",
     });
-    await tx.insert(resourceAccessPolicy).values({
-      tenantId: params.tenantId,
-      resourceType: "agent",
-      resourceId: id,
-      mode: "inherit",
-      principals: [],
-      collaborators: [],
-    });
+    // 访问策略行不再预写（消费方模型 v4：缺行 = 继承平台默认；权威在 auth-center）。
   });
   const [row] = await db.select().from(agentTable).where(eq(agentTable.id, id)).limit(1);
   if (!row) {

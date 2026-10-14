@@ -1,32 +1,53 @@
 /**
- * schema seed（占位指引）。
+ * schema seed / 租户基线供给（消费方模型 v4）。
  *
- * 空库流程（消费方模型 v4，身份与租户数据的唯一权威是 auth-center 仓）：
+ * 建库顺序（跨两仓）：
  *
  * ```text
- * auth-center 迁移（19 表，含 Tenant / UserIdentity / PrincipalBinding）
- * → auth-center seed（默认租户 + 管理员，幂等）
- * → nexharness 迁移（116 表，外键引用上述 3 表）
- * → 本 seed（无独立种子数据，仅输出指引）
+ * auth-center 迁移（19 表）→ auth-center seed（默认租户，幂等）
+ * → nexharness 迁移（116 表，外键引用）
+ * → 本 seed：对已存在的全部租户幂等补齐内核基线（Governance + Policy 双 baseline）
  * ```
  *
- * 本仓不再承载任何身份引导逻辑——原 seedDefaultIdentity / seedDefaultGrants
- * 已随身份域迁移至 auth-center（其 lib/db/seed.ts 为权威版本）。
+ * 租户行由 auth-center 创建；内核基线属本仓数据——本命令即"租户供给流"的
+ * nexharness 侧半边（auth-center 建租户 ↔ 内核基线幂等供给）。
+ *
+ * 用法：APP_ENV=development pnpm db:seed
+ * 注意：db client 必须动态 import——静态 import 会在 env 装载前初始化（时序坑，
+ * 与 scripts/register-builtin-tools.ts 同模式）。
  */
+import { loadAppEnvFiles } from "@/lib/env-loader";
 
-// ─── CLI runner（pnpm db:seed → tsx lib/db/seed.ts）─────────
-
-function main(): void {
-  console.log("[seed] nexharness 116 表基线无独立种子数据。");
-  console.log("[seed] 身份与租户数据由 auth-center 统一管理，建库顺序：");
-  console.log("[seed]   1) cd ../auth-center && pnpm db:migrate   # 19 表（外键前置）");
-  console.log("[seed]   2) cd ../auth-center && pnpm db:seed      # 默认租户 + 管理员");
-  console.log("[seed]   3) 本仓 pnpm exec drizzle-kit migrate     # 116 表");
-  console.log("[seed] 完成。");
+async function main(): Promise<void> {
+  const appEnv = process.env.APP_ENV;
+  if (!appEnv || !["development", "test", "production"].includes(appEnv)) {
+    throw new Error("请显式设置 APP_ENV=development、test 或 production");
+  }
+  loadAppEnvFiles(appEnv);
+  const { closeDbPool, db } = await import("@/lib/db/client");
+  const { tenant } = await import("@/lib/persistence/schema/identity");
+  const { ensureTenantBaselines } = await import("@/lib/identity/tenant-bootstrap");
+  try {
+    const tenants = await db.select({ id: tenant.id, key: tenant.key }).from(tenant);
+    if (tenants.length === 0) {
+      console.log(
+        "[seed] 未发现租户。请先运行 auth-center 的 db:migrate 与 db:seed（建默认租户）。",
+      );
+      return;
+    }
+    for (const row of tenants) {
+      const result = await ensureTenantBaselines(row.id);
+      console.log(
+        `[seed] 租户 ${row.key}（${row.id}）：Governance/Policy 基线${result === "created" ? "已创建" : "已存在"}`,
+      );
+    }
+    console.log("[seed] 完成。");
+  } finally {
+    await closeDbPool();
+  }
 }
 
-// 直接运行时执行；被 import 时不自动跑。
-// 用 typeof require 守卫，CJS / ESM 加载器下都安全。
-if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
-  main();
-}
+main().catch((error) => {
+  console.error("[seed] 失败：", error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

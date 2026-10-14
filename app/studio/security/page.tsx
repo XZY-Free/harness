@@ -2,6 +2,7 @@ import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsLinkRow,
+  StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
@@ -22,6 +23,8 @@ export const dynamic = "force-dynamic";
 export default async function SecurityPage() {
   const gate = await requireStudioPagePermission("studio.access");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
+  const authCenterBase = (process.env.NEX_AUTH_CENTER_URL ?? "").replace(/\/+$/, "");
+  const authCenterConsoleUrl = authCenterBase ? `${authCenterBase}/console/settings` : "";
 
   return (
     <StudioPage
@@ -41,11 +44,23 @@ export default async function SecurityPage() {
         />
       </StudioSettingsSection>
       <StudioSettingsSection title="访问与记录">
-        <StudioSettingsLinkRow
-          href="/studio/settings"
+        <StudioSettingsRow
           title="成员角色"
-          description="为现有成员分配后台角色模板。"
-        />
+          description="用户、用户组与后台角色已迁移至统一身份中心（auth-center）管理。"
+        >
+          {authCenterConsoleUrl ? (
+            <a
+              href={authCenterConsoleUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center rounded-[10px] border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              前往管理台 ↗
+            </a>
+          ) : (
+            <span className="text-xs text-muted-foreground">未配置身份中心地址</span>
+          )}
+        </StudioSettingsRow>
         <StudioSettingsLinkRow
           href="/studio/audit"
           title="操作记录"

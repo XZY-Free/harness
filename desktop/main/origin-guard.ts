@@ -146,12 +146,23 @@ export function shouldBlockNavigation(
   return !isTrustedServerOrigin(targetUrl, allowedOrigins, allowInsecureRemote);
 }
 
+/** 读取 auth-center origin（NEX_AUTH_CENTER_URL；未配置或非法返回 null）。 */
+function loadAuthCenterOrigin(): string | null {
+  const raw = process.env.NEX_AUTH_CENTER_URL;
+  if (!raw || !raw.trim()) return null;
+  try {
+    return new URL(raw.trim()).origin;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 认证窗口导航规则：允许企业认证站点继续使用 HTTPS 跳转，
- * 也允许回到本机 renderer；其他协议一律拒绝。
+ * 也允许回到本机 renderer 与配置的 auth-center；其他一律拒绝。
  *
- * 认证窗口只由本地 `/api/auth/sso` 跳转创建，主窗口仍使用
- * shouldBlockNavigation 的严格受信 origin 规则。
+ * 认证窗口只由本机 `/login`（统一登录 302 壳）跳转创建，
+ * 主窗口仍使用 shouldBlockNavigation 的严格受信 origin 规则。
  */
 export function isAllowedAuthenticationWindowNavigation(
   targetUrl: string,
@@ -161,7 +172,9 @@ export function isAllowedAuthenticationWindowNavigation(
     const target = new URL(targetUrl);
     const renderer = new URL(rendererOrigin);
     if (target.origin === renderer.origin) return true;
-    return target.protocol === "https:";
+    if (target.protocol === "https:") return true;
+    // 开发期 auth-center 为 http://localhost:3101：仅放行显式配置的地址。
+    return target.origin === loadAuthCenterOrigin();
   } catch {
     return false;
   }

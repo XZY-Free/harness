@@ -1,4 +1,3 @@
-import { LoginScreen } from "@/components/auth/login-screen";
 import { BrandProvider } from "@/components/brand/brand-provider";
 import { BrandName } from "@/components/brand/brand-wordmark";
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
@@ -15,7 +14,6 @@ import {
 import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
 import { getDesktopBridge, getDesktopCapabilities } from "@/lib/desktop/capabilities";
 import type { DesktopWorkspaceSelectionResult } from "@/lib/desktop/capabilities";
-import type { ExternalAuthZoneConfig } from "@/lib/identity/authentication-provider";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { parseDesktopRoute } from "../desktop-route";
 import { navigateDesktop, usePathname } from "../next-navigation";
@@ -28,19 +26,39 @@ function DesktopError({ children }: { readonly children: ReactNode }) {
   );
 }
 
-function DesktopLogin({
-  onAuthenticated,
-  externalAuth,
-}: {
-  readonly onAuthenticated: () => void;
-  readonly externalAuth?: ExternalAuthZoneConfig;
-}) {
+/**
+ * 桌面登录引导（消费方模型 v4）。
+ *
+ * 登录统一在 auth-center 完成：主窗口导航到本机 `/login`（302 壳）→ main 进程
+ * 拦截并打开「认证窗口」（与主窗口同 session partition）→ auth-center 登录 →
+ * 回跳本机（`?ticket=` 由 middleware 兑换为 nex_session cookie）→ 认证窗口关闭、
+ * 主窗口重载 → 已认证的 shell 链路自然进入桌面。
+ */
+function DesktopLogin() {
+  const trigger = useCallback(() => {
+    const returnTo = encodeURIComponent(`${window.location.origin}/desktop`);
+    window.location.assign(`/login?returnTo=${returnTo}`);
+  }, []);
+  useEffect(() => {
+    // 挂载即自动触发一次；失败（如窗口打开被拦截）时用户可点击按钮重试。
+    trigger();
+  }, [trigger]);
+
   return (
-    <LoginScreen
-      returnTo="/desktop"
-      onAuthenticated={onAuthenticated}
-      externalAuth={externalAuth}
-    />
+    <main className="flex h-dvh flex-col items-center justify-center gap-4 px-8 text-center">
+      <div className="text-2xl font-semibold tracking-tight text-foreground">正在打开统一登录…</div>
+      <p className="max-w-md text-sm leading-6 text-muted-foreground">
+        登录将在企业统一身份中心（auth-center）完成；完成后自动返回本桌面。
+      </p>
+      <button
+        type="button"
+        onClick={trigger}
+        className="inline-flex h-9 items-center rounded-[10px] border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+      >
+        打开统一登录
+      </button>
+      <BrandName className="mt-6 text-xs text-muted-foreground" />
+    </main>
   );
 }
 
@@ -50,8 +68,9 @@ function DesktopShell() {
   const [shell, setShell] = useState<ClientThreadShellResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
-  const [externalAuth, setExternalAuth] = useState<ExternalAuthZoneConfig | undefined>();
-  const [loadVersion, setLoadVersion] = useState(0);
+  // 受认证 shell 的加载版本号：统一登录完成后主窗口整体重载（见 DesktopLogin），
+  // 本状态保留为重载语义锚点与未来局部刷新扩展点。
+  const [loadVersion] = useState(0);
   const [newThreadError, setNewThreadError] = useState<string | null>(null);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [workspace, setWorkspace] = useState<Extract<
@@ -86,31 +105,6 @@ function DesktopShell() {
       active = false;
     };
   }, [loadVersion]);
-
-  useEffect(() => {
-    if (!authRequired) return;
-    let active = true;
-    void apiFetch("/api/auth/external-methods?returnTo=%2Fdesktop", {
-      credentials: "include",
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const body = (await response.json().catch(() => null)) as {
-          external_auth?: ExternalAuthZoneConfig | null;
-        } | null;
-        return body?.external_auth ?? null;
-      })
-      .then((config) => {
-        if (active) setExternalAuth(config ?? undefined);
-      })
-      .catch(() => {
-        if (active) setExternalAuth(undefined);
-      });
-    return () => {
-      active = false;
-    };
-  }, [authRequired]);
 
   // /desktop 恒为新建空态页，不自动跳转最近会话；
   // 假 new 路由 /desktop/new 已移除。进入已有会话由 sidebar 导航到 /desktop/chat/{id}。
@@ -198,16 +192,8 @@ function DesktopShell() {
   );
 
   if (authRequired) {
-    return (
-      <DesktopLogin
-        externalAuth={externalAuth}
-        onAuthenticated={() => {
-          setAuthRequired(false);
-          setShell(null);
-          setLoadVersion((version) => version + 1);
-        }}
-      />
-    );
+    // 认证窗口完成登录后主窗口会整体重载，无需本地回调。
+    return <DesktopLogin />;
   }
   if (error) return <DesktopError>{error}</DesktopError>;
   if (!shell) return <DesktopError>正在连接服务器…</DesktopError>;

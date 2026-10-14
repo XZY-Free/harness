@@ -223,3 +223,34 @@ export async function ensureDefaultTenant(): Promise<{
   }
   return created;
 }
+
+/**
+ * 幂等确保指定租户的 Governance/Policy 双基线存在（缺则建）。
+ *
+ * 租户供给流（消费方模型 v4）：租户行由 auth-center 创建；内核基线（治理/策略）
+ * 属本仓数据，由本命令（seed/运维）对既有租户补齐——双基线同事务建立（原子）。
+ * 并发兜底：UNIQUE(tenantId, *SetKey) 约束冲突视为「已存在」。
+ *
+ * @returns "exists"（已存在，跳过）/ "created"（本次创建）
+ */
+export async function ensureTenantBaselines(
+  tenantId: string,
+  actorId = "system",
+): Promise<"exists" | "created"> {
+  const [existing] = await db
+    .select({ id: governanceConfigSetTable.id })
+    .from(governanceConfigSetTable)
+    .where(eq(governanceConfigSetTable.tenantId, tenantId))
+    .limit(1);
+  if (existing) return "exists";
+  try {
+    await db.transaction(async (tx) => {
+      await bootstrapTenantBaselines(tx, tenantId, actorId);
+    });
+    return "created";
+  } catch (error) {
+    // 并发竞争：另一事务已先建基线 → 唯一约束冲突，视为已存在。
+    if (isMysqlDuplicateEntryError(error)) return "exists";
+    throw error;
+  }
+}

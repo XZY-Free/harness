@@ -66,7 +66,7 @@ export function createMainWindow(rendererOrigin: string): BrowserWindow {
     },
   });
 
-  let ssoRedirectPending = false;
+  let loginRedirectPending = false;
   let authenticationWindow: BrowserWindow | null = null;
 
   const isRendererNavigation = (url: string): boolean => {
@@ -77,10 +77,11 @@ export function createMainWindow(rendererOrigin: string): BrowserWindow {
     }
   };
 
-  const isSsoStartNavigation = (url: string): boolean => {
+  /** 统一登录入口（本机 /login 302 壳 → auth-center）触发认证窗口。 */
+  const isLoginStartNavigation = (url: string): boolean => {
     try {
       const parsed = new URL(url);
-      return isRendererNavigation(url) && parsed.pathname.endsWith("/api/auth/sso");
+      return isRendererNavigation(url) && parsed.pathname === "/login";
     } catch {
       return false;
     }
@@ -145,12 +146,12 @@ export function createMainWindow(rendererOrigin: string): BrowserWindow {
 
   // 页面仅允许留在本机 renderer origin；远端地址只经 API proxy 调用，不能被导航为 UI 页面。
   win.webContents.on("will-navigate", (event, url) => {
-    if (isSsoStartNavigation(url)) {
-      ssoRedirectPending = true;
+    if (isLoginStartNavigation(url)) {
+      loginRedirectPending = true;
       return;
     }
-    if (ssoRedirectPending && !isRendererNavigation(url)) {
-      ssoRedirectPending = false;
+    if (loginRedirectPending && !isRendererNavigation(url)) {
+      loginRedirectPending = false;
       if (isAllowedAuthenticationWindowNavigation(url, rendererOrigin)) {
         event.preventDefault();
         openAuthenticationWindow(url);
@@ -158,7 +159,7 @@ export function createMainWindow(rendererOrigin: string): BrowserWindow {
       }
     }
     if (isRendererNavigation(url)) {
-      ssoRedirectPending = false;
+      loginRedirectPending = false;
     }
     if (shouldBlockNavigation(url, [rendererOrigin], true)) {
       event.preventDefault();
