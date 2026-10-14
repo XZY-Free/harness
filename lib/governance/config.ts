@@ -1,7 +1,7 @@
 /**
  * Governance Config 正式领域（关口02 02-6 · 冻结方案 §5 / §54-P2）。
  *
- * 唯一实施基线：docs/V12/01/SnowHarness_专题01_关口02_02-6_Policy_Permission_最终冻结实施方案.md。
+ * 唯一实施基线：docs/V12/01/NexHarness_专题01_关口02_02-6_Policy_Permission_最终冻结实施方案.md。
  *
  * 关键不变量（§5.4）：
  * - INITIAL_GOVERNANCE_CONFIG 全仓只存在一份，唯一用途 = 创建 Tenant initial

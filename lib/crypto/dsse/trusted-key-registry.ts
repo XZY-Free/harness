@@ -9,7 +9,7 @@
  * - TrustedKeyRegistry 解决"签名是否由可信密钥产生"（密码学校验）
  * - SigningIdentityPolicy 解决"签名者身份是否被授权"（业务校验）
  *
- * keyid 是签名工具分配的稳定标识符（如 "builder:snow-harness-hosted-release"），
+ * keyid 是签名工具分配的稳定标识符（如 "builder:nexharness-hosted-release"），
  * 与公钥一一对应；同一公钥可有多个 keyid 别名，但同一 keyid 不得对应不同公钥。
  */
 

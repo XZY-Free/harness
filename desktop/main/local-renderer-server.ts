@@ -12,7 +12,7 @@ export interface LocalRendererServer {
 export interface StartLocalRendererServerOptions {
   /** Vite 构建输出目录。 */
   readonly rendererDir: string;
-  /** 远端后端 origin，可含 Nginx basePath（如 https://host/snowharness）。 */
+  /** 远端后端 origin，可含 Nginx basePath（如 https://host/nexharness）。 */
   readonly serverOrigin: string;
 }
 
@@ -132,7 +132,7 @@ function proxyRequest(
         ...(request.headers.origin ? { origin: upstream.origin } : {}),
         // SSO 回调必须回到 Electron 的 loopback renderer，不能回到服务端 origin。
         // 该值由本地 renderer server 注入，服务端只接受 loopback origin。
-        "x-snowharness-desktop-origin": desktopRendererOrigin,
+        "x-nexharness-desktop-origin": desktopRendererOrigin,
       },
     },
     (received) => {
@@ -180,7 +180,7 @@ export async function startLocalRendererServer(
   const rendererRoot = resolve(options.rendererDir);
   const upstream = new URL(options.serverOrigin);
   if (upstream.protocol !== "http:" && upstream.protocol !== "https:") {
-    throw new Error("SNOW_SERVER_ORIGIN 必须是 http 或 https 地址");
+    throw new Error("NEX_SERVER_ORIGIN 必须是 http 或 https 地址");
   }
 
   let desktopRendererOrigin = "";

@@ -31,7 +31,7 @@ function requireEndpoint(): string {
   const endpoint = capabilityMarketConfig.endpoint;
   if (!endpoint) {
     throw new CapabilityMarketClientError(
-      "capability-market endpoint 未配置（SNOW_CAPABILITY_MARKET_ENDPOINT）",
+      "capability-market endpoint 未配置（NEX_CAPABILITY_MARKET_ENDPOINT）",
     );
   }
   return endpoint;

@@ -22,7 +22,7 @@ describe("api-fixtures: buildApiRequest", () => {
     ];
     for (const { audience, prefix } of cases) {
       const req = buildApiRequest({ audience, method: "GET", path: "/threads" });
-      expect(req.url).toBe(`https://snow.test${prefix}/threads`);
+      expect(req.url).toBe(`https://nex.test${prefix}/threads`);
       expect(req.headers.get("x-request-id")).toMatch(/^req_/);
     }
   });

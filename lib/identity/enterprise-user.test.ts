@@ -87,7 +87,7 @@ describe("enterprise-user profile normalization", () => {
     ).toBe(computeEnterpriseProfileFingerprint(fingerprintInput));
   });
 
-  it("把企业 disabled 与 inactive 统一映射为 SnowHarness disabled", () => {
+  it("把企业 disabled 与 inactive 统一映射为 NexHarness disabled", () => {
     expect(normalizeEnterpriseUserProfile({ ...profile, status: "disabled" }).status).toBe(
       "disabled",
     );

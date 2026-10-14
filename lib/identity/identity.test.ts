@@ -486,7 +486,7 @@ describe("local-authentication", () => {
     expect(session.tokenHash).not.toBe(login.sessionToken);
 
     const authentication = await localAuthenticationProvider.authenticate({
-      headers: new Headers({ cookie: `snow_session=${login.sessionToken}` }),
+      headers: new Headers({ cookie: `nex_session=${login.sessionToken}` }),
     });
     expect(authentication).toEqual({
       status: "authenticated",
@@ -540,7 +540,7 @@ describe("local-authentication", () => {
       password: "correct horse battery staple",
     });
     if (login.status !== "authenticated") throw new Error("登录失败");
-    const headers = new Headers({ cookie: `snow_session=${login.sessionToken}` });
+    const headers = new Headers({ cookie: `nex_session=${login.sessionToken}` });
 
     await localAuthenticationProvider.logout!({ headers });
 
@@ -565,7 +565,7 @@ describe("local-authentication", () => {
       loginAccount: "zhangsan",
     });
     expect(setup.status).toBe("password_setup_required");
-    const setupHeaders = new Headers({ cookie: `snow_session=${setup.sessionToken}` });
+    const setupHeaders = new Headers({ cookie: `nex_session=${setup.sessionToken}` });
     await expect(
       localAuthenticationProvider.authenticate({ headers: setupHeaders }),
     ).resolves.toEqual({
@@ -584,7 +584,7 @@ describe("local-authentication", () => {
     await expect(getPasswordEnrollment({ headers: setupHeaders })).resolves.toBeNull();
     await expect(
       localAuthenticationProvider.authenticate({
-        headers: new Headers({ cookie: `snow_session=${completed.sessionToken}` }),
+        headers: new Headers({ cookie: `nex_session=${completed.sessionToken}` }),
       }),
     ).resolves.toMatchObject({
       status: "authenticated",
@@ -611,7 +611,7 @@ describe("local-authentication", () => {
       loginAccount: "old-account",
     });
     const completed = await completePasswordEnrollment({
-      headers: new Headers({ cookie: `snow_session=${setup.sessionToken}` }),
+      headers: new Headers({ cookie: `nex_session=${setup.sessionToken}` }),
       password: "correct horse battery staple",
     });
     expect(completed.status).toBe("authenticated");
@@ -664,7 +664,7 @@ describe("local-authentication", () => {
       loginAccount: "strengthuser",
     });
     expect(setup.status).toBe("password_setup_required");
-    const setupHeaders = new Headers({ cookie: `snow_session=${setup.sessionToken}` });
+    const setupHeaders = new Headers({ cookie: `nex_session=${setup.sessionToken}` });
 
     // 命中常见片段的弱密码：长度虽达标但强度不足，服务端必须拒绝。
     // 密码校验先于会话消费，拒绝后设密会话仍存活，可继续用同一 headers 重试。
@@ -676,7 +676,7 @@ describe("local-authentication", () => {
     // 旧的 <12 长度校验会误拒这类合规密码，正是前端提示 8–128 却在设密提交时被卡的 UAT 断点。
     const completed = await completePasswordEnrollment({
       headers: setupHeaders,
-      password: "Snow2026",
+      password: "Nex2026",
     });
     expect(completed.status).toBe("authenticated");
   });
@@ -694,7 +694,7 @@ describe("resolver", () => {
       password: "correct horse battery staple",
     });
     if (login.status !== "authenticated") throw new Error("登录失败");
-    const headers = new Headers({ cookie: `snow_session=${login.sessionToken}` });
+    const headers = new Headers({ cookie: `nex_session=${login.sessionToken}` });
     const principal = await resolvePrincipal(headers, "employee");
 
     expect(principal.tenantId).toBe(DEFAULT_TENANT_ID);
@@ -919,7 +919,7 @@ it("SSO 回调在建立会话时接纳可信企业资料", async () => {
   };
   const response = await GET(
     new NextRequest("http://localhost/api/auth/callback?code=test-code&state=test-state", {
-      headers: { cookie: "snow_sso_state=test-state" },
+      headers: { cookie: "nex_sso_state=test-state" },
     }),
     { params: Promise.resolve({ operation: ["callback"] }) },
   );

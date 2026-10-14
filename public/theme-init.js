@@ -8,7 +8,7 @@
       let storedTheme = null;
       if (!employeeSurface) {
         try {
-          storedTheme = localStorage.getItem("snow-theme");
+          storedTheme = localStorage.getItem("nex-theme");
         } catch (_) {}
       }
       const explicitTheme = storedTheme === "dark" || storedTheme === "light" ? storedTheme : null;

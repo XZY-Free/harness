@@ -431,7 +431,7 @@ interface DefaultPathContext {
   /** 运行根（Writer root）：Binding 冻结的 locationRef。 */
   writerRoot: string;
   hostRoot: string;
-  /** 控制面根（realpath 后的 `<hostRoot>/.snow`）。 */
+  /** 控制面根（realpath 后的 `<hostRoot>/.nex`）。 */
   controlRoot: string;
   storageRoot: string;
   brokerStorageRoot: string;
@@ -454,7 +454,7 @@ interface DefaultPathContext {
 }
 
 /** 受管环境容器标签：与本模块实例登记口径一致（清理用）。 */
-const ENVIRONMENT_TENANT_LABEL = "snow-harness.environment.tenantId";
+const ENVIRONMENT_TENANT_LABEL = "nexharness.environment.tenantId";
 
 /** 本地优先镜像候选（与 A05 / R07 合规验收同一口径，不允许静默跳过）。 */
 const IMAGE_CANDIDATES = [
@@ -545,7 +545,7 @@ async function readRestoredRunRoots(runsDir: string): Promise<string[]> {
 }
 
 async function findRestoredRunRoot(writerRoot: string, attemptId: string): Promise<string> {
-  const runsDir = path.join(await realpath(writerRoot), ".snow-runs", attemptId);
+  const runsDir = path.join(await realpath(writerRoot), ".nex-runs", attemptId);
   const restored = await readRestoredRunRoots(runsDir);
   if (restored.length !== 1) {
     throw new Error(`期望唯一恢复运行根，实际为 ${restored.length} 个`);
@@ -556,10 +556,10 @@ async function findRestoredRunRoot(writerRoot: string, attemptId: string): Promi
 describe("Checkpoint 默认端到端路径（A06）", () => {
   let temporaryRoots: string[] = [];
   const envKeys = [
-    "SNOWHARNESS_WORKSPACE_HOST_URL",
-    "SNOWHARNESS_WORKSPACE_HOST_ROOT",
-    "SNOWHARNESS_SNAPSHOT_STORAGE_ROOT",
-    "SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT",
+    "NEXHARNESS_WORKSPACE_HOST_URL",
+    "NEXHARNESS_WORKSPACE_HOST_ROOT",
+    "NEXHARNESS_SNAPSHOT_STORAGE_ROOT",
+    "NEXHARNESS_ENVIRONMENT_CONTROL_ROOT",
     "RUNTIME_DEFAULT",
   ] as const;
   const savedEnv = new Map<string, string | undefined>();
@@ -626,7 +626,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     // 避免跨用例/跨轮次共用同一份 registry。
     const environmentControlRoot = path.join(base, "environment-control");
     await mkdir(environmentControlRoot, { recursive: true });
-    process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT = environmentControlRoot;
+    process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT = environmentControlRoot;
     // 平台部署事实：受管 Environment 的真实实例化只在 container Runtime 上成立。
     // Docker 与候选镜像缺失时直接失败，不静默跳过、不降级 host。
     if (!dockerReady) {
@@ -644,9 +644,9 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     const probe = await broker.probeIdentity();
     rpc = await listenWorkspaceHostRpc({ broker });
     // 部署事实：受管 Workspace Host 是独立进程，经 RPC 访问。
-    process.env.SNOWHARNESS_WORKSPACE_HOST_URL = rpc.url;
-    Reflect.deleteProperty(process.env, "SNOWHARNESS_WORKSPACE_HOST_ROOT");
-    process.env.SNOWHARNESS_SNAPSHOT_STORAGE_ROOT = storageRoot;
+    process.env.NEXHARNESS_WORKSPACE_HOST_URL = rpc.url;
+    Reflect.deleteProperty(process.env, "NEXHARNESS_WORKSPACE_HOST_ROOT");
+    process.env.NEXHARNESS_SNAPSHOT_STORAGE_ROOT = storageRoot;
 
     const logicalWorkspace = await createWorkspace({
       tenantId: TENANT_ID,
@@ -868,7 +868,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       baseRoot: base,
       writerRoot: workspace.locationRef!,
       hostRoot,
-      controlRoot: path.join(await realpath(hostRoot), ".snow"),
+      controlRoot: path.join(await realpath(hostRoot), ".nex"),
       storageRoot,
       brokerStorageRoot,
       scopeDigest: probe.scopeDigest,
@@ -944,7 +944,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     );
     expect(manifest.contentRootDigest).toBe(row?.contentRootDigest);
     expect(manifest.entries.some((entry) => entry.path === "state.txt")).toBe(true);
-    // 快照真的落在 `SNOWHARNESS_SNAPSHOT_STORAGE_ROOT` 指向的根里……
+    // 快照真的落在 `NEXHARNESS_SNAPSHOT_STORAGE_ROOT` 指向的根里……
     await expect(readFile(path.join(ctx.storageRoot, row!.manifestRef), "utf8")).resolves.toContain(
       "state.txt",
     );
@@ -1255,7 +1255,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       workspace?: { mode?: string; writerGeneration?: number; grantRef?: string };
     };
     expect(activationEvidence?.workspace?.mode).toBe("CHECKPOINT_RESTORABLE");
-    const remote = createRemoteWorkspaceHost(process.env.SNOWHARNESS_WORKSPACE_HOST_URL!);
+    const remote = createRemoteWorkspaceHost(process.env.NEXHARNESS_WORKSPACE_HOST_URL!);
     const grant = await remote.getWriter(
       ctx.scopeDigest,
       activationEvidence!.workspace!.writerGeneration!,
@@ -1468,7 +1468,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       recoveryAnchorDigest: anchorDigest,
       preparationClaim: accepted.claim,
     });
-    const candidateParent = path.join(await realpath(ctx.writerRoot), ".snow-runs", attempt.id);
+    const candidateParent = path.join(await realpath(ctx.writerRoot), ".nex-runs", attempt.id);
     return {
       anchor,
       anchorDigest,
@@ -1946,7 +1946,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     const activationEvidence = owner?.activationEvidence as {
       workspace?: { writerGeneration?: number; grantRef?: string };
     };
-    const remote = createRemoteWorkspaceHost(process.env.SNOWHARNESS_WORKSPACE_HOST_URL!);
+    const remote = createRemoteWorkspaceHost(process.env.NEXHARNESS_WORKSPACE_HOST_URL!);
     const grant = await remote.getWriter(
       ctx.scopeDigest,
       activationEvidence!.workspace!.writerGeneration!,
@@ -2182,7 +2182,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     } | null;
     const writerGeneration = activationEvidence?.workspace?.writerGeneration;
     if (!writerGeneration) throw new Error("恢复后缺少 Writer generation");
-    const remote = createRemoteWorkspaceHost(process.env.SNOWHARNESS_WORKSPACE_HOST_URL!);
+    const remote = createRemoteWorkspaceHost(process.env.NEXHARNESS_WORKSPACE_HOST_URL!);
     const grant = await remote.getWriter(ctx.scopeDigest, writerGeneration);
     if (!grant) throw new Error("恢复后的 Writer grant 不存在");
     const expectedRoot = await realpath(grant.root);
@@ -2224,7 +2224,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     expect(await readFile(path.join(second.expectedRoot, "state.txt"), "utf8")).toBe(
       "checkpoint-k2",
     );
-    const runsDir = path.join(await realpath(ctx.writerRoot), ".snow-runs", ctx.attemptId);
+    const runsDir = path.join(await realpath(ctx.writerRoot), ".nex-runs", ctx.attemptId);
     expect(await readRestoredRunRoots(runsDir)).toHaveLength(2);
 
     // 同一 C2 已经交付并开始运行后发生合法写入；正式重投只能回读历史结论，不能重做 K2
@@ -2342,7 +2342,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
       }),
     );
     const restoredBefore = await readRestoredRunRoots(
-      path.join(await realpath(ctx.writerRoot), ".snow-runs", ctx.attemptId),
+      path.join(await realpath(ctx.writerRoot), ".nex-runs", ctx.attemptId),
     );
     const resumeRequestsBefore = ctx.stub.resumeRequests.length;
 
@@ -2383,7 +2383,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     ).toBe(ownerBefore?.id);
     expect(
       await readRestoredRunRoots(
-        path.join(await realpath(ctx.writerRoot), ".snow-runs", ctx.attemptId),
+        path.join(await realpath(ctx.writerRoot), ".nex-runs", ctx.attemptId),
       ),
     ).toEqual(restoredBefore);
     expect(await readFile(path.join(second.expectedRoot, "state.txt"), "utf8")).toBe(
@@ -2788,7 +2788,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     } | null;
     const generation = evidence?.workspace?.writerGeneration;
     if (!owner || !generation) throw new Error("恢复执行缺少物理 Writer");
-    const remote = createRemoteWorkspaceHost(process.env.SNOWHARNESS_WORKSPACE_HOST_URL!);
+    const remote = createRemoteWorkspaceHost(process.env.NEXHARNESS_WORKSPACE_HOST_URL!);
     const grant = await remote.getWriter(ctx.scopeDigest, generation);
     if (!grant) throw new Error("恢复 Writer grant 不存在");
     const activeRoot = await realpath(grant.root);
@@ -2957,7 +2957,7 @@ describe("Checkpoint 默认端到端路径（A06）", () => {
     const firstEvidence = firstOwner?.activationEvidence as {
       workspace?: { writerGeneration?: number; grantRef?: string };
     };
-    const remoteSession = createRemoteWorkspaceHost(process.env.SNOWHARNESS_WORKSPACE_HOST_URL!);
+    const remoteSession = createRemoteWorkspaceHost(process.env.NEXHARNESS_WORKSPACE_HOST_URL!);
     const firstGrant = await remoteSession.getWriter(
       ctx.scopeDigest,
       firstEvidence!.workspace!.writerGeneration!,

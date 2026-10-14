@@ -30,7 +30,7 @@ await build({
 
 const rootPackage = JSON.parse(await readFile("package.json", "utf8"));
 const packageJson = {
-  name: "snow-harness-desktop",
+  name: "nexharness-desktop",
   version: rootPackage.version,
   description: rootPackage.description,
   author: rootPackage.author,

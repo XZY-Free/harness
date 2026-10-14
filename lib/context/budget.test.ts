@@ -33,17 +33,17 @@ describe("resolveTokenBudget", () => {
   });
 
   it("配置过的 model → 返回窗口值", () => {
-    const original = process.env.SNOW_CONTEXT_WINDOWS;
-    process.env.SNOW_CONTEXT_WINDOWS = JSON.stringify({ "test-model-1": 131072 });
+    const original = process.env.NEX_CONTEXT_WINDOWS;
+    process.env.NEX_CONTEXT_WINDOWS = JSON.stringify({ "test-model-1": 131072 });
     expect(resolveTokenBudget("test-model-1")).toBe(131072);
-    process.env.SNOW_CONTEXT_WINDOWS = original;
+    process.env.NEX_CONTEXT_WINDOWS = original;
   });
 
   it("非法 JSON → 回退空 map → Infinity", () => {
-    const original = process.env.SNOW_CONTEXT_WINDOWS;
-    process.env.SNOW_CONTEXT_WINDOWS = "{not json";
+    const original = process.env.NEX_CONTEXT_WINDOWS;
+    process.env.NEX_CONTEXT_WINDOWS = "{not json";
     expect(resolveTokenBudget("any")).toBe(Number.POSITIVE_INFINITY);
-    process.env.SNOW_CONTEXT_WINDOWS = original;
+    process.env.NEX_CONTEXT_WINDOWS = original;
   });
 });
 
@@ -149,15 +149,15 @@ describe("computeContextWindowStatus", () => {
   });
 
   it("配了 contextWindow → loadLevel 按阈值分级", async () => {
-    const orig = process.env.SNOW_CONTEXT_WINDOWS;
-    process.env.SNOW_CONTEXT_WINDOWS = JSON.stringify({ "win-model": 1000 });
+    const orig = process.env.NEX_CONTEXT_WINDOWS;
+    process.env.NEX_CONTEXT_WINDOWS = JSON.stringify({ "win-model": 1000 });
     try {
       // 短消息 used 远小于 1000 → normal
       const normal = await computeContextWindowStatus([uiMsg("user", "hi")], "win-model");
       expect(normal.configured).toBe(true);
       expect(normal.loadLevel).toBe("normal");
     } finally {
-      process.env.SNOW_CONTEXT_WINDOWS = orig;
+      process.env.NEX_CONTEXT_WINDOWS = orig;
     }
   });
 });

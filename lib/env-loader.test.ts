@@ -29,7 +29,7 @@ describe("env-loader P1-19 生产禁 .local 覆盖", () => {
   }
 
   it("dev: .local 覆盖平台注入", () => {
-    const k = track("SNOW_TEST_DEV");
+    const k = track("NEX_TEST_DEV");
     process.env[k] = "platform";
     writeFileSync(join(cwd, ".env.development.local"), `${k}=local-override`);
     writeFileSync(join(cwd, ".env.development"), `${k}=base`);
@@ -38,7 +38,7 @@ describe("env-loader P1-19 生产禁 .local 覆盖", () => {
   });
 
   it("production: .local 不覆盖平台注入(覆盖被禁)", () => {
-    const k = track("SNOW_TEST_PROD");
+    const k = track("NEX_TEST_PROD");
     process.env[k] = "platform-secret";
     // 生产不加载 .local 文件;即使存在也不读
     writeFileSync(join(cwd, ".env.production.local"), `${k}=attacker-override`);
@@ -47,7 +47,7 @@ describe("env-loader P1-19 生产禁 .local 覆盖", () => {
   });
 
   it("production: .env.production 仍填补空缺", () => {
-    const k = track("SNOW_TEST_PROD_FILL");
+    const k = track("NEX_TEST_PROD_FILL");
     delete process.env[k];
     writeFileSync(join(cwd, ".env.production"), `${k}=base-value`);
     loadAppEnvFiles("production");
@@ -55,7 +55,7 @@ describe("env-loader P1-19 生产禁 .local 覆盖", () => {
   });
 
   it("production: .env.production 不覆盖已有平台注入", () => {
-    const k = track("SNOW_TEST_PROD_NOOVER");
+    const k = track("NEX_TEST_PROD_NOOVER");
     process.env[k] = "platform";
     writeFileSync(join(cwd, ".env.production"), `${k}=base-override-attempt`);
     loadAppEnvFiles("production");

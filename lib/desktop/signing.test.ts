@@ -18,7 +18,7 @@ describe("getAuthSignPayload()", () => {
       challenge: "challenge-xyz",
     });
     expect(payload).toBe(
-      JSON.stringify(["snowharness-device-auth-v1", "tenant-1", "device-abc", "challenge-xyz"]),
+      JSON.stringify(["nexharness-device-auth-v1", "tenant-1", "device-abc", "challenge-xyz"]),
     );
     expect(payload).toContain(AUTH_SIGN_DOMAIN);
   });

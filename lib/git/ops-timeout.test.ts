@@ -67,7 +67,7 @@ function ws(): string {
 }
 
 beforeEach(() => {
-  tmp.root = mkdtempSync(join(tmpdir(), "snow-git-timeout-"));
+  tmp.root = mkdtempSync(join(tmpdir(), "nex-git-timeout-"));
   mkdirSync(ws(), { recursive: true });
   // 读原语（gitStatus/gitDiff/gitRemoteUrl）需 isRepoAt=true 才进入 git op 调用
   mkdirSync(join(ws(), ".git"));
@@ -75,12 +75,12 @@ beforeEach(() => {
   // 但 addConfig 仍会被调；让 .git 不存在会更纯，但写原语本身不依赖 .git 存在。
   // 这里保留 .git 让读原语路径覆盖到。）
   writeFileSync(join(ws(), "a.txt"), "x");
-  process.env.SNOW_GIT_OP_TIMEOUT_MS = String(TIMEOUT_MS);
+  process.env.NEX_GIT_OP_TIMEOUT_MS = String(TIMEOUT_MS);
 });
 
 afterEach(() => {
   rmSync(tmp.root, { recursive: true, force: true });
-  process.env.SNOW_GIT_OP_TIMEOUT_MS = undefined;
+  process.env.NEX_GIT_OP_TIMEOUT_MS = undefined;
 });
 
 /** 断言 op 超时抛 `git op 超时（<ms>ms）`。 */
@@ -122,7 +122,7 @@ describe("git ops 超时全覆盖（mock simple-git pending）", () => {
   });
 
   it("gitTag 超时（ensureRepo + .raw(rev-parse) / .addTag()）", async () => {
-    await expectTimeout(() => gitTag(TID, "snow-checkpoint-xxxx2222"));
+    await expectTimeout(() => gitTag(TID, "nex-checkpoint-xxxx2222"));
   });
 
   it("gitResetHard 超时（ensureRepo + .reset()）", async () => {

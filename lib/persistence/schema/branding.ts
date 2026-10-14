@@ -7,7 +7,7 @@ import { json } from "@/lib/persistence/schema/json-column";
  * BrandChangeAudit 只增不改：记录每次品牌变更的 revision 前后、patch 与操作者，供审计回溯。
  *
  * 分层语义（品牌可配置定案 2026-09-11）：本表是运行时主存储；branding.json 与
- * SNOW_BRAND_* 环境变量为部署期 pin 层，不入库；被 pin 字段拒绝 API 写入。
+ * NEX_BRAND_* 环境变量为部署期 pin 层，不入库；被 pin 字段拒绝 API 写入。
  *
  * 事实源：docs/architecture/persistence.md。
  */

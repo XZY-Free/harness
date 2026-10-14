@@ -91,11 +91,11 @@ describe("themeInitScript", () => {
   });
 
   it("子路径部署时从 basePath 加载主题初始化脚本", () => {
-    vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
+    vi.stubEnv("NEXT_PUBLIC_NEX_BASE_PATH", "/nexharness");
     try {
       const markup = renderLayoutMarkup();
       expect(markup).toMatch(
-        /<script[^>]*id="theme-init"[^>]*src="\/snowharness\/theme-init\.js"[^>]*><\/script>/,
+        /<script[^>]*id="theme-init"[^>]*src="\/nexharness\/theme-init\.js"[^>]*><\/script>/,
       );
     } finally {
       vi.unstubAllEnvs();

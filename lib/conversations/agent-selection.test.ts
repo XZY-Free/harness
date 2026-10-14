@@ -29,15 +29,15 @@ import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn"
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 async function createThreadForOwner(key: string): Promise<string> {

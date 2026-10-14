@@ -14,8 +14,8 @@
  *   { kind: "container", image: "repo@sha256:…"|"repo:tag", imageDigest: "sha256:…",
  *     entrypoint: ["/usr/bin/agent", "--serve"], args?: ["--port","8080"], workdir?: "/workspace" }
  * executionTarget（host_agent）:
- *   { kind: "host_agent", artifactRef: "snowharness-agent@1.2.0",
- *     artifactDigest: "sha256:…", agentCommand: ["/opt/snow/agent","--serve"], workdir?: "…" }
+ *   { kind: "host_agent", artifactRef: "nexharness-agent@1.2.0",
+ *     artifactDigest: "sha256:…", agentCommand: ["/opt/nex/agent","--serve"], workdir?: "…" }
  * filesystemPolicy:
  *   { readOnlyRootfs?: boolean, workspaceMountPath?: "/workspace"|null,
  *     workspaceMountReadOnly?: boolean, isolatedFromHost?: boolean,

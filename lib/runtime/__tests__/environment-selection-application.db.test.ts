@@ -41,7 +41,7 @@ function revisionInput(
     networkPolicyJson: { egress: "deny_all" },
     resourceLimitsJson: { cpu: 2, memoryMb: 2048 },
     secretPolicyJson: { inject: "none" },
-    executionTarget: { kind: "container", image: "snowharness/test:latest" },
+    executionTarget: { kind: "container", image: "nexharness/test:latest" },
     requiredCapabilities: { isolation: true },
     createdByType: "user",
     createdById: "test-admin",

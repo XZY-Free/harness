@@ -22,7 +22,7 @@ function Svg({ size = 16, className, children }: IconProps & { children: React.R
 }
 
 export const Icon = {
-  snowflake: (p: IconProps) => (
+  nexflake: (p: IconProps) => (
     <Svg {...p}>
       <path d="M12 2v20M4.9 4.9l14.2 14.2M19.1 4.9 4.9 19.1M2 12h20" />
     </Svg>

@@ -7,7 +7,7 @@ export function buildE2eModelReply(userText: string): string {
   if (trimmed.length === 0) return `${E2E_REPLY_PREFIX} 收到空消息。`;
   // generateObject 与最终回答共用同一个 OpenAI 端点。行动决策必须返回符合
   // HARNESS_NEXT_ACTION_SCHEMA 的 JSON；否则正式 Harness Loop 会按协议拒绝普通正文。
-  if (trimmed.includes("SnowHarness 的行动决策器")) {
+  if (trimmed.includes("NexHarness 的行动决策器")) {
     return JSON.stringify({
       actionId: "e2e-respond-1",
       stepNo: 1,

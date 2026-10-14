@@ -30,7 +30,7 @@ import type { NextRequest } from "next/server";
  *
  * 安全口径：
  * - safeJoin / symlink / realpath 防护仍在 lib/workspace.ts 各函数内
- * - isInternalPath：内部目录（.snow/.git/node_modules 等）下的文件一律 404，不暴露存在性
+ * - isInternalPath：内部目录（.nex/.git/node_modules 等）下的文件一律 404，不暴露存在性
  *
  * GET 响应（默认 JSON 信封）：{ ok: true, data: { path, content, stat:{size,mtime,isDirectory,revision} } }
  *   - 404 文件不存在 / 内部目录下的路径（不区分，防枚举）

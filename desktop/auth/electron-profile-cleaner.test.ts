@@ -38,23 +38,23 @@ describe("ElectronProfileCleaner (V10 Phase 8)", () => {
   });
 
   it("调用 session.fromPartition 获取 session 并调用 clearStorageData", async () => {
-    await cleaner.clearStorageData("persist:snowharness-browser-alice");
+    await cleaner.clearStorageData("persist:nexharness-browser-alice");
 
-    expect(fromPartitionMock).toHaveBeenCalledWith("persist:snowharness-browser-alice");
+    expect(fromPartitionMock).toHaveBeenCalledWith("persist:nexharness-browser-alice");
     expect(clearStorageDataMock).toHaveBeenCalledTimes(1);
   });
 
   it("不同 partition 传入不同参数", async () => {
-    await cleaner.clearStorageData("persist:snowharness-browser-alice");
-    await cleaner.clearStorageData("persist:snowharness-browser-bob");
+    await cleaner.clearStorageData("persist:nexharness-browser-alice");
+    await cleaner.clearStorageData("persist:nexharness-browser-bob");
 
-    expect(fromPartitionMock).toHaveBeenNthCalledWith(1, "persist:snowharness-browser-alice");
-    expect(fromPartitionMock).toHaveBeenNthCalledWith(2, "persist:snowharness-browser-bob");
+    expect(fromPartitionMock).toHaveBeenNthCalledWith(1, "persist:nexharness-browser-alice");
+    expect(fromPartitionMock).toHaveBeenNthCalledWith(2, "persist:nexharness-browser-bob");
     expect(clearStorageDataMock).toHaveBeenCalledTimes(2);
   });
 
   it("clearStorageData 无参数调用（清理所有存储类型）", async () => {
-    await cleaner.clearStorageData("persist:snowharness-browser-alice");
+    await cleaner.clearStorageData("persist:nexharness-browser-alice");
 
     expect(clearStorageDataMock).toHaveBeenCalledWith();
   });
@@ -63,15 +63,15 @@ describe("ElectronProfileCleaner (V10 Phase 8)", () => {
     const error = new Error("清理失败");
     clearStorageDataMock.mockRejectedValue(error);
 
-    await expect(cleaner.clearStorageData("persist:snowharness-browser-alice")).rejects.toThrow(
+    await expect(cleaner.clearStorageData("persist:nexharness-browser-alice")).rejects.toThrow(
       "清理失败",
     );
   });
 
   it("incognito partition 也可清理", async () => {
-    await cleaner.clearStorageData("snowharness-incognito-thread-1-nonce");
+    await cleaner.clearStorageData("nexharness-incognito-thread-1-nonce");
 
-    expect(fromPartitionMock).toHaveBeenCalledWith("snowharness-incognito-thread-1-nonce");
+    expect(fromPartitionMock).toHaveBeenCalledWith("nexharness-incognito-thread-1-nonce");
     expect(clearStorageDataMock).toHaveBeenCalledTimes(1);
   });
 });

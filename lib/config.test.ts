@@ -5,31 +5,31 @@ import { fileStorageConfig, runtimeConformanceConfig } from "./config";
  * Runtime Conformance 配置 fail-closed 测试。
  */
 
-const ORIG_RUNNER_SIGNING_IDENTITIES = process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON;
-const ORIG_LEGACY_RUNNERS = process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS;
-const ORIG_LEGACY_KEYS = process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON;
-const ORIG_ACTIVE_EXTERNAL_SIGNER = process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
-const ORIG_IMAGE_UPLOAD_MB = process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB;
-const ORIG_DOCUMENT_UPLOAD_MB = process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB;
+const ORIG_RUNNER_SIGNING_IDENTITIES = process.env.NEX_RUNNER_SIGNING_IDENTITIES_JSON;
+const ORIG_LEGACY_RUNNERS = process.env.NEX_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS;
+const ORIG_LEGACY_KEYS = process.env.NEX_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON;
+const ORIG_ACTIVE_EXTERNAL_SIGNER = process.env.NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+const ORIG_IMAGE_UPLOAD_MB = process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB;
+const ORIG_DOCUMENT_UPLOAD_MB = process.env.NEX_FILE_DOCUMENT_UPLOAD_MAX_MB;
 
 beforeEach(() => {
   // 清空 env（用 undefined 赋值，避免 delete 操作符）
-  process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = undefined;
-  process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = undefined;
-  process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = undefined;
-  process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = undefined;
-  process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = undefined;
-  process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = undefined;
+  process.env.NEX_RUNNER_SIGNING_IDENTITIES_JSON = undefined;
+  process.env.NEX_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = undefined;
+  process.env.NEX_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = undefined;
+  process.env.NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = undefined;
+  process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB = undefined;
+  process.env.NEX_FILE_DOCUMENT_UPLOAD_MAX_MB = undefined;
 });
 
 afterEach(() => {
   // 还原原值
-  process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = ORIG_RUNNER_SIGNING_IDENTITIES;
-  process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = ORIG_LEGACY_RUNNERS;
-  process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = ORIG_LEGACY_KEYS;
-  process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = ORIG_ACTIVE_EXTERNAL_SIGNER;
-  process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = ORIG_IMAGE_UPLOAD_MB;
-  process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = ORIG_DOCUMENT_UPLOAD_MB;
+  process.env.NEX_RUNNER_SIGNING_IDENTITIES_JSON = ORIG_RUNNER_SIGNING_IDENTITIES;
+  process.env.NEX_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = ORIG_LEGACY_RUNNERS;
+  process.env.NEX_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = ORIG_LEGACY_KEYS;
+  process.env.NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = ORIG_ACTIVE_EXTERNAL_SIGNER;
+  process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB = ORIG_IMAGE_UPLOAD_MB;
+  process.env.NEX_FILE_DOCUMENT_UPLOAD_MAX_MB = ORIG_DOCUMENT_UPLOAD_MB;
 });
 
 describe("fileStorageConfig", () => {
@@ -37,16 +37,16 @@ describe("fileStorageConfig", () => {
     expect(fileStorageConfig.imageUploadMaxBytes).toBe(10 * 1024 * 1024);
     expect(fileStorageConfig.documentUploadMaxBytes).toBe(20 * 1024 * 1024);
 
-    process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = "7";
-    process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = "32";
+    process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB = "7";
+    process.env.NEX_FILE_DOCUMENT_UPLOAD_MAX_MB = "32";
 
     expect(fileStorageConfig.imageUploadMaxBytes).toBe(7 * 1024 * 1024);
     expect(fileStorageConfig.documentUploadMaxBytes).toBe(32 * 1024 * 1024);
   });
 
   it.each(["0", "-1", "abc", "1.5"])("非法上传上限 %s 回退到安全默认值", (value) => {
-    process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = value;
-    process.env.SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB = value;
+    process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB = value;
+    process.env.NEX_FILE_DOCUMENT_UPLOAD_MAX_MB = value;
 
     expect(fileStorageConfig.imageUploadMaxBytes).toBe(10 * 1024 * 1024);
     expect(fileStorageConfig.documentUploadMaxBytes).toBe(20 * 1024 * 1024);
@@ -64,14 +64,14 @@ describe("runtimeConformanceConfig.runnerSigningIdentities", () => {
     revokedAt: null,
   };
 
-  it("只从 SNOW_RUNNER_SIGNING_IDENTITIES_JSON 读取完整身份记录", () => {
-    process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([identity]);
+  it("只从 NEX_RUNNER_SIGNING_IDENTITIES_JSON 读取完整身份记录", () => {
+    process.env.NEX_RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([identity]);
 
     expect(runtimeConformanceConfig.runnerSigningIdentities).toEqual([identity]);
   });
 
   it("同一 keyId 配置不同 publicKey 时返回空注册集并 fail-closed", () => {
-    process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([
+    process.env.NEX_RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([
       identity,
       {
         ...identity,
@@ -94,14 +94,14 @@ describe("runtimeConformanceConfig.runnerSigningIdentities", () => {
     ["字段类型非法", JSON.stringify([{ ...identity, tenantScope: 42 }])],
     ["时间非法", JSON.stringify([{ ...identity, validFrom: "not-a-date" }])],
   ])("%s 时返回空注册集并 fail-closed", (_label, raw) => {
-    process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = raw;
+    process.env.NEX_RUNNER_SIGNING_IDENTITIES_JSON = raw;
 
     expect(runtimeConformanceConfig.runnerSigningIdentities).toEqual([]);
   });
 
   it("旧环境变量单独存在时不生成身份记录，也不再暴露旧配置入口", () => {
-    process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = identity.runnerIdentity;
-    process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = JSON.stringify({
+    process.env.NEX_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = identity.runnerIdentity;
+    process.env.NEX_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = JSON.stringify({
       [identity.keyId]: identity.publicKey,
     });
 
@@ -118,15 +118,15 @@ describe("runtimeConformanceConfig.activeExternalConformanceSigner", () => {
     privateKeyPkcs8Base64: "MC4CAQAwBQYDK2VwBCIEIKK4J5hL1fS4YyL+2XnC1o0wPvfFjL0eQ0Q0Q0Q0Q0Q",
   };
 
-  it("只从 SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON 读取完整 signer 对象", () => {
-    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify(signer);
+  it("只从 NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON 读取完整 signer 对象", () => {
+    process.env.NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify(signer);
 
     expect(runtimeConformanceConfig.activeExternalConformanceSigner).toEqual(signer);
   });
 
   it("getter 惰性求值：同一次进程内修改 env 后读取到新值", () => {
     expect(runtimeConformanceConfig.activeExternalConformanceSigner).toBeNull();
-    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify(signer);
+    process.env.NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify(signer);
     expect(runtimeConformanceConfig.activeExternalConformanceSigner).toEqual(signer);
   });
 
@@ -136,7 +136,7 @@ describe("runtimeConformanceConfig.activeExternalConformanceSigner", () => {
       runnerIdentity: " ci/runtime-conformance ",
       privateKeyPkcs8Base64: " MC4CAQAwBQYDK2VwBCIEIA== ",
     };
-    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify(untrimmed);
+    process.env.NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify(untrimmed);
 
     expect(runtimeConformanceConfig.activeExternalConformanceSigner).toEqual(untrimmed);
   });
@@ -158,7 +158,7 @@ describe("runtimeConformanceConfig.activeExternalConformanceSigner", () => {
     ["runnerIdentity 纯空白", JSON.stringify({ ...signer, runnerIdentity: " \t " })],
     ["privateKeyPkcs8Base64 纯空白", JSON.stringify({ ...signer, privateKeyPkcs8Base64: " " })],
   ])("%s 时返回 null 并 fail-closed", (_label, raw) => {
-    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = raw;
+    process.env.NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = raw;
 
     expect(runtimeConformanceConfig.activeExternalConformanceSigner).toBeNull();
   });

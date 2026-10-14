@@ -29,13 +29,13 @@ const extraRoots: string[] = [];
 
 /** 造一个「其他工作区」的根目录，登记后由 afterEach 统一清理。 */
 function foreignWorkspaceRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "snow-other-ws-"));
+  const dir = mkdtempSync(join(tmpdir(), "nex-other-ws-"));
   extraRoots.push(dir);
   return dir;
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "snow-container-ownership-"));
+  root = mkdtempSync(join(tmpdir(), "nex-container-ownership-"));
 });
 
 afterEach(() => {
@@ -46,7 +46,7 @@ afterEach(() => {
 function candidate(overrides: Partial<OwnedContainerCandidate>): OwnedContainerCandidate {
   return {
     id: "container-id",
-    project: "snow-harness",
+    project: "nexharness",
     workspace: "workspace-hash",
     run: "run-1",
     ...overrides,
@@ -54,7 +54,7 @@ function candidate(overrides: Partial<OwnedContainerCandidate>): OwnedContainerC
 }
 
 describe("测试容器归属：可回收判定", () => {
-  const self = { project: "snow-harness", workspace: "workspace-hash" };
+  const self = { project: "nexharness", workspace: "workspace-hash" };
 
   it("本项目 + 本工作区 + 无活跃运行者 → 可回收", () => {
     const orphan = candidate({ id: "orphan", run: "gone" });

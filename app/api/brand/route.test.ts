@@ -37,7 +37,7 @@ function snapshot(
 describe("GET /api/brand", () => {
   it("返回品牌合同与 pin 信息并带 ETag", async () => {
     store.get.mockResolvedValue(snapshot("Acme", 3));
-    const response = await GET(new NextRequest("https://snow.example.test/api/brand"));
+    const response = await GET(new NextRequest("https://nex.example.test/api/brand"));
     expect(response.status).toBe(200);
     expect(response.headers.get("etag")).toBe('"3:0"');
     const body = (await response.json()) as { brand: { name: string }; pinned: unknown };
@@ -48,7 +48,7 @@ describe("GET /api/brand", () => {
   it("If-None-Match 命中返回 304 且不重复下发状态", async () => {
     store.get.mockResolvedValue(snapshot("Acme", 3));
     const response = await GET(
-      new NextRequest("https://snow.example.test/api/brand", {
+      new NextRequest("https://nex.example.test/api/brand", {
         headers: { "if-none-match": '"3:0"' },
       }),
     );
@@ -62,7 +62,7 @@ describe("PUT /api/admin/brand", () => {
     guard.mockResolvedValue({ ok: true, principal: { userIdentityId: "u-1", tenantId: "t-1" } });
     store.update.mockResolvedValue(snapshot("NewName", 4));
     const response = await PUT(
-      new NextRequest("https://snow.example.test/api/admin/brand", {
+      new NextRequest("https://nex.example.test/api/admin/brand", {
         method: "PUT",
         body: JSON.stringify({ name: "NewName" }),
         headers: { "content-type": "application/json" },
@@ -78,7 +78,7 @@ describe("PUT /api/admin/brand", () => {
     guard.mockResolvedValue({ ok: true, principal: { userIdentityId: "u-1", tenantId: "t-1" } });
     store.update.mockRejectedValue(new BrandFieldPinnedError("name", "env"));
     const response = await PUT(
-      new NextRequest("https://snow.example.test/api/admin/brand", {
+      new NextRequest("https://nex.example.test/api/admin/brand", {
         method: "PUT",
         body: JSON.stringify({ name: "X" }),
       }),
@@ -92,7 +92,7 @@ describe("PUT /api/admin/brand", () => {
     guard.mockResolvedValue({ ok: true, principal: { userIdentityId: "u-1", tenantId: "t-1" } });
     store.update.mockRejectedValue(new BrandValidationError("icon 仅支持 svg/png/webp/jpeg"));
     const response = await PUT(
-      new NextRequest("https://snow.example.test/api/admin/brand", {
+      new NextRequest("https://nex.example.test/api/admin/brand", {
         method: "PUT",
         body: JSON.stringify({ icon: "https://evil.example/x.png" }),
       }),
@@ -105,7 +105,7 @@ describe("PUT /api/admin/brand", () => {
   it("非对象请求体直接 400 且不触达 store", async () => {
     guard.mockResolvedValue({ ok: true, principal: { userIdentityId: "u-1", tenantId: "t-1" } });
     const response = await PUT(
-      new NextRequest("https://snow.example.test/api/admin/brand", {
+      new NextRequest("https://nex.example.test/api/admin/brand", {
         method: "PUT",
         body: JSON.stringify([1, 2]),
       }),
@@ -117,7 +117,7 @@ describe("PUT /api/admin/brand", () => {
   it("守卫拒绝时原样返回守卫响应", async () => {
     guard.mockResolvedValue({ ok: false, response: new Response(null, { status: 403 }) });
     const response = await PUT(
-      new NextRequest("https://snow.example.test/api/admin/brand", {
+      new NextRequest("https://nex.example.test/api/admin/brand", {
         method: "PUT",
         body: JSON.stringify({ name: "X" }),
       }),

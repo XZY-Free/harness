@@ -2,9 +2,9 @@
  * RuntimeTransport Port。
  *
  * Transport 是协议抽象，不是框架抽象：
- * - harness_runtime_protocol → SnowHarness Runtime Protocol（HTTP wire）。
+ * - harness_runtime_protocol → NexHarness Runtime Protocol（HTTP wire）。
  *
- * 不同 Transport 内部可以使用不同 wire protocol，但必须产出同一 SnowHarness
+ * 不同 Transport 内部可以使用不同 wire protocol，但必须产出同一 NexHarness
  * 归一化 Runtime Event（经 Transport Mapper → RuntimeEventIngress，04 §6）。
  *
  * 端口形状与 RuntimeHttpClient 一致（probe/start/cancel/resume/steer/safe-point）；
@@ -19,7 +19,7 @@ import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
 /** 协议中立的 Runtime Transport 端口。 */
 export type RuntimeTransport = RuntimeHttpClient;
 
-/** Transport 错误分类（进入 SnowHarness 稳定错误码，不暴露供应商 SDK 异常字符串）。 */
+/** Transport 错误分类（进入 NexHarness 稳定错误码，不暴露供应商 SDK 异常字符串）。 */
 export type RuntimeTransportFailureKind =
   | "endpoint_auth"
   | "protocol_schema"

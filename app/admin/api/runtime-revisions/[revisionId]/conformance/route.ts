@@ -46,7 +46,7 @@ import { RuntimeConformanceCaseFailedError } from "@/lib/runtime/domain/runtime-
  * - GET：列出 Revision 的全部 conformance 结果（按 caseId 升序）。
  * - POST：提交 conformance 结果。可选 `publish=true` 同时发布 Revision（通过门禁后）。
  * - publish=true时，发布事实、Runtime指针、Audit、Outbox和幂等完成同事务提交。
- * - external_endpoint Revision 的 POST 一律拒绝（422）：External 验收只能由 SnowHarness
+ * - external_endpoint Revision 的 POST 一律拒绝（422）：External 验收只能由 NexHarness
  *   主动调用黑盒 endpoint 产生，管理员/调用方上传 DSSE 属证据来源错误，不做验签/落库。
  *
  * 身份与授权：
@@ -274,13 +274,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   );
   if (!scopeResult.ok) return scopeResult.response;
 
-  // 7. external_endpoint 证据来源 fail-closed：External 验收只能由 SnowHarness 主动调用
+  // 7. external_endpoint 证据来源 fail-closed：External 验收只能由 NexHarness 主动调用
   //    黑盒 endpoint 产生；管理员/调用方上传的 DSSE 一律拒绝（签名可信也不改变证据来源错误）。
   //    拒绝发生在幂等守卫之前：不解析验签、不创建幂等记录、不落任何 ConformanceRun。
   if (revision.runtimeEvidenceKind === "external_endpoint") {
     return apiError(
       "BUSINESS_CONSTRAINT_VIOLATION",
-      "外部运行服务（external_endpoint）的 Conformance 验收报告只能由 SnowHarness 主动验收产生，不能上传",
+      "外部运行服务（external_endpoint）的 Conformance 验收报告只能由 NexHarness 主动验收产生，不能上传",
       { requestId },
     );
   }

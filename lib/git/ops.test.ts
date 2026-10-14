@@ -48,7 +48,7 @@ function gitCli(args: string[]): string {
 }
 
 beforeEach(() => {
-  tmp.root = mkdtempSync(join(tmpdir(), "snow-git-ops-"));
+  tmp.root = mkdtempSync(join(tmpdir(), "nex-git-ops-"));
   mkdirSync(ws(), { recursive: true });
 });
 
@@ -95,9 +95,9 @@ describe("gitAdd / gitCommit", () => {
     expect(res.commitSha).toBeUndefined();
   });
 
-  it("默认暂存排除 SnowHarness 内部文件", async () => {
+  it("默认暂存排除 NexHarness 内部文件", async () => {
     writeFile("app.js", "console.log('ok')");
-    writeFile(".snow/files/attachment/private/content", "private bytes");
+    writeFile(".nex/files/attachment/private/content", "private bytes");
 
     await gitAdd(TID);
 
@@ -142,8 +142,8 @@ describe("gitTag / gitResetHard", () => {
     writeFile("a.txt", "v1");
     await gitAdd(TID);
     await gitCommit(TID, "first");
-    const tag = await gitTag(TID, "snow-checkpoint-aaaa1111");
-    expect(tag.tag).toBe("snow-checkpoint-aaaa1111");
+    const tag = await gitTag(TID, "nex-checkpoint-aaaa1111");
+    expect(tag.tag).toBe("nex-checkpoint-aaaa1111");
     expect(tag.commitSha).toBe(gitCli(["rev-parse", "HEAD"]));
 
     // 制造改动
@@ -163,7 +163,7 @@ describe("gitTag / gitResetHard", () => {
 describe("ensureRemote / gitPush", () => {
   it("推送到 bare 本地 remote：refs/heads/main 落地", async () => {
     // bare remote
-    const remotePath = mkdtempSync(join(tmpdir(), "snow-git-remote-"));
+    const remotePath = mkdtempSync(join(tmpdir(), "nex-git-remote-"));
     execFileSync("git", ["init", "--bare", remotePath]);
 
     writeFile("a.txt", "hello");
@@ -187,7 +187,7 @@ describe("ensureRemote / gitPush", () => {
   });
 
   it("force push 覆盖远程历史（不默认）", async () => {
-    const remotePath = mkdtempSync(join(tmpdir(), "snow-git-remote-"));
+    const remotePath = mkdtempSync(join(tmpdir(), "nex-git-remote-"));
     execFileSync("git", ["init", "--bare", remotePath]);
 
     writeFile("a.txt", "v1");
@@ -250,40 +250,40 @@ describe("withGitTimeout（超时包装）", () => {
   });
 
   it("ms 显式参数优先于 env", async () => {
-    const prev = process.env.SNOW_GIT_OP_TIMEOUT_MS;
-    process.env.SNOW_GIT_OP_TIMEOUT_MS = "99999";
+    const prev = process.env.NEX_GIT_OP_TIMEOUT_MS;
+    process.env.NEX_GIT_OP_TIMEOUT_MS = "99999";
     try {
       const never = new Promise<string>(() => {});
       // 显式 15ms 应胜过 env 99999ms
       await expect(withGitTimeout(never, 15)).rejects.toThrow(/超时（15ms）/);
     } finally {
-      if (prev === undefined) process.env.SNOW_GIT_OP_TIMEOUT_MS = undefined;
-      else process.env.SNOW_GIT_OP_TIMEOUT_MS = prev;
+      if (prev === undefined) process.env.NEX_GIT_OP_TIMEOUT_MS = undefined;
+      else process.env.NEX_GIT_OP_TIMEOUT_MS = prev;
     }
   });
 
-  it("env SNOW_GIT_OP_TIMEOUT_MS 控制默认阈值（动态读，不缓存）", async () => {
-    const prev = process.env.SNOW_GIT_OP_TIMEOUT_MS;
+  it("env NEX_GIT_OP_TIMEOUT_MS 控制默认阈值（动态读，不缓存）", async () => {
+    const prev = process.env.NEX_GIT_OP_TIMEOUT_MS;
     const never = new Promise<string>(() => {});
-    process.env.SNOW_GIT_OP_TIMEOUT_MS = "25";
+    process.env.NEX_GIT_OP_TIMEOUT_MS = "25";
     try {
       await expect(withGitTimeout(never)).rejects.toThrow(/超时（25ms）/);
     } finally {
-      if (prev === undefined) process.env.SNOW_GIT_OP_TIMEOUT_MS = undefined;
-      else process.env.SNOW_GIT_OP_TIMEOUT_MS = prev;
+      if (prev === undefined) process.env.NEX_GIT_OP_TIMEOUT_MS = undefined;
+      else process.env.NEX_GIT_OP_TIMEOUT_MS = prev;
     }
   });
 
   it("env 非法值（NaN / 非正数）回退默认 60s", async () => {
-    const prev = process.env.SNOW_GIT_OP_TIMEOUT_MS;
+    const prev = process.env.NEX_GIT_OP_TIMEOUT_MS;
     const never = new Promise<string>(() => {});
-    process.env.SNOW_GIT_OP_TIMEOUT_MS = "not-a-number";
+    process.env.NEX_GIT_OP_TIMEOUT_MS = "not-a-number";
     try {
       // 60s 太久不实际等；用显式 ms=5 验证函数可正常调用，非法 env 不影响显式参数路径
       await expect(withGitTimeout(never, 5)).rejects.toThrow(/超时（5ms）/);
     } finally {
-      if (prev === undefined) process.env.SNOW_GIT_OP_TIMEOUT_MS = undefined;
-      else process.env.SNOW_GIT_OP_TIMEOUT_MS = prev;
+      if (prev === undefined) process.env.NEX_GIT_OP_TIMEOUT_MS = undefined;
+      else process.env.NEX_GIT_OP_TIMEOUT_MS = prev;
     }
   });
 });

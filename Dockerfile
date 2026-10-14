@@ -1,13 +1,13 @@
-# snow_harness 容器镜像（单 Next.js app）
+# nexharness 容器镜像（单 Next.js app）
 #
 # 本地构建（context = 本目录）：
-#   docker build -t snow-harness:dev snow_harness/
+#   docker build -t nexharness:dev nexharness/
 #
 # 指定部署环境构建：
-#   docker build --build-arg APP_ENV=test -t snow-harness:test snow_harness/
+#   docker build --build-arg APP_ENV=test -t nexharness:test nexharness/
 #
 # ⚠️ CNB 流水线的 build context 可能是仓库根（python-service/）——届时把下面所有
-#    COPY 源路径统一加 `snow_harness/` 前缀即可（见迁移 #12 接 CNB）。本文件先保证
+#    COPY 源路径统一加 `nexharness/` 前缀即可（见迁移 #12 接 CNB）。本文件先保证
 #    本地 context=本目录时可独立构建、可验证。
 
 # 部署环境标识：development | test | production（默认 production）

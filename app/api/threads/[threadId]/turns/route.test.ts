@@ -48,7 +48,7 @@ vi.mock("@/lib/runtime/employee-turn-dispatcher", () => ({
 }));
 
 function turnRequest(): NextRequest {
-  return new NextRequest("https://snow.example.com/api/threads/th1/turns", {
+  return new NextRequest("https://nex.example.com/api/threads/th1/turns", {
     method: "POST",
     headers: {
       "content-type": "application/json",

@@ -85,7 +85,7 @@ export interface SnapshotStorage {
  * JSON 请求就会**静默退化成普通对象**，服务端 `storage.readManifest(...)` 立刻是
  * "not a function"。因此真实 IO 必须留在**拥有该存储能力的那一端**执行：
  *
- * - `file`：显式物理根（部署配置了 `SNOWHARNESS_SNAPSHOT_STORAGE_ROOT` 一类事实）；
+ * - `file`：显式物理根（部署配置了 `NEXHARNESS_SNAPSHOT_STORAGE_ROOT` 一类事实）；
  *   同机进程间共享同一路径时合法。
  * - `broker_default`：由 Broker 使用**它自己持有的**默认存储。控制面不知道也不需要知道
  *   其物理路径 —— 远端进程的默认存储根在控制面本来就不可见，这是唯一诚实的表达。

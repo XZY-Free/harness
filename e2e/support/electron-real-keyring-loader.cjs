@@ -2,7 +2,7 @@
 
 /**
  * Playwright 的 Electron loader 为通用浏览器测试强制使用 basic/mock keychain。
- * SnowHarness Desktop E2E 必须验证真实 OS keyring，因此在应用入口加载前撤销该默认值。
+ * NexHarness Desktop E2E 必须验证真实 OS keyring，因此在应用入口加载前撤销该默认值。
  */
 function applyRealKeyringCommandLine(commandLine, platform = process.platform) {
   commandLine.removeSwitch("use-mock-keychain");

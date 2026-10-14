@@ -984,13 +984,13 @@ export function collectHarnessAgentBoundaryViolations(
 
 /**
  * 生产作用域在剥离注释后必须满足：
- * - A2A external production wire 不得出现 snowharness.execution_subject；
+ * - A2A external production wire 不得出现 nexharness.execution_subject；
  * - 公共 subject 映射不得输出裸 "service"（必须 platform_service）；
  * - Studio production 不得自行构造 conformance_run_id 字面量（只能来自 DTO）；
  * - 生产代码不得有 HR-specific runtime branch。
  */
 const EXECUTION_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
-  { pattern: /snowharness\.execution_subject/, title: "namespaced execution_subject wire" },
+  { pattern: /nexharness\.execution_subject/, title: "namespaced execution_subject wire" },
   {
     // 捕获直接赋值与三元输出映射（"platform_service" 因引号边界不匹配）；
     // === / !== / < / > 后的 "service" 是比较而非输出，可变长 lookbehind 排除。

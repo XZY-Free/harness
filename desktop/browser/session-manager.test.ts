@@ -29,16 +29,16 @@ import {
  */
 
 describe("session-manager 常量 (V10 Phase 4)", () => {
-  it("APP_SESSION_PARTITION 等于 persist:snowharness-app", () => {
-    expect(APP_SESSION_PARTITION).toBe("persist:snowharness-app");
+  it("APP_SESSION_PARTITION 等于 persist:nexharness-app", () => {
+    expect(APP_SESSION_PARTITION).toBe("persist:nexharness-app");
   });
 
-  it("BROWSER_PARTITION_PREFIX 等于 persist:snowharness-browser-", () => {
-    expect(BROWSER_PARTITION_PREFIX).toBe("persist:snowharness-browser-");
+  it("BROWSER_PARTITION_PREFIX 等于 persist:nexharness-browser-", () => {
+    expect(BROWSER_PARTITION_PREFIX).toBe("persist:nexharness-browser-");
   });
 
-  it("INCOGNITO_PARTITION_PREFIX 等于 snowharness-incognito-（不加 persist:）", () => {
-    expect(INCOGNITO_PARTITION_PREFIX).toBe("snowharness-incognito-");
+  it("INCOGNITO_PARTITION_PREFIX 等于 nexharness-incognito-（不加 persist:）", () => {
+    expect(INCOGNITO_PARTITION_PREFIX).toBe("nexharness-incognito-");
   });
 });
 
@@ -69,8 +69,8 @@ describe("sanitizeUserId (V10 Phase 4)", () => {
 });
 
 describe("getBrowserPartition (V10 Phase 4)", () => {
-  it("格式正确：persist:snowharness-browser-{userId}", () => {
-    expect(getBrowserPartition("alice")).toBe("persist:snowharness-browser-alice");
+  it("格式正确：persist:nexharness-browser-{userId}", () => {
+    expect(getBrowserPartition("alice")).toBe("persist:nexharness-browser-alice");
   });
 
   it("同一 userId 多次调用结果一致（共享登录态）", () => {
@@ -80,7 +80,7 @@ describe("getBrowserPartition (V10 Phase 4)", () => {
   });
 
   it("userId 含特殊字符被 sanitize 后拼接", () => {
-    expect(getBrowserPartition("user@domain")).toBe("persist:snowharness-browser-user_domain");
+    expect(getBrowserPartition("user@domain")).toBe("persist:nexharness-browser-user_domain");
   });
 
   it("不同 userId 生成不同 partition", () => {
@@ -89,16 +89,16 @@ describe("getBrowserPartition (V10 Phase 4)", () => {
 });
 
 describe("getIncognitoPartition (V10 Phase 4)", () => {
-  it("格式正确：snowharness-incognito-{threadId}-{nonce}（无 persist:）", () => {
+  it("格式正确：nexharness-incognito-{threadId}-{nonce}（无 persist:）", () => {
     const partition = getIncognitoPartition("thread-1", "abc123");
-    expect(partition).toBe("snowharness-incognito-thread-1-abc123");
+    expect(partition).toBe("nexharness-incognito-thread-1-abc123");
     // 不以 persist: 开头
     expect(partition.startsWith("persist:")).toBe(false);
   });
 
   it("带 nonce 时拼接到末尾", () => {
     const partition = getIncognitoPartition("thread-2", "nonce-xyz");
-    expect(partition).toBe("snowharness-incognito-thread-2-nonce-xyz");
+    expect(partition).toBe("nexharness-incognito-thread-2-nonce-xyz");
   });
 
   it("不带 nonce 时自动生成（基于 Date.now 36 进制）", () => {
@@ -106,7 +106,7 @@ describe("getIncognitoPartition (V10 Phase 4)", () => {
     vi.setSystemTime(new Date(2026, 0, 1, 0, 0, 0, 0));
     const ts = Date.now().toString(36);
     const partition = getIncognitoPartition("thread-3");
-    expect(partition).toBe(`snowharness-incognito-thread-3-${ts}`);
+    expect(partition).toBe(`nexharness-incognito-thread-3-${ts}`);
     vi.useRealTimers();
   });
 
@@ -118,18 +118,18 @@ describe("getIncognitoPartition (V10 Phase 4)", () => {
 
   it("threadId 含特殊字符被 sanitize", () => {
     const partition = getIncognitoPartition("thread/1", "nonce");
-    expect(partition).toBe("snowharness-incognito-thread_1-nonce");
+    expect(partition).toBe("nexharness-incognito-thread_1-nonce");
   });
 });
 
 describe("isPersistentPartition (V10 Phase 4)", () => {
   it("persist: 前缀返回 true", () => {
-    expect(isPersistentPartition("persist:snowharness-app")).toBe(true);
-    expect(isPersistentPartition("persist:snowharness-browser-alice")).toBe(true);
+    expect(isPersistentPartition("persist:nexharness-app")).toBe(true);
+    expect(isPersistentPartition("persist:nexharness-browser-alice")).toBe(true);
   });
 
   it("非 persist: 前缀返回 false", () => {
-    expect(isPersistentPartition("snowharness-incognito-thread-1-nonce")).toBe(false);
+    expect(isPersistentPartition("nexharness-incognito-thread-1-nonce")).toBe(false);
     expect(isPersistentPartition("memory")).toBe(false);
     expect(isPersistentPartition("")).toBe(false);
   });
@@ -137,57 +137,57 @@ describe("isPersistentPartition (V10 Phase 4)", () => {
 
 describe("isAppSession (V10 Phase 4)", () => {
   it("精确匹配 APP_SESSION_PARTITION 返回 true", () => {
-    expect(isAppSession("persist:snowharness-app")).toBe(true);
+    expect(isAppSession("persist:nexharness-app")).toBe(true);
   });
 
   it("不匹配 browser profile partition 返回 false", () => {
-    expect(isAppSession("persist:snowharness-browser-alice")).toBe(false);
+    expect(isAppSession("persist:nexharness-browser-alice")).toBe(false);
   });
 
   it("不匹配 incognito partition 返回 false", () => {
-    expect(isAppSession("snowharness-incognito-thread-1-nonce")).toBe(false);
+    expect(isAppSession("nexharness-incognito-thread-1-nonce")).toBe(false);
   });
 
   it("前缀相似但不精确匹配返回 false", () => {
-    expect(isAppSession("persist:snowharness-app-extra")).toBe(false);
-    expect(isAppSession("persist:snowharness-app ")).toBe(false);
+    expect(isAppSession("persist:nexharness-app-extra")).toBe(false);
+    expect(isAppSession("persist:nexharness-app ")).toBe(false);
   });
 });
 
 describe("isBrowserProfile (V10 Phase 4)", () => {
-  it("前缀匹配 persist:snowharness-browser- 返回 true", () => {
-    expect(isBrowserProfile("persist:snowharness-browser-alice")).toBe(true);
-    expect(isBrowserProfile("persist:snowharness-browser-user_domain")).toBe(true);
+  it("前缀匹配 persist:nexharness-browser- 返回 true", () => {
+    expect(isBrowserProfile("persist:nexharness-browser-alice")).toBe(true);
+    expect(isBrowserProfile("persist:nexharness-browser-user_domain")).toBe(true);
   });
 
   it("不匹配 app session partition 返回 false", () => {
-    expect(isBrowserProfile("persist:snowharness-app")).toBe(false);
+    expect(isBrowserProfile("persist:nexharness-app")).toBe(false);
   });
 
   it("不匹配 incognito partition 返回 false", () => {
-    expect(isBrowserProfile("snowharness-incognito-thread-1-nonce")).toBe(false);
+    expect(isBrowserProfile("nexharness-incognito-thread-1-nonce")).toBe(false);
   });
 
   it("仅前缀本身（无 userId）也匹配（容错）", () => {
-    expect(isBrowserProfile("persist:snowharness-browser-")).toBe(true);
+    expect(isBrowserProfile("persist:nexharness-browser-")).toBe(true);
   });
 });
 
 describe("isIncognito (V10 Phase 4)", () => {
-  it("前缀匹配 snowharness-incognito- 返回 true", () => {
-    expect(isIncognito("snowharness-incognito-thread-1-nonce")).toBe(true);
+  it("前缀匹配 nexharness-incognito- 返回 true", () => {
+    expect(isIncognito("nexharness-incognito-thread-1-nonce")).toBe(true);
   });
 
   it("不匹配 app session partition 返回 false", () => {
-    expect(isIncognito("persist:snowharness-app")).toBe(false);
+    expect(isIncognito("persist:nexharness-app")).toBe(false);
   });
 
   it("不匹配 browser profile partition 返回 false", () => {
-    expect(isIncognito("persist:snowharness-browser-alice")).toBe(false);
+    expect(isIncognito("persist:nexharness-browser-alice")).toBe(false);
   });
 
   it("仅前缀本身（无 threadId/nonce）也匹配（容错）", () => {
-    expect(isIncognito("snowharness-incognito-")).toBe(true);
+    expect(isIncognito("nexharness-incognito-")).toBe(true);
   });
 });
 
@@ -201,7 +201,7 @@ describe("SessionManager 类 (V10 Phase 4)", () => {
   describe("getOrCreateBrowserPartition", () => {
     it("首次调用创建并返回 partition", () => {
       const partition = manager.getOrCreateBrowserPartition("alice");
-      expect(partition).toBe("persist:snowharness-browser-alice");
+      expect(partition).toBe("persist:nexharness-browser-alice");
       expect(manager.getUserIds()).toContain("alice");
     });
 
@@ -222,7 +222,7 @@ describe("SessionManager 类 (V10 Phase 4)", () => {
 
     it("userId 含特殊字符被 sanitize 后保存", () => {
       const partition = manager.getOrCreateBrowserPartition("user@domain");
-      expect(partition).toBe("persist:snowharness-browser-user_domain");
+      expect(partition).toBe("persist:nexharness-browser-user_domain");
       // 内部 key 仍为原始 userId（removeBrowserProfile 应能匹配）
       expect(manager.removeBrowserProfile("user@domain")).toBe(true);
     });
@@ -231,7 +231,7 @@ describe("SessionManager 类 (V10 Phase 4)", () => {
   describe("createIncognitoPartition", () => {
     it("创建并返回 incognito partition", () => {
       const partition = manager.createIncognitoPartition("thread-1", "nonce-1");
-      expect(partition).toBe("snowharness-incognito-thread-1-nonce-1");
+      expect(partition).toBe("nexharness-incognito-thread-1-nonce-1");
       expect(manager.getIncognitoCount("thread-1")).toBe(1);
     });
 
@@ -282,7 +282,7 @@ describe("SessionManager 类 (V10 Phase 4)", () => {
       manager.createIncognitoPartition("thread-1", "n1");
       manager.destroyIncognitoPartitions("thread-1");
       const partition = manager.createIncognitoPartition("thread-1", "n2");
-      expect(partition).toBe("snowharness-incognito-thread-1-n2");
+      expect(partition).toBe("nexharness-incognito-thread-1-n2");
       expect(manager.getIncognitoCount("thread-1")).toBe(1);
     });
 
@@ -322,7 +322,7 @@ describe("SessionManager 类 (V10 Phase 4)", () => {
       manager.getOrCreateBrowserPartition("alice");
       manager.removeBrowserProfile("alice");
       const partition = manager.getOrCreateBrowserPartition("alice");
-      expect(partition).toBe("persist:snowharness-browser-alice");
+      expect(partition).toBe("persist:nexharness-browser-alice");
       expect(manager.getUserIds()).toContain("alice");
     });
   });

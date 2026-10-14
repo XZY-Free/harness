@@ -26,7 +26,7 @@ export function allocatePort(threadId: string): number {
   }
   if (cursor > end) {
     throw new Error(
-      `[runtime] 端口耗尽（${runtimeConfig.portRangeStart}-${end}）；请提高 SNOW_RUNTIME_PORT_END 或回收空闲 thread`,
+      `[runtime] 端口耗尽（${runtimeConfig.portRangeStart}-${end}）；请提高 NEX_RUNTIME_PORT_END 或回收空闲 thread`,
     );
   }
   const port = cursor;

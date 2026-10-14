@@ -89,11 +89,11 @@ describe("extractKeywords - Intl.Segmenter 分词", () => {
   });
 });
 
-// S1（11-P2-1）：停用词可配置(env SNOW_SKILL_STOPWORDS)
+// S1（11-P2-1）：停用词可配置(env NEX_SKILL_STOPWORDS)
 describe("extractKeywords - 停用词可配置", () => {
   afterEach(() => {
     // 清缓存 + 恢复 env
-    Reflect.deleteProperty(process.env, "SNOW_SKILL_STOPWORDS");
+    Reflect.deleteProperty(process.env, "NEX_SKILL_STOPWORDS");
     invalidateStopwordCache();
   });
 
@@ -105,8 +105,8 @@ describe("extractKeywords - 停用词可配置", () => {
     expect(kws).not.toContain("生成");
   });
 
-  it("env SNOW_SKILL_STOPWORDS 叠加自定义停用词", () => {
-    process.env.SNOW_SKILL_STOPWORDS = "需求分析,自定义词";
+  it("env NEX_SKILL_STOPWORDS 叠加自定义停用词", () => {
+    process.env.NEX_SKILL_STOPWORDS = "需求分析,自定义词";
     invalidateStopwordCache();
     const kws = extractKeywords("需求分析 自定义词 撰写");
     expect(kws).not.toContain("需求分析");
@@ -115,7 +115,7 @@ describe("extractKeywords - 停用词可配置", () => {
   });
 
   it("空 env 配置 → 仅默认停用词", () => {
-    process.env.SNOW_SKILL_STOPWORDS = "";
+    process.env.NEX_SKILL_STOPWORDS = "";
     invalidateStopwordCache();
     const kws = extractKeywords("需求分析 撰写");
     expect(kws).toContain("需求分析");

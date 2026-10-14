@@ -39,7 +39,7 @@ export type ArtifactType = ArtifactKind;
  * 与 Runtime Conformance 的 Predicate Type 区分，专用于制品 provenance 声明。
  */
 export const ARTIFACT_ATTESTATION_PREDICATE_TYPE =
-  "https://snowharness.dev/attestation/artifact-provenance/v1";
+  "https://nexharness.dev/attestation/artifact-provenance/v1";
 
 export const ATTESTATION_FAILURE_CODES = [
   "unknown_artifact_type",

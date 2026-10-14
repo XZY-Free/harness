@@ -62,7 +62,7 @@ export function createMainWindow(rendererOrigin: string): BrowserWindow {
       webSecurity: true,
       allowRunningInsecureContent: false,
       // App Session 独立 partition，与系统浏览器 Cookie/storage 隔离
-      partition: "persist:snowharness-app",
+      partition: "persist:nexharness-app",
     },
   });
 
@@ -116,7 +116,7 @@ export function createMainWindow(rendererOrigin: string): BrowserWindow {
         nodeIntegration: false,
         webSecurity: true,
         allowRunningInsecureContent: false,
-        partition: "persist:snowharness-app",
+        partition: "persist:nexharness-app",
       },
     });
     authenticationWindow = child;

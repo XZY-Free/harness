@@ -731,7 +731,7 @@ describe("dispatchEmployeeTurn", () => {
         tenantId: fixture.tenantId,
         userId: fixture.ownerId,
         deviceKey: "desktop-device-1",
-        displayName: "snow_harness",
+        displayName: "nexharness",
         storageScopeDigest: `sha256:${"b".repeat(64)}`,
       });
       await db
@@ -840,7 +840,7 @@ describe("dispatchEmployeeTurn", () => {
   });
 
   it("external_endpoint 真实发送 HTTP 并持久化会话能力，不启动 Hosted Loop", async () => {
-    vi.stubEnv("SNOW_CONTROL_PLANE_PUBLIC_URL", "https://platform.example.test/base/");
+    vi.stubEnv("NEX_CONTROL_PLANE_PUBLIC_URL", "https://platform.example.test/base/");
     const { server, tenantId, ownerId, thread, turn } =
       await seedReadyExternalEmployeeTurn("http-start");
     const observedAtExternalStart: Array<{ ownerId: string | null; sessionIds: string[] }> = [];

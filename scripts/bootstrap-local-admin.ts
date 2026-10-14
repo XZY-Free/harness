@@ -10,9 +10,9 @@ function required(name: string): string {
 }
 
 async function main(): Promise<void> {
-  const email = required("SNOW_BOOTSTRAP_ADMIN_EMAIL");
-  const displayName = required("SNOW_BOOTSTRAP_ADMIN_NAME");
-  const passwordFile = required("SNOW_BOOTSTRAP_ADMIN_PASSWORD_FILE");
+  const email = required("NEX_BOOTSTRAP_ADMIN_EMAIL");
+  const displayName = required("NEX_BOOTSTRAP_ADMIN_NAME");
+  const passwordFile = required("NEX_BOOTSTRAP_ADMIN_PASSWORD_FILE");
   const mode = statSync(passwordFile).mode & 0o777;
   if ((mode & 0o077) !== 0) {
     throw new Error("管理员密码文件权限过宽，请设置为仅文件所有者可读写（0600）");

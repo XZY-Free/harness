@@ -53,7 +53,7 @@ describe("canonical production worker topology", () => {
       "scripts/workers/environment-lease-cleanup.ts",
     );
     expect(
-      topology.services["workspace-host"]?.environment?.SNOWHARNESS_WORKSPACE_HOST_ROOT,
+      topology.services["workspace-host"]?.environment?.NEXHARNESS_WORKSPACE_HOST_ROOT,
     ).toBeTruthy();
     expect(
       topology.services["environment-lease-cleanup"]?.environment?.WORKER_ROLE,

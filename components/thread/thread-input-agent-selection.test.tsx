@@ -130,8 +130,8 @@ describe("Desktop 本地目录选择", () => {
     expect(screen.getByRole("button", { name: "选择本地目录" })).toBeTruthy();
 
     rerender(
-      <ThreadInput {...props} onWorkspaceSelect={onWorkspaceSelect} workspaceName="snow_harness" />,
+      <ThreadInput {...props} onWorkspaceSelect={onWorkspaceSelect} workspaceName="nexharness" />,
     );
-    expect(screen.getByRole("button", { name: "本地目录：snow_harness" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "本地目录：nexharness" })).toBeTruthy();
   });
 });

@@ -121,8 +121,8 @@ function safeComponent(value: string): string {
 
 export function defaultEnvironmentControlRoot(): string {
   return (
-    process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT?.trim() ||
-    path.join(tmpdir(), "snowharness-environment")
+    process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT?.trim() ||
+    path.join(tmpdir(), "nexharness-environment")
   );
 }
 
@@ -200,7 +200,7 @@ export interface ContainerEnvironmentBackendDeps {
 }
 
 function containerName(operationId: string): string {
-  return `snow-env-${safeComponent(operationId).slice(0, 40)}`;
+  return `nex-env-${safeComponent(operationId).slice(0, 40)}`;
 }
 
 /**
@@ -639,10 +639,10 @@ export function createContainerEnvironmentBackend(
         entrypoint: spec.container.entrypoint,
         args: spec.container.args,
         labels: {
-          "snow-harness.environment.operationId": input.operationId,
-          "snow-harness.environment.leaseId": input.leaseId,
-          "snow-harness.environment.tenantId": input.tenantId,
-          "snow-harness.environment.revisionId": spec.revisionId,
+          "nexharness.environment.operationId": input.operationId,
+          "nexharness.environment.leaseId": input.leaseId,
+          "nexharness.environment.tenantId": input.tenantId,
+          "nexharness.environment.revisionId": spec.revisionId,
         },
         memoryBytes: spec.resourceLimits.memoryBytes,
         nanoCpus: spec.resourceLimits.nanoCpus,

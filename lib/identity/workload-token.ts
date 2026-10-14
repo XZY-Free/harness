@@ -3,7 +3,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { API_STATUS, apiError, generateRequestId } from "@/lib/http";
 import type { ApiAudience } from "@/lib/http";
 
-export const WORKLOAD_TOKEN_SIGNING_SECRET_ENV = "SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET";
+export const WORKLOAD_TOKEN_SIGNING_SECRET_ENV = "NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET";
 export const WORKLOAD_SIGNING_KEY_ID_ENV = "WORKLOAD_SIGNING_KEY_ID";
 export const WORKLOAD_TOKEN_FORMAT_VERSION = 1 as const;
 export const WORKLOAD_TOKEN_MAX_LENGTH = 16 * 1024;
@@ -94,7 +94,7 @@ function decodeJson<T>(segment: string, name: string): T {
 
 function macFor(parts: string[]): Buffer {
   return createHmac("sha256", signingSecret())
-    .update(["snowharness.workload", ...parts].join("\0"), "utf8")
+    .update(["nexharness.workload", ...parts].join("\0"), "utf8")
     .digest();
 }
 

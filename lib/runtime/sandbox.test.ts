@@ -11,7 +11,7 @@ const origEnv = { ...process.env };
 
 afterEach(() => {
   // biome-ignore lint/performance/noDelete: 测试恢复 env 原状需 delete
-  delete process.env.SNOW_HOST_SANDBOX;
+  delete process.env.NEX_HOST_SANDBOX;
   Object.assign(process.env, origEnv);
   __resetSandboxCacheForTest();
   if (origPlatform) Object.defineProperty(process, "platform", origPlatform);
@@ -24,19 +24,19 @@ function setPlatform(p: string) {
 describe("wrapWithHostSandbox", () => {
   it("mode=off → 原样返回（不包裹）", async () => {
     setPlatform("linux");
-    process.env.SNOW_HOST_SANDBOX = "off";
+    process.env.NEX_HOST_SANDBOX = "off";
     expect(await wrapWithHostSandbox("npm run build", "/ws")).toBe("npm run build");
   });
 
   it("非 Linux 平台 → 原样返回（不伪装有沙箱）", async () => {
     setPlatform("darwin");
-    process.env.SNOW_HOST_SANDBOX = "on";
+    process.env.NEX_HOST_SANDBOX = "on";
     expect(await wrapWithHostSandbox("npm run build", "/ws")).toBe("npm run build");
   });
 
   it("mode=on + Linux + bwrap 不可用 → fail-open 原样返回", async () => {
     setPlatform("linux");
-    process.env.SNOW_HOST_SANDBOX = "on";
+    process.env.NEX_HOST_SANDBOX = "on";
     // bwrap 探测会失败（测试环境无 bwrap 或探测返回非 0）→ 原样返回
     const out = await wrapWithHostSandbox("npm run build", "/ws");
     // 无 bwrap → 原样；有 bwrap → 包含 bwrap 前缀。两种都接受，关键是“不抛错 + 沙箱逻辑存在”

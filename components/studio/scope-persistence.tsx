@@ -12,12 +12,12 @@ export function ScopePersistence() {
   useEffect(() => {
     const urlScope = sp.get("scope");
     if (!urlScope) {
-      const saved = localStorage.getItem("snow-analytics-scope");
+      const saved = localStorage.getItem("nex-analytics-scope");
       if (saved === "global" || saved === "self") {
         router.replace(`/studio?scope=${saved}`);
       }
     } else {
-      localStorage.setItem("snow-analytics-scope", urlScope);
+      localStorage.setItem("nex-analytics-scope", urlScope);
     }
   }, [sp, router]);
   return null;

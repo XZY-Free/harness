@@ -54,7 +54,7 @@ import { and, desc, eq, max } from "drizzle-orm";
 /**
  * 从配置构建 RunnerSigningIdentityRegistry。
  *
- * 仅使用 SNOW_RUNNER_SIGNING_IDENTITIES_JSON；缺失或非法时为空并 fail-closed。
+ * 仅使用 NEX_RUNNER_SIGNING_IDENTITIES_JSON；缺失或非法时为空并 fail-closed。
  */
 function buildRunnerIdentityRegistry(): RunnerSigningIdentityRegistry {
   return new RunnerSigningIdentityRegistry(runtimeConformanceConfig.runnerSigningIdentities);

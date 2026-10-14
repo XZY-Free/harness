@@ -2,7 +2,7 @@
  * 品牌合同：BrandContract 文档结构、校验与 overlay 合并。
  *
  * 定案（2026-09-11）：一份 schema 多层存储——DB 单行文档为主存储，branding.json 与
- * SNOW_BRAND_* 为部署期 pin 层，代码默认兜底。revision 单调递增，是热更新与缓存失效唯一依据。
+ * NEX_BRAND_* 为部署期 pin 层，代码默认兜底。revision 单调递增，是热更新与缓存失效唯一依据。
  * 本模块零副作用：不读 env、不读文件、不访问 DB，纯类型与纯函数，供 store / 端点 / 测试共用。
  */
 

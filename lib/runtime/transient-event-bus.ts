@@ -69,7 +69,7 @@ const BUFFER_TTL_MS = 2 * 60 * 1000;
 export const MAX_BUFFERED_EVENTS_PER_THREAD = Math.floor(SSE_BUFFER_SIZE / 2);
 
 /** Symbol.for 在跨模块实例/跨 bundle 时解析为同一符号，从而共享同一进程级状态。 */
-const STATE_KEY = Symbol.for("snowharness.threadTransientEventBus.state");
+const STATE_KEY = Symbol.for("nexharness.threadTransientEventBus.state");
 
 function getBusState(): BusState {
   const g = globalThis as { [STATE_KEY]?: BusState };

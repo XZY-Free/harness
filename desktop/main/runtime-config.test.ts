@@ -7,13 +7,13 @@ describe("runtime-config", () => {
       loadRuntimeEnvironment({
         env: {},
         configText: JSON.stringify({
-          serverOrigin: "http://119.45.222.120/snowharness",
+          serverOrigin: "http://127.0.0.1/nexharness",
           allowInsecureRemoteOrigin: true,
         }),
       }),
     ).toMatchObject({
-      SNOW_SERVER_ORIGIN: "http://119.45.222.120/snowharness",
-      SNOW_ALLOW_INSECURE_REMOTE_ORIGIN: "1",
+      NEX_SERVER_ORIGIN: "http://127.0.0.1/nexharness",
+      NEX_ALLOW_INSECURE_REMOTE_ORIGIN: "1",
     });
   });
 
@@ -21,17 +21,17 @@ describe("runtime-config", () => {
     expect(
       loadRuntimeEnvironment({
         env: {
-          SNOW_SERVER_ORIGIN: "https://snow.example.com/api",
-          SNOW_ALLOW_INSECURE_REMOTE_ORIGIN: "0",
+          NEX_SERVER_ORIGIN: "https://nex.example.com/api",
+          NEX_ALLOW_INSECURE_REMOTE_ORIGIN: "0",
         },
         configText: JSON.stringify({
-          serverOrigin: "http://119.45.222.120/snowharness",
+          serverOrigin: "http://127.0.0.1/nexharness",
           allowInsecureRemoteOrigin: true,
         }),
       }),
     ).toMatchObject({
-      SNOW_SERVER_ORIGIN: "https://snow.example.com/api",
-      SNOW_ALLOW_INSECURE_REMOTE_ORIGIN: "0",
+      NEX_SERVER_ORIGIN: "https://nex.example.com/api",
+      NEX_ALLOW_INSECURE_REMOTE_ORIGIN: "0",
     });
   });
 

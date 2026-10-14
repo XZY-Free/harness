@@ -1,12 +1,12 @@
-name: snow-harness
+name: nexharness
 
 x-shared-environment: &shared-environment
   APP_ENV: production
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-  SNOW_WORKSPACES_DIR: ${SNOW_HARNESS_WORKSPACE_ROOT:?SNOW_HARNESS_WORKSPACE_ROOT is required}
-  SNOWHARNESS_WORKSPACE_HOST_URL: http://workspace-host:8123
-  SNOWHARNESS_SNAPSHOT_STORAGE_ROOT: ${SNOW_HARNESS_SNAPSHOT_ROOT:?SNOW_HARNESS_SNAPSHOT_ROOT is required}
-  SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT: ${SNOW_HARNESS_ENVIRONMENT_CONTROL_ROOT:?SNOW_HARNESS_ENVIRONMENT_CONTROL_ROOT is required}
+  NEX_WORKSPACES_DIR: ${NEXHARNESS_WORKSPACE_ROOT:?NEXHARNESS_WORKSPACE_ROOT is required}
+  NEXHARNESS_WORKSPACE_HOST_URL: http://workspace-host:8123
+  NEXHARNESS_SNAPSHOT_STORAGE_ROOT: ${NEXHARNESS_SNAPSHOT_ROOT:?NEXHARNESS_SNAPSHOT_ROOT is required}
+  NEXHARNESS_ENVIRONMENT_CONTROL_ROOT: ${NEXHARNESS_ENVIRONMENT_CONTROL_ROOT:?NEXHARNESS_ENVIRONMENT_CONTROL_ROOT is required}
 
 x-shared-runtime: &shared-runtime
   restart: unless-stopped
@@ -17,9 +17,9 @@ x-shared-runtime: &shared-runtime
     <<: *shared-environment
   volumes:
     # 容器内外保持同一路径，受管容器的 Docker bind mount 才指向真实 Workspace。
-    - ${SNOW_HARNESS_WORKSPACE_ROOT:?SNOW_HARNESS_WORKSPACE_ROOT is required}:${SNOW_HARNESS_WORKSPACE_ROOT:?SNOW_HARNESS_WORKSPACE_ROOT is required}
-    - ${SNOW_HARNESS_SNAPSHOT_ROOT:?SNOW_HARNESS_SNAPSHOT_ROOT is required}:${SNOW_HARNESS_SNAPSHOT_ROOT:?SNOW_HARNESS_SNAPSHOT_ROOT is required}
-    - ${SNOW_HARNESS_ENVIRONMENT_CONTROL_ROOT:?SNOW_HARNESS_ENVIRONMENT_CONTROL_ROOT is required}:${SNOW_HARNESS_ENVIRONMENT_CONTROL_ROOT:?SNOW_HARNESS_ENVIRONMENT_CONTROL_ROOT is required}
+    - ${NEXHARNESS_WORKSPACE_ROOT:?NEXHARNESS_WORKSPACE_ROOT is required}:${NEXHARNESS_WORKSPACE_ROOT:?NEXHARNESS_WORKSPACE_ROOT is required}
+    - ${NEXHARNESS_SNAPSHOT_ROOT:?NEXHARNESS_SNAPSHOT_ROOT is required}:${NEXHARNESS_SNAPSHOT_ROOT:?NEXHARNESS_SNAPSHOT_ROOT is required}
+    - ${NEXHARNESS_ENVIRONMENT_CONTROL_ROOT:?NEXHARNESS_ENVIRONMENT_CONTROL_ROOT is required}:${NEXHARNESS_ENVIRONMENT_CONTROL_ROOT:?NEXHARNESS_ENVIRONMENT_CONTROL_ROOT is required}
     - /var/run/docker.sock:/var/run/docker.sock
 
 x-worker: &worker
@@ -27,7 +27,7 @@ x-worker: &worker
   build:
     context: ../..
     dockerfile: docker/worker/Dockerfile
-  image: snow-harness-worker:${SNOW_HARNESS_IMAGE_TAG:-latest}
+  image: nexharness-worker:${NEXHARNESS_IMAGE_TAG:-latest}
   healthcheck:
     test:
       - CMD
@@ -45,9 +45,9 @@ services:
     command: ["node_modules/.bin/tsx", "scripts/workers/workspace-host.ts"]
     environment:
       <<: *shared-environment
-      SNOWHARNESS_WORKSPACE_HOST_ROOT: ${SNOW_HARNESS_WORKSPACE_ROOT:?SNOW_HARNESS_WORKSPACE_ROOT is required}
-      SNOWHARNESS_WORKSPACE_HOST_BIND: 0.0.0.0
-      SNOWHARNESS_WORKSPACE_HOST_PORT: 8123
+      NEXHARNESS_WORKSPACE_HOST_ROOT: ${NEXHARNESS_WORKSPACE_ROOT:?NEXHARNESS_WORKSPACE_ROOT is required}
+      NEXHARNESS_WORKSPACE_HOST_BIND: 0.0.0.0
+      NEXHARNESS_WORKSPACE_HOST_PORT: 8123
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8123/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -62,10 +62,10 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: snow-harness-web:${SNOW_HARNESS_IMAGE_TAG:-latest}
+    image: nexharness-web:${NEXHARNESS_IMAGE_TAG:-latest}
     command: ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]
     ports:
-      - "${SNOW_HARNESS_HTTP_PORT:-3000}:3000"
+      - "${NEXHARNESS_HTTP_PORT:-3000}:3000"
     depends_on:
       workspace-host:
         condition: service_healthy

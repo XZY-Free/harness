@@ -1,7 +1,7 @@
 /**
  * A2A host_controls 合同。
  *
- * 外部 Agent 只能提交结构化提议；本模块把它收敛成 SnowHarness 可持久化的安全 DTO。
+ * 外部 Agent 只能提交结构化提议；本模块把它收敛成 NexHarness 可持久化的安全 DTO。
  * 不从文本猜动作，不接受客户端声明的 authorized，不携带内部 ID、凭证或企业权限。
  */
 import { agentHostControlConfig } from "@/lib/config";

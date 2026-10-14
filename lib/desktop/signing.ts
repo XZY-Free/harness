@@ -54,7 +54,7 @@ export function generateDeviceKeyPair(): DeviceKeyPair {
  * 用于把设备认证签名与项目内其他签名（如 RPC 信封）区分开，防止跨用途重放。
  * 变更签名方案时递增，旧签名不再被接受。
  */
-export const AUTH_SIGN_DOMAIN = "snowharness-device-auth-v1" as const;
+export const AUTH_SIGN_DOMAIN = "nexharness-device-auth-v1" as const;
 
 /**
  * 构造设备认证（challenge-response）的规范签名 payload。
@@ -65,7 +65,7 @@ export const AUTH_SIGN_DOMAIN = "snowharness-device-auth-v1" as const;
  * - 同一租户下同一 deviceKey 的签名也绑定本次 challenge，无法重放旧挑战签名。
  *
  * 编码采用带 domain separator 的无歧义 canonical 结构：JSON.stringify 把
- * `["snowharness-device-auth-v1", tenantId, deviceKey, challenge]` 序列化为定长数组。
+ * `["nexharness-device-auth-v1", tenantId, deviceKey, challenge]` 序列化为定长数组。
  * JSON 数组编码天然对分隔符/换行免疫——任何字段内包含 `"`、`\n`、`,` 都不会与
  * 其他字段拼接碰撞，也不会误验签。调用方 schema 已拒绝控制字符，字段要求非空。
  */

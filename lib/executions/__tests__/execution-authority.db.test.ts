@@ -289,7 +289,7 @@ async function createManagedBinding(input: { root: string }) {
 let roots: string[] = [];
 
 async function makeRoot(): Promise<string> {
-  const created = await mkdtemp(path.join(tmpdir(), "snowharness-authority-"));
+  const created = await mkdtemp(path.join(tmpdir(), "nexharness-authority-"));
   roots.push(created);
   return created;
 }

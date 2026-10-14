@@ -27,7 +27,7 @@ vi.mock("@/lib/identity/identity-extension-bootstrap", () => ({
 }));
 vi.mock("@/lib/identity/resolver", () => ({ acceptAuthenticatedEvidence }));
 vi.mock("@/lib/identity/local-authentication", () => ({
-  SESSION_COOKIE_NAME: "snow_session",
+  SESSION_COOKIE_NAME: "nex_session",
   localAuthenticationProvider: { logout: localLogout },
   establishExternalSession,
   completePasswordEnrollment,
@@ -46,7 +46,7 @@ describe("auth operation facade", () => {
       expiresAt: new Date("2026-09-16T00:00:00.000Z"),
       user: { account: "admin", email: "admin@example.com", displayName: "管理员" },
     });
-    const request = new NextRequest("https://snow.example.com/api/auth/login?returnTo=/chat", {
+    const request = new NextRequest("https://nex.example.com/api/auth/login?returnTo=/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ account: " ADMIN ", password: "correct horse battery" }),
@@ -60,7 +60,7 @@ describe("auth operation facade", () => {
       return_to: "/chat",
       user: { account: "admin", email: "admin@example.com", display_name: "管理员" },
     });
-    expect(response.headers.get("set-cookie")).toContain("snow_session=session-token");
+    expect(response.headers.get("set-cookie")).toContain("nex_session=session-token");
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
     expect(response.headers.get("set-cookie")).toContain("SameSite=Lax");
     expect(response.headers.get("set-cookie")).toContain("Secure");
@@ -72,7 +72,7 @@ describe("auth operation facade", () => {
 
   it("login 拒绝任意外部 returnTo", async () => {
     const request = new NextRequest(
-      "https://snow.example.com/api/auth/login?returnTo=https%3A%2F%2Fevil.example.test",
+      "https://nex.example.com/api/auth/login?returnTo=https%3A%2F%2Fevil.example.test",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -87,7 +87,7 @@ describe("auth operation facade", () => {
   });
 
   it("浏览器跨站 POST 被拒绝，不能代替用户登录或退出", async () => {
-    const request = new NextRequest("https://snow.example.com/api/auth/login", {
+    const request = new NextRequest("https://nex.example.com/api/auth/login", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -103,7 +103,7 @@ describe("auth operation facade", () => {
   });
 
   it("浏览器的 null Origin 同样被拒绝，不能绕过同源校验", async () => {
-    const request = new NextRequest("https://snow.example.com/api/auth/login", {
+    const request = new NextRequest("https://nex.example.com/api/auth/login", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -120,11 +120,11 @@ describe("auth operation facade", () => {
 
   it("账号锁定响应提供 Retry-After", async () => {
     provider.login.mockResolvedValue({ status: "rate_limited", retryAfterSeconds: 321 });
-    const request = new NextRequest("https://snow.example.com/api/auth/login", {
+    const request = new NextRequest("https://nex.example.com/api/auth/login", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        origin: "https://snow.example.com",
+        origin: "https://nex.example.com",
       },
       body: JSON.stringify({ account: "admin", password: "wrong password" }),
     });
@@ -139,7 +139,7 @@ describe("auth operation facade", () => {
     provider.beginExternalLogin.mockImplementation(async ({ state }) => ({
       location: `https://sso.example.com/authorize?state=${state}`,
     }));
-    const request = new NextRequest("https://snow.example.com/api/auth/sso?returnTo=/chat");
+    const request = new NextRequest("https://nex.example.com/api/auth/sso?returnTo=/chat");
 
     const response = await GET(request, { params: Promise.resolve({ operation: ["sso"] }) });
 
@@ -147,12 +147,12 @@ describe("auth operation facade", () => {
     const location = response.headers.get("location");
     expect(location).toMatch(/^https:\/\/sso\.example\.com\/authorize\?state=.{32,}$/);
     const setCookie = response.headers.get("set-cookie") ?? "";
-    expect(setCookie).toContain("snow_sso_state=");
-    expect(setCookie).toContain("snow_sso_return_to=%2Fchat");
+    expect(setCookie).toContain("nex_sso_state=");
+    expect(setCookie).toContain("nex_sso_return_to=%2Fchat");
     expect(setCookie).toContain("HttpOnly");
     expect(provider.beginExternalLogin).toHaveBeenCalledWith(
       expect.objectContaining({
-        callbackUrl: "https://snow.example.com/api/auth/callback",
+        callbackUrl: "https://nex.example.com/api/auth/callback",
         returnTo: "/chat",
         state: expect.any(String),
       }),
@@ -164,7 +164,7 @@ describe("auth operation facade", () => {
       location: `https://sso.example.com/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}`,
     }));
     const request = new NextRequest("http://localhost:3000/api/auth/sso?returnTo=/desktop", {
-      headers: { "x-snowharness-desktop-origin": "http://127.0.0.1:54321" },
+      headers: { "x-nexharness-desktop-origin": "http://127.0.0.1:54321" },
     });
 
     const response = await GET(request, { params: Promise.resolve({ operation: ["sso"] }) });
@@ -182,14 +182,14 @@ describe("auth operation facade", () => {
     provider.beginExternalLogin.mockImplementation(async ({ callbackUrl }) => ({
       location: `https://sso.example.com/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}`,
     }));
-    const request = new NextRequest("https://snow.example.com/api/auth/sso?returnTo=/chat", {
-      headers: { "x-snowharness-desktop-origin": "https://evil.example.test" },
+    const request = new NextRequest("https://nex.example.com/api/auth/sso?returnTo=/chat", {
+      headers: { "x-nexharness-desktop-origin": "https://evil.example.test" },
     });
 
     await GET(request, { params: Promise.resolve({ operation: ["sso"] }) });
 
     expect(provider.beginExternalLogin).toHaveBeenCalledWith(
-      expect.objectContaining({ callbackUrl: "https://snow.example.com/api/auth/callback" }),
+      expect.objectContaining({ callbackUrl: "https://nex.example.com/api/auth/callback" }),
     );
   });
 
@@ -207,7 +207,7 @@ describe("auth operation facade", () => {
       ],
     });
     const request = new NextRequest(
-      "https://snow.example.com/api/auth/external-methods?returnTo=/desktop",
+      "https://nex.example.com/api/auth/external-methods?returnTo=/desktop",
     );
 
     const response = await GET(request, {
@@ -235,7 +235,7 @@ describe("auth operation facade", () => {
 
   it("external-methods 拒绝外部回跳地址", async () => {
     const request = new NextRequest(
-      "https://snow.example.com/api/auth/external-methods?returnTo=https%3A%2F%2Fevil.example.test",
+      "https://nex.example.com/api/auth/external-methods?returnTo=https%3A%2F%2Fevil.example.test",
     );
 
     const response = await GET(request, {
@@ -248,8 +248,8 @@ describe("auth operation facade", () => {
 
   it("callback 在 state 不匹配时拒绝认证且不调用企业提供器", async () => {
     const request = new NextRequest(
-      "https://snow.example.com/api/auth/callback?code=oauth-code&state=attacker-state",
-      { headers: { cookie: "snow_sso_state=expected-state; snow_sso_return_to=%2Fchat" } },
+      "https://nex.example.com/api/auth/callback?code=oauth-code&state=attacker-state",
+      { headers: { cookie: "nex_sso_state=expected-state; nex_sso_return_to=%2Fchat" } },
     );
 
     const response = await GET(request, { params: Promise.resolve({ operation: ["callback"] }) });
@@ -276,17 +276,17 @@ describe("auth operation facade", () => {
       expiresAt: new Date("2026-09-10T10:15:00.000Z"),
     });
     const request = new NextRequest(
-      "https://snow.example.com/api/auth/callback?code=oauth-code&state=expected-state",
-      { headers: { cookie: "snow_sso_state=expected-state; snow_sso_return_to=%2Fchat" } },
+      "https://nex.example.com/api/auth/callback?code=oauth-code&state=expected-state",
+      { headers: { cookie: "nex_sso_state=expected-state; nex_sso_return_to=%2Fchat" } },
     );
 
     const response = await GET(request, { params: Promise.resolve({ operation: ["callback"] }) });
 
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
-      "https://snow.example.com/setup-password?returnTo=%2Fchat",
+      "https://nex.example.com/setup-password?returnTo=%2Fchat",
     );
-    expect(response.headers.get("set-cookie")).toContain("snow_session=setup-token");
+    expect(response.headers.get("set-cookie")).toContain("nex_session=setup-token");
     expect(establishExternalSession).toHaveBeenCalledWith({
       userIdentityId: "identity-1",
       loginAccount: "zhangsan",
@@ -314,8 +314,8 @@ describe("auth operation facade", () => {
       "http://127.0.0.1:3000/api/auth/callback?code=oauth-code&state=expected-state",
       {
         headers: {
-          cookie: "snow_sso_state=expected-state; snow_sso_return_to=%2Fdesktop",
-          "x-snowharness-desktop-origin": "http://127.0.0.1:54321",
+          cookie: "nex_sso_state=expected-state; nex_sso_return_to=%2Fdesktop",
+          "x-nexharness-desktop-origin": "http://127.0.0.1:54321",
         },
       },
     );
@@ -327,7 +327,7 @@ describe("auth operation facade", () => {
   });
 
   it("子路径部署时 callback 保留 basePath 进入设密页", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
+    vi.stubEnv("NEXT_PUBLIC_NEX_BASE_PATH", "/nexharness");
     provider.completeExternalLogin.mockResolvedValue({
       status: "authenticated",
       evidence: {
@@ -345,14 +345,14 @@ describe("auth operation facade", () => {
       expiresAt: new Date("2026-09-10T10:15:00.000Z"),
     });
     const request = new NextRequest(
-      "https://snow.example.com/snowharness/api/auth/callback?code=oauth-code&state=expected-state",
-      { headers: { cookie: "snow_sso_state=expected-state; snow_sso_return_to=%2Fchat" } },
+      "https://nex.example.com/nexharness/api/auth/callback?code=oauth-code&state=expected-state",
+      { headers: { cookie: "nex_sso_state=expected-state; nex_sso_return_to=%2Fchat" } },
     );
 
     try {
       const response = await GET(request, { params: Promise.resolve({ operation: ["callback"] }) });
       expect(response.headers.get("location")).toBe(
-        "https://snow.example.com/snowharness/setup-password?returnTo=%2Fchat",
+        "https://nex.example.com/nexharness/setup-password?returnTo=%2Fchat",
       );
     } finally {
       vi.unstubAllEnvs();
@@ -367,13 +367,13 @@ describe("auth operation facade", () => {
       user: { account: "zhangsan", email: "zhangsan@example.com", displayName: "张三" },
     });
     const request = new NextRequest(
-      "https://snow.example.com/api/auth/setup-password?returnTo=/chat",
+      "https://nex.example.com/api/auth/setup-password?returnTo=/chat",
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          cookie: "snow_session=setup-token",
-          origin: "https://snow.example.com",
+          cookie: "nex_session=setup-token",
+          origin: "https://nex.example.com",
         },
         body: JSON.stringify({
           password: "correct horse battery",
@@ -392,19 +392,19 @@ describe("auth operation facade", () => {
       headers: request.headers,
       password: "correct horse battery",
     });
-    expect(response.headers.get("set-cookie")).toContain("snow_session=authenticated-token");
+    expect(response.headers.get("set-cookie")).toContain("nex_session=authenticated-token");
   });
 
   it("首次设密拒绝弱密码与超短密码（PASSWORD_TOO_WEAK）", async () => {
     for (const password of ["abc", "abc12345", "password123"]) {
       const request = new NextRequest(
-        "https://snow.example.com/api/auth/setup-password?returnTo=/chat",
+        "https://nex.example.com/api/auth/setup-password?returnTo=/chat",
         {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            cookie: "snow_session=setup-token",
-            origin: "https://snow.example.com",
+            cookie: "nex_session=setup-token",
+            origin: "https://nex.example.com",
           },
           body: JSON.stringify({ password, confirmPassword: password }),
         },
@@ -428,7 +428,7 @@ describe("auth operation facade", () => {
       },
       { password: "correct horse battery", confirmPassword: "different password" },
     ]) {
-      const request = new NextRequest("https://snow.example.com/api/auth/setup-password", {
+      const request = new NextRequest("https://nex.example.com/api/auth/setup-password", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -443,7 +443,7 @@ describe("auth operation facade", () => {
 
   it("首次设密会话失效时返回明确拒绝", async () => {
     completePasswordEnrollment.mockRejectedValue(new PasswordEnrollmentError("会话已失效"));
-    const request = new NextRequest("https://snow.example.com/api/auth/setup-password", {
+    const request = new NextRequest("https://nex.example.com/api/auth/setup-password", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -460,7 +460,7 @@ describe("auth operation facade", () => {
 
   it("首次设密不把数据库故障伪装成会话失效", async () => {
     completePasswordEnrollment.mockRejectedValue(new Error("database unavailable"));
-    const request = new NextRequest("https://snow.example.com/api/auth/setup-password", {
+    const request = new NextRequest("https://nex.example.com/api/auth/setup-password", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -477,7 +477,7 @@ describe("auth operation facade", () => {
   it("企业退出失败仍撤销本地会话并清 Cookie", async () => {
     provider.logout.mockRejectedValue(new Error("private upstream secret"));
     const response = await POST(
-      new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+      new NextRequest("https://nex.example.com/api/auth/logout", { method: "POST" }),
       { params: Promise.resolve({ operation: ["logout"] }) },
     );
     expect(localLogout).toHaveBeenCalledOnce();
@@ -487,7 +487,7 @@ describe("auth operation facade", () => {
   it("返回受信任提供器生成的 HTTPS 退出跳转", async () => {
     provider.logout.mockResolvedValue({ location: "https://id.example.com/logout" });
     const response = await POST(
-      new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+      new NextRequest("https://nex.example.com/api/auth/logout", { method: "POST" }),
       { params: Promise.resolve({ operation: ["logout"] }) },
     );
     expect(await response.json()).toEqual({
@@ -502,7 +502,7 @@ describe("auth operation facade", () => {
     try {
       provider.logout.mockImplementationOnce(() => new Promise(() => {}));
       const pending = POST(
-        new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+        new NextRequest("https://nex.example.com/api/auth/logout", { method: "POST" }),
         { params: Promise.resolve({ operation: ["logout"] }) },
       );
       await vi.advanceTimersByTimeAsync(3001);
@@ -517,7 +517,7 @@ describe("auth operation facade", () => {
   it("本地撤销失败不能报告成功，也不能调用企业退出", async () => {
     localLogout.mockRejectedValueOnce(new Error("database unavailable"));
     await expect(
-      POST(new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }), {
+      POST(new NextRequest("https://nex.example.com/api/auth/logout", { method: "POST" }), {
         params: Promise.resolve({ operation: ["logout"] }),
       }),
     ).rejects.toThrow("database unavailable");
@@ -526,7 +526,7 @@ describe("auth operation facade", () => {
   it("拒绝提供器返回的可执行地址", async () => {
     provider.logout.mockResolvedValueOnce({ location: "javascript:alert(1)" });
     const response = await POST(
-      new NextRequest("https://snow.example.com/api/auth/logout", { method: "POST" }),
+      new NextRequest("https://nex.example.com/api/auth/logout", { method: "POST" }),
       { params: Promise.resolve({ operation: ["logout"] }) },
     );
     expect(await response.json()).toEqual({ loggedOut: true, externalLogout: "unavailable" });
@@ -534,9 +534,9 @@ describe("auth operation facade", () => {
 
   it("logout 撤销服务端会话并清除 cookie", async () => {
     provider.logout.mockResolvedValue(undefined);
-    const request = new NextRequest("https://snow.example.com/api/auth/logout", {
+    const request = new NextRequest("https://nex.example.com/api/auth/logout", {
       method: "POST",
-      headers: { cookie: "snow_session=session-token" },
+      headers: { cookie: "nex_session=session-token" },
     });
 
     const response = await POST(request, { params: Promise.resolve({ operation: ["logout"] }) });
@@ -544,9 +544,9 @@ describe("auth operation facade", () => {
     expect(response.status).toBe(200);
     expect(provider.logout).toHaveBeenCalledWith({
       headers: request.headers,
-      returnToUrl: "https://snow.example.com/login",
+      returnToUrl: "https://nex.example.com/login",
     });
-    expect(response.headers.get("set-cookie")).toContain("snow_session=");
+    expect(response.headers.get("set-cookie")).toContain("nex_session=");
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 

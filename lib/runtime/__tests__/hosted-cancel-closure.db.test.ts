@@ -53,7 +53,7 @@ import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn"
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -155,12 +155,12 @@ async function seedCancelable() {
 
 describe("A02：Hosted Cancel 的终态收口与代际一致", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
   });
 
   afterEach(() => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
   });
 
   it("CANCEL-01: 无 liveRunner 的合法取消收口全部执行子对象与产品面", async () => {

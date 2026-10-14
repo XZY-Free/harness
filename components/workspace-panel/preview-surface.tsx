@@ -46,7 +46,7 @@ export function PreviewSurface({
   reloadKey: number;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  // basePath 部署（/snowharness）下，服务端下发的 /preview 裸路径需补前缀（apiPath 幂等，已带前缀则原样返回）
+  // basePath 部署（/nexharness）下，服务端下发的 /preview 裸路径需补前缀（apiPath 幂等，已带前缀则原样返回）
   const resolvedPreviewUrl = previewUrl ? apiPath(previewUrl) : null;
   const [localReloadKey, setLocalReloadKey] = useState(0);
   const [deviceSize, setDeviceSize] = useState<DeviceSize>("responsive");

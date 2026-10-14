@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
  *    上一轮残留的主进程会让新实例静默 `app.quit()`，表现为
  *    "Target page, context or browser has been closed"，极难定位。
  * 2. 隔离 Desktop SQLite 库与 safeStorage 设备身份，用例之间互不污染。
- * 3. 不触碰开发者本机真实的 SnowHarness Desktop 数据。
+ * 3. 不触碰开发者本机真实的 NexHarness Desktop 数据。
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,7 +41,7 @@ export async function readBrandName(window: Page): Promise<string> {
     const payload = (await response.json()) as { brand?: { name?: string }; name?: string };
     return payload.brand?.name ?? payload.name ?? "";
   });
-  return name || "SnowHarness";
+  return name || "NexHarness";
 }
 
 /** Desktop 使用独立 Electron Session，因此必须通过与 Web 相同的正式登录接口。 */
@@ -83,9 +83,9 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
     );
   }
 
-  const userDataDir = await mkdtemp(join(tmpdir(), "snow-e2e-desktop-"));
+  const userDataDir = await mkdtemp(join(tmpdir(), "nex-e2e-desktop-"));
 
-  // 读取主进程通过 SNOW_E2E_LOG_FILE 写入的阶段化启动日志。
+  // 读取主进程通过 NEX_E2E_LOG_FILE 写入的阶段化启动日志。
   // 用户指令：不能在 electron.launch() 返回后立即读取（此时 main() 可能尚未
   // 推进到关键阶段/错误尚未写完），而应在「窗口创建」或「进程退出」之后读取。
   // 因此本函数只在本文件的两个时机被触发：app.on("window")（窗口创建）与
@@ -103,14 +103,14 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
     env: {
       ...process.env,
       // Desktop 只把服务端当作 API/SSE 提供方，UI 来自本机打包 renderer。
-      SNOW_SERVER_ORIGIN: E2E_ORIGIN,
+      NEX_SERVER_ORIGIN: E2E_ORIGIN,
       // E2E 每次启动独立 user-data-dir 的实例，放行主进程单实例锁，
       // 否则多次 launch 共享锁时后续实例静默 app.quit()，firstWindow 报
       // "Target page, context or browser has been closed"。
-      SNOW_E2E_DISABLE_SINGLE_INSTANCE: "1",
+      NEX_E2E_DISABLE_SINGLE_INSTANCE: "1",
       // 主进程把关键启动日志（单实例锁结果 / main() 失败）写入该文件，
       // launch 返回后读取，定位 CI 下窗口未创建的真实原因。
-      SNOW_E2E_LOG_FILE: join(userDataDir, "e2e-main.log"),
+      NEX_E2E_LOG_FILE: join(userDataDir, "e2e-main.log"),
     },
   });
 

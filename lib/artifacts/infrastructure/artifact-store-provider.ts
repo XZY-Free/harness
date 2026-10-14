@@ -11,7 +11,7 @@
  * 安全边界：
  * - 未配置 ManagedArtifactStore 时明确失败，不伪装存在空存储实现。
  * - builder 密钥注册表默认为空，任何 builder_identity 都不在白名单（fail-closed）。
- * - override 仅供测试使用；生产环境通过 SNOW_HOSTED_BUILDER_KEYS_JSON 注入。
+ * - override 仅供测试使用；生产环境通过 NEX_HOSTED_BUILDER_KEYS_JSON 注入。
  */
 import type {
   BuilderKeyRegistry,
@@ -38,7 +38,7 @@ export function getManagedArtifactStore(): ManagedArtifactStore {
 /**
  * 获取运行时 BuilderKeyRegistry。
  *
- * 优先级：test override > SNOW_HOSTED_BUILDER_KEYS_JSON > 空注册表（fail-closed）。
+ * 优先级：test override > NEX_HOSTED_BUILDER_KEYS_JSON > 空注册表（fail-closed）。
  */
 export function getBuilderKeyRegistry(): BuilderKeyRegistry {
   if (registryOverride) return registryOverride;

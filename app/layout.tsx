@@ -27,7 +27,7 @@ export async function generateMetadata(): Promise<Metadata> {
  * 默认使用浅色并尊重已保存的显式选择，Studio 的保存值不污染员工界面。
  */
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const basePath = process.env.NEXT_PUBLIC_SNOW_BASE_PATH ?? "";
+  const basePath = process.env.NEXT_PUBLIC_NEX_BASE_PATH ?? "";
 
   return (
     <html lang="zh-CN" suppressHydrationWarning>

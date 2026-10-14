@@ -30,8 +30,8 @@ function dockerArgs(callIdx = 0): readonly string[] {
 
 function baseOpts(over: Partial<RunContainerOpts> = {}): RunContainerOpts {
   return {
-    name: "snow-thread-test",
-    image: "snow-harness-runtime:node22",
+    name: "nex-thread-test",
+    image: "nexharness-runtime:node22",
     threadId: "tid-docker-cli",
     hostPath: "/tmp/ws",
     port: 41000,
@@ -118,7 +118,7 @@ describe("runContainer 透传 extraArgs（02-P2-5）", () => {
     expect(addHostIdx).toBeGreaterThan(-1);
     expect(args[addHostIdx + 1]).toBe("host.docker.internal:host-gateway");
     // image 参数在 extraArgs 之后
-    expect(args.indexOf("snow-harness-runtime:node22")).toBeGreaterThan(addHostIdx);
+    expect(args.indexOf("nexharness-runtime:node22")).toBeGreaterThan(addHostIdx);
   });
 
   it("无 extraArgs → docker args 不含 --add-host(默认无额外参数)", async () => {
@@ -155,9 +155,9 @@ describe("execDetachedWithPid shQuote 转义（02-P2-6）", () => {
     await execDetachedWithPid("c1", "task-uuid-123", "node server.js");
     const cmd = wrappedCmd();
     // tasksDir/pidFile/logPath 均被 shQuote 包成 '...'
-    expect(cmd).toContain("mkdir -p '/workspace/.snow/runtime/tasks'");
-    expect(cmd).toContain("'/workspace/.snow/runtime/tasks/task-uuid-123.pid'");
-    expect(cmd).toContain("'/workspace/.snow/runtime/tasks/task-uuid-123.log'");
+    expect(cmd).toContain("mkdir -p '/workspace/.nex/runtime/tasks'");
+    expect(cmd).toContain("'/workspace/.nex/runtime/tasks/task-uuid-123.pid'");
+    expect(cmd).toContain("'/workspace/.nex/runtime/tasks/task-uuid-123.log'");
     // 原始 command 原样拼入(非转义,调用方负责)
     expect(cmd).toContain("exec node server.js");
   });
@@ -166,14 +166,14 @@ describe("execDetachedWithPid shQuote 转义（02-P2-6）", () => {
     await execDetachedWithPid("c1", "task with space", "sleep 1");
     const cmd = wrappedCmd();
     // shQuote 包成单引号串,空格在引号内安全(不断词)
-    expect(cmd).toContain("'/workspace/.snow/runtime/tasks/task with space.pid'");
-    expect(cmd).toContain("'/workspace/.snow/runtime/tasks/task with space.log'");
+    expect(cmd).toContain("'/workspace/.nex/runtime/tasks/task with space.pid'");
+    expect(cmd).toContain("'/workspace/.nex/runtime/tasks/task with space.log'");
   });
 
   it("返回 pidFile/logPath 路径(供调用方回收)", async () => {
     const info = await execDetachedWithPid("c1", "t1", "sleep 1");
-    expect(info.pidFile).toBe("/workspace/.snow/runtime/tasks/t1.pid");
-    expect(info.logPath).toBe("/workspace/.snow/runtime/tasks/t1.log");
+    expect(info.pidFile).toBe("/workspace/.nex/runtime/tasks/t1.pid");
+    expect(info.logPath).toBe("/workspace/.nex/runtime/tasks/t1.log");
   });
 });
 

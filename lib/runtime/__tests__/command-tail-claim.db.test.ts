@@ -44,7 +44,7 @@ import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn"
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 async function readCommand(commandId: string) {
   const [row] = await db
@@ -80,12 +80,12 @@ function endpointResolution() {
 
 describe("A09：命令尾部提交必须校验当前领取权", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
   });
 
   afterEach(() => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
   });
 
   /** 建出可派发的 cancel 命令，并由 `worker-A` 正式领取。 */
@@ -257,12 +257,12 @@ describe("A09：命令尾部提交必须校验当前领取权", () => {
  */
 describe("A09：内联投递必须持真实领取身份（null 旁路已消除）", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
   });
 
   afterEach(() => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
     setCommandGatewayHostedApplicationServiceForTest(null);
   });
 

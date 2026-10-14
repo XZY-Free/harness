@@ -8,7 +8,7 @@ import {
 } from "../lib/test-support/e2e-credentials";
 import { type LaunchedDesktop, launchDesktopApp, readBrandName } from "./support/launch-desktop";
 
-const captureUi = process.env.SNOW_CAPTURE_UI === "1";
+const captureUi = process.env.NEX_CAPTURE_UI === "1";
 const captureDir = resolve(process.cwd(), "output/login-design-qa");
 
 async function capture(window: Page, name: string): Promise<void> {

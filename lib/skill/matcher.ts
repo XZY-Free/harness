@@ -234,7 +234,7 @@ function segmentCn(text: string): string[] {
  * 1. CJK 段用 Intl.Segmenter 真分词 → 得到 ["需求","分析","调研",...] 等独立词
  * 2. 4+ 字 CJK 段额外 bigram 补召回(Segmenter 切细时仍能命中"需求分析"整体)
  * 3. 英文标识符:含字母/数字/点/连字符的 token(如 requirement.md、ui-spec、demo.html)
- * 4. 过滤停用词(默认 + env SNOW_SKILL_STOPWORDS 自定义)
+ * 4. 过滤停用词(默认 + env NEX_SKILL_STOPWORDS 自定义)
  */
 export function extractKeywords(description: string | null | undefined): string[] {
   if (!description) return [];

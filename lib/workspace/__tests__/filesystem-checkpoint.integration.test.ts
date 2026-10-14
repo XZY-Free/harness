@@ -612,7 +612,7 @@ describe("FilesystemCheckpoint integration", () => {
   beforeEach(async () => {
     await resetDatabase(db);
     await ensureDefaultTenant();
-    temporaryRoot = await mkdtemp(path.join(tmpdir(), "snowharness-checkpoint-"));
+    temporaryRoot = await mkdtemp(path.join(tmpdir(), "nexharness-checkpoint-"));
   });
 
   // ─── CHECKPOINT-01..12（R09）──────────────────────────────────────────────
@@ -877,7 +877,7 @@ describe("FilesystemCheckpoint integration", () => {
       await writeFile(path.join(ctx.writerRoot, "state.txt"), "backend release", "utf8");
       const grantRoot = path.join(
         ctx.hostRoot,
-        ".snow",
+        ".nex",
         "grants",
         (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
       );
@@ -1539,7 +1539,7 @@ describe("FilesystemCheckpoint integration", () => {
       expect(await countCheckpoints(ctx.invocationId)).toBe(0);
       const freezeFile = path.join(
         ctx.hostRoot,
-        ".snow",
+        ".nex",
         "grants",
         (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
         "freeze.json",
@@ -1667,7 +1667,7 @@ describe("FilesystemCheckpoint integration", () => {
       }
       const freezeFile = path.join(
         ctx.hostRoot,
-        ".snow",
+        ".nex",
         "grants",
         (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
         "freeze.json",
@@ -1791,7 +1791,7 @@ describe("FilesystemCheckpoint integration", () => {
 
         const intentPath = path.join(
           ctx.hostRoot,
-          ".snow",
+          ".nex",
           "safe-point-intents",
           grant.scopeDigest.replace(/^sha256:/, ""),
           `${requested.checkpointIntentId}.json`,
@@ -1805,7 +1805,7 @@ describe("FilesystemCheckpoint integration", () => {
         });
         const freezeFile = path.join(
           ctx.hostRoot,
-          ".snow",
+          ".nex",
           "grants",
           grant.scopeDigest.replace(/^sha256:/, ""),
           "freeze.json",
@@ -1855,7 +1855,7 @@ describe("FilesystemCheckpoint integration", () => {
       expect(before?.checkpointIntentId).toBe(checkpoint.checkpointIntentId);
       const frozenFile = path.join(
         ctx.hostRoot,
-        ".snow",
+        ".nex",
         "grants",
         (ctx.workspaceBinding.storageScopeDigest as string).replace(/^sha256:/, ""),
         "freeze.json",
@@ -2301,7 +2301,7 @@ describe("FilesystemCheckpoint integration", () => {
         const ctx = await setupCheckpointFixture(temporaryRoot);
         const source = path.join(ctx.writerRoot, "extended.txt");
         await writeFile(source, "attribute matters", "utf8");
-        const marked = markExtendedXattr(source, "com.snowharness.checkpoint", "present");
+        const marked = markExtendedXattr(source, "com.nexharness.checkpoint", "present");
         expect(marked).toBe(0);
         await expect(ctx.commit()).rejects.toThrow(/不支持 xattr/);
         expect(await countCheckpoints(ctx.invocationId)).toBe(0);

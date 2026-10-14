@@ -92,7 +92,7 @@ export interface ExecResult {
  * 命令执行责任面。
  *
  * host 实现：`execa(command, { shell, cwd: workspaceRoot, timeout, reject:false, maxBuffer })`。
- * container 实现：`docker exec snow-thread-{id} sh -c "cd /workspace && {command}"`。
+ * container 实现：`docker exec nex-thread-{id} sh -c "cd /workspace && {command}"`。
  *
  * 异常语义：exec 内部 catch spawn 级失败（ENOENT / timeout），返回 `{ ok:false, exitCode:-1 }`，
  * 不向上抛——对齐现有 runCommand/runTests 的 try/catch 兜底契约。

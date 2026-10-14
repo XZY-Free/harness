@@ -59,8 +59,8 @@ describe("buildExternalSource", () => {
     const s = buildExternalSource({
       sourceUrl: "u",
       content: "c",
-      artifactPath: ".snow/runtime/tid/external/x.txt",
+      artifactPath: ".nex/runtime/tid/external/x.txt",
     });
-    expect(s.artifactPath).toBe(".snow/runtime/tid/external/x.txt");
+    expect(s.artifactPath).toBe(".nex/runtime/tid/external/x.txt");
   });
 });

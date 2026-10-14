@@ -142,7 +142,7 @@ import { runEnvironmentCleanupOnce } from "@/scripts/workers/environment-lease-c
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-const TENANT_LABEL = "snow-harness.environment.tenantId";
+const TENANT_LABEL = "nexharness.environment.tenantId";
 
 /** 本地优先镜像候选（与 R07 合规验收同一口径，不允许静默跳过）。 */
 const IMAGE_CANDIDATES = [
@@ -157,8 +157,8 @@ const NANO_CPUS = 500_000_000;
 const PIDS_LIMIT = 64;
 const OPEN_FILES_LIMIT = 128;
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
-const ORIGINAL_ENV_CONTROL_ROOT = process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_ENV_CONTROL_ROOT = process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT;
 const ORIGINAL_RUNTIME_DEFAULT = process.env.RUNTIME_DEFAULT;
 
 let dockerReady = false;
@@ -242,9 +242,9 @@ afterAll(async () => {
     }
   }
   if (ORIGINAL_ENV_CONTROL_ROOT === undefined) {
-    Reflect.deleteProperty(process.env, "SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT");
+    Reflect.deleteProperty(process.env, "NEXHARNESS_ENVIRONMENT_CONTROL_ROOT");
   } else {
-    process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT = ORIGINAL_ENV_CONTROL_ROOT;
+    process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT = ORIGINAL_ENV_CONTROL_ROOT;
   }
   if (ORIGINAL_RUNTIME_DEFAULT === undefined) {
     Reflect.deleteProperty(process.env, "RUNTIME_DEFAULT");
@@ -262,9 +262,9 @@ afterEach(async () => {
     await scenario.provider.close();
   }
   if (ORIGINAL_AUTH_MODE === undefined) {
-    Reflect.deleteProperty(process.env, "SNOW_VITEST_IDENTITY_FIXTURE");
+    Reflect.deleteProperty(process.env, "NEX_VITEST_IDENTITY_FIXTURE");
   } else {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
   }
 });
 
@@ -360,7 +360,7 @@ async function seedManagedResumeContext(suffix: string): Promise<ManagedResumeCo
     tenantId: context.tenantId,
     userId: context.ownerId,
     deviceKey,
-    displayName: "snow_harness",
+    displayName: "nexharness",
     storageScopeDigest: `sha256:${suffix
       .padEnd(64, "0")
       .slice(0, 64)
@@ -713,9 +713,9 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
     const root = await mkdtemp(path.join(tmpdir(), "a05-managed-resume-"));
     temporaryRoots.push(root);
     environmentControlRoot = path.join(root, "environment-control");
-    process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT = environmentControlRoot;
+    process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT = environmentControlRoot;
     // 真实员工路由的身份夹具（与 R03 CONTROL 用例同一口径）。
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
     await ensureDefaultTenant();
   });
@@ -1230,7 +1230,7 @@ describe("A05：MANAGED 的正式暂停恢复（真实容器 + 真实 Workspace 
       if (!request) throw new Error("AgentCall 没有产生正式 UserActionRequest");
       const response = await resolveUserActionPOST(
         new Request(
-          `http://snow.test/api/threads/${ctx.threadId}/user-actions/${request.id}/resolve`,
+          `http://nex.test/api/threads/${ctx.threadId}/user-actions/${request.id}/resolve`,
           {
             method: "POST",
             headers: {
@@ -1720,7 +1720,7 @@ async function seedPreparedSlotLifecycle(input: {
 
 describe("A05：唯一决策表（来源意图与环境准备交接的逐行判据）", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
     await ensureDefaultTenant();
   });
@@ -2903,7 +2903,7 @@ describe("N02：Attempt 准备领取贯穿成功、失败与换手", () => {
 
   it("N02-T3: 旧准备真实 IO 成功晚到后仅清理独占候选，不改继任代际", async () => {
     const fixture = await seedClaimFixture();
-    const root = await mkdtemp(path.join(tmpdir(), "snow-n02-late-prepare-"));
+    const root = await mkdtemp(path.join(tmpdir(), "nex-n02-late-prepare-"));
     try {
       const broker = createWorkspaceHostBroker({ root });
       const first = await claimAttemptPreparation(preparationInput(fixture, randomUUID()));

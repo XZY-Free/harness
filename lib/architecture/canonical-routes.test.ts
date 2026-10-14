@@ -24,7 +24,7 @@
  * - scripts/architecture-gate-rules.test.ts 中 gate 规则测试的 mock 文档路径
  *   （负向测试构造假设违规路径来验证 gate 检测能力）
  * - lib/artifacts/test-support/*.ts 中 DSSE predicateType URI
- *   `https://snowharness.dev/conformance/runtime/v1`（Conformance suiteRevision
+ *   `https://nexharness.dev/conformance/runtime/v1`（Conformance suiteRevision
  *   独立版本域，naming-rules item 2）
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";

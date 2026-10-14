@@ -36,13 +36,13 @@ export function assertGitRefName(name: string): void {
  * 并设置 bot 提交身份（与 `deliverToGit` 既有逻辑对齐）。读原语（status/diff）只探测是否 repo，
  * 不 auto-init——对非 repo 工作区诚实返回 `isRepo:false`，而非副作用式地造一个空 repo。
  *
- * repo 探测用 `existsSync(join(cwd, ".git"))` 而非 `checkIsRepo()`：父目录 snow-harness 本身是
+ * repo 探测用 `existsSync(join(cwd, ".git"))` 而非 `checkIsRepo()`：父目录 nexharness 本身是
  * git repo 会让 checkIsRepo 误判为 true，导致 git 操作落到父仓库、被父 .gitignore 拦截
  * （与 deliverToGit 同一防护）。
  */
 
-const BOT_NAME = "SnowHarness";
-const BOT_EMAIL = "bot@snow-harness.local";
+const BOT_NAME = "NexHarness";
+const BOT_EMAIL = "bot@nexharness.local";
 
 /** diff 文本上限（避免把超大 diff 灌入 agent 上下文，完整 diff 走 Artifact）。 */
 const MAX_DIFF_BYTES = 20_000;
@@ -50,11 +50,11 @@ const MAX_DIFF_BYTES = 20_000;
 /**
  * git ops 超时（ms），默认 60s，env 可配。原无超时，push 可能挂死 agent。
  *
- * 走 getter 而非顶层 const：测试与运行时动态读 env，改 `SNOW_GIT_OP_TIMEOUT_MS` 立即生效，
+ * 走 getter 而非顶层 const：测试与运行时动态读 env，改 `NEX_GIT_OP_TIMEOUT_MS` 立即生效，
  * 无需重新 import。NaN / 非正数回退默认 60s。
  */
 function gitOpTimeoutMs(): number {
-  const raw = process.env.SNOW_GIT_OP_TIMEOUT_MS ?? "60000";
+  const raw = process.env.NEX_GIT_OP_TIMEOUT_MS ?? "60000";
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : 60000;
 }
@@ -163,7 +163,7 @@ export async function gitRemoteUrl(threadId: string, name = "origin"): Promise<s
 /** `git add <paths|.|>`（非 repo 则先 init + 配身份）。 */
 export async function gitAdd(threadId: string, paths?: string[]): Promise<void> {
   const g = await ensureRepo(threadId);
-  await withGitTimeout(g.add([...(paths ?? ["."]), ":(exclude).snow", ":(exclude).snow/**"]));
+  await withGitTimeout(g.add([...(paths ?? ["."]), ":(exclude).nex", ":(exclude).nex/**"]));
 }
 
 export type GitCommitResult = { commitSha?: string; nothingToCommit?: boolean };

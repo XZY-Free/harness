@@ -87,7 +87,7 @@ import { workerInstanceId } from "@/lib/workers/worker-instance-identity";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 /** 在途子调用的动作身份（父执行已持久化它，子调用尚未终态）。 */
 const IN_FLIGHT_ACTION_ID = "action-supervisor-inflight-1";
@@ -629,12 +629,12 @@ async function reportOf(handle: SupervisorProcessHandle): Promise<SupervisorProc
 
 describe("A03：Hosted Supervisor 身份、唯一 claim 与失权闭环", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
   });
 
   afterEach(() => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
     vi.restoreAllMocks();
   });
 

@@ -1,7 +1,7 @@
 /**
  * HR Agent Contract 测试夹具 — 真实首个集成（人力agent/hr-assistant）的登记事实。
  *
- * 事实源：/Users/sunshine/IdeaProjects/人力agent/hr-agent/artifacts/snowharness-registration/agent-contract.json
+ * 事实源：/Users/sunshine/IdeaProjects/人力agent/hr-agent/artifacts/nexharness-registration/agent-contract.json
  * 逐字保留该 artifact 的中英文 description / notes；capabilities 不含
  * tags/examples/input_modes/output_modes，invocation_context 不含 trust_requirement /
  * declaration_source（wire 上缺席即缺席，不虚构）。
@@ -60,7 +60,7 @@ export const hrAgentContract = {
       necessity: "preferred",
       description: {
         "zh-CN":
-          "SnowHarness本次执行所代表的可信调用者身份。制度咨询不一定需要身份；本人信息/请假办理需要身份。有可信身份且策略允许时尽量提供；没有身份时普通制度咨询仍可运行，本人数据或办理业务由智能体返回稳定身份缺失结果，不允许用户输入员工工号冒充可信身份。",
+          "NexHarness本次执行所代表的可信调用者身份。制度咨询不一定需要身份；本人信息/请假办理需要身份。有可信身份且策略允许时尽量提供；没有身份时普通制度咨询仍可运行，本人数据或办理业务由智能体返回稳定身份缺失结果，不允许用户输入员工工号冒充可信身份。",
       },
       applies_to: ["leave-and-attendance-service", "employee-self-service"],
     },

@@ -100,7 +100,7 @@ export class HostExecutionRuntime implements ExecutionRuntime {
 /**
  * ContainerExecutionRuntime——`ExecutionRuntime` 的容器实现。
  *
- * `docker exec snow-thread-{id} sh -lc "cd /workspace && {command}"`（经 docker-cli seam）。
+ * `docker exec nex-thread-{id} sh -lc "cd /workspace && {command}"`（经 docker-cli seam）。
  * 首次 exec 惰性 `startContainer`（含 ensureRuntimeImage），thread 内复用同一容器；
  * 每次 exec 后 `touchActivity` 刷新 idle TTL（ 回收依据）。
  * 超时 / buffer 截断 / 异常兜底与 HostExecutionRuntime 一致（docker-cli.execInContainer 内处理）。

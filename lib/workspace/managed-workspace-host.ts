@@ -2,8 +2,8 @@
  * 受管 WorkspaceHost 的生产解析（R01 §1「Workspace执行资源（BOUND时必需）」）。
  *
  * 服务端只有在**确实能拿到受管 Host** 时才声明 Workspace 执行资源可用：
- * - `SNOWHARNESS_WORKSPACE_HOST_URL`：连接到常驻 `workspace-host` 服务进程（RPC）。
- * - `SNOWHARNESS_WORKSPACE_HOST_ROOT`：同进程内直接构造 Broker（单机/测试部署）。
+ * - `NEXHARNESS_WORKSPACE_HOST_URL`：连接到常驻 `workspace-host` 服务进程（RPC）。
+ * - `NEXHARNESS_WORKSPACE_HOST_ROOT`：同进程内直接构造 Broker（单机/测试部署）。
  * 两者都没有 → `WorkspaceNotReadyError`，由调用方保留可恢复失败事实，
  * **绝不**降级成 NO_PLATFORM_WORKSPACE。
  */
@@ -61,7 +61,7 @@ export async function resolveManagedWorkspaceHost(
   if (binding.backendKind !== "managed_host") {
     throw new WorkspaceHostUnavailableError(`不受支持的 Workspace backend：${binding.backendKind}`);
   }
-  const endpointUrl = overrides.endpointUrl ?? envValue("SNOWHARNESS_WORKSPACE_HOST_URL");
+  const endpointUrl = overrides.endpointUrl ?? envValue("NEXHARNESS_WORKSPACE_HOST_URL");
   const host: WorkspaceHost = endpointUrl
     ? createRemoteWorkspaceHost(endpointUrl)
     : createLocalManagedWorkspaceHost(binding, overrides);
@@ -84,15 +84,15 @@ function createLocalManagedWorkspaceHost(
   overrides: ManagedWorkspaceHostOverrides,
 ): WorkspaceHost {
   assertScopeLockProviderAvailable();
-  const root = overrides.root ?? envValue("SNOWHARNESS_WORKSPACE_HOST_ROOT");
+  const root = overrides.root ?? envValue("NEXHARNESS_WORKSPACE_HOST_ROOT");
   if (!root) {
     throw new WorkspaceNotReadyError(
-      `Workspace ${binding.id} 需要受管 WorkspaceHost，但未配置 SNOWHARNESS_WORKSPACE_HOST_URL / SNOWHARNESS_WORKSPACE_HOST_ROOT`,
+      `Workspace ${binding.id} 需要受管 WorkspaceHost，但未配置 NEXHARNESS_WORKSPACE_HOST_URL / NEXHARNESS_WORKSPACE_HOST_ROOT`,
     );
   }
-  const hostIdentity = overrides.hostIdentity ?? envValue("SNOWHARNESS_WORKSPACE_HOST_IDENTITY");
+  const hostIdentity = overrides.hostIdentity ?? envValue("NEXHARNESS_WORKSPACE_HOST_IDENTITY");
   const snapshotRoot =
-    overrides.snapshotStorageRoot ?? envValue("SNOWHARNESS_SNAPSHOT_STORAGE_ROOT");
+    overrides.snapshotStorageRoot ?? envValue("NEXHARNESS_SNAPSHOT_STORAGE_ROOT");
   return createWorkspaceHostBroker({
     root,
     ...(hostIdentity ? { hostIdentity } : {}),
@@ -129,7 +129,7 @@ export interface ManagedWorkspaceResources {
  *
  * 与 `resolveManagedWorkspaceHost` 同源解析，但额外给出 `root`/`snapshotStorageRoot`，
  * 使组合层不必各自重复读环境配置（"一个修复、两个版本"）。
- * 远端 Host（`SNOWHARNESS_WORKSPACE_HOST_URL`）没有本地根概念，使用 Binding 的
+ * 远端 Host（`NEXHARNESS_WORKSPACE_HOST_URL`）没有本地根概念，使用 Binding 的
  * `locationRef` 作为该 Host 上的目录引用。
  */
 export async function resolveManagedWorkspaceResources(
@@ -137,8 +137,8 @@ export async function resolveManagedWorkspaceResources(
   overrides: ManagedWorkspaceHostOverrides = {},
 ): Promise<ManagedWorkspaceResources> {
   const host = await resolveManagedWorkspaceHost(binding, overrides);
-  const endpointUrl = overrides.endpointUrl ?? envValue("SNOWHARNESS_WORKSPACE_HOST_URL");
-  const localRoot = overrides.root ?? envValue("SNOWHARNESS_WORKSPACE_HOST_ROOT");
+  const endpointUrl = overrides.endpointUrl ?? envValue("NEXHARNESS_WORKSPACE_HOST_URL");
+  const localRoot = overrides.root ?? envValue("NEXHARNESS_WORKSPACE_HOST_ROOT");
   const root = endpointUrl ? binding.locationRef : (localRoot ?? binding.locationRef);
   if (!root) {
     throw new WorkspaceNotReadyError(
@@ -148,7 +148,7 @@ export async function resolveManagedWorkspaceResources(
   // 配置了物理根 → 显式 `file` 引用；没配 → `broker_default`（由 Broker 用它自己持有
   // 的存储执行真实 IO）。两条都是**真实能力**，不存在"没有存储"这一种默认状态。
   const snapshotStorage = snapshotStorageRefFromRoot(
-    overrides.snapshotStorageRoot ?? envValue("SNOWHARNESS_SNAPSHOT_STORAGE_ROOT"),
+    overrides.snapshotStorageRoot ?? envValue("NEXHARNESS_SNAPSHOT_STORAGE_ROOT"),
   );
   return { host, root, snapshotStorage };
 }

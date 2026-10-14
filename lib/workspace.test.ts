@@ -26,15 +26,15 @@ const TEST_ROOT = resolve(".test-workspaces");
 const TEST_CHAT_ID = "test-workspace-unit";
 
 // 覆盖 workspaceConfig.root
-const originalRoot = process.env.SNOW_WORKSPACES_DIR;
+const originalRoot = process.env.NEX_WORKSPACES_DIR;
 
 beforeEach(async () => {
-  process.env.SNOW_WORKSPACES_DIR = TEST_ROOT;
+  process.env.NEX_WORKSPACES_DIR = TEST_ROOT;
   await rm(join(TEST_ROOT, TEST_CHAT_ID), { recursive: true, force: true });
 });
 
 afterEach(async () => {
-  process.env.SNOW_WORKSPACES_DIR = originalRoot;
+  process.env.NEX_WORKSPACES_DIR = originalRoot;
   await rm(TEST_ROOT, { recursive: true, force: true });
 });
 
@@ -91,7 +91,7 @@ describe("默认文件存储 Provider", () => {
     });
 
     expect(stored.resourceRef).toBe(
-      ".snow/files/attachment/123e4567-e89b-12d3-a456-426614174000/content",
+      ".nex/files/attachment/123e4567-e89b-12d3-a456-426614174000/content",
     );
     expect(stored.resourceRef).not.toContain("人事证明.pdf");
     await expect(
@@ -158,7 +158,7 @@ describe("默认文件存储 Provider", () => {
       workspaceFileStorageProvider.read({
         tenantId: "tenant-1",
         threadId: TEST_CHAT_ID,
-        resourceRef: ".snow/files/attachment/------------------------------------/content",
+        resourceRef: ".nex/files/attachment/------------------------------------/content",
       }),
     ).rejects.toThrow("不是受管文件路径");
   });
@@ -265,7 +265,7 @@ describe("workspace symlink 越界防护（四入口）(切片 B2)", () => {
   async function makeExternalSymlink(linkRel: string): Promise<string> {
     const root = workspaceRoot(TEST_CHAT_ID);
     await mkdir(root, { recursive: true });
-    const external = resolve(tmpdir(), `snow-ws-ext-${TEST_CHAT_ID}.txt`);
+    const external = resolve(tmpdir(), `nex-ws-ext-${TEST_CHAT_ID}.txt`);
     await writeFile(external, "external-secret", "utf8");
     const linkPath = join(root, linkRel);
     await symlink(external, linkPath);
@@ -273,7 +273,7 @@ describe("workspace symlink 越界防护（四入口）(切片 B2)", () => {
   }
 
   async function makeRootSymlinkToExternalWorkspace(): Promise<string> {
-    const externalRoot = resolve(tmpdir(), `snow-ws-root-ext-${TEST_CHAT_ID}`);
+    const externalRoot = resolve(tmpdir(), `nex-ws-root-ext-${TEST_CHAT_ID}`);
     await rm(externalRoot, { recursive: true, force: true });
     await mkdir(externalRoot, { recursive: true });
     await writeFile(join(externalRoot, "secret.txt"), "external-secret", "utf8");
@@ -341,7 +341,7 @@ describe("workspace symlink 越界防护（四入口）(切片 B2)", () => {
 
 describe("workspace 内部目录隐藏 (V5-B1)", () => {
   it("isInternalDirName 识别内部目录名", () => {
-    expect(isInternalDirName(".snow")).toBe(true);
+    expect(isInternalDirName(".nex")).toBe(true);
     expect(isInternalDirName(".git")).toBe(true);
     expect(isInternalDirName("node_modules")).toBe(true);
     expect(isInternalDirName(".next")).toBe(true);
@@ -356,7 +356,7 @@ describe("workspace 内部目录隐藏 (V5-B1)", () => {
   });
 
   it("isInternalPath 检查路径任意段", () => {
-    expect(isInternalPath(".snow/secret.log")).toBe(true);
+    expect(isInternalPath(".nex/secret.log")).toBe(true);
     expect(isInternalPath(".git/HEAD")).toBe(true);
     expect(isInternalPath("node_modules/react/index.js")).toBe(true);
     expect(isInternalPath("src/node_modules/app.js")).toBe(true); // 中段也命中
@@ -377,7 +377,7 @@ describe("workspace 内部目录隐藏 (V5-B1)", () => {
     await writeWorkspaceFile(TEST_CHAT_ID, "README.md", "readme");
     await writeWorkspaceFile(TEST_CHAT_ID, "src/app.js", "app");
     // 内部目录文件——应该被跳过
-    await writeWorkspaceFile(TEST_CHAT_ID, ".snow/log.txt", "secret");
+    await writeWorkspaceFile(TEST_CHAT_ID, ".nex/log.txt", "secret");
     await writeWorkspaceFile(TEST_CHAT_ID, "node_modules/react/index.js", "module");
     await writeWorkspaceFile(TEST_CHAT_ID, ".next/types.d.ts", "types");
     await writeWorkspaceFile(TEST_CHAT_ID, ".git/HEAD", "ref: refs/heads/main");
@@ -385,7 +385,7 @@ describe("workspace 内部目录隐藏 (V5-B1)", () => {
     const files = await listWorkspaceFiles(TEST_CHAT_ID, { skipInternal: true });
     expect(files).toEqual(expect.arrayContaining(["index.html", "README.md", "src/app.js"]));
     // 内部目录下的文件不出现在前台
-    expect(files).not.toContain(".snow/log.txt");
+    expect(files).not.toContain(".nex/log.txt");
     expect(files).not.toContain("node_modules/react/index.js");
     expect(files).not.toContain(".next/types.d.ts");
     expect(files).not.toContain(".git/HEAD");
@@ -395,11 +395,11 @@ describe("workspace 内部目录隐藏 (V5-B1)", () => {
 
   it("listWorkspaceFiles 默认 skipInternal=false 列出全部文件（向后兼容）", async () => {
     await writeWorkspaceFile(TEST_CHAT_ID, "index.html", "<h1>1</h1>");
-    await writeWorkspaceFile(TEST_CHAT_ID, ".snow/log.txt", "secret");
+    await writeWorkspaceFile(TEST_CHAT_ID, ".nex/log.txt", "secret");
 
     const files = await listWorkspaceFiles(TEST_CHAT_ID);
     expect(files).toContain("index.html");
-    expect(files).toContain(".snow/log.txt");
+    expect(files).toContain(".nex/log.txt");
   });
 });
 
@@ -502,7 +502,7 @@ describe("writeWorkspaceFileWithRevision (V9 阶段 4)", () => {
 
   it("内部目录路径 → 抛 WorkspacePathError", async () => {
     await expect(
-      writeWorkspaceFileWithRevision(TEST_CHAT_ID, ".snow/secret.txt", "x"),
+      writeWorkspaceFileWithRevision(TEST_CHAT_ID, ".nex/secret.txt", "x"),
     ).rejects.toThrow(WorkspacePathError);
   });
 });

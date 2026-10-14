@@ -58,7 +58,7 @@ beforeEach(() => {
   browser.cancelAi.mockResolvedValue(true);
   browser.onLockStateChange.mockReturnValue(() => undefined);
   browser.onTabUpdate.mockReturnValue(() => undefined);
-  (globalThis as unknown as { snowDesktop?: unknown }).snowDesktop = {
+  (globalThis as unknown as { nexDesktop?: unknown }).nexDesktop = {
     capabilities: {
       version: 1,
       serverOrigin: "http://localhost:3000",
@@ -79,7 +79,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  (globalThis as unknown as { snowDesktop?: unknown }).snowDesktop = undefined;
+  (globalThis as unknown as { nexDesktop?: unknown }).nexDesktop = undefined;
 });
 
 describe("DesktopBrowserSurface", () => {

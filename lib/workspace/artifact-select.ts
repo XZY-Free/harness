@@ -15,7 +15,7 @@ import type { WorkspacePanelView } from "@/components/workspace-panel/types";
  * 避免自动打开 src/app.js 这种员工不关心的中间产物）
  * 7. 无文件 → null（右侧保持空态，WorkspacePanel 不渲染）
  *
- * 内部目录文件（.snow/、node_modules/ 等）不应出现在 files 中——
+ * 内部目录文件（.nex/、node_modules/ 等）不应出现在 files 中——
  * list API 已默认 skipInternal=true。本函数不重复判定，信任入参。
  *
  * @param files 工作区文件相对路径列表（已排除内部目录）

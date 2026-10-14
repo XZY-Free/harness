@@ -22,8 +22,8 @@ type AuthOperation =
   | "external-methods";
 type AuthRouteContext = { params: Promise<{ operation?: string[] }> };
 
-const SSO_STATE_COOKIE_NAME = "snow_sso_state";
-const SSO_RETURN_TO_COOKIE_NAME = "snow_sso_return_to";
+const SSO_STATE_COOKIE_NAME = "nex_sso_state";
+const SSO_RETURN_TO_COOKIE_NAME = "nex_sso_return_to";
 const SSO_FLOW_TTL_SECONDS = 10 * 60;
 
 const loginSchema = z.object({
@@ -98,7 +98,7 @@ async function handle(
     const state = randomBytes(32).toString("base64url");
     const callbackBase = getDesktopRendererOrigin(request) ?? request.url;
     const callbackUrl = new URL(
-      `${process.env.NEXT_PUBLIC_SNOW_BASE_PATH ?? ""}/api/auth/callback`,
+      `${process.env.NEXT_PUBLIC_NEX_BASE_PATH ?? ""}/api/auth/callback`,
       callbackBase,
     ).toString();
     const redirect = await authenticationProvider.beginExternalLogin({
@@ -336,7 +336,7 @@ function isInternalReturnTo(value: string): boolean {
  * 只接受 loopback HTTP origin，避免任意 Header 改写 OAuth callback。
  */
 function getDesktopRendererOrigin(request: NextRequest): string | null {
-  const value = request.headers.get("x-snowharness-desktop-origin")?.trim();
+  const value = request.headers.get("x-nexharness-desktop-origin")?.trim();
   if (!value) return null;
   try {
     const origin = new URL(value);
@@ -358,7 +358,7 @@ function getDesktopRendererOrigin(request: NextRequest): string | null {
 }
 
 function withBasePath(path: string): string {
-  const basePath = process.env.NEXT_PUBLIC_SNOW_BASE_PATH ?? "";
+  const basePath = process.env.NEXT_PUBLIC_NEX_BASE_PATH ?? "";
   if (!basePath || path === basePath || path.startsWith(`${basePath}/`)) return path;
   return `${basePath}${path}`;
 }
@@ -416,7 +416,7 @@ function serializeNamedCookie(
   value: string,
   lifetime: string,
 ): string {
-  const basePath = process.env.NEXT_PUBLIC_SNOW_BASE_PATH ?? "";
+  const basePath = process.env.NEXT_PUBLIC_NEX_BASE_PATH ?? "";
   const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
   const secure = request.nextUrl.protocol === "https:" || forwardedProto === "https";
   return [

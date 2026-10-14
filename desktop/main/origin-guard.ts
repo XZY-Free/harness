@@ -5,7 +5,7 @@
  * 防止 renderer 被诱导导航到恶意站点后绕过 sandbox / contextIsolation。
  *
  * 规则：
- * - 受信任 origin 列表从环境变量 SNOW_SERVER_ORIGIN 读取（逗号分隔），默认 http://localhost:3000。
+ * - 受信任 origin 列表从环境变量 NEX_SERVER_ORIGIN 读取（逗号分隔），默认 http://localhost:3000。
  * - https://<domain> 在 allowedOrigins 中 → 允许。
  * - http://localhost:<port> / http://127.0.0.1:<port> 在 allowedOrigins 中 → 允许（本地开发）。
  * - 其他 http://（非 localhost / 127.0.0.1）→ 阻止（生产环境不允许非 localhost 的 http）。
@@ -70,7 +70,7 @@ function isEligibleOrigin(origin: string, allowInsecureRemote = false): boolean 
 
 /**
  * 从可能含 basePath 的条目提取纯 origin。
- * 如 "http://119.45.222.120/snowharness" → "http://119.45.222.120"。
+ * 如 "https://nex.example.com/nexharness" → "https://nex.example.com"。
  * 无效条目返回 null。
  */
 function extractOriginFromEntry(entry: string): string | null {
@@ -82,8 +82,8 @@ function extractOriginFromEntry(entry: string): string | null {
  * 需要 origin 在 allowedOrigins 列表中，且符合协议规则。
  * about:blank 不是 server origin，返回 false。
  *
- * allowedOrigins 条目可含 basePath（如 http://host/snowharness），比对时提取 origin。
- * allowInsecureRemote 从环境变量 SNOW_ALLOW_INSECURE_REMOTE_ORIGIN 读取（主进程侧）。
+ * allowedOrigins 条目可含 basePath（如 http://host/nexharness），比对时提取 origin。
+ * allowInsecureRemote 从环境变量 NEX_ALLOW_INSECURE_REMOTE_ORIGIN 读取（主进程侧）。
  */
 export function isTrustedServerOrigin(
   url: string,
@@ -175,7 +175,7 @@ export function isAllowedAuthenticationWindowNavigation(
  * 单测可传入自定义 env 对象，避免污染全局环境。
  */
 export function loadAllowedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
-  const raw = env.SNOW_SERVER_ORIGIN;
+  const raw = env.NEX_SERVER_ORIGIN;
   if (!raw || raw.trim().length === 0) {
     return [DEFAULT_SERVER_ORIGIN];
   }

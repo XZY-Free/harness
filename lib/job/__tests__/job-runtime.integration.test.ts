@@ -100,9 +100,9 @@ function signedContextWithExtraSubjectField(issued: string, field: string, value
   parsed.subject[field] = value;
   const changedPayload = Buffer.from(canonicalizeJson(parsed), "utf8").toString("base64url");
   const secret =
-    process.env.SNOW_CONTEXT_HANDLE_SECRET?.trim() || "snow-context-handle-test-secret-32-bytes";
+    process.env.NEX_CONTEXT_HANDLE_SECRET?.trim() || "nex-context-handle-test-secret-32-bytes";
   const mac = createHmac("sha256", secret)
-    .update(`snowharness.context\0${header}.${changedPayload}`, "utf8")
+    .update(`nexharness.context\0${header}.${changedPayload}`, "utf8")
     .digest("base64url");
   return `ch.${header}.${changedPayload}.${mac}`;
 }
@@ -1958,7 +1958,7 @@ describe("Thread-independent Job runtime integration", () => {
       ? workspaceConfig.root
       : resolve(process.cwd(), workspaceConfig.root);
     await writeFile(
-      join(root, ".snow", "job-inputs", TENANT_ID, frozenDigest.slice("sha256:".length)),
+      join(root, ".nex", "job-inputs", TENANT_ID, frozenDigest.slice("sha256:".length)),
       JSON.stringify(changedContent),
     );
     await expect(

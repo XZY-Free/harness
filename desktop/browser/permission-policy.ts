@@ -181,9 +181,9 @@ export function checkUrlSafety(url: string): UrlSafetyResult {
 }
 
 /**
- * 判断 URL 是否为内部 SnowHarness Server URL。
+ * 判断 URL 是否为内部 NexHarness Server URL。
  *
- * serverOrigins 条目可含 basePath（如 http://host/snowharness），比对时提取 origin。
+ * serverOrigins 条目可含 basePath（如 http://host/nexharness），比对时提取 origin。
  *
  * @param url - 要检查的 URL
  * @param serverOrigins - 受信任 Server origin 列表（可含 basePath）

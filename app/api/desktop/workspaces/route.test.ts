@@ -22,7 +22,7 @@ const principal = {
 };
 const body = {
   device_id: "device-key-1",
-  display_name: "snow_harness",
+  display_name: "nexharness",
   storage_scope_digest: `sha256:${"a".repeat(64)}`,
 };
 
@@ -41,7 +41,7 @@ describe("POST /api/desktop/workspaces", () => {
     vi.mocked(ensureDesktopWorkspace).mockResolvedValue({
       workspaceId: "workspace-1",
       bindingId: "binding-1",
-      displayName: "snow_harness",
+      displayName: "nexharness",
     });
   });
 
@@ -53,7 +53,7 @@ describe("POST /api/desktop/workspaces", () => {
       tenantId: "tenant-1",
       userId: "user-1",
       deviceKey: "device-key-1",
-      displayName: "snow_harness",
+      displayName: "nexharness",
       storageScopeDigest: body.storage_scope_digest,
     });
     expect(await response.json()).toEqual({
@@ -61,7 +61,7 @@ describe("POST /api/desktop/workspaces", () => {
       data: {
         workspace_id: "workspace-1",
         binding_id: "binding-1",
-        display_name: "snow_harness",
+        display_name: "nexharness",
       },
     });
   });

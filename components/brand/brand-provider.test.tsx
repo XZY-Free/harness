@@ -11,7 +11,7 @@ afterEach(() => {
 
 describe("BrandProvider 子路径部署", () => {
   it("快照和失效订阅都使用应用 basePath，失效后携带 ETag 更新品牌", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
+    vi.stubEnv("NEXT_PUBLIC_NEX_BASE_PATH", "/nexharness");
     vi.resetModules();
     const sources: Array<EventTarget & { url: string; close: ReturnType<typeof vi.fn> }> = [];
     vi.stubGlobal(
@@ -40,8 +40,8 @@ describe("BrandProvider 子路径部署", () => {
       </BrandProvider>,
     );
     await screen.findByText("测试工作台");
-    expect(fetch).toHaveBeenCalledWith("/snowharness/api/brand", { headers: {} });
-    expect(sources[0]?.url).toBe("/snowharness/api/brand/stream");
+    expect(fetch).toHaveBeenCalledWith("/nexharness/api/brand", { headers: {} });
+    expect(sources[0]?.url).toBe("/nexharness/api/brand/stream");
 
     fetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ brand: { ...DEFAULT_BRAND, name: "更新后的工作台" } }), {
@@ -50,7 +50,7 @@ describe("BrandProvider 子路径部署", () => {
     );
     act(() => sources[0]?.dispatchEvent(new Event("brand")));
     await screen.findByText("更新后的工作台");
-    expect(fetch).toHaveBeenLastCalledWith("/snowharness/api/brand", {
+    expect(fetch).toHaveBeenLastCalledWith("/nexharness/api/brand", {
       headers: { "if-none-match": '"brand-1"' },
     });
 

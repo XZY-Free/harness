@@ -1,7 +1,7 @@
 /**
  * Platform Integration Conformance 合同唯一入口。
  *
- * 职责：SnowHarness 正式控制面与执行面组合以后，是否满足平台级不变量。本层属于
+ * 职责：NexHarness 正式控制面与执行面组合以后，是否满足平台级不变量。本层属于
  * CI / Platform Release Gate，不属于 RuntimeRevision Publication Gate，不写入
  * RuntimeConformanceRun、不阻断 RuntimeRevision Publication。
  *

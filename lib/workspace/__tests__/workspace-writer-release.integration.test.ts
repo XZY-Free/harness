@@ -202,7 +202,7 @@ async function readLock(lockId: string) {
 
 describe("Workspace writer release lane integration", () => {
   let roots: string[] = [];
-  const envKeys = ["SNOWHARNESS_WORKSPACE_HOST_ROOT"] as const;
+  const envKeys = ["NEXHARNESS_WORKSPACE_HOST_ROOT"] as const;
   const savedEnv = new Map<string, string | undefined>();
 
   beforeEach(async () => {
@@ -232,7 +232,7 @@ describe("Workspace writer release lane integration", () => {
   });
 
   async function makeRoot(): Promise<string> {
-    const root = await mkdtemp(path.join(tmpdir(), "snowharness-writer-release-"));
+    const root = await mkdtemp(path.join(tmpdir(), "nexharness-writer-release-"));
     roots.push(root);
     return root;
   }
@@ -308,7 +308,7 @@ describe("Workspace writer release lane integration", () => {
     expect(processAlive(run.spawned.pid)).toBe(true);
 
     // 生产解析路径（env root → 新建 Broker 实例）：只凭持久状态发现旧 Writer。
-    process.env.SNOWHARNESS_WORKSPACE_HOST_ROOT = root;
+    process.env.NEXHARNESS_WORKSPACE_HOST_ROOT = root;
     const summary = await runDueWorkspaceWriterReleases({ leaseOwner: "test-worker:1", limit: 10 });
     expect(summary.scanned).toBe(1);
     expect(summary.released).toBe(1);

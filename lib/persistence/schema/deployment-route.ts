@@ -47,7 +47,7 @@ export type RouteState = (typeof ROUTE_STATES)[number];
 
 /**
  * Route 目标类型 — 显式判别，禁止再用 agentId null/non-null 隐式猜测目标。
- * - runtime：SnowHarness Harness Runtime Route（顶层执行目标）。
+ * - runtime：NexHarness Harness Runtime Route（顶层执行目标）。
  * - agent：Agent 能力 Route（Harness 调用外部 Agent 能力）。
  * 仍只有一套 Route 体系，targetKind 只区分目标，不建立第二套路由 Authority。
  */

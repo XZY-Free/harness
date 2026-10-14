@@ -1,11 +1,11 @@
 /**
  * Desktop preload capability schema 和 IPC channel 定义。
  *
- * Desktop Electron 的 preload 脚本注入 `globalThis.__SNOW_DESKTOP__` 包含 capability
+ * Desktop Electron 的 preload 脚本注入 `globalThis.__NEX_DESKTOP__` 包含 capability
  * 信息。renderer 通过 `getDesktopCapabilities()` 读取后验证来源，才挂载 DesktopBrowserSurface。
  *
  * 普通浏览器（Web 端）不注入此标识，`getDesktopCapabilities()` 返回 null，
- * `/desktop` 路由显示"需要 SnowHarness Desktop"提示页。
+ * `/desktop` 路由显示"需要 NexHarness Desktop"提示页。
  *
  * 安全约束：
  * - capability 只能由受信任 preload 脚本注入，不可通过 URL 参数或 localStorage 伪造。
@@ -113,12 +113,12 @@ export const DESKTOP_IPC_CHANNELS = [
 export type DesktopIpcChannel = (typeof DESKTOP_IPC_CHANNELS)[number];
 
 /**
- * Desktop capability 结构。由 preload 注入到 `globalThis.__SNOW_DESKTOP__`。
+ * Desktop capability 结构。由 preload 注入到 `globalThis.__NEX_DESKTOP__`。
  */
 export interface DesktopCapabilities {
   /** Capability schema 版本 */
   version: typeof DESKTOP_CAPABILITY_VERSION;
-  /** 受信任 SnowHarness Server origin（如 https://snow.example.com） */
+  /** 受信任 NexHarness Server origin（如 https://nex.example.com） */
   serverOrigin: string;
   /** Desktop 应用版本（从 package.json 读取） */
   appVersion: string;
@@ -130,7 +130,7 @@ export interface DesktopCapabilities {
    * 是否允许非 localhost 的 http origin（连接远程 http 部署时显式开启）。
    *
    * 默认 false：仅允许 https 或 http://localhost|127.0.0.1（生产安全默认）。
-   * preload 从环境变量 SNOW_ALLOW_INSECURE_REMOTE_ORIGIN 读取注入。
+   * preload 从环境变量 NEX_ALLOW_INSECURE_REMOTE_ORIGIN 读取注入。
    * renderer 校验时通过此 flag 放行公网 http origin（capability 由 preload 在
    * contextIsolation 下注入，renderer 无法伪造）。
    */
@@ -433,8 +433,7 @@ export interface DesktopWindowFrameState {
  * 返回对象时需进一步校验 version 和 serverOrigin。
  */
 export function getDesktopCapabilities(): DesktopCapabilities | null {
-  const bridge = (globalThis as unknown as { snowDesktop?: { capabilities?: unknown } })
-    .snowDesktop;
+  const bridge = (globalThis as unknown as { nexDesktop?: { capabilities?: unknown } }).nexDesktop;
   const cap = bridge?.capabilities;
   if (!isValidDesktopCapabilities(cap)) {
     return null;
@@ -443,7 +442,7 @@ export function getDesktopCapabilities(): DesktopCapabilities | null {
 }
 
 export function getDesktopBridge(): DesktopRendererBridge | null {
-  const bridge = (globalThis as unknown as { snowDesktop?: unknown }).snowDesktop;
+  const bridge = (globalThis as unknown as { nexDesktop?: unknown }).nexDesktop;
   if (typeof bridge !== "object" || bridge === null) return null;
   const candidate = bridge as Partial<DesktopRendererBridge>;
   if (!isValidDesktopCapabilities(candidate.capabilities)) return null;
@@ -456,7 +455,7 @@ export function getDesktopBridge(): DesktopRendererBridge | null {
 /**
  * 校验值是否为合法 DesktopCapabilities。
  *
- * 防止恶意脚本通过注入假 `__SNOW_DESKTOP__` 伪造 Desktop 环境：
+ * 防止恶意脚本通过注入假 `__NEX_DESKTOP__` 伪造 Desktop 环境：
  * - 必须是对象
  * - version 必须等于当前 schema 版本
  * - serverOrigin 必须是 https URL（本地开发允许 http://localhost）

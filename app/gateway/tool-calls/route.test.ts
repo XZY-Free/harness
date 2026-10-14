@@ -287,7 +287,7 @@ async function seedToolCallEffect(input: {
     requestDigest: computeEffectRequestDigest({ toolCall: input.toolCallId, fixture: "gateway" }),
     effectType: "update",
     targetSummaryJson: input.targetSummaryJson ?? { total: 1 },
-    externalIdempotencyKey: `snow-tool:${input.toolCallId}`,
+    externalIdempotencyKey: `nex-tool:${input.toolCallId}`,
   });
 }
 
@@ -619,14 +619,14 @@ beforeEach(async () => {
   await resetDatabase(db);
   catalogTool = null;
   currentAuthority = null;
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
-  process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
   await ensureDefaultTenant();
 });
 
 afterEach(() => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
-  process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
 });
 
 describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () => {
@@ -779,7 +779,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
         toState: "dispatched",
         retryClass: "undetermined",
       });
-      const nativeRoot = await realpath(await mkdtemp(join(tmpdir(), "snow-desktop-bridge-")));
+      const nativeRoot = await realpath(await mkdtemp(join(tmpdir(), "nex-desktop-bridge-")));
       const workspaceRoot = join(nativeRoot, "project");
       await mkdir(workspaceRoot);
       const nativeDb = await openDesktopDatabase(
@@ -854,9 +854,9 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
     },
   );
   it("命令经过真实 Gateway、权限、Worker 和 Effect 链返回系统时间，重放不重复执行", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snow-shell-gateway-"));
+    const root = await mkdtemp(join(tmpdir(), "nex-shell-gateway-"));
     vi.stubEnv("RUNTIME_DEFAULT", "host");
-    vi.stubEnv("SNOW_WORKSPACES_DIR", root);
+    vi.stubEnv("NEX_WORKSPACES_DIR", root);
     try {
       await registerBuiltinTools({ tenantId: TENANT, ownerUserId: "test-admin" });
       const tool = (await listTools({ tenantId: TENANT })).items.find(
@@ -1419,7 +1419,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
         attemptId: claimed.attempt.id,
         fromState: "claimed",
         toState: "dispatched",
-        externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+        externalIdempotencyKey: `nex-tool:${body.tool_call_id}`,
         retryClass: "undetermined",
       });
       await fetch(endpoint, { method: "POST", body: "{}" });
@@ -1477,7 +1477,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       attemptId: claimed.attempt.id,
       fromState: "claimed",
       toState: "dispatched",
-      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+      externalIdempotencyKey: `nex-tool:${body.tool_call_id}`,
       retryClass: "undetermined",
     });
     await reconcileEffect({
@@ -1495,7 +1495,7 @@ describe("POST /gateway/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", () 
       attemptId: claimed.attempt.id,
       fromState: "dispatched",
       toState: "succeeded",
-      externalIdempotencyKey: `snow-tool:${body.tool_call_id}`,
+      externalIdempotencyKey: `nex-tool:${body.tool_call_id}`,
       providerRequestRef: "provider-success-before-crash",
       retryClass: "none",
       finished: true,

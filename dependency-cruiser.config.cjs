@@ -1,7 +1,7 @@
 /**
  * dependency-cruiser 架构规则配置。
  *
- * 规则来源: SnowHarness 01专题后续四批改造总方案 §二十八 + §9.4 收口
+ * 规则来源: NexHarness 01专题后续四批改造总方案 §二十八 + §9.4 收口
  *
  * 层次:
  * - Domain: 只允许同领域 Domain + 纯类型 + Node 标准库纯计算

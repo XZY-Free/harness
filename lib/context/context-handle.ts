@@ -49,12 +49,12 @@ export class ContextHandleError extends Error {
 }
 
 function signingSecret(): string {
-  const secret = process.env.SNOW_CONTEXT_HANDLE_SECRET?.trim();
+  const secret = process.env.NEX_CONTEXT_HANDLE_SECRET?.trim();
   if (secret && Buffer.byteLength(secret, "utf8") >= 32) return secret;
   if (process.env.NODE_ENV === "test" || process.env.APP_ENV === "test") {
-    return "snow-context-handle-test-secret-32-bytes";
+    return "nex-context-handle-test-secret-32-bytes";
   }
-  throw new ContextHandleError("invalid", "未配置 SNOW_CONTEXT_HANDLE_SECRET");
+  throw new ContextHandleError("invalid", "未配置 NEX_CONTEXT_HANDLE_SECRET");
 }
 
 function signingKeyId(): string {
@@ -63,7 +63,7 @@ function signingKeyId(): string {
 
 function sign(header: string, payload: string): string {
   return createHmac("sha256", signingSecret())
-    .update(`snowharness.context\0${header}.${payload}`, "utf8")
+    .update(`nexharness.context\0${header}.${payload}`, "utf8")
     .digest("base64url");
 }
 

@@ -32,7 +32,7 @@ const TRUSTED_RUNNER_KEY = generateTestRunnerKey("hosted-control-plane-runner");
 const RUNNER_IDENTITY = "ci/hosted-runtime-conformance";
 /** 实际执行环境：in-process Hosted Adapter（真实 suite 运行环境）。 */
 const TEST_ENVIRONMENT_REVISION = "in-process-hosted-adapter@1";
-const BUILDER_IDENTITY = "builder:snow-harness-hosted-release";
+const BUILDER_IDENTITY = "builder:nexharness-hosted-release";
 
 export function trustedHostedRunnerSigningIdentityForTest(tenantId: string): RunnerSigningIdentity {
   return {
@@ -95,8 +95,8 @@ function createEvidenceProvider(options?: {
 
   return {
     async loadArtifactEvidence({ artifactType }) {
-      const artifactDigest = digest(`snow-harness:${artifactType}:release-1`);
-      const prefix = `managed://snow-harness/${artifactType}/release-1`;
+      const artifactDigest = digest(`nexharness:${artifactType}:release-1`);
+      const prefix = `managed://nexharness/${artifactType}/release-1`;
       const dsseEnvelopeRef = `${prefix}/dsse-envelope`;
       const sbomRef = `${prefix}/sbom`;
       const provenanceRef = `${prefix}/provenance`;
@@ -112,12 +112,12 @@ function createEvidenceProvider(options?: {
               specVersion: "1.6",
               version: 1,
               metadata: {
-                component: { type: "application", name: "snow-harness", version: "release-1" },
+                component: { type: "application", name: "nexharness", version: "release-1" },
               },
               components: [
                 {
                   type: "library",
-                  name: "snow-harness",
+                  name: "nexharness",
                   version: "release-1",
                   licenses: [{ license: { id: "MIT" } }],
                 },
@@ -141,12 +141,12 @@ function createEvidenceProvider(options?: {
         specVersion: "1.6",
         version: 1,
         metadata: {
-          component: { type: "application", name: "snow-harness", version: "release-1" },
+          component: { type: "application", name: "nexharness", version: "release-1" },
         },
         components: [
           {
             type: "library",
-            name: "snow-harness",
+            name: "nexharness",
             version: "release-1",
             licenses: [{ license: { id: "MIT" } }],
           },
@@ -160,7 +160,7 @@ function createEvidenceProvider(options?: {
       });
       return {
         artifactDigest,
-        artifactRef: `managed://snow-harness/${artifactType}@${artifactDigest}`,
+        artifactRef: `managed://nexharness/${artifactType}@${artifactDigest}`,
         dsseEnvelopeRef,
         sbomRef,
         provenanceRef,

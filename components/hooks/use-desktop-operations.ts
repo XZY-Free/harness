@@ -22,7 +22,7 @@
  * ```tsx
  * function DesktopOperationRunner({ threadId }: { threadId: string }) {
  *   const ops = useDesktopOperations();
- *   if (!ops.isDesktop) return <Hint>需要 SnowHarness Desktop</Hint>;
+ *   if (!ops.isDesktop) return <Hint>需要 NexHarness Desktop</Hint>;
  *   return <OpPanel capabilities={ops.capabilities} onRun={(op) => ops.execShell({ ... })} />;
  * }
  * ```

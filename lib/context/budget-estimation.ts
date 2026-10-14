@@ -6,7 +6,7 @@ import type { ChatMessage } from "@/lib/types";
  *
  * 关键不变式：`resolveTokenBudget` 在无 per-model contextWindow 配置时返回 `Infinity`，
  * `shouldCompress` 对 `Infinity` 预算恒为 false → **永不压缩 → 零回归**。
- * 即使没配 `SNOW_CONTEXT_WINDOWS`，也不破坏现有 chat 行为。
+ * 即使没配 `NEX_CONTEXT_WINDOWS`，也不破坏现有 chat 行为。
  *
  * S1 修复（03-升级真 tokenizer）：原 CJK 友好的 char 估算（CJK=1, ASCII=char/4）只是
  * 过渡方案，对中英混排/代码仍偏差。改用 `gpt-tokenizer`（o200k_base，GPT-4o 编码，纯 JS BPE）

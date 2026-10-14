@@ -55,7 +55,7 @@ vi.mock("@/lib/identity/idempotency", async (importOriginal) => {
 
 import { AuthenticationError } from "@/lib/identity/resolver";
 
-const originalImageUploadMaxMb = process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB;
+const originalImageUploadMaxMb = process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB;
 
 function uploadRequest(file: File, idempotencyKey: string | null = "upload-test-1"): Request {
   const body = new FormData();
@@ -71,7 +71,7 @@ const context = { params: Promise.resolve({ threadId: "test-thread-1" }) };
 
 describe("POST /api/threads/:threadId/attachments", () => {
   afterEach(() => {
-    process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = originalImageUploadMaxMb;
+    process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB = originalImageUploadMaxMb;
     storageMock.throwOnStore = false;
     storageMock.store.mockReset();
     storageMock.read.mockReset();
@@ -96,7 +96,7 @@ describe("POST /api/threads/:threadId/attachments", () => {
     });
     storageMock.store.mockImplementation(async (input: { resourceId: string }) => {
       if (storageMock.throwOnStore) throw new Error("disk full");
-      return { resourceRef: `.snow/files/attachment/${input.resourceId}/content` };
+      return { resourceRef: `.nex/files/attachment/${input.resourceId}/content` };
     });
     storageMock.delete.mockResolvedValue(true);
     attachmentRepositoryMock.create.mockImplementation(async (input: Record<string, unknown>) => ({
@@ -258,7 +258,7 @@ describe("POST /api/threads/:threadId/attachments", () => {
         tenantId: "tenant-1",
         threadId: "test-thread-1",
         storageProvider: "test-storage",
-        resourceRef: `.snow/files/attachment/${body.attachment_id}/content`,
+        resourceRef: `.nex/files/attachment/${body.attachment_id}/content`,
         resourceFingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
         originalFilename: file.name,
         contentType: file.type,
@@ -287,7 +287,7 @@ describe("POST /api/threads/:threadId/attachments", () => {
   });
 
   it("使用部署配置的图片上传上限", async () => {
-    process.env.SNOW_FILE_IMAGE_UPLOAD_MAX_MB = "1";
+    process.env.NEX_FILE_IMAGE_UPLOAD_MAX_MB = "1";
 
     const res = await POST(
       uploadRequest(
@@ -323,7 +323,7 @@ describe("POST /api/threads/:threadId/attachments", () => {
     expect(storageMock.delete).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       threadId: "test-thread-1",
-      resourceRef: `.snow/files/attachment/${storedInput.resourceId}/content`,
+      resourceRef: `.nex/files/attachment/${storedInput.resourceId}/content`,
     });
   });
 });

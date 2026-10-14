@@ -25,7 +25,7 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 
 const TOKEN = "external-secret-token-03";
-const ENV_NAME = "SNOWHARNESS_TEST_OUTBOUND_TOKEN";
+const ENV_NAME = "NEXHARNESS_TEST_OUTBOUND_TOKEN";
 const FINGERPRINT = `sha256:${createHash("sha256").update(TOKEN, "utf8").digest("hex")}`;
 
 let tenantId: string;
@@ -131,7 +131,7 @@ describe("resolveOutboundRuntimeAuth（03 §5）", () => {
   });
 
   it("bearer：env 缺失 → 拒绝", async () => {
-    const refId = await seedCredentialRef({ vaultRef: "SNOWHARNESS_TEST_OUTBOUND_MISSING" });
+    const refId = await seedCredentialRef({ vaultRef: "NEXHARNESS_TEST_OUTBOUND_MISSING" });
     await expectAuthErrorKind(
       resolveOutboundRuntimeAuth({ tenantId, identityMode: "bearer", credentialRefId: refId }),
       "credential_unresolvable",

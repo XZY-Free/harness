@@ -67,7 +67,7 @@ describe("Snapshot storage (R09 §5/§6/§7)", () => {
   let storageRoot: string;
 
   beforeEach(async () => {
-    root = await mkdtemp(path.join(tmpdir(), "snow-snapshot-"));
+    root = await mkdtemp(path.join(tmpdir(), "nex-snapshot-"));
     source = path.join(root, "writer");
     storageRoot = path.join(root, "storage");
     await mkdir(source, { recursive: true });

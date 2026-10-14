@@ -68,7 +68,7 @@ describe("BrandStore 解析与 pin 语义", () => {
   it("env pin 覆盖 DB 且拒绝接口写入该字段", async () => {
     const { store } = storeWith({
       row: row({ schemaVersion: 1, name: "DbName" }, 3),
-      env: { SNOW_BRAND_NAME: "EnvPinned" },
+      env: { NEX_BRAND_NAME: "EnvPinned" },
     });
     const snapshot = await store.get();
     expect(snapshot.contract.name).toBe("EnvPinned");

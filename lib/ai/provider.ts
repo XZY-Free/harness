@@ -7,7 +7,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
  *
  * 多 endpoint + 熔断切换。
  * 原 17 行单 provider,主 endpoint 宕机/限流时整个平台瘫痪。现支持配 fallback
- * endpoints(SNOW_LLM_FALLBACK_BASEURLS),主 endpoint 连续失败熔断后切备用。
+ * endpoints(NEX_LLM_FALLBACK_BASEURLS),主 endpoint 连续失败熔断后切备用。
  *
  * 熔断语义(进程级,避免请求内重试的流式复杂度):
  * - getChatModel 选当前健康 endpoint(主优先,fallback 次之)创建/复用 provider
@@ -55,7 +55,7 @@ function getProvider(baseUrl: string) {
   let p = providers.get(baseUrl);
   if (!p) {
     p = createOpenAICompatible({
-      name: "snow-llm",
+      name: "nex-llm",
       baseURL: baseUrl,
       apiKey: aiConfig.apiKey,
     });

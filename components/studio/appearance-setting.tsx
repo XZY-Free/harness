@@ -6,13 +6,13 @@ import { useEffect, useState } from "react";
 /**
  * 平台设置 → 外观（侧栏改版 v3：主题从导航槽位迁回设置）。
  *
- * - 三态：跟随系统 / 亮色 / 暗色；显式选择写入 localStorage `snow-theme`，
+ * - 三态：跟随系统 / 亮色 / 暗色；显式选择写入 localStorage `nex-theme`，
  *   `跟随系统` 写入 "system"，theme-init.js 视同未保存并回落到系统偏好。
  * - 系统变化由常驻的 theme-init.js 处理，离开设置页仍生效。
  * - 首屏主题仍由 theme-init.js 在 hydration 前写入，本组件只同步与切换。
  */
 
-const THEME_STORAGE_KEY = "snow-theme";
+const THEME_STORAGE_KEY = "nex-theme";
 
 type ThemeChoice = "system" | "light" | "dark";
 

@@ -438,7 +438,7 @@ describe("createA2AAgentTransport — start message/stream wire + 归一化（04
       "tenant_id",
       "corp_id",
       "employee_id",
-      "snowharness.execution_subject",
+      "nexharness.execution_subject",
     ]) {
       expect(keys).not.toContain(forbidden);
     }

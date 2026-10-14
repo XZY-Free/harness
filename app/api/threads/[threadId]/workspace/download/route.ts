@@ -15,7 +15,7 @@
  * 安全约束：
  * - token 一次性使用：consume 后立即从 store 删除，无法二次消费
  * - token 绑定 threadId：消费时校验 threadId 与 URL 路径中的 threadId 一致
- * - 内部目录路径（.snow/.git 等）一律返回 404，不暴露存在性（防枚举）
+ * - 内部目录路径（.nex/.git 等）一律返回 404，不暴露存在性（防枚举）
  * - safeJoin / symlink / realpath 由 readWorkspaceFileBytes 内部兜底
  * - 不需要 owner 校验：token 本身是授权凭证，仅由 Server 签发
  *

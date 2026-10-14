@@ -18,7 +18,7 @@ import { LogOut, PanelLeft, Plus, Search, User } from "lucide-react";
  *
  * 结构（自上而下）：
  * 1. macOS 红绿灯安全区（普通窗口 32px，原生全屏 / Web 预览为 0）。
- * 2. 品牌行：SnowHarness + 搜索按钮（打开 ⌘K）。
+ * 2. 品牌行：NexHarness + 搜索按钮（打开 ⌘K）。
  * 3. 新建会话。
  * 4. "会话"区标题。
  * 5. 会话列表（按主智能体分组；未选助手的平铺顶部）。
@@ -68,9 +68,9 @@ export function DesktopSidebar({
   useEffect(() => {
     const controls = (
       globalThis as unknown as {
-        snowDesktop?: { windowControls?: DesktopWindowControls };
+        nexDesktop?: { windowControls?: DesktopWindowControls };
       }
-    ).snowDesktop?.windowControls;
+    ).nexDesktop?.windowControls;
     if (!controls) return;
 
     setNativeTitlebar(true);
@@ -303,12 +303,12 @@ export function DesktopSidebar({
                   onClick={async () => {
                     const desktop = (
                       window as unknown as {
-                        snowDesktop?: {
+                        nexDesktop?: {
                           auth?: { logout: () => Promise<{ ok: boolean }> };
                           openExternal?: (url: string) => Promise<void>;
                         };
                       }
-                    ).snowDesktop;
+                    ).nexDesktop;
                     await logoutClientSession({
                       cleanupDesktop: desktop?.auth?.logout
                         ? async () => {

@@ -10,7 +10,7 @@
  * §27"测试必须证明生产链"：turn 调度测试必须走真实 Route Resolver →
  * ExecutionBinding → Runtime，而不是 mock 成功。本夹具即为此而建。
  *
- * owner 默认用 DEFAULT_USER_ID 身份，使 SNOW_AUTH_MODE=dev 下路由解析出的
+ * owner 默认用 DEFAULT_USER_ID 身份，使 NEX_AUTH_MODE=dev 下路由解析出的
  * principal 与 thread 属主一致（conversation 路由按属主鉴权）。
  */
 import { randomUUID } from "node:crypto";

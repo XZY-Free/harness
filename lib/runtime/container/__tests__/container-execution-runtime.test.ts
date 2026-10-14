@@ -20,7 +20,7 @@ import { ContainerExecutionRuntime } from "@/lib/runtime/execution-runtime";
 
 const TID = "thread-b-exec";
 const ENTRY = {
-  containerName: `snow-thread-${TID}`,
+  containerName: `nex-thread-${TID}`,
   containerId: "id",
   port: 41000,
   state: "running" as const,

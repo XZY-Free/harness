@@ -197,7 +197,7 @@ export function serializeThreadGenerationBaseline(
 }
 
 /** 进程内发号键：与事件总线同策略（跨 module 实例共享同一份进程级状态）。 */
-const REVISION_KEY = Symbol.for("snowharness.threadGeneration.issuedRevision");
+const REVISION_KEY = Symbol.for("nexharness.threadGeneration.issuedRevision");
 
 /**
  * 取下一个发号。

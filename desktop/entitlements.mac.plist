@@ -26,10 +26,10 @@
 	<!-- 文件读取（用户选择的工作区文件上传） -->
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
-	<!-- 深链接 snowharness:// 协议注册 -->
+	<!-- 深链接 nexharness:// 协议注册 -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:snowharness</string>
+		<string>applinks:nexharness</string>
 	</array>
 </dict>
 </plist>

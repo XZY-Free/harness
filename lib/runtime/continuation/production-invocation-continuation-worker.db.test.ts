@@ -57,7 +57,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
-const originalAuthMode = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const originalAuthMode = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 interface ExternalRuntimeFixture {
   server: Server;
@@ -195,13 +195,13 @@ describe("生产 continuation worker durable topology", () => {
   const runtimes: ExternalRuntimeFixture[] = [];
 
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
     await ensureDefaultTenant();
   });
 
   afterEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = originalAuthMode;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = originalAuthMode;
     for (const scenario of scenarios) {
       delete process.env[scenario.credentialEnvVar];
       await scenario.provider.close();
@@ -217,8 +217,8 @@ describe("生产 continuation worker durable topology", () => {
       const defaultUserIdentity = await upsertUserIdentity({
         tenantId: DEFAULT_TENANT_ID,
         externalSubject: DEFAULT_USER_ID,
-        email: "owner@snow-harness.local",
-        displayName: "SnowHarness 管理员",
+        email: "owner@nexharness.local",
+        displayName: "NexHarness 管理员",
       });
       const scenario = await seedAgentCallExecutionScenario({
         tenantId: DEFAULT_TENANT_ID,
@@ -407,7 +407,7 @@ describe("生产 continuation worker durable topology", () => {
 
       const response = await resolveUserAction(
         new Request(
-          `http://snow.test/api/threads/${scenario.threadId}/user-actions/${request.id}/resolve`,
+          `http://nex.test/api/threads/${scenario.threadId}/user-actions/${request.id}/resolve`,
           {
             method: "POST",
             headers: {
@@ -522,7 +522,7 @@ describe("生产 continuation worker durable topology", () => {
         if (!secondRequest) throw new Error("第二个子调用没有产生正式 UserActionRequest");
         const secondResponse = await resolveUserAction(
           new Request(
-            `http://snow.test/api/threads/${scenario.threadId}/user-actions/${secondRequest.id}/resolve`,
+            `http://nex.test/api/threads/${scenario.threadId}/user-actions/${secondRequest.id}/resolve`,
             {
               method: "POST",
               headers: {

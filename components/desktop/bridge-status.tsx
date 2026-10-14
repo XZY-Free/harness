@@ -49,26 +49,26 @@ export function BridgeStatus() {
     setIsDesktop(true);
 
     // 读取初始状态
-    const snowDesktop = (
+    const nexDesktop = (
       window as unknown as {
-        snowDesktop?: {
+        nexDesktop?: {
           bridge?: {
             getState: () => Promise<BridgeState>;
             onStateChange: (cb: (state: BridgeState) => void) => () => void;
           };
         };
       }
-    ).snowDesktop;
+    ).nexDesktop;
 
-    if (!snowDesktop?.bridge) {
+    if (!nexDesktop?.bridge) {
       return;
     }
 
     // 获取初始状态
-    void snowDesktop.bridge.getState().then(setState);
+    void nexDesktop.bridge.getState().then(setState);
 
     // 订阅状态变化
-    const unsubscribe = snowDesktop.bridge.onStateChange((newState) => {
+    const unsubscribe = nexDesktop.bridge.onStateChange((newState) => {
       setState(newState);
     });
 

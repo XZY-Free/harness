@@ -54,7 +54,7 @@ describe("check-licenses.mjs 许可证扫描", () => {
   let nodeModulesDir: string;
 
   beforeAll(async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "snow-license-test-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "nex-license-test-"));
     nodeModulesDir = join(tempRoot, "node_modules");
     await mkdir(nodeModulesDir, { recursive: true });
 

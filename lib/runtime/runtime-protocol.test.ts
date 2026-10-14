@@ -193,7 +193,7 @@ describe("RuntimeProtocol constants (§7.1 / §7.3 / §7.11)", () => {
 
   it("WorkloadToken 固定 HS256 与域分离前缀，audiences 只两个", () => {
     expect(WORKLOAD_TOKEN_ALGORITHM).toBe("HS256");
-    expect(WORKLOAD_TOKEN_HMAC_DOMAIN).toBe("snowharness.workload\0");
+    expect(WORKLOAD_TOKEN_HMAC_DOMAIN).toBe("nexharness.workload\0");
     expect(WORKLOAD_TOKEN_AUDIENCES).toEqual(["runtime", "gateway"]);
   });
 

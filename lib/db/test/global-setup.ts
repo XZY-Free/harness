@@ -15,13 +15,13 @@ import { startTestMysql } from "./mysql-harness";
  * 仅测试运行期注入；生产/真实环境必须由部署方配置独立随机 Secret。
  * globalSetup 对全部 project 只跑一次，故 unit 与 db 测试共享同一密钥。
  */
-const TEST_WORKLOAD_TOKEN_SIGNING_SECRET = "snow-harness-test-signing-secret-0000-abcdef0123456789";
+const TEST_WORKLOAD_TOKEN_SIGNING_SECRET = "nexharness-test-signing-secret-0000-abcdef0123456789";
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
   const { connectionString, stop } = await startTestMysql();
   process.env.DATABASE_URL = connectionString;
-  process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = TEST_WORKLOAD_TOKEN_SIGNING_SECRET;
-  process.env.WORKLOAD_SIGNING_KEY_ID = "snow-harness-test-signing-key-0000";
+  process.env.NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = TEST_WORKLOAD_TOKEN_SIGNING_SECRET;
+  process.env.WORKLOAD_SIGNING_KEY_ID = "nexharness-test-signing-key-0000";
   console.log("[global-setup] DATABASE_URL =", connectionString);
   return stop;
 }

@@ -8,7 +8,7 @@
  *
  * 因此需要在启动时回收**孤儿**容器。回收必须严格限定范围，禁止全局 prune：
  *
- * - 只认本项目（`snow.test.project`）+ 本工作区（`snow.test.workspace`）的容器；
+ * - 只认本项目（`nex.test.project`）+ 本工作区（`nex.test.workspace`）的容器；
  *   其他项目、其他工作区（worktree / 克隆）的容器一律不动。
  * - 只回收**没有活跃运行者**的容器：每个运行实例在启动时登记运行标记，
  *   标记里的 pid 仍存活即视为活跃；标记缺失或 pid 已死才是孤儿。
@@ -27,13 +27,13 @@ import { join, resolve } from "node:path";
 
 /** 归属标签：项目 / 工作区 / 运行实例，三者缺一不可。 */
 export const OWNERSHIP_LABELS = {
-  project: "snow.test.project",
-  workspace: "snow.test.workspace",
-  run: "snow.test.run",
+  project: "nex.test.project",
+  workspace: "nex.test.workspace",
+  run: "nex.test.run",
 } as const;
 
 /** 本项目标识（与 package.json 的包名一致，跨 worktree 稳定）。 */
-const PROJECT = "snow-harness";
+const PROJECT = "nexharness";
 
 /** 运行标记目录（`tmp/` 已被 .gitignore 覆盖，不进版本管理）。 */
 const RUN_REGISTRY_DIR = "tmp/testcontainers-runs";

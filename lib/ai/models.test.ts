@@ -57,7 +57,7 @@ describe("dedupeModels", () => {
 describe("isChatModel allowlist 模式", () => {
   const orig = { ...process.env };
   afterEach(() => {
-    for (const k of ["CHAT_MODEL_ALLOWLIST", "CHAT_MODEL_DENY_SUBSTRINGS", "SNOW_CHAT_MODEL"]) {
+    for (const k of ["CHAT_MODEL_ALLOWLIST", "CHAT_MODEL_DENY_SUBSTRINGS", "NEX_CHAT_MODEL"]) {
       delete process.env[k];
     }
     Object.assign(process.env, orig);
@@ -65,7 +65,7 @@ describe("isChatModel allowlist 模式", () => {
 
   it("设 CHAT_MODEL_ALLOWLIST → 只放行白名单 + chatModel", () => {
     process.env.CHAT_MODEL_ALLOWLIST = "glm-5.2,qwen-max";
-    process.env.SNOW_CHAT_MODEL = "glm-5.2";
+    process.env.NEX_CHAT_MODEL = "glm-5.2";
     expect(isChatModel("glm-5.2")).toBe(true);
     expect(isChatModel("qwen-max")).toBe(true);
     // 白名单外的不放行（即使原本是"对话模型"）
@@ -102,7 +102,7 @@ describe("fetchAvailableModels 失败降级缓存", () => {
 
   it("发现失败时降级为当前 chatModel，并在 TTL 内被缓存（连续两次只 fetch 一次）", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
-    const chatModel = process.env.SNOW_CHAT_MODEL ?? "deepseek-v4-flash";
+    const chatModel = process.env.NEX_CHAT_MODEL ?? "deepseek-v4-flash";
 
     const first = await fetchAvailableModels();
     const second = await fetchAvailableModels();

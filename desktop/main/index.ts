@@ -3,7 +3,7 @@
  *
  * 职责：
  * - 单实例锁（防止多开，第二实例聚焦已有窗口）。
- * - macOS 深链接处理（snowharness:// 协议；仅聚焦窗口，路由由 renderer 处理）。
+ * - macOS 深链接处理（nexharness:// 协议；仅聚焦窗口，路由由 renderer 处理）。
  * - 创建主窗口并加载 Server URL（${origin}/desktop）。
  * - 注册系统菜单（最小集：appMenu / editMenu / viewMenu）。
  * - 生产环境启动崩溃报告（crashReporter），开发环境不启动。
@@ -44,8 +44,8 @@ import { DEFAULT_SERVER_ORIGIN, loadAllowedOrigins } from "./origin-guard";
 import { loadRuntimeEnvironment } from "./runtime-config";
 import { createMainWindow } from "./window";
 
-/** SnowHarness 深链接协议。 */
-const DEEP_LINK_PROTOCOL = "snowharness";
+/** NexHarness 深链接协议。 */
+const DEEP_LINK_PROTOCOL = "nexharness";
 
 /** Desktop 路由路径（追加到 Server origin 后）。 */
 const DESKTOP_ROUTE_PATH = "/desktop";
@@ -143,12 +143,12 @@ function focusExistingWindow(): void {
 }
 
 /**
- * E2E 诊断：主进程关键启动日志写入 SNOW_E2E_LOG_FILE 指向的文件。
+ * E2E 诊断：主进程关键启动日志写入 NEX_E2E_LOG_FILE 指向的文件。
  * 仅当 env 设置时写入（E2E 场景），供 launch-desktop.ts 在 launch 返回后
  * 读取，定位 CI 下主进程静默退出 / 窗口未创建的真实原因。生产不设置不受影响。
  */
 function logToE2EFile(msg: string): void {
-  const target = process.env.SNOW_E2E_LOG_FILE;
+  const target = process.env.NEX_E2E_LOG_FILE;
   if (!target) return;
   try {
     writeFileSync(target, `${new Date().toISOString()} ${msg}\n`, { flag: "a" });
@@ -166,13 +166,13 @@ async function main(): Promise<void> {
     crashReporter.start({ uploadToServer: false });
   }
 
-  // 注册深链接协议（macOS：snowharness://...）
+  // 注册深链接协议（macOS：nexharness://...）
   app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
 
   // 单实例锁：防止多开。E2E 测试需要并行启动多个独立实例（每个独立
   // user-data-dir），通过显式 env 放行，生产环境不设置不受影响。
   const gotLock =
-    process.env.SNOW_E2E_DISABLE_SINGLE_INSTANCE === "1" || app.requestSingleInstanceLock();
+    process.env.NEX_E2E_DISABLE_SINGLE_INSTANCE === "1" || app.requestSingleInstanceLock();
   if (!gotLock) {
     logToE2EFile("single-instance lock held by another instance -> quit");
     app.quit();
@@ -184,7 +184,7 @@ async function main(): Promise<void> {
     focusExistingWindow();
   });
 
-  // macOS 深链接：snowharness://open/...
+  // macOS 深链接：nexharness://open/...
   // 仅聚焦窗口，深链接路由由 renderer 处理
   app.on("open-url", (_event, _url) => {
     focusExistingWindow();
@@ -204,7 +204,7 @@ async function main(): Promise<void> {
         : undefined,
   });
   const serverOrigin = getServerOrigin(runtimeEnv);
-  const allowInsecureRemoteOrigin = runtimeEnv.SNOW_ALLOW_INSECURE_REMOTE_ORIGIN;
+  const allowInsecureRemoteOrigin = runtimeEnv.NEX_ALLOW_INSECURE_REMOTE_ORIGIN;
   const localRenderer = await startLocalRendererServer({
     rendererDir: join(app.getAppPath(), "renderer"),
     serverOrigin,
@@ -219,21 +219,21 @@ async function main(): Promise<void> {
   const deviceRegistration: DesktopDeviceRegistrationPayload = {
     deviceId: identity.deviceId,
     publicKey: identity.keyPair.publicKeyBase64,
-    name: hostname() || "SnowHarness Desktop",
+    name: hostname() || "NexHarness Desktop",
     version: app.getVersion(),
     // tenantId 来自 Server 注册响应（identity.tenantId），未注册为 null
     tenantId: identity.tenantId,
   };
 
   // preload 在隔离上下文中同步读取，必须在创建 BrowserWindow 前注入。
-  process.env.SNOW_SERVER_ORIGIN = serverOrigin;
+  process.env.NEX_SERVER_ORIGIN = serverOrigin;
   if (allowInsecureRemoteOrigin === undefined) {
-    Reflect.deleteProperty(process.env, "SNOW_ALLOW_INSECURE_REMOTE_ORIGIN");
+    Reflect.deleteProperty(process.env, "NEX_ALLOW_INSECURE_REMOTE_ORIGIN");
   } else {
-    process.env.SNOW_ALLOW_INSECURE_REMOTE_ORIGIN = allowInsecureRemoteOrigin;
+    process.env.NEX_ALLOW_INSECURE_REMOTE_ORIGIN = allowInsecureRemoteOrigin;
   }
-  process.env.SNOW_APP_VERSION = app.getVersion();
-  process.env.SNOW_DEVICE_ID = identity.deviceId;
+  process.env.NEX_APP_VERSION = app.getVersion();
+  process.env.NEX_DEVICE_ID = identity.deviceId;
   const capabilities = buildCapabilities(serverOrigin, identity.deviceId);
   const desktopDatabase = await openDesktopDatabase(
     join(app.getPath("userData"), "desktop.sqlite"),
@@ -338,10 +338,10 @@ async function main(): Promise<void> {
   // 创建 DesktopBridgeLifecycle（从环境变量读取 Server URL）。
   // 认证签名必须绑定 tenantId；tenantId 由 Server 注册响应回填，未注册时 lifecycle
   // 保持 disconnected（不伪造默认租户），注册成功（device:register）后动态创建并连接。
-  const bridgeUrl = process.env.SNOW_BRIDGE_URL ?? "ws://localhost:3002";
+  const bridgeUrl = process.env.NEX_BRIDGE_URL ?? "ws://localhost:3002";
   const bridgeLifecycle = new DesktopBridgeLifecycle(identity, {
     serverUrl: bridgeUrl,
-    deviceName: "SnowHarness Desktop",
+    deviceName: "NexHarness Desktop",
     deviceVersion: app.getVersion(),
     commandTarget,
     actionTarget,
@@ -453,6 +453,6 @@ main().catch((err) => {
   // JSON.stringify 而非 String()：keychain 等抛的是 desktopError 对象
   // （{ok, code, message}），String() 只会得到 "[object Object]"。
   logToE2EFile(`main() failed: ${JSON.stringify(err)}`);
-  console.error("[snowharness:desktop] 主进程启动失败:", err);
+  console.error("[nexharness:desktop] 主进程启动失败:", err);
   app.quit();
 });

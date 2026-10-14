@@ -190,7 +190,7 @@ const externalHolderPids: number[] = [];
 interface Fixture {
   broker: ReturnType<typeof createWorkspaceHostBroker>;
   probe: Awaited<ReturnType<ReturnType<typeof createWorkspaceHostBroker>["probeIdentity"]>>;
-  /** 控制面根（未追加 `.snow`）。 */
+  /** 控制面根（未追加 `.nex`）。 */
   hostRoot: string;
   writerRoot: string;
   runRoot: string;
@@ -254,7 +254,7 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
       testHooks,
     });
     const probe = await broker.probeIdentity();
-    const controlRoot = path.join(await realpath(hostRoot), ".snow");
+    const controlRoot = path.join(await realpath(hostRoot), ".nex");
     return {
       broker,
       probe,
@@ -1486,7 +1486,7 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
     expect(await pathExists(path.join(fixture.writerRoot, "escape.txt"))).toBe(false);
 
     // F05：字面仍在受管根内的路径，不得通过祖先/最终符号链接把 IO 导向根外。
-    const outside = await mkdtemp(path.join(tmpdir(), "snow-a07-managed-file-outside-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "nex-a07-managed-file-outside-"));
     roots.push(outside);
     await writeFile(path.join(outside, "protected.txt"), "outside-original", "utf8");
     await symlink(outside, path.join(fixture.runRoot, "linked-directory"), "dir");
@@ -1742,7 +1742,7 @@ describe("WorkspaceHost 物理写入与崩溃边界（A07）", () => {
       managedRoot,
       snapshotStorage: storage,
     });
-    const attemptRoot = path.join(managedRoot, ".snow-runs", authority().attemptId);
+    const attemptRoot = path.join(managedRoot, ".nex-runs", authority().attemptId);
     const destinationOne = path.join(attemptRoot, "restore-one");
     const destinationTwo = path.join(attemptRoot, "restore-two");
     await mkdir(attemptRoot, { recursive: true });

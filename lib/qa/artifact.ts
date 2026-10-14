@@ -7,11 +7,11 @@ import { logger } from "@/lib/logger";
  * Stage A：QA 证据落盘 + 事件 payload 构造（plan / §5）。
  *
  * 证据**不落 DB blob**，落文件（对齐运行时证据 artifact 模式）：
- * - 截图：`.snow/runtime/{threadId}/qa/{checkId}.png`
- * - console/network/a11y/verdict JSON：`.snow/runtime/{threadId}/qa/{checkId}.json`
+ * - 截图：`.nex/runtime/{threadId}/qa/{checkId}.png`
+ * - console/network/a11y/verdict JSON：`.nex/runtime/{threadId}/qa/{checkId}.json`
  *
  * 路径解析：浏览器/gate **在 host 侧**跑（container 模式也打映射端口，不在容器内装浏览器），
- * 故 QA 证据恒落 host 平台目录 `runtimeEvidenceConfig.hostDir`（`.snow/runtime`，已 gitignore、
+ * 故 QA 证据恒落 host 平台目录 `runtimeEvidenceConfig.hostDir`（`.nex/runtime`，已 gitignore、
  * 不被静态 preview server 服务）。这与 container→workspace 限制不同——那样是因为
  * 容器进程只能写 bind mount；QA 写者是 host 进程，无此约束，统一 host 目录更简单且不污染用户工作区。
  */
@@ -135,7 +135,7 @@ export async function readQaArtifact(threadId: string, fileName: string): Promis
 /**
  * 清理 thread 的全部 QA 证据文件（截图 + 报告 JSON）。
  *
- * 原 QA 只写不删，thread 删除/废弃后 .snow/runtime/{threadId}/qa/ 长期累积占磁盘。
+ * 原 QA 只写不删，thread 删除/废弃后 .nex/runtime/{threadId}/qa/ 长期累积占磁盘。
  * 本函数物理删除整个 QA 目录；由 retention（终态 thread 明细清理）+ 显式 thread 删除调用。
  * best-effort：删除失败不抛（log warn）。
  */

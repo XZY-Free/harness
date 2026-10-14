@@ -1207,9 +1207,9 @@ describe("collectHarnessAgentBoundaryViolations A2A AgentCall boundary", () => {
 // ─── Execution wire 与特例分支边界 ────────────────────────
 
 describe("collectExecutionBoundaryViolations", () => {
-  it("生产 A2A wire 出现 snowharness.execution_subject → 违规", () => {
+  it("生产 A2A wire 出现 nexharness.execution_subject → 违规", () => {
     const documents = [
-      doc("lib/runtime/transport/a2a-transport.ts", 'const key = "snowharness.execution_subject";'),
+      doc("lib/runtime/transport/a2a-transport.ts", 'const key = "nexharness.execution_subject";'),
     ];
     expect(collectExecutionBoundaryViolations(documents)).toEqual([
       {
@@ -1267,7 +1267,7 @@ describe("collectExecutionBoundaryViolations", () => {
 
   it(".test.* 文件与注释不违规", () => {
     const documents = [
-      doc("lib/runtime/x.test.ts", 'const key = "snowharness.execution_subject";'),
+      doc("lib/runtime/x.test.ts", 'const key = "nexharness.execution_subject";'),
       doc("lib/runtime/x.ts", "// 注释中的 hr-assistant 不算"),
     ];
     expect(collectExecutionBoundaryViolations(documents)).toEqual([]);

@@ -27,7 +27,7 @@ import { z } from "zod";
 
 /**
  * 环境变量名前缀黑名单。任何以此开头的 key 均视为架构切换 Feature Flag，
- * 出现即 fail-fast。SnowHarness 只允许一套正式执行架构（Canonical Runtime
+ * 出现即 fail-fast。NexHarness 只允许一套正式执行架构（Canonical Runtime
  * Protocol v3），不接受运行时切换。
  */
 export const FORBIDDEN_ENV_FLAG_PREFIXES = [
@@ -92,7 +92,7 @@ export function assertNoArchitectureFlags(
   const hits = findForbiddenArchitectureFlags(env);
   if (hits.length > 0) {
     throw new Error(
-      `[runtime-settings] 检测到禁止的架构切换 Flag: ${hits.join(", ")}。SnowHarness 只有一套正式执行架构（Canonical Runtime Protocol v3），不接受 USE_NEW_* / ENABLE_V3_* / LEGACY_* 等运行时切换。`,
+      `[runtime-settings] 检测到禁止的架构切换 Flag: ${hits.join(", ")}。NexHarness 只有一套正式执行架构（Canonical Runtime Protocol v3），不接受 USE_NEW_* / ENABLE_V3_* / LEGACY_* 等运行时切换。`,
     );
   }
 }
@@ -167,19 +167,19 @@ export const RuntimeSettingsSchema = z
 export type RuntimeSettings = z.infer<typeof RuntimeSettingsSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Env variable mapping — 全部 SNOWHARNESS_ 前缀，无短别名
+// Env variable mapping — 全部 NEXHARNESS_ 前缀，无短别名
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 环境变量到 RuntimeSettings 字段的唯一映射。 */
 export const RUNTIME_SETTINGS_ENV_KEYS = {
-  heartbeatIntervalMs: "SNOWHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS",
-  leaseTtlMs: "SNOWHARNESS_RUNTIME_LEASE_TTL_MS",
-  dispatchDeadlineMs: "SNOWHARNESS_RUNTIME_DISPATCH_DEADLINE_MS",
-  executionTimeoutMs: "SNOWHARNESS_RUNTIME_EXECUTION_TIMEOUT_MS",
-  workloadTokenTtlMs: "SNOWHARNESS_WORKLOAD_TOKEN_TTL_MS",
+  heartbeatIntervalMs: "NEXHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS",
+  leaseTtlMs: "NEXHARNESS_RUNTIME_LEASE_TTL_MS",
+  dispatchDeadlineMs: "NEXHARNESS_RUNTIME_DISPATCH_DEADLINE_MS",
+  executionTimeoutMs: "NEXHARNESS_RUNTIME_EXECUTION_TIMEOUT_MS",
+  workloadTokenTtlMs: "NEXHARNESS_WORKLOAD_TOKEN_TTL_MS",
   workloadSigningKeyId: "WORKLOAD_SIGNING_KEY_ID",
-  ingressDeduplicationWindowMs: "SNOWHARNESS_RUNTIME_INGRESS_DEDUP_WINDOW_MS",
-  recoveryWorkerPollIntervalMs: "SNOWHARNESS_RUNTIME_RECOVERY_POLL_INTERVAL_MS",
+  ingressDeduplicationWindowMs: "NEXHARNESS_RUNTIME_INGRESS_DEDUP_WINDOW_MS",
+  recoveryWorkerPollIntervalMs: "NEXHARNESS_RUNTIME_RECOVERY_POLL_INTERVAL_MS",
 } as const;
 
 // ═══════════════════════════════════════════════════════════════════════════

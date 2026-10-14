@@ -13,7 +13,7 @@ import { buildImage, imageExists } from "./docker-cli";
  * 镜像 CI 预构建可跳过运行时 build（plan §5 风险表）。
  */
 
-/** Dockerfile 所在目录（相对 cwd，snow_harness 根）。 */
+/** Dockerfile 所在目录（相对 cwd，nexharness 根）。 */
 const DOCKERFILE_DIR = resolve(process.cwd(), "docker/runtime");
 
 let ensuring: Promise<void> | null = null;

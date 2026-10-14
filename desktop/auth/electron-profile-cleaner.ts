@@ -8,8 +8,8 @@
  * 调用 clearStorageData 清理 cookies / localStorage / cache / IndexedDB 等持久化数据。
  *
  * 安全约束：
- * - 只清理 persist:snowharness-browser-* partition（由 SessionManager 枚举）
- * - 不清理 App Session（persist:snowharness-app）——那是应用自身的数据
+ * - 只清理 persist:nexharness-browser-* partition（由 SessionManager 枚举）
+ * - 不清理 App Session（persist:nexharness-app）——那是应用自身的数据
  * - clearStorageData 无选项时清理所有存储类型
  */
 import { session } from "electron";
@@ -25,7 +25,7 @@ export class ElectronProfileCleaner implements BrowserProfileCleaner {
   /**
    * 清理指定 partition 的所有持久化数据。
    *
-   * @param partition Electron session partition 名称（如 persist:snowharness-browser-alice）
+   * @param partition Electron session partition 名称（如 persist:nexharness-browser-alice）
    */
   async clearStorageData(partition: string): Promise<void> {
     const ses = session.fromPartition(partition);

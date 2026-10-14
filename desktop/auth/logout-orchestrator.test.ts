@@ -38,7 +38,7 @@ class MemoryKeychain implements KeychainAdapter {
 function makeMockSessionManager(userIds: string[]): SessionManager {
   return {
     getUserIds: vi.fn(() => userIds),
-    getOrCreateBrowserPartition: vi.fn((userId: string) => `persist:snowharness-browser-${userId}`),
+    getOrCreateBrowserPartition: vi.fn((userId: string) => `persist:nexharness-browser-${userId}`),
     removeBrowserProfile: vi.fn(() => true),
   } as unknown as SessionManager;
 }
@@ -81,7 +81,7 @@ describe("performLogout (Phase 8)", () => {
     expect(
       (bridgeClient as unknown as { disconnect: ReturnType<typeof vi.fn> }).disconnect,
     ).toHaveBeenCalledTimes(1);
-    expect(profileCleaner.clearStorageData).toHaveBeenCalledWith("persist:snowharness-browser-u1");
+    expect(profileCleaner.clearStorageData).toHaveBeenCalledWith("persist:nexharness-browser-u1");
     expect(sessionManager.removeBrowserProfile).toHaveBeenCalledWith("u1");
   });
 

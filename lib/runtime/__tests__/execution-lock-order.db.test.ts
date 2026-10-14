@@ -68,7 +68,7 @@ import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn"
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -122,12 +122,12 @@ async function rowIsFree(
 
 describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
   });
 
   afterEach(() => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
   });
 
   it("LOCKORDER-01: 守卫在取得执行根之前不预先占住 Ownership 行", async () => {
@@ -855,7 +855,7 @@ describe("R04 §2 固定锁图：真实双连接下的持锁顺序（A01）", ()
         networkPolicyJson: { egress: "deny_all" },
         resourceLimitsJson: { cpu: 2, memoryMb: 2048 },
         secretPolicyJson: { inject: "none" },
-        executionTarget: { kind: "container", image: "snowharness/test:latest" },
+        executionTarget: { kind: "container", image: "nexharness/test:latest" },
         requiredCapabilities: { isolation: true },
         createdByType: "service",
         createdById: "a01-t05",

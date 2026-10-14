@@ -32,16 +32,16 @@ import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn"
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 employee-api.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+// vitest 不加载 .env.test，需手动设置 NEX_VITEST_IDENTITY_FIXTURE=enabled（与 employee-api.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 辅助：seed 默认身份 + 可调度 Agent + Ready Route ───────

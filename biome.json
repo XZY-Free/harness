@@ -24,7 +24,7 @@
       ".omc/**",
       ".omx/**",
       ".test-workspaces*/**",
-      ".snow/**",
+      ".nex/**",
       ".codify/**",
       "desktop/dist/**",
       "desktop/release/**",

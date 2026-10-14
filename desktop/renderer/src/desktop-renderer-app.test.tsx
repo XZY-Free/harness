@@ -242,7 +242,7 @@ describe("DesktopRendererApp", () => {
       ok: true,
       workspaceId: "workspace-1",
       bindingId: "binding-1",
-      displayName: "snow_harness",
+      displayName: "nexharness",
     });
     getDesktopBridge.mockReturnValue({
       device: { register: vi.fn().mockResolvedValue({ ok: true, tenantId: "tenant-1" }) },
@@ -272,7 +272,7 @@ describe("DesktopRendererApp", () => {
     fireEvent.click(screen.getByRole("button", { name: "选择本地目录" }));
     await waitFor(() =>
       expect(screen.getByTestId("desktop-new-thread-page").dataset.workspaceName).toBe(
-        "snow_harness",
+        "nexharness",
       ),
     );
 

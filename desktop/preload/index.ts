@@ -2,10 +2,10 @@
  * Electron preload 脚本。
  *
  * 职责：
- * - 同步注入 globalThis.__SNOW_DESKTOP__（capability 对象），renderer 通过
+ * - 同步注入 globalThis.__NEX_DESKTOP__（capability 对象），renderer 通过
  *   getDesktopCapabilities() 读取后校验来源，才挂载 DesktopBrowserSurface。
- * - 注入 globalThis.__SNOW_PLATFORM__ = "desktop-browser"，供 getPlatformCapability() 识别。
- * - 通过 contextBridge.exposeInMainWorld('snowDesktop', {...}) 暴露最小 API，
+ * - 注入 globalThis.__NEX_PLATFORM__ = "desktop-browser"，供 getPlatformCapability() 识别。
+ * - 通过 contextBridge.exposeInMainWorld('nexDesktop', {...}) 暴露最小 API，
  *   只暴露白名单 IPC channel 的 invoke 包装，不暴露通用 ipcRenderer。
  *
  * 安全约束：
@@ -36,20 +36,20 @@ const DEFAULT_APP_VERSION = "0.0.0";
 /**
  * 同步构造 capability 对象（供 preload 注入）。
  *
- * - serverOrigin / appVersion 由主进程通过 env 注入（SNOW_SERVER_ORIGIN / SNOW_APP_VERSION）。
+ * - serverOrigin / appVersion 由主进程通过 env 注入（NEX_SERVER_ORIGIN / NEX_APP_VERSION）。
  * - deviceId 在设备身份创建后即填充。
  */
 function buildCapabilities(): DesktopCapabilities {
-  const serverOrigin = process.env.SNOW_SERVER_ORIGIN ?? DEFAULT_SERVER_ORIGIN;
-  const appVersion = process.env.SNOW_APP_VERSION ?? DEFAULT_APP_VERSION;
+  const serverOrigin = process.env.NEX_SERVER_ORIGIN ?? DEFAULT_SERVER_ORIGIN;
+  const appVersion = process.env.NEX_APP_VERSION ?? DEFAULT_APP_VERSION;
   return {
     version: DESKTOP_CAPABILITY_VERSION,
     serverOrigin,
     appVersion,
     ipcChannels: DESKTOP_IPC_CHANNELS,
-    deviceId: process.env.SNOW_DEVICE_ID ?? null,
+    deviceId: process.env.NEX_DEVICE_ID ?? null,
     // 连接远程 http 部署时显式开启（主进程 env 注入）
-    allowInsecureRemoteOrigin: process.env.SNOW_ALLOW_INSECURE_REMOTE_ORIGIN === "1",
+    allowInsecureRemoteOrigin: process.env.NEX_ALLOW_INSECURE_REMOTE_ORIGIN === "1",
   };
 }
 
@@ -59,7 +59,7 @@ if (!isValidDesktopCapabilities(capabilities)) {
 }
 
 // 暴露最小 API：只暴露白名单 IPC channel 的 invoke 包装
-contextBridge.exposeInMainWorld("snowDesktop", {
+contextBridge.exposeInMainWorld("nexDesktop", {
   /** 同步 capability 值，由 contextBridge 安全复制到 renderer main world。 */
   capabilities,
   /** 获取 Desktop capability handshake（异步从主进程取，含校验值）。 */

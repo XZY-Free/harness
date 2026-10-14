@@ -1,8 +1,8 @@
-# SnowHarness
+# NexHarness
 
 AI 引导式「从想法到上线」的全生命周期开发平台。用户打开即聊天，AI 按内置 Skill 一步步引导，把一个想法变成可预览、可推代码、最终可部署上线的真实项目。
 
-> 已作为子服务 `snow_harness/` 迁入公司 monorepo **python-service**（CNB → K8s 流水线）。
+> 已作为子服务 `nexharness/` 迁入公司 monorepo **python-service**（CNB → K8s 流水线）。
 > 项目总纲 / 北极星 / 路线图见 [`docs/00-README.md`](docs/00-README.md)；架构见 [`docs/01-架构/00-总览与目标.md`](docs/01-架构/00-总览与目标.md)；开发计划与进度（含迁移记录）见 [`docs/02-开发计划与源码清单.md`](docs/02-开发计划与源码清单.md)。
 
 ## 当前能力（MVP 主链路已跑通）
@@ -21,7 +21,7 @@ AI 引导式「从想法到上线」的全生命周期开发平台。用户打�
 
 ## 浏览器（V10 双形态）
 
-V10 起 SnowHarness 同时保留两种产品形态，不再提供服务器远程浏览器：
+V10 起 NexHarness 同时保留两种产品形态，不再提供服务器远程浏览器：
 
 - **Web**：回归简单、低延迟的 iframe AppRuntime 预览（`/preview/{threadId}` 反向代理 + owner guard + token + CSP）。不内置任意外部网站浏览器。
 - **macOS Desktop**：Electron + `WebContentsView` 完整承接原 V9 浏览器能力（用户直接操作本地 Chromium，AI 经结构化 RPC 操作同一 WebContents）。Desktop 离线时 Browser Tool 返回 `desktop_unavailable`，不启动 Server Chromium fallback。
@@ -35,8 +35,8 @@ V10 起 SnowHarness 同时保留两种产品形态，不再提供服务器远程
 pnpm install
 
 # 2. 起一个本地 MySQL（开发用）
-docker run -d --name snow-mysql \
-  -e MYSQL_ROOT_PASSWORD=snowroot -e MYSQL_DATABASE=snow_harness \
+docker run -d --name nex-mysql \
+  -e MYSQL_ROOT_PASSWORD=nexroot -e MYSQL_DATABASE=nexharness \
   -p 3307:3306 mysql:8.0
 
 # 3. 配置个人密钥（多环境机制见下方「环境变量」）
@@ -70,7 +70,7 @@ pnpm dev          # = APP_ENV=development，加载 .env.development(.local)
 
 - `admin`：全部权限（看全局 analytics、任意 thread、policy 只读等）。
 - `member`：受限（只看自己的 analytics / thread）。
-- dev/test：默认用户自动获 admin（`SNOW_STUDIO_OPEN=true`），本地与既有测试零回归；生产强制 false，无角色 → `/studio` 403。
+- dev/test：默认用户自动获 admin（`NEX_STUDIO_OPEN=true`），本地与既有测试零回归；生产强制 false，无角色 → `/studio` 403。
 
 数据库结构通过已审批的建库/变更 SQL 初始化，应用不会自动建表或迁移。完成建库后可执行 `pnpm db:seed` 灌入本地示例数据。
 Policies 页为只读展示（policy 已 DB 化，经解释器编译为运行时配置；编辑能力留后续切片）。
@@ -136,21 +136,21 @@ workspaces/             运行时生成的用户项目（git 忽略）
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `APP_ENV` | — | 部署环境标识；由启动脚本 / 平台注入，无需手填 |
-| `DATABASE_URL` | ✅ | MySQL 连接串（如 `mysql://user:pass@host:3306/snow_harness`） |
+| `DATABASE_URL` | ✅ | MySQL 连接串（如 `mysql://user:pass@host:3306/nexharness`） |
 | `LLM_API_KEY` | ✅ | LLM 密钥（放 `.env.{APP_ENV}.local`） |
 | `LLM_BASE_URL` | | OpenAI 兼容端点（默认阿里云百炼 compatible-mode） |
-| `SNOW_CHAT_MODEL` | | 主聊天 / 代码生成模型（默认 qwen-plus） |
-| `SNOW_TITLE_MODEL` | | 标题模型（默认 qwen-turbo） |
-| `SNOW_WORKSPACES_DIR` | | 工作区根目录（默认 `workspaces`）；开源默认文件 Provider 也在这里保存用户原文件和 AI 最终产物 |
-| `SNOW_FILE_IMAGE_UPLOAD_MAX_MB` | | 员工图片上传上限，正整数 MB（默认 10） |
-| `SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB` | | 员工文档上传上限，正整数 MB（默认 20） |
+| `NEX_CHAT_MODEL` | | 主聊天 / 代码生成模型（默认 qwen-plus） |
+| `NEX_TITLE_MODEL` | | 标题模型（默认 qwen-turbo） |
+| `NEX_WORKSPACES_DIR` | | 工作区根目录（默认 `workspaces`）；开源默认文件 Provider 也在这里保存用户原文件和 AI 最终产物 |
+| `NEX_FILE_IMAGE_UPLOAD_MAX_MB` | | 员工图片上传上限，正整数 MB（默认 10） |
+| `NEX_FILE_DOCUMENT_UPLOAD_MAX_MB` | | 员工文档上传上限，正整数 MB（默认 20） |
 
 ### V3.8：生产 runtime / 部署 / secret（可选，不配置则功能降级）
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `RUNTIME_DEFAULT_TYPE` | | 默认 runtime 类型（`host` / `container`，默认 `host`）。container 需 docker 可用 |
-| `RUNTIME_IMAGE` | | container 模式镜像（默认 `snow-harness-runtime:node22`） |
+| `RUNTIME_IMAGE` | | container 模式镜像（默认 `nexharness-runtime:node22`） |
 | `RUNTIME_MEMORY_LIMIT` | | 容器内存上限（默认 `512m`） |
 | `RUNTIME_CPUS` | | 容器 CPU 上限（默认 `0.5`） |
 | `RUNTIME_DEFAULT_QUOTA_CPU` | | 全局默认 per-thread CPU 配额 |
@@ -171,7 +171,7 @@ workspaces/             运行时生成的用户项目（git 忽略）
 
 ## 接手须知
 
-- **大仓子服务**：本项目是 `python-service` 下的 `snow_harness/`，经 CNB 流水线（Node 构建按钮选 `snow_harness`）构建镜像、部署 K8s。详见 `docs/02` 的「迁移」一节。
+- **大仓子服务**：本项目是 `python-service` 下的 `nexharness/`，经 CNB 流水线（Node 构建按钮选 `nexharness`）构建镜像、部署 K8s。详见 `docs/02` 的「迁移」一节。
 - **单租户 MVP**：当前用户写死在 `lib/constants.ts`；多租户 / 公司 SSO 是阶段二，schema 已预留 `userId`。
 - **DB**：外部 MySQL；连接经 `DATABASE_URL`，K8s 下用 secret 注入、不要写进镜像。建表是 `ensureSchema()` 幂等 DDL，无迁移工具。
 - **Runtime 隔离（V3.8）**：host 模式（默认）是信任平台进程，networkPolicy=open / quotaEnforced=false **诚实标注不伪装**；container 模式经 docker `--network` / `--memory` / `--cpus` 硬隔离。per-thread 配额/网络策略覆盖**只能收紧不能放宽**。secret 经 AES-256-GCM 加密存储（`SECRET_MASTER_KEY` 未配置 → fail-closed），全链路脱敏（ToolRun output / 日志 / manifest 不含明文）。部署经 CI/CD webhook 交接，**不直接操作 K8s**。

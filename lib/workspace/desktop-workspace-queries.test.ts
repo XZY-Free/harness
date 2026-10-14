@@ -33,7 +33,7 @@ describe("Desktop Workspace 绑定", () => {
       tenantId,
       userId,
       deviceKey: "device-key-1",
-      displayName: "snow_harness",
+      displayName: "nexharness",
       storageScopeDigest: `sha256:${"a".repeat(64)}`,
     };
 

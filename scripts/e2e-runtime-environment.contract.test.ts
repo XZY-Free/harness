@@ -194,7 +194,7 @@ describe("E2E 运行环境契约：.env.test 必须满足生产 Runtime 设置�
     assertDeclaredOnce(envTest, WORKLOAD_SIGNING_KEY_ID_ENV, ".env.test");
   });
 
-  it("恰好声明一次非空 SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET（至少 32 字节）", () => {
+  it("恰好声明一次非空 NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET（至少 32 字节）", () => {
     const secret = assertDeclaredOnce(envTest, WORKLOAD_TOKEN_SIGNING_SECRET_ENV, ".env.test");
     expect(
       Buffer.byteLength(secret, "utf8"),

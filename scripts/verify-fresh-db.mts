@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   let app: ChildProcess | null = null;
   console.log("[fresh-db] 启动空 MySQL 8.4");
   const container = await new MySqlContainer("mysql:8.4")
-    .withDatabase("snow_fresh")
+    .withDatabase("nex_fresh")
     .withRootPassword("test")
     .withCommand([
       "--skip-sync-binlog",
@@ -118,8 +118,8 @@ async function main(): Promise<void> {
       APP_ENV: "test",
       DATABASE_URL: connectionString,
       LLM_API_KEY: "fresh-db-test-key",
-      SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET: "fresh-db-test-workload-signing-secret-0123456789",
-      SNOW_DIST_DIR: distDir,
+      NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET: "fresh-db-test-workload-signing-secret-0123456789",
+      NEX_DIST_DIR: distDir,
     };
 
     const schemaConnection = await mysql.createConnection(connectionString);

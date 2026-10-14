@@ -20,15 +20,14 @@ function positiveInt(value: string | undefined, fallback: number): number {
 
 export function createEnvironmentCleanupServiceFromEnvironment() {
   const backend = createDefaultEnvironmentInstanceBackend({
-    runtimeType:
-      process.env.SNOWHARNESS_ENVIRONMENT_BACKEND === "host_agent" ? "host" : "container",
-    ...(process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT
-      ? { controlRoot: process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT }
+    runtimeType: process.env.NEXHARNESS_ENVIRONMENT_BACKEND === "host_agent" ? "host" : "container",
+    ...(process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT
+      ? { controlRoot: process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT }
       : {}),
   });
   const owner = `environment-cleanup:${process.env.HOSTNAME ?? "localhost"}:${process.pid}`;
-  const intervalMs = positiveInt(process.env.SNOWHARNESS_ENVIRONMENT_CLEANUP_INTERVAL_MS, 5_000);
-  const limit = positiveInt(process.env.SNOWHARNESS_ENVIRONMENT_CLEANUP_BATCH, 20);
+  const intervalMs = positiveInt(process.env.NEXHARNESS_ENVIRONMENT_CLEANUP_INTERVAL_MS, 5_000);
+  const limit = positiveInt(process.env.NEXHARNESS_ENVIRONMENT_CLEANUP_BATCH, 20);
   return { backend, owner, intervalMs, limit };
 }
 

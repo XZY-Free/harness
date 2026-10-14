@@ -1,5 +1,5 @@
 /**
- * RuntimeProtocol — SnowHarness 平台与 Runtime 之间的唯一机器契约。
+ * RuntimeProtocol — NexHarness 平台与 Runtime 之间的唯一机器契约。
  *
  * Authority（工程包 sections/runtime-contract.md §7）：
  * - 唯一 protocolVersion = 3（JSON 整数）；代码类型统一叫 RuntimeProtocol、
@@ -38,7 +38,7 @@ export const WORKLOAD_TOKEN_FORMAT_VERSION = 1 as const;
 export const WORKLOAD_TOKEN_ALGORITHM = "HS256" as const;
 
 /** WorkloadToken HMAC 域分离前缀，防止跨协议重放。 */
-export const WORKLOAD_TOKEN_HMAC_DOMAIN = "snowharness.workload\0" as const;
+export const WORKLOAD_TOKEN_HMAC_DOMAIN = "nexharness.workload\0" as const;
 
 /**
  * WorkloadToken audience 白名单。两种是权限隔离的受众，不是新旧 Contract。

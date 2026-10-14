@@ -13,7 +13,7 @@ import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { authSession, localCredential, userIdentity } from "@/lib/persistence/schema/identity";
 import { and, eq, gt, isNull } from "drizzle-orm";
 
-export const SESSION_COOKIE_NAME = "snow_session";
+export const SESSION_COOKIE_NAME = "nex_session";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const PASSWORD_ENROLLMENT_TTL_MS = 15 * 60 * 1_000;
@@ -23,7 +23,7 @@ const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_N = 16_384;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
-const DUMMY_SALT = "snow-harness-missing-account-v1";
+const DUMMY_SALT = "nexharness-missing-account-v1";
 
 interface PasswordRecord {
   version: "scrypt-v1";

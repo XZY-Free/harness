@@ -52,13 +52,13 @@ describe("buildCapability", () => {
   });
 
   it("container 模式：imageVersion + enforced=true", () => {
-    process.env.SNOW_RUNTIME_IMAGE = "snow-harness-runtime:node22";
+    process.env.NEX_RUNTIME_IMAGE = "nexharness-runtime:node22";
     const cap = buildCapability({
       runtimeType: "container",
-      imageVersion: "snow-harness-runtime:node22",
+      imageVersion: "nexharness-runtime:node22",
     });
     expect(cap.runtimeType).toBe("container");
-    expect(cap.imageVersion).toBe("snow-harness-runtime:node22");
+    expect(cap.imageVersion).toBe("nexharness-runtime:node22");
     expect(cap.networkPolicyEnforced).toBe(true);
     expect(cap.quotaEnforced).toBe(true);
   });

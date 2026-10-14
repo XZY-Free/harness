@@ -3,7 +3,7 @@
  * S10-W06：useDesktopOperations Hook 测试。
  *
  * 覆盖：
- * - 非 Desktop 环境（globalThis.snowDesktop 不存在）→ isDesktop=false，所有操作返回 null + NOT_DESKTOP。
+ * - 非 Desktop 环境（globalThis.nexDesktop 不存在）→ isDesktop=false，所有操作返回 null + NOT_DESKTOP。
  * - Desktop 环境 + 命名空间缺失 → NAMESPACE_UNAVAILABLE。
  * - Desktop 环境 + 命名空间存在 → IPC 调用成功，lastResult 设置。
  * - IPC 调用抛异常 → IPC_ERROR。
@@ -20,7 +20,7 @@ import { useDesktopOperations } from "./use-desktop-operations";
 function makeCapabilities() {
   return {
     version: 1 as const,
-    serverOrigin: "https://snow.example.com",
+    serverOrigin: "https://nex.example.com",
     appVersion: "1.0.0-test",
     ipcChannels: [
       "desktop:getCapabilities",
@@ -81,12 +81,12 @@ function makeFullBridge() {
 }
 
 beforeEach(() => {
-  // 清理 globalThis.snowDesktop
-  (globalThis as Record<string, unknown>).snowDesktop = undefined;
+  // 清理 globalThis.nexDesktop
+  (globalThis as Record<string, unknown>).nexDesktop = undefined;
 });
 
 afterEach(() => {
-  (globalThis as Record<string, unknown>).snowDesktop = undefined;
+  (globalThis as Record<string, unknown>).nexDesktop = undefined;
   cleanup();
 });
 
@@ -117,7 +117,7 @@ describe("useDesktopOperations", () => {
 
   it("Desktop 环境 + 命名空间存在 → IPC 调用成功，lastResult 设置", async () => {
     const bridge = makeFullBridge();
-    (globalThis as Record<string, unknown>).snowDesktop = bridge;
+    (globalThis as Record<string, unknown>).nexDesktop = bridge;
 
     const expectedResult = {
       category: "shell" as const,
@@ -161,7 +161,7 @@ describe("useDesktopOperations", () => {
     // 构造不含 shell 命名空间的 bridge
     const bridge = makeFullBridge();
     (bridge as { shell?: unknown }).shell = undefined;
-    (globalThis as Record<string, unknown>).snowDesktop = bridge;
+    (globalThis as Record<string, unknown>).nexDesktop = bridge;
 
     const { result } = renderHook(() => useDesktopOperations());
 
@@ -184,7 +184,7 @@ describe("useDesktopOperations", () => {
 
   it("IPC 调用抛异常 → IPC_ERROR", async () => {
     const bridge = makeFullBridge();
-    (globalThis as Record<string, unknown>).snowDesktop = bridge;
+    (globalThis as Record<string, unknown>).nexDesktop = bridge;
     bridge.shell.exec.mockRejectedValueOnce(new Error("IPC channel closed"));
 
     const { result } = renderHook(() => useDesktopOperations());
@@ -207,7 +207,7 @@ describe("useDesktopOperations", () => {
 
   it("running 状态在调用期间为 true", async () => {
     const bridge = makeFullBridge();
-    (globalThis as Record<string, unknown>).snowDesktop = bridge;
+    (globalThis as Record<string, unknown>).nexDesktop = bridge;
 
     let resolveExec: ((v: unknown) => void) | null = null;
     bridge.shell.exec.mockImplementationOnce(
@@ -258,7 +258,7 @@ describe("useDesktopOperations", () => {
 
   it("clear 清除 lastResult 和 lastError", async () => {
     const bridge = makeFullBridge();
-    (globalThis as Record<string, unknown>).snowDesktop = bridge;
+    (globalThis as Record<string, unknown>).nexDesktop = bridge;
     bridge.git.status.mockResolvedValueOnce({
       category: "git",
       operation: "git.status",
@@ -295,7 +295,7 @@ describe("useDesktopOperations", () => {
 
   it("各操作方法都能正确路由到对应命名空间", async () => {
     const bridge = makeFullBridge();
-    (globalThis as Record<string, unknown>).snowDesktop = bridge;
+    (globalThis as Record<string, unknown>).nexDesktop = bridge;
 
     const mockResult = {
       category: "file" as const,

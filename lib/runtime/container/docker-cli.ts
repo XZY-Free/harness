@@ -88,7 +88,7 @@ export async function runContainer(opts: RunContainerOpts): Promise<string> {
     "--name",
     opts.name,
     "--label",
-    `snow-harness.threadId=${opts.threadId}`,
+    `nexharness.threadId=${opts.threadId}`,
     "-v",
     `${opts.hostPath}:/workspace`,
     "-p",
@@ -328,9 +328,9 @@ export async function execDetachedWithPid(
 ): Promise<DetachedPidInfo> {
   // pidFile/logPath 经 shQuote 转义（taskId 虽为 UUID 安全，但路径拼接入 shell
   // 字符串一律转义，防未来 taskId 来源变化或路径注入）。
-  const pidFile = `/workspace/.snow/runtime/tasks/${taskId}.pid`;
-  const logPath = `/workspace/.snow/runtime/tasks/${taskId}.log`;
-  const tasksDir = shQuote("/workspace/.snow/runtime/tasks");
+  const pidFile = `/workspace/.nex/runtime/tasks/${taskId}.pid`;
+  const logPath = `/workspace/.nex/runtime/tasks/${taskId}.log`;
+  const tasksDir = shQuote("/workspace/.nex/runtime/tasks");
   const wrapped = `mkdir -p ${tasksDir} && (echo $$ > ${shQuote(pidFile)} && exec ${command}) > ${shQuote(logPath)} 2>&1 &`;
   await execDetached(name, wrapped);
   return { pidFile, logPath };

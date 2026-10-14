@@ -20,10 +20,10 @@ import {
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "skill-repo-"));
-  process.env.SNOW_SKILLS_DIR = dir;
+  process.env.NEX_SKILLS_DIR = dir;
 });
 afterEach(async () => {
-  Reflect.deleteProperty(process.env, "SNOW_SKILLS_DIR");
+  Reflect.deleteProperty(process.env, "NEX_SKILLS_DIR");
   await rm(dir, { recursive: true, force: true });
 });
 

@@ -80,7 +80,7 @@ function revisionInput(
     networkPolicyJson: { egress: "deny_all" },
     resourceLimitsJson: { cpu: 2, memoryMb: 2048 },
     secretPolicyJson: { inject: "none" },
-    executionTarget: { kind: "container", image: "snowharness/test:latest" },
+    executionTarget: { kind: "container", image: "nexharness/test:latest" },
     requiredCapabilities: { isolation: true },
     createdByType: "user",
     createdById: "test-admin",
@@ -386,7 +386,7 @@ describe("EnvironmentDefinition / Revision / Lease database semantics", () => {
     await createEnvironmentRevision(
       DEFAULT_TENANT_ID,
       definition.id,
-      revisionInput({ executionTarget: { kind: "container", image: "snowharness/latest:latest" } }),
+      revisionInput({ executionTarget: { kind: "container", image: "nexharness/latest:latest" } }),
     );
     // R1 不可实例化：连续失败重试仍然只引用 R1，不 fallback 到 R2。每次重试对应新 Attempt。
     for (let i = 0; i < 3; i += 1) {

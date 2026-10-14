@@ -28,7 +28,7 @@ export function buildGatewayEndpoints(params: {
       );
     }
     throw new Error(
-      "External Runtime 调度缺少合法 SNOW_CONTROL_PLANE_PUBLIC_URL，无法建立 Gateway 回调闭环",
+      "External Runtime 调度缺少合法 NEX_CONTROL_PLANE_PUBLIC_URL，无法建立 Gateway 回调闭环",
     );
   }
   return buildExternalGatewayEndpoints(baseUrl, params.invocationId);

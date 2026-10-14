@@ -79,7 +79,7 @@ describe("Web 侧栏 overlay drawer 行为", () => {
   it("空数据时不伪造项目层级，会话直接进入真实会话列表", () => {
     renderSidebar(false);
     expect(screen.queryByText("项目")).toBeNull();
-    expect(screen.queryByLabelText("SnowHarness 项目")).toBeNull();
+    expect(screen.queryByLabelText("NexHarness 项目")).toBeNull();
     expect(screen.getByRole("link", { name: /会话一/ })).toBeTruthy();
   });
 

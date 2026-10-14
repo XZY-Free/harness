@@ -70,17 +70,17 @@ import { seedActionPermission } from "@/lib/test-support/seed-action-permission"
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 identity.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+// vitest 不加载 .env.test，需手动设置 NEX_VITEST_IDENTITY_FIXTURE=enabled（与 identity.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
   resetArtifactStoreOverrides();
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 辅助：InMemoryManagedArtifactStore ────────────────────

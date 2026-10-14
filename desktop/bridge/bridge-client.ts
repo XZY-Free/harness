@@ -200,7 +200,7 @@ export class BridgeClient {
           typeof raw === "string" ? JSON.parse(raw) : JSON.parse(raw.toString("utf8"));
         this.handleMessage(data);
       } catch (e) {
-        console.error("[snowharness:bridge] 消息解析失败:", e);
+        console.error("[nexharness:bridge] 消息解析失败:", e);
       }
     });
 
@@ -313,7 +313,7 @@ export class BridgeClient {
         dispatchControlEvent(msg);
         break;
       case "error":
-        console.error(`[snowharness:bridge] Server 错误: ${msg.error.code} - ${msg.error.message}`);
+        console.error(`[nexharness:bridge] Server 错误: ${msg.error.code} - ${msg.error.message}`);
         break;
     }
   }
@@ -393,7 +393,7 @@ export class BridgeClient {
    * 处理 auth_failed：进入 revoked 状态，不自动重连。
    */
   private handleAuthFailed(code: string, message: string): void {
-    console.error(`[snowharness:bridge] 认证失败: ${code} - ${message}`);
+    console.error(`[nexharness:bridge] 认证失败: ${code} - ${message}`);
     const state = this.stateMachine.getState();
     if (state === "connected") {
       this.stateMachine.transition({ type: "revoke" });
@@ -546,7 +546,7 @@ export class BridgeClient {
    */
   private handleLeaseRevoked(threadId: string, reason: string): void {
     this.config.aiLockManager?.revoke(threadId);
-    console.warn(`[snowharness:bridge] Lease 撤销: threadId=${threadId} reason=${reason}`);
+    console.warn(`[nexharness:bridge] Lease 撤销: threadId=${threadId} reason=${reason}`);
   }
 
   private handleLeaseLocked(message: {
@@ -653,7 +653,7 @@ export class BridgeClient {
     this.heartbeatTimer = setInterval(() => {
       const elapsed = Date.now() - this.lastHeartbeatAt;
       if (elapsed > interval * 2) {
-        console.warn("[snowharness:bridge] 心跳超时，主动断开触发重连");
+        console.warn("[nexharness:bridge] 心跳超时，主动断开触发重连");
         this.cleanupConnection();
         this.handleClose();
       }
@@ -686,7 +686,7 @@ export class BridgeClient {
     }
     const maxAttempts = this.config.reconnectMaxAttempts ?? 0;
     if (maxAttempts > 0 && this.reconnectAttempts >= maxAttempts) {
-      console.error(`[snowharness:bridge] 达到最大重连次数 ${maxAttempts}，停止重连`);
+      console.error(`[nexharness:bridge] 达到最大重连次数 ${maxAttempts}，停止重连`);
       return;
     }
 
@@ -738,7 +738,7 @@ export class BridgeClient {
    * 处理 WebSocket 错误。
    */
   private handleError(error: Error): void {
-    console.error("[snowharness:bridge] WebSocket 错误:", error.message);
+    console.error("[nexharness:bridge] WebSocket 错误:", error.message);
   }
 
   /**

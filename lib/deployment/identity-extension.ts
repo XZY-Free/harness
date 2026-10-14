@@ -27,7 +27,7 @@ export function createIdentityExtension(): IdentityExtension {
     // 仅 Vitest 进程且测试文件显式开启时注入固定身份。APP_ENV=test 的真实应用、
     // Playwright、开发和生产都不会进入此分支，产品行为始终要求真实登录。
     authenticationProvider:
-      process.env.VITEST === "true" && process.env.SNOW_VITEST_IDENTITY_FIXTURE === "enabled"
+      process.env.VITEST === "true" && process.env.NEX_VITEST_IDENTITY_FIXTURE === "enabled"
         ? explicitVitestIdentityFixture
         : localAuthenticationProvider,
   };

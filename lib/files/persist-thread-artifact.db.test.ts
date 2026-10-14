@@ -12,16 +12,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { persistThreadArtifact } from "./persist-thread-artifact";
 
 const TEST_ROOT = resolve(".test-artifact-workspaces");
-const originalRoot = process.env.SNOW_WORKSPACES_DIR;
+const originalRoot = process.env.NEX_WORKSPACES_DIR;
 
 beforeEach(async () => {
-  process.env.SNOW_WORKSPACES_DIR = TEST_ROOT;
+  process.env.NEX_WORKSPACES_DIR = TEST_ROOT;
   await resetDatabase(db);
   await rm(TEST_ROOT, { recursive: true, force: true });
 });
 
 afterEach(async () => {
-  process.env.SNOW_WORKSPACES_DIR = originalRoot;
+  process.env.NEX_WORKSPACES_DIR = originalRoot;
   await rm(TEST_ROOT, { recursive: true, force: true });
 });
 
@@ -67,7 +67,7 @@ describe("AI 生成文件进入统一文件存储", () => {
       storageProvider: "workspace",
       visibilityScope: "thread",
     });
-    expect(artifact.contentRef).toBe(`.snow/files/artifact/${artifact.id}/content`);
+    expect(artifact.contentRef).toBe(`.nex/files/artifact/${artifact.id}/content`);
     expect(artifact.contentHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     await expect(getArtifactById(tenant.id, artifact.id)).resolves.toMatchObject({
       id: artifact.id,

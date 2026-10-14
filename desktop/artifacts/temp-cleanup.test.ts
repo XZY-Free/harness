@@ -25,7 +25,7 @@ describe("temp-cleanup", () => {
   function createTempFile(content = "test"): string {
     const p = path.join(
       os.tmpdir(),
-      `snow-test-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
+      `nex-test-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
     );
     fs.writeFileSync(p, content, { mode: 0o600 });
     tempFiles.push(p);
@@ -36,7 +36,7 @@ describe("temp-cleanup", () => {
   function createTempDir(): string {
     const d = path.join(
       os.tmpdir(),
-      `snow-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      `nex-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     fs.mkdirSync(d, { recursive: true });
     tempDirs.push(d);
@@ -86,7 +86,7 @@ describe("temp-cleanup", () => {
       const result = await safeUnlink(
         path.join(
           os.tmpdir(),
-          `snow-not-exist-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          `nex-not-exist-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         ),
       );
       expect(result).toBe(true);
@@ -132,7 +132,7 @@ describe("temp-cleanup", () => {
       const entries: TempFileEntry[] = [
         makeEntry(a, "screenshot"),
         makeEntry(b, "download"),
-        makeEntry("/tmp/snow-non-existent-xyz", "artifact"),
+        makeEntry("/tmp/nex-non-existent-xyz", "artifact"),
       ];
       const count = await cleanupTempFiles(entries);
       // 不存在的文件返回 true（safeUnlink 幂等），所以全部算成功
@@ -195,7 +195,7 @@ describe("temp-cleanup", () => {
       const a = createTempFile("a");
       // 提前删除 b，模拟孤儿
       registry.register("t1", a, "screenshot");
-      registry.register("t1", "/tmp/snow-orphan-xyz", "download");
+      registry.register("t1", "/tmp/nex-orphan-xyz", "download");
 
       const count = await cleanupThreadTempFiles(registry, "t1");
       expect(count).toBe(2); // 不存在也算成功

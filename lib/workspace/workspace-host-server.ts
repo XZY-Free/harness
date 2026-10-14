@@ -54,7 +54,7 @@ import {
 
 // ─── 稳定字面量 ────────────────────────────────────────────
 
-const CONTROL_DIR = ".snow";
+const CONTROL_DIR = ".nex";
 const HOST_IDENTITY_FILE = "host-identity.json";
 const WORKSPACE_IDENTITY_FILE = "workspace-identity.json";
 const SCOPE_CLAIM_FILE = "workspace-scope.json";
@@ -68,7 +68,7 @@ const CANDIDATES_DIR = "candidates";
  * Writer root" —— 于是"恢复成功但随后无法激活"是必然结果。控制面目录只保留
  * `candidates/<sha>.json` 这份**归属登记**，真正的目录在工作区侧。
  */
-const RUNS_DIR = ".snow-runs";
+const RUNS_DIR = ".nex-runs";
 const GRANTS_DIR = "grants";
 const SAFE_POINTS_DIR = "safe-points";
 const SAFE_POINT_INTENTS_DIR = "safe-point-intents";

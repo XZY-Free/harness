@@ -87,7 +87,7 @@ export type RuntimeRevisionState = (typeof RUNTIME_REVISION_STATES)[number];
 // ─── Protocol Type / Identity Mode / Network Zone ──────────
 // 契约未固定枚举值，使用 varchar 存储以便扩展；以下为已知常量。
 
-/** 已知协议类型 — Runtime 只表示 SnowHarness Harness Runtime。 */
+/** 已知协议类型 — Runtime 只表示 NexHarness Harness Runtime。 */
 export const RUNTIME_PROTOCOL_TYPES = ["harness_runtime_protocol"] as const;
 export type RuntimeProtocolType = (typeof RUNTIME_PROTOCOL_TYPES)[number];
 

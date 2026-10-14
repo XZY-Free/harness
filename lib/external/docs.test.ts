@@ -8,8 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 beforeEach(() => {
-  Reflect.deleteProperty(process.env, "SNOW_DOCS_DOMAINS");
-  Reflect.deleteProperty(process.env, "SNOW_DOCS_INDEX_PATH");
+  Reflect.deleteProperty(process.env, "NEX_DOCS_DOMAINS");
+  Reflect.deleteProperty(process.env, "NEX_DOCS_INDEX_PATH");
   Reflect.deleteProperty(process.env, "WEB_FETCH_DOMAIN_ALLOWLIST");
   Reflect.deleteProperty(process.env, "WEB_FETCH_DOMAIN_BLACKLIST");
 });
@@ -40,7 +40,7 @@ describe("searchDocs", () => {
   });
 
   it("文档域配置 → 仅返回文档域内结果 + 来源", async () => {
-    process.env.SNOW_DOCS_DOMAINS = "react.dev";
+    process.env.NEX_DOCS_DOMAINS = "react.dev";
     const { searchDocs } = await import("./docs");
     const r = await searchDocs({
       query: "hooks",
@@ -55,7 +55,7 @@ describe("searchDocs", () => {
   });
 
   it("配置索引时优先走本地全文索引，不调用搜索引擎", async () => {
-    process.env.SNOW_DOCS_DOMAINS = "react.dev";
+    process.env.NEX_DOCS_DOMAINS = "react.dev";
     const fetchImpl = mockSearchFetch(DDG_HTML);
     const { searchDocs } = await import("./docs");
     const r = await searchDocs({
@@ -91,8 +91,8 @@ describe("searchDocs", () => {
   });
 
   it("legacy JSON 源会构建 sidecar 索引并在后续搜索中复用", async () => {
-    process.env.SNOW_DOCS_DOMAINS = "react.dev";
-    const dir = await mkdtemp(join(tmpdir(), "snow-docs-"));
+    process.env.NEX_DOCS_DOMAINS = "react.dev";
+    const dir = await mkdtemp(join(tmpdir(), "nex-docs-"));
     const sourcePath = join(dir, "docs.json");
     await writeFile(
       sourcePath,
@@ -106,7 +106,7 @@ describe("searchDocs", () => {
       ]),
       "utf8",
     );
-    process.env.SNOW_DOCS_INDEX_PATH = sourcePath;
+    process.env.NEX_DOCS_INDEX_PATH = sourcePath;
     const fetchImpl = mockSearchFetch(DDG_HTML);
     const { searchDocs } = await import("./docs");
     const r = await searchDocs({
@@ -123,14 +123,14 @@ describe("searchDocs", () => {
       sourcePath: string;
       postings: Record<string, string[]>;
     };
-    expect(compiled.kind).toBe("snow-docs-index");
+    expect(compiled.kind).toBe("nex-docs-index");
     expect(compiled.version).toBe(1);
     expect(compiled.sourcePath).toBe(sourcePath);
     expect(compiled.postings.cleanup?.length).toBeGreaterThan(0);
   });
 
   it("文档域外的结果被过滤", async () => {
-    process.env.SNOW_DOCS_DOMAINS = "vue.dev";
+    process.env.NEX_DOCS_DOMAINS = "vue.dev";
     const { searchDocs } = await import("./docs");
     const r = await searchDocs({
       query: "hooks",
@@ -145,7 +145,7 @@ describe("searchDocs", () => {
 // S1（06-P2-5）：真 BM25 评分测试
 describe("searchDocs BM25 评分（06-P2-5）", () => {
   beforeEach(() => {
-    process.env.SNOW_DOCS_DOMAINS = "react.dev";
+    process.env.NEX_DOCS_DOMAINS = "react.dev";
   });
 
   it("罕见词权重 > 常见词（IDF 加权：罕见词排序靠前）", async () => {

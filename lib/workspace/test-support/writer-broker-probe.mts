@@ -137,7 +137,7 @@ async function main(): Promise<void> {
       scopeDigest: probe.scopeDigest,
       mode: config.mode,
       identity,
-      controlRoot: path.join(await realpath(config.hostRoot), ".snow"),
+      controlRoot: path.join(await realpath(config.hostRoot), ".nex"),
     })}\n`,
   );
 }

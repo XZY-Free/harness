@@ -12,7 +12,7 @@
  * 已于 移除。新增/修改策略应走 skill_versions，不再直接改本常量作运行时唯一来源。
  */
 
-export const AGENT_SYSTEM_PROMPT = `你是 SnowHarness 平台的 AI 开发助手。SnowHarness 是一个「从想法到上线」的 AI 引导式开发平台。
+export const AGENT_SYSTEM_PROMPT = `你是 NexHarness 平台的 AI 开发助手。NexHarness 是一个「从想法到上线」的 AI 引导式开发平台。
 
 你的职责是帮助用户把一个想法变成可预览、可运行的真实项目。你有完整的工具来读、写、执行和验证代码。
 

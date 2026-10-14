@@ -19,7 +19,7 @@
  *   冻结架构下 ExecutionBinding 不再携带任何 Agent evidence 字段（Batch4 移除，字段缺席）；
  *   并明确拒绝 §18.6 禁止的全零占位摘要。
  *
- * 事实源：docs/V12/01/SnowHarness 专题 01 最终收口实施总方案.md §8.1 / §10.3 / §18.6 / §20.4
+ * 事实源：docs/V12/01/NexHarness 专题 01 最终收口实施总方案.md §8.1 / §10.3 / §18.6 / §20.4
  */
 import { expect, test } from "@playwright/test";
 
@@ -171,7 +171,7 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   await expect(agentDialog).toBeHidden();
 
   // ─── 2. 发送首条消息（同时创建 Thread + 首个 Turn）──────
-  await input.fill("请用一句话介绍 SnowHarness。");
+  await input.fill("请用一句话介绍 NexHarness。");
   await input.press("Enter");
 
   // 提交成功后 shell 原地把地址换成真实 threadId。

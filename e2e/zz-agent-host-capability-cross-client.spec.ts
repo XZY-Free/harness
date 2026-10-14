@@ -12,7 +12,7 @@ import { type Locator, type Page, expect, test } from "@playwright/test";
 import { E2E_PORT } from "../playwright.config";
 import { authenticateDesktopWindow, launchDesktopApp } from "./support/launch-desktop";
 
-const captureUi = process.env.SNOW_CAPTURE_UI === "1";
+const captureUi = process.env.NEX_CAPTURE_UI === "1";
 const captureDir = resolve(process.cwd(), "output/user-action-design-qa");
 
 async function capture(page: import("@playwright/test").Page, name: string): Promise<void> {
@@ -57,7 +57,7 @@ async function withVisibleDesktopSidebar(window: Page, assert: () => Promise<voi
 }
 
 function e2eRuntimeDescriptorPath(): string {
-  return resolve(process.env.TMPDIR ?? "/tmp", `snow-harness-e2e-${E2E_PORT}.json`);
+  return resolve(process.env.TMPDIR ?? "/tmp", `nexharness-e2e-${E2E_PORT}.json`);
 }
 
 async function loadE2eHarness() {

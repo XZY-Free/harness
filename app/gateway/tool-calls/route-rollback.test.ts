@@ -439,14 +439,14 @@ function toolCallBody(patch: Partial<Record<string, unknown>>): Record<string, u
 beforeEach(async () => {
   await resetDatabase(db);
   catalogTool = null;
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
-  process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
   await ensureDefaultTenant();
 });
 
 afterEach(() => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
-  process.env.SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET = SIGNING_SECRET;
 });
 
 describe("POST /gateway/tool-calls 事务原子性（02-6 P7 §55.7 故障注入）", () => {

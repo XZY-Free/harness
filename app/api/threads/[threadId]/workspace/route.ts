@@ -14,7 +14,7 @@ import type { NextRequest } from "next/server";
  * GET /api/threads/{threadId}/workspace → 列出本会话 workspace 中的用户可见文件。
  *
  * 与 Studio 后台 `/studio/api/threads/[id]/workspace` 的差异见 lib/workspace-access.ts（已删）。
- * 内部运行时目录（.snow/.git/node_modules/.next/dist/build/.cache/.turbo）默认隐藏。
+ * 内部运行时目录（.nex/.git/node_modules/.next/dist/build/.cache/.turbo）默认隐藏。
  *
  * 鉴权：员工身份（Employee API 不走 action scope），经 Thread.ownerUserId 鉴权；
  * Thread 不存在 / 非 owner / 已删除一律 404（隐藏式，不泄露存在）。

@@ -20,9 +20,9 @@ const connectionString =
 
 // 连接池参数可配置（原仅用连接串默认 connectionLimit=10）。
 const poolOptions: mysql.PoolOptions = {
-  connectionLimit: Number.parseInt(process.env.SNOW_DB_CONNECTION_LIMIT ?? "10", 10),
+  connectionLimit: Number.parseInt(process.env.NEX_DB_CONNECTION_LIMIT ?? "10", 10),
   waitForConnections: true,
-  queueLimit: Number.parseInt(process.env.SNOW_DB_QUEUE_LIMIT ?? "100", 10),
+  queueLimit: Number.parseInt(process.env.NEX_DB_QUEUE_LIMIT ?? "100", 10),
   // BIGINT 的 DB→driver 边界必须保留十进制原文；默认 Number 会在 2^53 后舍入。
   supportBigNumbers: true,
   // 安全整数仍按 Number 返回（COUNT(*) 等旧调用方依赖此类型）；超出安全范围才返回字符串。
@@ -30,13 +30,13 @@ const poolOptions: mysql.PoolOptions = {
 };
 
 const globalForDb = globalThis as unknown as {
-  __snowMysqlPool?: mysql.Pool;
+  __nexMysqlPool?: mysql.Pool;
 };
 
 const pool =
-  globalForDb.__snowMysqlPool ?? mysql.createPool({ uri: connectionString, ...poolOptions });
-if (!globalForDb.__snowMysqlPool) {
-  globalForDb.__snowMysqlPool = pool;
+  globalForDb.__nexMysqlPool ?? mysql.createPool({ uri: connectionString, ...poolOptions });
+if (!globalForDb.__nexMysqlPool) {
+  globalForDb.__nexMysqlPool = pool;
 }
 
 export const db = drizzle(pool, { schema, mode: "default" });
@@ -48,9 +48,9 @@ export async function openMigrationConnection(): Promise<mysql.PoolConnection> {
 
 /** 关闭当前测试文件的业务连接池，避免 Vitest 文件隔离造成连接池累积。 */
 export async function closeDbPool(): Promise<void> {
-  const currentPool = globalForDb.__snowMysqlPool;
+  const currentPool = globalForDb.__nexMysqlPool;
   if (!currentPool) return;
-  globalForDb.__snowMysqlPool = undefined;
+  globalForDb.__nexMysqlPool = undefined;
   await currentPool.end();
 }
 

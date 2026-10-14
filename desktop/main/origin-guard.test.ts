@@ -9,7 +9,7 @@ import {
 } from "./origin-guard";
 
 /** 测试用受信任 origin 列表（覆盖 https / localhost / 127.0.0.1 三类）。 */
-const TRUSTED = ["http://localhost:3000", "http://127.0.0.1:3000", "https://snow.example.com"];
+const TRUSTED = ["http://localhost:3000", "http://127.0.0.1:3000", "https://nex.example.com"];
 
 describe("origin-guard getOrigin (V10 Phase 3)", () => {
   it("http URL 返回 origin（剥 path）", () => {
@@ -17,7 +17,7 @@ describe("origin-guard getOrigin (V10 Phase 3)", () => {
   });
 
   it("https URL 返回 origin（剥 path）", () => {
-    expect(getOrigin("https://snow.example.com/path")).toBe("https://snow.example.com");
+    expect(getOrigin("https://nex.example.com/path")).toBe("https://nex.example.com");
   });
 
   it("about:blank 返回哨兵值 about:blank", () => {
@@ -47,7 +47,7 @@ describe("origin-guard getOrigin (V10 Phase 3)", () => {
 
 describe("origin-guard isTrustedServerOrigin (V10 Phase 3)", () => {
   it("受信任 https origin 通过", () => {
-    expect(isTrustedServerOrigin("https://snow.example.com/path", TRUSTED)).toBe(true);
+    expect(isTrustedServerOrigin("https://nex.example.com/path", TRUSTED)).toBe(true);
   });
 
   it("http://localhost:3000 通过", () => {
@@ -93,7 +93,7 @@ describe("origin-guard isTrustedServerOrigin (V10 Phase 3)", () => {
 
 describe("origin-guard shouldBlockNavigation (V10 Phase 3)", () => {
   it("受信任 https origin 不阻止", () => {
-    expect(shouldBlockNavigation("https://snow.example.com/path", TRUSTED)).toBe(false);
+    expect(shouldBlockNavigation("https://nex.example.com/path", TRUSTED)).toBe(false);
   });
 
   it("http://localhost:3000 不阻止", () => {
@@ -177,18 +177,18 @@ describe("origin-guard loadAllowedOrigins (V10 Phase 3)", () => {
 
   it("逗号分隔的环境变量解析为列表", () => {
     expect(
-      loadAllowedOrigins({ SNOW_SERVER_ORIGIN: "https://a.com,http://localhost:3000" }),
+      loadAllowedOrigins({ NEX_SERVER_ORIGIN: "https://a.com,http://localhost:3000" }),
     ).toEqual(["https://a.com", "http://localhost:3000"]);
   });
 
   it("纯空白值回退默认", () => {
-    expect(loadAllowedOrigins({ SNOW_SERVER_ORIGIN: "  " })).toEqual([DEFAULT_SERVER_ORIGIN]);
+    expect(loadAllowedOrigins({ NEX_SERVER_ORIGIN: "  " })).toEqual([DEFAULT_SERVER_ORIGIN]);
   });
 
   it("前后空格被 trim", () => {
     expect(
       loadAllowedOrigins({
-        SNOW_SERVER_ORIGIN: " https://a.com , http://localhost:3000 ",
+        NEX_SERVER_ORIGIN: " https://a.com , http://localhost:3000 ",
       }),
     ).toEqual(["https://a.com", "http://localhost:3000"]);
   });
@@ -196,12 +196,12 @@ describe("origin-guard loadAllowedOrigins (V10 Phase 3)", () => {
   it("空段被过滤", () => {
     expect(
       loadAllowedOrigins({
-        SNOW_SERVER_ORIGIN: "https://a.com,,http://localhost:3000,",
+        NEX_SERVER_ORIGIN: "https://a.com,,http://localhost:3000,",
       }),
     ).toEqual(["https://a.com", "http://localhost:3000"]);
   });
 
   it("空字符串值回退默认", () => {
-    expect(loadAllowedOrigins({ SNOW_SERVER_ORIGIN: "" })).toEqual([DEFAULT_SERVER_ORIGIN]);
+    expect(loadAllowedOrigins({ NEX_SERVER_ORIGIN: "" })).toEqual([DEFAULT_SERVER_ORIGIN]);
   });
 });

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 /**
  * BrandStore：品牌配置的运行时主存储与事件源。
  *
- * 分层解析（低→高）：代码默认 → DB 单行文档 → branding.json overlay → SNOW_BRAND_* env overlay。
+ * 分层解析（低→高）：代码默认 → DB 单行文档 → branding.json overlay → NEX_BRAND_* env overlay。
  * file/env 为部署期 pin 层：被 pin 字段拒绝 update()（BrandFieldPinnedError），管理界面只读展示。
  * revision 单调递增（DB 列），etag = revision:fileGen，是热更新与缓存校验的唯一依据。
  *
@@ -60,22 +60,22 @@ function envOverlay(env: Record<string, string | undefined>): {
 } {
   const patch: Record<string, unknown> = {};
   const fields: string[] = [];
-  const name = env.SNOW_BRAND_NAME?.trim();
+  const name = env.NEX_BRAND_NAME?.trim();
   if (name) {
     patch.name = name;
     fields.push("name");
   }
-  if (env.SNOW_BRAND_TAGLINE !== undefined) {
-    patch.tagline = env.SNOW_BRAND_TAGLINE.trim() || null;
+  if (env.NEX_BRAND_TAGLINE !== undefined) {
+    patch.tagline = env.NEX_BRAND_TAGLINE.trim() || null;
     fields.push("tagline");
   }
-  const icon = env.SNOW_BRAND_ICON?.trim();
+  const icon = env.NEX_BRAND_ICON?.trim();
   if (icon) {
     patch.icon = icon;
     fields.push("icon");
   }
-  const logoLight = env.SNOW_BRAND_LOGO_LIGHT?.trim();
-  const logoDark = env.SNOW_BRAND_LOGO_DARK?.trim();
+  const logoLight = env.NEX_BRAND_LOGO_LIGHT?.trim();
+  const logoDark = env.NEX_BRAND_LOGO_DARK?.trim();
   if (logoLight || logoDark) {
     patch.logo = { light: logoLight || null, dark: logoDark || null };
     fields.push("logo");

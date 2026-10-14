@@ -2,9 +2,9 @@
  * V10 Phase 4：Session partition 管理器。
  *
  * 管理 Electron Session partition 名称：
- * - App Session（SnowHarness BrowserWindow）：persist:snowharness-app
- * - Browser Profile Session（外部 WebContentsView）：persist:snowharness-browser-{userId}
- * - Incognito Session：snowharness-incognito-{threadId}-{nonce}
+ * - App Session（NexHarness BrowserWindow）：persist:nexharness-app
+ * - Browser Profile Session（外部 WebContentsView）：persist:nexharness-browser-{userId}
+ * - Incognito Session：nexharness-incognito-{threadId}-{nonce}
  *
  * 同一 userId 的 Thread 共享 Browser Profile partition（共享登录态）。
  * 隐身 session 不使用 persist: 前缀，关闭后数据不持久化。
@@ -13,14 +13,14 @@
  * 参考架构：docs/solutions/v10-macos-desktop-web-preview/02-desktop-browser-architecture.md §5。
  */
 
-/** App Session partition（SnowHarness BrowserWindow 使用） */
-export const APP_SESSION_PARTITION = "persist:snowharness-app";
+/** App Session partition（NexHarness BrowserWindow 使用） */
+export const APP_SESSION_PARTITION = "persist:nexharness-app";
 
 /** Browser Profile partition 前缀 */
-export const BROWSER_PARTITION_PREFIX = "persist:snowharness-browser-";
+export const BROWSER_PARTITION_PREFIX = "persist:nexharness-browser-";
 
 /** Incognito partition 前缀（不加 persist:） */
-export const INCOGNITO_PARTITION_PREFIX = "snowharness-incognito-";
+export const INCOGNITO_PARTITION_PREFIX = "nexharness-incognito-";
 
 /** userId 规范化（只保留 [a-zA-Z0-9_-]，其余替换为下划线） */
 export function sanitizeUserId(userId: string): string {

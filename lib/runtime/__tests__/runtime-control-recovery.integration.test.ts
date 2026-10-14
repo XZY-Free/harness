@@ -204,7 +204,7 @@ async function freezeCommand(input: {
   );
 }
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 function endpointResolution() {
   return {
@@ -332,7 +332,7 @@ async function claimCommandForDelivery(commandId: string, leaseOwner: string): P
 
 describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-01..06）", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
     await ensureDefaultTenant();
   });
@@ -340,7 +340,7 @@ describe("R03 §6/§7 控制命令固定目标与暂停/Resume 统一（CONTROL-
   afterEach(() => {
     vi.useRealTimers();
     setCommandGatewayHostedApplicationServiceForTest(null);
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
   });
 
   it("CONTROL-01: 旧 Cancel 迟到且新 Owner 已执行时，Hosted 与 External 都核对 targetAuthority，不取消新 generation", async () => {

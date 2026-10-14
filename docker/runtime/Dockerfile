@@ -1,6 +1,6 @@
 # Phase 5 Stage B：用户项目 runtime 镜像（容器隔离用）。
 #
-# 与 snow_harness 自身部署 Dockerfile（项目根）分开——本镜像不跑平台进程，
+# 与 nexharness 自身部署 Dockerfile（项目根）分开——本镜像不跑平台进程，
 # 而是给每个 thread 拉起的隔离容器：node:22-alpine + git + 常用构建工具
 # （python3 / make / g++，适配 node-gyp 原生模块编译）。
 #

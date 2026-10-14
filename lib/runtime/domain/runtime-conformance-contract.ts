@@ -1,7 +1,7 @@
 /**
  * Runtime Revision Publication Conformance 合同唯一入口。
  *
- * 职责：候选 RuntimeRevision 自身是否符合 SnowHarness Runtime Protocol /
+ * 职责：候选 RuntimeRevision 自身是否符合 NexHarness Runtime Protocol /
  * Adapter Contract，是否具备成为正式 Runtime 资产的资格。
  *
  * 本套件只验证未发布候选 Runtime 自身的 Adapter / Protocol 行为：

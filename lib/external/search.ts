@@ -63,7 +63,7 @@ export async function webSearch(params: {
   try {
     const res = await fetchImpl(ddgUrl, {
       signal: controller.signal,
-      headers: { "user-agent": "snow-harness-websearch/1.0" },
+      headers: { "user-agent": "nexharness-websearch/1.0" },
     });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const html = await res.text();

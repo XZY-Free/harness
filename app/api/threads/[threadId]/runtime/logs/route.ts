@@ -4,10 +4,10 @@
  * GET /api/threads/{threadId}/runtime/logs
  *   → 返回 dev server stdout/stderr 日志尾部（最多 200 行）
  *
- * dev server 启动时将 stdout/stderr 重定向到工作区 .snow/runtime/{threadId}/devserver.log。
+ * dev server 启动时将 stdout/stderr 重定向到工作区 .nex/runtime/{threadId}/devserver.log。
  * 此端点直接读取该文件尾部，供 RunLogPanel 实时展示运行时输出。
  *
- * 注意：.snow 是内部目录，前台 workspace 文件 API 会 404 拒绝读取。
+ * 注意：.nex 是内部目录，前台 workspace 文件 API 会 404 拒绝读取。
  * 此端点是服务端直接读取（owner 鉴权后），绕过 isInternalPath 检查。
  *
  * 鉴权：员工身份（Employee API 不走 action scope），经 Thread.ownerUserId 鉴权；
@@ -49,8 +49,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ thre
     return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
-  // dev server 日志路径：.snow/runtime/{threadId}/devserver.log
-  const relPath = `.snow/runtime/${threadId}/devserver.log`;
+  // dev server 日志路径：.nex/runtime/{threadId}/devserver.log
+  const relPath = `.nex/runtime/${threadId}/devserver.log`;
   const content = await readWorkspaceFile(threadId, relPath);
 
   if (content === null) {

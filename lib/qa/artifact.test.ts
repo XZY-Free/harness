@@ -10,16 +10,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  */
 
 const TEST_LOG_DIR = resolve(".test-qa-artifacts");
-const origEvidenceDir = process.env.SNOW_RUNTIME_EVIDENCE_DIR;
+const origEvidenceDir = process.env.NEX_RUNTIME_EVIDENCE_DIR;
 const TID = "qa-artifact-thread";
 
 beforeEach(async () => {
-  process.env.SNOW_RUNTIME_EVIDENCE_DIR = TEST_LOG_DIR;
+  process.env.NEX_RUNTIME_EVIDENCE_DIR = TEST_LOG_DIR;
   await rm(TEST_LOG_DIR, { recursive: true, force: true });
 });
 
 afterEach(async () => {
-  process.env.SNOW_RUNTIME_EVIDENCE_DIR = origEvidenceDir;
+  process.env.NEX_RUNTIME_EVIDENCE_DIR = origEvidenceDir;
   await rm(TEST_LOG_DIR, { recursive: true, force: true });
 });
 

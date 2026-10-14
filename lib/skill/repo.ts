@@ -65,8 +65,8 @@ async function ensureRepo(): Promise<SimpleGit> {
   const git = simpleGit({ baseDir: root });
   if (!existsSync(join(root, ".git"))) {
     await git.init();
-    await git.addConfig("user.name", "SnowHarness");
-    await git.addConfig("user.email", "bot@snow-harness.local");
+    await git.addConfig("user.name", "NexHarness");
+    await git.addConfig("user.email", "bot@nexharness.local");
   }
   return git;
 }

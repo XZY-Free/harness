@@ -192,8 +192,8 @@ describe("loadRuntimeSettings", () => {
   it("env 覆盖 default", () => {
     const settings = loadRuntimeSettings(
       envWith({
-        SNOWHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "10000",
-        SNOWHARNESS_RUNTIME_LEASE_TTL_MS: "45000",
+        NEXHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "10000",
+        NEXHARNESS_RUNTIME_LEASE_TTL_MS: "45000",
       }),
     );
     expect(settings.heartbeatIntervalMs).toBe(10_000);
@@ -206,23 +206,21 @@ describe("loadRuntimeSettings", () => {
 
   it("非整数 env 值抛错并含 env key 名", () => {
     expect(() =>
-      loadRuntimeSettings(envWith({ SNOWHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "not-a-number" })),
-    ).toThrowError(/SNOWHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS/);
+      loadRuntimeSettings(envWith({ NEXHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "not-a-number" })),
+    ).toThrowError(/NEXHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS/);
   });
 
   it("空字符串视为未设置（走 default）", () => {
-    const settings = loadRuntimeSettings(
-      envWith({ SNOWHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "" }),
-    );
+    const settings = loadRuntimeSettings(envWith({ NEXHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "" }));
     expect(settings.heartbeatIntervalMs).toBe(15_000);
   });
 
   it("env key 映射固定（防止悄悄改名）", () => {
     expect(RUNTIME_SETTINGS_ENV_KEYS.workloadSigningKeyId).toBe("WORKLOAD_SIGNING_KEY_ID");
     expect(RUNTIME_SETTINGS_ENV_KEYS.heartbeatIntervalMs).toBe(
-      "SNOWHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS",
+      "NEXHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS",
     );
-    expect(RUNTIME_SETTINGS_ENV_KEYS.leaseTtlMs).toBe("SNOWHARNESS_RUNTIME_LEASE_TTL_MS");
+    expect(RUNTIME_SETTINGS_ENV_KEYS.leaseTtlMs).toBe("NEXHARNESS_RUNTIME_LEASE_TTL_MS");
   });
 });
 
@@ -318,8 +316,8 @@ describe("assertRuntimeSettingsValid", () => {
     expect(() =>
       assertRuntimeSettingsValid(
         envWith({
-          SNOWHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "30000",
-          SNOWHARNESS_RUNTIME_LEASE_TTL_MS: "60000",
+          NEXHARNESS_RUNTIME_HEARTBEAT_INTERVAL_MS: "30000",
+          NEXHARNESS_RUNTIME_LEASE_TTL_MS: "60000",
         }),
       ),
     ).toThrowError(/leaseTtlMs/);

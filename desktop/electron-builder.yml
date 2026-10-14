@@ -13,8 +13,8 @@
 #     export APPLE_APP_SPECIFIC_PASSWORD="..."
 #     export APPLE_TEAM_ID="TEAMID"
 #     pnpm package:desktop
-appId: com.snowharness.desktop
-productName: SnowHarness
+appId: cn.nexharness.desktop
+productName: NexHarness
 directories:
   app: desktop/package-app
   buildResources: desktop
@@ -65,4 +65,4 @@ extraResources:
 # 生产环境替换为真实更新服务器 URL
 publish:
   provider: generic
-  url: https://updates.snowharness.com/mac
+  url: https://updates.nexharness.com/mac

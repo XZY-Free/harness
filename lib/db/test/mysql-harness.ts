@@ -50,7 +50,7 @@ export async function startTestMysql(): Promise<{
   // DDL（TRUNCATE）默认要等 binlog 刷盘，关闭后 TRUNCATE 提速 5-10 倍。
   const container = await new MySqlContainer("mysql:8.0")
     .withLabels(ownershipLabels(ownership))
-    .withDatabase("snow_test")
+    .withDatabase("nex_test")
     .withRootPassword("test")
     .withCommand([
       "--skip-sync-binlog",

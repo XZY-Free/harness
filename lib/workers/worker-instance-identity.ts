@@ -15,7 +15,7 @@
  * 不随模块图重新求值。
  */
 
-const INSTANCE_KEY = Symbol.for("snowharness.worker-instance-identity.v1");
+const INSTANCE_KEY = Symbol.for("nexharness.worker-instance-identity.v1");
 
 interface IdentityHolder {
   readonly instanceId: string;

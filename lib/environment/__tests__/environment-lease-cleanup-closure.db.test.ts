@@ -88,7 +88,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = DEFAULT_TENANT_ID;
-const TENANT_LABEL = "snow-harness.environment.tenantId";
+const TENANT_LABEL = "nexharness.environment.tenantId";
 const MEMORY_BYTES = 128 * 1024 * 1024;
 
 /** 本地优先镜像候选（与 R07 一致的共享目录语义）。 */
@@ -159,7 +159,7 @@ async function makeFixture(): Promise<ManagedFixture> {
   }
   const image = resolvedImage;
   const imageDigest = resolvedImageDigest;
-  const root = await mkdtemp(path.join(tmpdir(), "snow-env-cleanup-"));
+  const root = await mkdtemp(path.join(tmpdir(), "nex-env-cleanup-"));
   temporaryRoots.push(root);
   const controlRoot = path.join(root, "environment-control");
   const workspaceRoot = path.join(root, "workspace");

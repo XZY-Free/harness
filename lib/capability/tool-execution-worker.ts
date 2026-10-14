@@ -205,7 +205,7 @@ export function createToolExecutionWorker(
         return "executed";
       }
       const externalIdempotencyKey =
-        contract.idempotencySupport === "header" ? `snow-tool:${toolCall.id}` : null;
+        contract.idempotencySupport === "header" ? `nex-tool:${toolCall.id}` : null;
       let effect = await getEffectRecordByToolCall(binding.tenantId, toolCall.id);
       if (contract.sideEffectMode === "write" && !effect) {
         const effectType = contract.providerOperationMetadata.effectType as EffectType;

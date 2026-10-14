@@ -13,7 +13,7 @@ import { logger } from "@/lib/logger";
  * - --unshare-all + --share-net（隔离 IPC/PID/mount/uts，保留网络供 npm install）
  *
  * 默认 OFF（host 模式为开发信任环境，且 bwrap 配置对任意命令并非 100% 兼容）。运维经
- * `SNOW_HOST_SANDBOX=on` 显式开启硬隔离；`auto` = bwrap 可用则开启。bwrap 不可用时 fail-open
+ * `NEX_HOST_SANDBOX=on` 显式开启硬隔离；`auto` = bwrap 可用则开启。bwrap 不可用时 fail-open
  * （warn 日志，原样执行），不阻断开发流程。
  */
 
@@ -60,7 +60,7 @@ export async function wrapWithHostSandbox(command: string, cwd: string): Promise
     if (mode === "on") {
       logger.warn("host sandbox mode=on 但 bwrap 不可用，命令将在无沙箱隔离下执行", {
         cwd,
-        hint: "安装 bubblewrap (apt install bubblewrap) 或切换 SNOW_HOST_SANDBOX=off",
+        hint: "安装 bubblewrap (apt install bubblewrap) 或切换 NEX_HOST_SANDBOX=off",
       });
     }
     return command;

@@ -179,12 +179,12 @@ const FrozenStartSemanticSchema = z
 
 // ─── 环境 ───────────────────────────────────────────────────
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 const ORIGINAL_LLM_BASE_URL = process.env.LLM_BASE_URL;
 const ORIGINAL_LLM_API_KEY = process.env.LLM_API_KEY;
-const ORIGINAL_ENV_CONTROL_ROOT = process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT;
-const ORIGINAL_WORKSPACE_HOST_ROOT = process.env.SNOWHARNESS_WORKSPACE_HOST_ROOT;
-const ORIGINAL_WORKSPACE_HOST_URL = process.env.SNOWHARNESS_WORKSPACE_HOST_URL;
+const ORIGINAL_ENV_CONTROL_ROOT = process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT;
+const ORIGINAL_WORKSPACE_HOST_ROOT = process.env.NEXHARNESS_WORKSPACE_HOST_ROOT;
+const ORIGINAL_WORKSPACE_HOST_URL = process.env.NEXHARNESS_WORKSPACE_HOST_URL;
 const ORIGINAL_RUNTIME_DEFAULT = process.env.RUNTIME_DEFAULT;
 
 const IMAGE_CANDIDATES = ["debian:bookworm-slim", "node:24-alpine", "alpine/socat:latest"] as const;
@@ -536,10 +536,10 @@ afterAll(async () => {
 });
 
 afterEach(() => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
-  restore("SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT", ORIGINAL_ENV_CONTROL_ROOT);
-  restore("SNOWHARNESS_WORKSPACE_HOST_ROOT", ORIGINAL_WORKSPACE_HOST_ROOT);
-  restore("SNOWHARNESS_WORKSPACE_HOST_URL", ORIGINAL_WORKSPACE_HOST_URL);
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+  restore("NEXHARNESS_ENVIRONMENT_CONTROL_ROOT", ORIGINAL_ENV_CONTROL_ROOT);
+  restore("NEXHARNESS_WORKSPACE_HOST_ROOT", ORIGINAL_WORKSPACE_HOST_ROOT);
+  restore("NEXHARNESS_WORKSPACE_HOST_URL", ORIGINAL_WORKSPACE_HOST_URL);
 });
 
 function restore(name: string, value: string | undefined): void {
@@ -601,7 +601,7 @@ async function seedEntryContext(contentSuffix: string): Promise<EntryContext> {
     tenantId: context.tenantId,
     userId: context.ownerId,
     deviceKey,
-    displayName: "snow_harness",
+    displayName: "nexharness",
     storageScopeDigest: `sha256:${contentSuffix
       .padEnd(64, "0")
       .slice(0, 64)
@@ -913,12 +913,12 @@ async function driveToolCompletionRound(tenantId: string, invocationId: string):
 }
 
 beforeEach(async () => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
-  process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT = await temporaryRoot("entry-env-control-");
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT = await temporaryRoot("entry-env-control-");
   // 受管 WorkspaceHost Backend 必须保持「未配置」：ENTRY-01/03 的断言依赖这一点。
-  clearEnv("SNOWHARNESS_WORKSPACE_HOST_ROOT");
-  clearEnv("SNOWHARNESS_WORKSPACE_HOST_URL");
-  environmentControlRoot = process.env.SNOWHARNESS_ENVIRONMENT_CONTROL_ROOT;
+  clearEnv("NEXHARNESS_WORKSPACE_HOST_ROOT");
+  clearEnv("NEXHARNESS_WORKSPACE_HOST_URL");
+  environmentControlRoot = process.env.NEXHARNESS_ENVIRONMENT_CONTROL_ROOT;
   modelStub.reset();
   providerStub.requests.length = 0;
   providerStub.payload = { ok: true };
@@ -1009,7 +1009,7 @@ async function seedManagedWriterEntryContext(suffix: string) {
   const hostRoot = await temporaryRoot(`${suffix}-workspace-host-`);
   const broker = createWorkspaceHostBroker({ root: hostRoot });
   const probe = await broker.probeIdentity();
-  process.env.SNOWHARNESS_WORKSPACE_HOST_ROOT = hostRoot;
+  process.env.NEXHARNESS_WORKSPACE_HOST_ROOT = hostRoot;
   const managed = await seedServerSideWorkspace({
     tenantId: context.tenantId,
     ownerId: context.ownerId,
@@ -1179,7 +1179,7 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
         ...managedRevisionInput(),
         executionTarget: {
           kind: "container",
-          image: `snowharness/missing-env07-${randomUUID()}:fixed`,
+          image: `nexharness/missing-env07-${randomUUID()}:fixed`,
           imageDigest: `sha256:${"a".repeat(64)}`,
           entrypoint: ["/bin/sh"],
           args: ["-c", "sleep 5"],
@@ -1559,7 +1559,7 @@ describe("R01 ENTRY 默认生产入口（真实 Thread API + 真实组合层）"
       ).pollOnce();
       expect((await waitForTurn(context.tenantId, accepted.turn.id)).turnState).toBe("completed");
       expect(providerStub.requests).toHaveLength(1);
-      expect(providerStub.requests[0]?.idempotencyKey).toBe(`snow-tool:${queuedCall.id}`);
+      expect(providerStub.requests[0]?.idempotencyKey).toBe(`nex-tool:${queuedCall.id}`);
       expect(modelStub.decisionPrompts.at(-1)).toContain("late-tool-result");
     } finally {
       await removeTestContainerForTurn(context.tenantId, accepted.turn.id);

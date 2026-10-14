@@ -47,7 +47,7 @@ describe("StudioNav 侧栏改版 v3", () => {
     expect(screen.getAllByRole("link", { name: /返回使用端/ }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("searchbox")).toBeNull();
     expect(screen.queryByText("搜索设置与功能")).toBeNull();
-    expect(screen.queryByText("SnowHarness")).toBeNull();
+    expect(screen.queryByText("NexHarness")).toBeNull();
     expect(screen.queryByRole("button", { name: /切换主题|切换到/ })).toBeNull();
   });
 

@@ -130,8 +130,7 @@ class DurableReferenceRuntime {
   }
 
   async start(): Promise<void> {
-    if (!this.root)
-      this.root = await mkdtemp(path.join(tmpdir(), "snowharness-reference-runtime-"));
+    if (!this.root) this.root = await mkdtemp(path.join(tmpdir(), "nexharness-reference-runtime-"));
     this.server = createServer((request, response) => void this.handle(request, response));
     this.server.listen(0, "127.0.0.1");
     await once(this.server, "listening");

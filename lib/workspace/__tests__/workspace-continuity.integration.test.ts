@@ -223,7 +223,7 @@ describe("Workspace continuity integration", () => {
   beforeEach(async () => {
     await resetDatabase(db);
     await ensureDefaultTenant();
-    temporaryRoot = await mkdtemp(path.join(tmpdir(), "snowharness-continuity-"));
+    temporaryRoot = await mkdtemp(path.join(tmpdir(), "nexharness-continuity-"));
   });
 
   it("WORKSPACE-01: after a runtime process death the same host restores files and mints the next legal generation", async () => {

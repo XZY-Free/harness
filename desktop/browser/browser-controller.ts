@@ -55,7 +55,7 @@ const DEFAULT_VISIBLE_BOUNDS: Bounds = { x: 0, y: 80, width: 1400, height: 820 }
  * Browser Controller 配置。
  */
 export interface BrowserControllerConfig {
-  /** 受信任 SnowHarness Server origin 列表 */
+  /** 受信任 NexHarness Server origin 列表 */
   serverOrigins: string[];
   /** 窗口尺寸约束（用于 bounds 校验） */
   windowConstraints: WindowConstraints;
@@ -628,7 +628,7 @@ export class BrowserController {
     downloadUrl: string,
   ): Promise<boolean> {
     // 1. 下载文件到临时目录
-    const tempPath = path.join(os.tmpdir(), `snowharness-upload-${randomUUID()}`);
+    const tempPath = path.join(os.tmpdir(), `nexharness-upload-${randomUUID()}`);
     try {
       const response = await fetch(downloadUrl);
       if (!response.ok || !response.body) return false;

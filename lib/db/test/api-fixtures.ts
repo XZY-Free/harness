@@ -54,7 +54,7 @@ export interface BuildApiRequestOptions {
  */
 export function buildApiRequest(options: BuildApiRequestOptions): Request {
   const requestId = options.requestId ?? generateRequestId();
-  const url = `https://snow.test${AUDIENCE_PREFIX[options.audience]}${options.path}`;
+  const url = `https://nex.test${AUDIENCE_PREFIX[options.audience]}${options.path}`;
   const headers: Record<string, string> = {
     [REQUEST_ID_HEADER]: requestId,
     "content-type": "application/json",

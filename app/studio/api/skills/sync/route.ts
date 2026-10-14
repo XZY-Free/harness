@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     return jsonError(
       400,
       "sync_not_configured",
-      "capability-market endpoint 未配置（SNOW_CAPABILITY_MARKET_ENDPOINT）,无法同步",
+      "capability-market endpoint 未配置（NEX_CAPABILITY_MARKET_ENDPOINT）,无法同步",
     );
   }
 

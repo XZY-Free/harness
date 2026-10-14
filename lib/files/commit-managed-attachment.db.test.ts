@@ -41,7 +41,7 @@ async function fixture() {
       tenantId: tenant.id,
       threadId: thread.id,
       storageProvider: "workspace",
-      resourceRef: `.snow/files/attachment/${attachmentId}/content`,
+      resourceRef: `.nex/files/attachment/${attachmentId}/content`,
       resourceFingerprint: `sha256:${"a".repeat(64)}`,
       originalFilename: "证明材料.pdf",
       contentType: "application/pdf",

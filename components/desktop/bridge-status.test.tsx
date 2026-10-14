@@ -12,9 +12,9 @@ vi.mock("@/lib/desktop/capabilities", () => ({
 
 import { getDesktopCapabilities } from "@/lib/desktop/capabilities";
 
-// 模拟 window.snowDesktop
-interface MockSnowDesktop {
-  snowDesktop?: {
+// 模拟 window.nexDesktop
+interface MockNexDesktop {
+  nexDesktop?: {
     bridge?: {
       getState: () => Promise<unknown>;
       onStateChange: (cb: (state: unknown) => void) => () => void;
@@ -22,14 +22,14 @@ interface MockSnowDesktop {
   };
 }
 
-function setSnowDesktop(bridge?: MockSnowDesktop["snowDesktop"]): void {
-  const w = window as unknown as MockSnowDesktop;
-  w.snowDesktop = bridge;
+function setNexDesktop(bridge?: MockNexDesktop["nexDesktop"]): void {
+  const w = window as unknown as MockNexDesktop;
+  w.nexDesktop = bridge;
 }
 
-function clearSnowDesktop(): void {
-  const w = window as unknown as MockSnowDesktop;
-  w.snowDesktop = undefined;
+function clearNexDesktop(): void {
+  const w = window as unknown as MockNexDesktop;
+  w.nexDesktop = undefined;
 }
 
 const MOCK_CAPS = {
@@ -43,12 +43,12 @@ const MOCK_CAPS = {
 describe("BridgeStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearSnowDesktop();
+    clearNexDesktop();
   });
 
   afterEach(() => {
     cleanup();
-    clearSnowDesktop();
+    clearNexDesktop();
   });
 
   it("非 Desktop 环境不渲染", () => {
@@ -60,7 +60,7 @@ describe("BridgeStatus", () => {
   it("Desktop 环境渲染状态指示器", async () => {
     vi.mocked(getDesktopCapabilities).mockReturnValue(MOCK_CAPS);
 
-    setSnowDesktop({
+    setNexDesktop({
       bridge: {
         getState: vi.fn().mockResolvedValue("authenticated"),
         onStateChange: vi.fn().mockReturnValue(() => {}),
@@ -75,7 +75,7 @@ describe("BridgeStatus", () => {
   it("disconnected 状态显示正确", async () => {
     vi.mocked(getDesktopCapabilities).mockReturnValue(MOCK_CAPS);
 
-    setSnowDesktop({
+    setNexDesktop({
       bridge: {
         getState: vi.fn().mockResolvedValue("disconnected"),
         onStateChange: vi.fn().mockReturnValue(() => {}),
@@ -90,7 +90,7 @@ describe("BridgeStatus", () => {
   it("authenticated 状态显示正确", async () => {
     vi.mocked(getDesktopCapabilities).mockReturnValue(MOCK_CAPS);
 
-    setSnowDesktop({
+    setNexDesktop({
       bridge: {
         getState: vi.fn().mockResolvedValue("authenticated"),
         onStateChange: vi.fn().mockReturnValue(() => {}),
@@ -105,7 +105,7 @@ describe("BridgeStatus", () => {
   it("protocol_mismatch 状态显示正确", async () => {
     vi.mocked(getDesktopCapabilities).mockReturnValue(MOCK_CAPS);
 
-    setSnowDesktop({
+    setNexDesktop({
       bridge: {
         getState: vi.fn().mockResolvedValue("protocol_mismatch"),
         onStateChange: vi.fn().mockReturnValue(() => {}),
@@ -117,10 +117,10 @@ describe("BridgeStatus", () => {
     expect(status.getAttribute("data-state")).toBe("protocol_mismatch");
   });
 
-  it("snowDesktop.bridge 不存在时显示 disconnected 状态", async () => {
+  it("nexDesktop.bridge 不存在时显示 disconnected 状态", async () => {
     vi.mocked(getDesktopCapabilities).mockReturnValue(MOCK_CAPS);
 
-    // 不设置 snowDesktop
+    // 不设置 nexDesktop
     render(<BridgeStatus />);
     const status = await screen.findByTestId("bridge-status");
     expect(status.getAttribute("data-state")).toBe("disconnected");
@@ -130,7 +130,7 @@ describe("BridgeStatus", () => {
     vi.mocked(getDesktopCapabilities).mockReturnValue(MOCK_CAPS);
 
     let stateCallback: ((state: unknown) => void) | null = null;
-    setSnowDesktop({
+    setNexDesktop({
       bridge: {
         getState: vi.fn().mockResolvedValue("connecting"),
         onStateChange: vi.fn().mockImplementation((cb: (state: unknown) => void) => {

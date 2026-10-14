@@ -187,7 +187,7 @@ async function runSupervisorProcessEntry(config: SupervisorProcessConfig): Promi
 /**
  * 拉起一个**真实** Supervisor 进程。
  *
- * 环境完全继承父进程（`DATABASE_URL`、身份夹具开关、`SNOWHARNESS_*` 签名密钥都在里面），
+ * 环境完全继承父进程（`DATABASE_URL`、身份夹具开关、`NEXHARNESS_*` 签名密钥都在里面），
  * 因此子进程连的是同一个真实 MySQL —— 它和父测试共享的只有数据库，这正是要证明的边界。
  */
 export async function spawnSupervisorProcess(

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const NAVIGATION_EVENT = "snowharness:desktop:navigate";
+const NAVIGATION_EVENT = "nexharness:desktop:navigate";
 
 function navigate(pathname: string, replace = false): void {
   if (!pathname.startsWith("/")) return;

@@ -28,7 +28,7 @@ describe("logger S01-W03 敏感字段脱敏", () => {
   it("authorization/cookie/credential/token 类字段置 [REDACTED]", () => {
     const out = redactSensitiveFields({
       authorization: "Bearer abc",
-      cookie: "snow_session=xyz",
+      cookie: "nex_session=xyz",
       credential: "user:pass",
       access_token: "tok_1",
       password: "s3cr3t",

@@ -17,7 +17,7 @@ import {
  * - 失败重试（有限次）+ 超时 + 明确错误（不含 secret）
  * - webhook URL/token 未配置 → 明确错误（不静默失败）
  *
- * SnowHarness 不直接操作 K8s——部署经公司现有 CI/CD 交接，由 CI/CD 负责底层集群。
+ * NexHarness 不直接操作 K8s——部署经公司现有 CI/CD 交接，由 CI/CD 负责底层集群。
  */
 
 /** CI/CD webhook 响应。 */

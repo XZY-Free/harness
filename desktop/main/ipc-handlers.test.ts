@@ -459,7 +459,7 @@ describe("registerIpcHandlers (本地目录选择)", () => {
   });
 
   it("仅向 renderer 返回逻辑标识和目录名，绝对路径只写入本机存储", async () => {
-    selectedDirectory = await mkdtemp(join(tmpdir(), "snowharness-workspace-"));
+    selectedDirectory = await mkdtemp(join(tmpdir(), "nexharness-workspace-"));
     const canonicalPath = await realpath(selectedDirectory);
     electronMocks.showOpenDialog.mockResolvedValue({
       canceled: false,

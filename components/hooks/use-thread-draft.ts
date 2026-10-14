@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_PREFIX = "snowharness:draft:";
+const STORAGE_PREFIX = "nexharness:draft:";
 
 function storageKey(draftKey: string): string {
   return `${STORAGE_PREFIX}${draftKey}`;

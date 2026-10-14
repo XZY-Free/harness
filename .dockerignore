@@ -9,7 +9,7 @@ tmp
 test-results
 *.tsbuildinfo
 .playwright-cli
-.snow
+.nex
 
 # 运行时产物（不该进镜像）
 .data

@@ -18,7 +18,7 @@ import { cleanupSecretFileCache } from "./start-options";
  * - 回收：`stopContainer(threadId)` 主动停删；idle TTL 回收在  实现
  * - 退出：`closeAllContainers()` 进程退出时清所有容器
  *
- * 容器名 `snow-thread-{threadId}`，标签 `snow-harness.threadId={threadId}` 便于查询。
+ * 容器名 `nex-thread-{threadId}`，标签 `nexharness.threadId={threadId}` 便于查询。
  */
 
 export interface ContainerEntry {
@@ -32,7 +32,7 @@ export interface ContainerEntry {
 const containers = new Map<string, ContainerEntry>();
 
 function containerName(threadId: string): string {
-  return `snow-thread-${threadId}`;
+  return `nex-thread-${threadId}`;
 }
 
 /** 拉起容器（已存在则复用）。惰性：Map 无则清理同名旧容器 + run 新容器。 */
@@ -169,8 +169,8 @@ export function startIdleSweep(intervalMs = 60_000): void {
  * 进程退出清理：best-effort（不阻塞退出）。
  * Note： 引入 idle TTL 定时回收；此处只做退出清理。
  */
-if (!globalThis.__snowContainerCleanup) {
-  globalThis.__snowContainerCleanup = true;
+if (!globalThis.__nexContainerCleanup) {
+  globalThis.__nexContainerCleanup = true;
   const trigger = () => {
     void closeAllContainers();
   };
@@ -181,7 +181,7 @@ if (!globalThis.__snowContainerCleanup) {
 
 /** 按标签查询容器（诊断/清理用）。 */
 export async function listThreadContainers(threadId: string): Promise<string[]> {
-  return listContainersByLabel("snow-harness.threadId", threadId);
+  return listContainersByLabel("nexharness.threadId", threadId);
 }
 
 /** 仅供测试：清空内存 registry（不触 docker）。 */
@@ -191,5 +191,5 @@ export function __clearContainerRegistryForTest(): void {
 
 declare global {
   // eslint-disable-next-line no-var
-  var __snowContainerCleanup: boolean | undefined;
+  var __nexContainerCleanup: boolean | undefined;
 }

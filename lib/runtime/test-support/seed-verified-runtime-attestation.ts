@@ -34,7 +34,7 @@ export async function seedVerifiedRuntimeAttestation(
     tenantId,
     kind: "runtime_revision",
     digest: artifactDigest,
-    mediaType: "application/vnd.snowharness.runtime+json",
+    mediaType: "application/vnd.nexharness.runtime+json",
     contentRef: `oci://registry/runtime@${artifactDigest}`,
     sourceRevision: "test-pipeline@1",
     buildMetadata: { builder: "test" },

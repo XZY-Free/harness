@@ -38,19 +38,19 @@ const devServerPreviewRuntime = new DevServerPreviewRuntime();
 
 const TID = "thread-c-dev";
 const ENTRY = {
-  containerName: `snow-thread-${TID}`,
+  containerName: `nex-thread-${TID}`,
   containerId: "id",
   port: 41000,
   state: "running" as const,
   lastActivityAt: 0,
 };
-const origTimeout = process.env.SNOW_PREVIEW_READY_TIMEOUT_MS;
+const origTimeout = process.env.NEX_PREVIEW_READY_TIMEOUT_MS;
 
 beforeEach(() => {
   vi.clearAllMocks();
   __clearDevServerRegistryForTest();
   // 缩短超时，让 failed 路径快测
-  process.env.SNOW_PREVIEW_READY_TIMEOUT_MS = "100";
+  process.env.NEX_PREVIEW_READY_TIMEOUT_MS = "100";
   mgr.startContainer.mockResolvedValue(ENTRY);
   mgr.stopContainerById.mockResolvedValue(undefined);
   cli.execDetached.mockResolvedValue(undefined);
@@ -68,7 +68,7 @@ beforeEach(() => {
 afterEach(() => {
   __clearDevServerRegistryForTest();
   // 恢复 env（未设过则回默认 30000，避免 delete operator）
-  process.env.SNOW_PREVIEW_READY_TIMEOUT_MS = origTimeout ?? "30000";
+  process.env.NEX_PREVIEW_READY_TIMEOUT_MS = origTimeout ?? "30000";
 });
 
 describe("DevServerPreviewRuntime", () => {

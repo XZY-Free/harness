@@ -7,7 +7,7 @@ afterEach(() => {
 
 describe("control plane HTTP client", () => {
   it("空 baseUrl 在子路径部署时自动拼接应用前缀", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SNOW_BASE_PATH", "/snowharness");
+    vi.stubEnv("NEXT_PUBLIC_NEX_BASE_PATH", "/nexharness");
     vi.resetModules();
     const { createControlPlaneRequest: createRequest } = await import("./http-client");
     const fetcher = vi.fn(async () => Response.json({ items: [], total: 0 }));
@@ -19,7 +19,7 @@ describe("control plane HTTP client", () => {
 
     await request("/admin/api/agents");
 
-    expect(fetcher).toHaveBeenCalledWith("/snowharness/admin/api/agents", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith("/nexharness/admin/api/agents", expect.any(Object));
   });
 
   it("合并认证头并直接返回服务端资源", async () => {

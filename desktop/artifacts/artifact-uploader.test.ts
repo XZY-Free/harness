@@ -38,7 +38,7 @@ function createFetchMock(response: Response | Error): typeof globalThis.fetch {
 }
 
 describe("uploadArtifact", () => {
-  const tempDir = mkdtempSync(join(tmpdir(), "snowharness-artifact-test-"));
+  const tempDir = mkdtempSync(join(tmpdir(), "nexharness-artifact-test-"));
 
   afterAll(() => {
     globalThis.fetch = originalFetch;

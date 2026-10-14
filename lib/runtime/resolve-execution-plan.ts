@@ -10,7 +10,7 @@
  *
  * 事实源：docs/architecture/runtime-control-plane.md。
  *
- * 架构边界：顶层执行计划只属于 SnowHarness Harness。
+ * 架构边界：顶层执行计划只属于 NexHarness Harness。
  * Agent 是 Harness 可调用的能力资产，不进入顶层 ExecutionPlan。
  * 冻结 exact AgentRevision 是 AgentCall 的职责，不在本层发生。
  */

@@ -1,25 +1,25 @@
 import type { NextConfig } from "next";
 
-// basePath 由环境变量 SNOW_BASE_PATH 驱动：
+// basePath 由环境变量 NEX_BASE_PATH 驱动：
 // - 本地开发：不设置 → 无 basePath（http://localhost:3000 直接访问）。
-// - 腾讯云部署构建：SNOW_BASE_PATH=/snowharness pnpm build（Nginx 子路径代理）。
-// 客户端裸 fetch 经 NEXT_PUBLIC_SNOW_BASE_PATH 构建时内联（见 lib/api-fetch.ts）。
-// 注意：next start 运行时也会读本文件——服务器 PM2 env 必须同样注入 SNOW_BASE_PATH，
-// 否则运行时 basePath 为空，/snowharness/* 全部 404。
-const basePath = process.env.SNOW_BASE_PATH ?? "";
+// - 腾讯云部署构建：NEX_BASE_PATH=/nexharness pnpm build（Nginx 子路径代理）。
+// 客户端裸 fetch 经 NEXT_PUBLIC_NEX_BASE_PATH 构建时内联（见 lib/api-fetch.ts）。
+// 注意：next start 运行时也会读本文件——服务器 PM2 env 必须同样注入 NEX_BASE_PATH，
+// 否则运行时 basePath 为空，/nexharness/* 全部 404。
+const basePath = process.env.NEX_BASE_PATH ?? "";
 
 if (basePath && (!basePath.startsWith("/") || basePath.endsWith("/"))) {
-  throw new Error(`SNOW_BASE_PATH 必须以 / 开头且不以 / 结尾，当前值: "${basePath}"`);
+  throw new Error(`NEX_BASE_PATH 必须以 / 开头且不以 / 结尾，当前值: "${basePath}"`);
 }
 
 const nextConfig: NextConfig = {
   basePath: basePath || undefined,
-  // 构建产物目录。默认 .next；e2e 用 SNOW_DIST_DIR=.next-e2e 隔离，
+  // 构建产物目录。默认 .next；e2e 用 NEX_DIST_DIR=.next-e2e 隔离，
   // 使 e2e 的 build/start 与开发者常驻的 `pnpm dev` 互不干扰
   // （Next 16 对同一项目目录的 dev server 有独占锁，且共用 .next 会互相覆盖）。
-  distDir: process.env.SNOW_DIST_DIR || ".next",
+  distDir: process.env.NEX_DIST_DIR || ".next",
   env: {
-    NEXT_PUBLIC_SNOW_BASE_PATH: basePath,
+    NEXT_PUBLIC_NEX_BASE_PATH: basePath,
   },
   devIndicators: false,
   poweredByHeader: false,

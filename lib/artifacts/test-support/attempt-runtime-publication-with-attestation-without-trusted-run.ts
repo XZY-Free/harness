@@ -63,7 +63,7 @@ async function insertConformanceRunInDb(params: {
     signingKeyId: "test-signing-key",
     verificationEngine: "test-verifier",
     verificationEngineVersion: "1.0",
-    predicateType: "https://snowharness.dev/conformance/runtime",
+    predicateType: "https://nexharness.dev/conformance/runtime",
     verifiedAt: now,
     idempotencyKey: `conformance-run:${runId}`,
     requestId: `req:${runId}`,

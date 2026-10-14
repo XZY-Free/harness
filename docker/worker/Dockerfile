@@ -1,4 +1,4 @@
-# SnowHarness durable worker 的统一生产制品。
+# NexHarness durable worker 的统一生产制品。
 FROM node:24-alpine AS dependencies
 RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
@@ -8,7 +8,7 @@ RUN pnpm install --prod --frozen-lockfile
 RUN npm install --global node-gyp@12.4.0
 COPY native ./native
 COPY scripts/build-workspace-lock.mjs ./scripts/build-workspace-lock.mjs
-RUN SNOWHARNESS_NODE_GYP_PATH=/usr/local/lib/node_modules/node-gyp/bin/node-gyp.js pnpm build:workspace-lock
+RUN NEXHARNESS_NODE_GYP_PATH=/usr/local/lib/node_modules/node-gyp/bin/node-gyp.js pnpm build:workspace-lock
 
 FROM node:24-alpine AS worker
 RUN apk add --no-cache tini git libstdc++ attr acl docker-cli

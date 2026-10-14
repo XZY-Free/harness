@@ -38,7 +38,7 @@ const E2E_DIST_DIR = ".next-e2e";
  * 测试前置事实；不是应用配置，也不会进入构建产物或版本控制。
  */
 function e2eRuntimeDescriptorPath(port: string): string {
-  return resolve(process.env.TMPDIR ?? "/tmp", `snow-harness-e2e-${port}.json`);
+  return resolve(process.env.TMPDIR ?? "/tmp", `nexharness-e2e-${port}.json`);
 }
 
 /**
@@ -75,7 +75,7 @@ function childEnv(connectionString: string, modelBaseUrl: string, port: string) 
     ...loadEnvFile(resolve(process.cwd(), ".env.test")),
     APP_ENV: "test",
     PORT: port,
-    SNOW_DIST_DIR: E2E_DIST_DIR,
+    NEX_DIST_DIR: E2E_DIST_DIR,
     DATABASE_URL: connectionString,
     LLM_BASE_URL: modelBaseUrl,
     LLM_API_KEY: "e2e-test-key",
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
 
   console.log("[e2e] 正在启动 MySQL 容器...");
   const container = await new MySqlContainer("mysql:8.0")
-    .withDatabase("snow_test")
+    .withDatabase("nex_test")
     .withRootPassword("test")
     .withCommand([
       "--skip-sync-binlog",
@@ -132,7 +132,7 @@ async function main(): Promise<void> {
   const modelServer = await startE2eModelServer();
   console.log(`[e2e] 确定性模型服务就绪：${modelServer.baseUrl}`);
 
-  const port = process.env.SNOW_E2E_PORT ?? "3100";
+  const port = process.env.NEX_E2E_PORT ?? "3100";
   const env = childEnv(connectionString, modelServer.baseUrl, port);
   const runtimeDescriptor = e2eRuntimeDescriptorPath(port);
   writeFileSync(runtimeDescriptor, JSON.stringify({ databaseUrl: connectionString }), {

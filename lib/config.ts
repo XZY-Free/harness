@@ -71,7 +71,7 @@ export const dbConfig = {
 /** Runtime Conformance DSSE 验签配置。缺失时 fail-closed。 */
 export const runtimeConformanceConfig = {
   /**
-   * Runner 签名身份注册表 JSON（SNOW_RUNNER_SIGNING_IDENTITIES_JSON）。
+   * Runner 签名身份注册表 JSON（NEX_RUNNER_SIGNING_IDENTITIES_JSON）。
    *
    * 格式：RunnerSigningIdentity[]（keyId + publicKey + runnerIdentity + tenantScope +
    * validFrom + validUntil + revokedAt）。
@@ -87,7 +87,7 @@ export const runtimeConformanceConfig = {
     validUntil: string | null;
     revokedAt: string | null;
   }> {
-    const raw = optionalEnv("SNOW_RUNNER_SIGNING_IDENTITIES_JSON", "");
+    const raw = optionalEnv("NEX_RUNNER_SIGNING_IDENTITIES_JSON", "");
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -100,7 +100,7 @@ export const runtimeConformanceConfig = {
   },
 
   /**
-   * Active external A2A conformance signer 私有配置（SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON）。
+   * Active external A2A conformance signer 私有配置（NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON）。
    *
    * 格式：恰好三个键的对象 {keyId, runnerIdentity, privateKeyPkcs8Base64}。
    *
@@ -112,7 +112,7 @@ export const runtimeConformanceConfig = {
     runnerIdentity: string;
     privateKeyPkcs8Base64: string;
   } | null {
-    const raw = optionalEnv("SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON", "");
+    const raw = optionalEnv("NEX_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON", "");
     if (!raw || raw.trim().length === 0) return null;
     let parsed: unknown;
     try {
@@ -196,13 +196,13 @@ function hasConsistentRunnerPublicKeys(
 /** Hosted 制品证明与独立 Conformance Runner 的受管服务配置。 */
 export const hostedControlPlaneConfig = {
   get endpoint(): string {
-    return optionalEnv("SNOW_HOSTED_EVIDENCE_SERVICE_URL", "").replace(/\/$/, "");
+    return optionalEnv("NEX_HOSTED_EVIDENCE_SERVICE_URL", "").replace(/\/$/, "");
   },
   get token(): string {
-    return process.env.SNOW_HOSTED_EVIDENCE_SERVICE_TOKEN ?? "";
+    return process.env.NEX_HOSTED_EVIDENCE_SERVICE_TOKEN ?? "";
   },
   get builderKeys(): Record<string, string> {
-    const raw = optionalEnv("SNOW_HOSTED_BUILDER_KEYS_JSON", "");
+    const raw = optionalEnv("NEX_HOSTED_BUILDER_KEYS_JSON", "");
     if (!raw) return {};
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -214,7 +214,7 @@ export const hostedControlPlaneConfig = {
     }
   },
   get timeoutMs(): number {
-    const value = Number.parseInt(optionalEnv("SNOW_HOSTED_EVIDENCE_TIMEOUT_MS", "30000"), 10);
+    const value = Number.parseInt(optionalEnv("NEX_HOSTED_EVIDENCE_TIMEOUT_MS", "30000"), 10);
     return Number.isFinite(value) && value > 0 ? value : 30_000;
   },
 } as const;
@@ -230,23 +230,23 @@ export const aiConfig = {
   },
   /** 主聊天 / 代码生成默认模型。 */
   get chatModel(): string {
-    return optionalEnv("SNOW_CHAT_MODEL", "deepseek-v4-flash");
+    return optionalEnv("NEX_CHAT_MODEL", "deepseek-v4-flash");
   },
   /**
    * OpenAI-compatible reasoning effort。空值表示按模型选择安全默认：
    * GLM-5 系列使用 minimal，其他模型不发送该参数。
    */
   get reasoningEffort(): string {
-    return optionalEnv("SNOW_REASONING_EFFORT", "").trim();
+    return optionalEnv("NEX_REASONING_EFFORT", "").trim();
   },
   /**
    * LLM fallback endpoints。
    * 主 endpoint(LLM_BASE_URL)连续失败熔断后,切这些备用 endpoint。
-   * env SNOW_LLM_FALLBACK_BASEURLS 逗号分隔,默认空(单 endpoint,仅 maxRetries 重试)。
+   * env NEX_LLM_FALLBACK_BASEURLS 逗号分隔,默认空(单 endpoint,仅 maxRetries 重试)。
    * 每个 fallback 共用同一 LLM_API_KEY(OpenAI 兼容端点惯例)。
    */
   get fallbackBaseUrls(): string[] {
-    const raw = optionalEnv("SNOW_LLM_FALLBACK_BASEURLS", "");
+    const raw = optionalEnv("NEX_LLM_FALLBACK_BASEURLS", "");
     return raw
       .split(",")
       .map((s) => s.trim())
@@ -260,7 +260,7 @@ export const aiConfig = {
    * 0 表示不限制(保留旧行为,仅用于排查)。
    */
   get maxOutputTokens(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_MAX_OUTPUT_TOKENS", "16384"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_MAX_OUTPUT_TOKENS", "16384"), 10);
     return Number.isFinite(n) && n >= 0 ? n : 16384;
   },
 } as const;
@@ -296,7 +296,7 @@ export const modelFilterConfig = {
  */
 export const hostSandboxConfig = {
   get mode(): "off" | "on" | "auto" {
-    const raw = optionalEnv("SNOW_HOST_SANDBOX", "off");
+    const raw = optionalEnv("NEX_HOST_SANDBOX", "off");
     return raw === "on" || raw === "auto" ? raw : "off";
   },
 } as const;
@@ -304,7 +304,7 @@ export const hostSandboxConfig = {
 export const workspaceConfig = {
   /** 工作区文件根目录。 */
   get root(): string {
-    return optionalEnv("SNOW_WORKSPACES_DIR", "workspaces");
+    return optionalEnv("NEX_WORKSPACES_DIR", "workspaces");
   },
 } as const;
 
@@ -317,10 +317,10 @@ function positiveIntegerMegabytes(key: string, fallback: number): number {
 
 export const fileStorageConfig = {
   get imageUploadMaxBytes(): number {
-    return positiveIntegerMegabytes("SNOW_FILE_IMAGE_UPLOAD_MAX_MB", 10) * 1024 * 1024;
+    return positiveIntegerMegabytes("NEX_FILE_IMAGE_UPLOAD_MAX_MB", 10) * 1024 * 1024;
   },
   get documentUploadMaxBytes(): number {
-    return positiveIntegerMegabytes("SNOW_FILE_DOCUMENT_UPLOAD_MAX_MB", 20) * 1024 * 1024;
+    return positiveIntegerMegabytes("NEX_FILE_DOCUMENT_UPLOAD_MAX_MB", 20) * 1024 * 1024;
   },
 } as const;
 
@@ -334,7 +334,7 @@ export const fileStorageConfig = {
 export const skillsConfig = {
   /** skill 目录仓库根目录。 */
   get root(): string {
-    return optionalEnv("SNOW_SKILLS_DIR", "skills");
+    return optionalEnv("NEX_SKILLS_DIR", "skills");
   },
 } as const;
 
@@ -344,22 +344,22 @@ export const skillsConfig = {
  * capability-market 仅作为后台手动同步的上游来源,运行时（chat / resolver / tools）
  * 不访问。配置缺失时同步 API 明确失败,运行时不受影响。
  *
- * endpoint 语义：`SNOW_CAPABILITY_MARKET_ENDPOINT` 是 **API base**（如
+ * endpoint 语义：`NEX_CAPABILITY_MARKET_ENDPOINT` 是 **API base**（如
  * `http://localhost:3000/api`），同步客户端在此后追加 `/capabilities` 等子路径。
  * 请勿含尾斜杠,避免出现 `//capabilities`。
  */
 export const capabilityMarketConfig = {
   /** capability-market API base（同步入口必填，缺失则同步 API 失败）。 */
   get endpoint(): string {
-    return optionalEnv("SNOW_CAPABILITY_MARKET_ENDPOINT", "");
+    return optionalEnv("NEX_CAPABILITY_MARKET_ENDPOINT", "");
   },
   /** 同步用 Bearer token。 */
   get token(): string | null {
-    return process.env.SNOW_CAPABILITY_MARKET_TOKEN ?? null;
+    return process.env.NEX_CAPABILITY_MARKET_TOKEN ?? null;
   },
   /** 同步请求超时（ms，默认 10000；artifact 下载单独按流式超时保护）。 */
   get timeoutMs(): number {
-    return Number.parseInt(optionalEnv("SNOW_CAPABILITY_MARKET_TIMEOUT_MS", "10000"), 10) || 10000;
+    return Number.parseInt(optionalEnv("NEX_CAPABILITY_MARKET_TIMEOUT_MS", "10000"), 10) || 10000;
   },
 } as const;
 
@@ -372,7 +372,7 @@ export const capabilityMarketConfig = {
 export const agentHostControlConfig = {
   get confirmationTtlMs(): number {
     const seconds = Number.parseInt(
-      optionalEnv("SNOW_EXTERNAL_AGENT_CONFIRMATION_TTL_SECONDS", "900"),
+      optionalEnv("NEX_EXTERNAL_AGENT_CONFIRMATION_TTL_SECONDS", "900"),
       10,
     );
     return Number.isInteger(seconds) && seconds >= 60 && seconds <= 86_400
@@ -381,7 +381,7 @@ export const agentHostControlConfig = {
   },
 
   get externalAllowedHosts(): string[] {
-    return optionalEnv("SNOW_HOST_ACTION_EXTERNAL_ALLOWED_HOSTS", "")
+    return optionalEnv("NEX_HOST_ACTION_EXTERNAL_ALLOWED_HOSTS", "")
       .split(",")
       .map((value) => value.trim().toLowerCase())
       .filter((value) => /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value))
@@ -409,7 +409,7 @@ export const appConfig = {
 } as const;
 
 /**
- * SnowHarness 对外回调基地址。
+ * NexHarness 对外回调基地址。
  *
  * External Runtime 与平台不在同一进程，必须通过可路由的绝对 URL 回调 Gateway。
  * 缺失时返回空串，由 endpoint builder 在真正需要 External Runtime 时 fail closed；
@@ -417,7 +417,7 @@ export const appConfig = {
  */
 export const runtimeGatewayConfig = {
   get publicBaseUrl(): string {
-    const raw = optionalEnv("SNOW_CONTROL_PLANE_PUBLIC_URL", "").trim();
+    const raw = optionalEnv("NEX_CONTROL_PLANE_PUBLIC_URL", "").trim();
     if (!raw) return "";
     try {
       const url = new URL(raw);
@@ -453,25 +453,25 @@ export const runtimeConfig = {
     return raw;
   },
   get idleTtlMs(): number {
-    return Number.parseInt(optionalEnv("SNOW_RUNTIME_IDLE_TTL_MS", "600000"), 10);
+    return Number.parseInt(optionalEnv("NEX_RUNTIME_IDLE_TTL_MS", "600000"), 10);
   },
   get portRangeStart(): number {
-    return Number.parseInt(optionalEnv("SNOW_RUNTIME_PORT_START", "41000"), 10);
+    return Number.parseInt(optionalEnv("NEX_RUNTIME_PORT_START", "41000"), 10);
   },
   get portRangeEnd(): number {
-    return Number.parseInt(optionalEnv("SNOW_RUNTIME_PORT_END", "41999"), 10);
+    return Number.parseInt(optionalEnv("NEX_RUNTIME_PORT_END", "41999"), 10);
   },
   get runtimeImage(): string {
-    return optionalEnv("SNOW_RUNTIME_IMAGE", "snow-harness-runtime:node22");
+    return optionalEnv("NEX_RUNTIME_IMAGE", "nexharness-runtime:node22");
   },
   get memoryLimit(): string {
-    return optionalEnv("SNOW_RUNTIME_MEMORY", "1g");
+    return optionalEnv("NEX_RUNTIME_MEMORY", "1g");
   },
   get cpus(): string {
-    return optionalEnv("SNOW_RUNTIME_CPUS", "1.0");
+    return optionalEnv("NEX_RUNTIME_CPUS", "1.0");
   },
   get readyTimeoutMs(): number {
-    return Number.parseInt(optionalEnv("SNOW_PREVIEW_READY_TIMEOUT_MS", "30000"), 10);
+    return Number.parseInt(optionalEnv("NEX_PREVIEW_READY_TIMEOUT_MS", "30000"), 10);
   },
   get degradeOnDockerUnavailable(): boolean {
     const isProd = optionalEnv("NODE_ENV", "development") === "production";
@@ -579,12 +579,12 @@ export const deployConfig = {
  * 运行时证据配置（QA 证据 / external fetch artifact 写入目录）。
  *
  * - `hostDir`：host 平台目录（非用户 workspace），QA 证据与 external fetch artifact 落此。
- *   container 模式证据落 workspace bind mount，不受此项影响。默认 `.snow/runtime`
+ *   container 模式证据落 workspace bind mount，不受此项影响。默认 `.nex/runtime`
  *   （相对 cwd，已加入 .gitignore）。
  */
 export const runtimeEvidenceConfig = {
   get hostDir(): string {
-    return optionalEnv("SNOW_RUNTIME_EVIDENCE_DIR", ".snow/runtime");
+    return optionalEnv("NEX_RUNTIME_EVIDENCE_DIR", ".nex/runtime");
   },
 } as const;
 
@@ -644,14 +644,14 @@ export const memoryConfig = {
  * 上下文压缩配置（a）。
  *
  * - `contextWindowByModel`：per-model 上下文窗口（token）。默认空 → `resolveTokenBudget`
- * 返回 `Infinity` → 永不压缩 → 零回归。部署时通过 `SNOW_CONTEXT_WINDOWS`（JSON map）
+ * 返回 `Infinity` → 永不压缩 → 零回归。部署时通过 `NEX_CONTEXT_WINDOWS`（JSON map）
  * 注入，例如 `{"kimi-k2.7-code": 131072}`。解析失败回退空 map（不抛错，保持零副作用）。
  * - `budgetThreshold`：触发压缩的预算占比（默认 0.7，蓝图 ）。
  * - `toolOutputThreshold`：单工具输出超过此 token 估算时单独摘要该 toolRun。
  */
 export const contextConfig = {
   get contextWindowByModel(): Record<string, number> {
-    const raw = optionalEnv("SNOW_CONTEXT_WINDOWS", "");
+    const raw = optionalEnv("NEX_CONTEXT_WINDOWS", "");
     if (!raw) return {};
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -663,10 +663,10 @@ export const contextConfig = {
     }
   },
   get budgetThreshold(): number {
-    return Number.parseFloat(optionalEnv("SNOW_CONTEXT_BUDGET_THRESHOLD", "0.7"));
+    return Number.parseFloat(optionalEnv("NEX_CONTEXT_BUDGET_THRESHOLD", "0.7"));
   },
   get toolOutputThreshold(): number {
-    return Number.parseInt(optionalEnv("SNOW_CONTEXT_TOOL_OUTPUT_THRESHOLD", String(8 * 1024)), 10);
+    return Number.parseInt(optionalEnv("NEX_CONTEXT_TOOL_OUTPUT_THRESHOLD", String(8 * 1024)), 10);
   },
   /**
    * 三级阈值。
@@ -675,14 +675,14 @@ export const contextConfig = {
    * - `criticalThreshold`（默认 0.9）：临界线，超此拒绝追加新工具输出（硬保护防 413）。
    */
   get softThreshold(): number {
-    return Number.parseFloat(optionalEnv("SNOW_CONTEXT_SOFT_THRESHOLD", "0.5"));
+    return Number.parseFloat(optionalEnv("NEX_CONTEXT_SOFT_THRESHOLD", "0.5"));
   },
   get criticalThreshold(): number {
-    return Number.parseFloat(optionalEnv("SNOW_CONTEXT_CRITICAL_THRESHOLD", "0.9"));
+    return Number.parseFloat(optionalEnv("NEX_CONTEXT_CRITICAL_THRESHOLD", "0.9"));
   },
   /** microcompact 单条消息 token 上限，超此在软警告线触发时裁剪该消息文本。 */
   get microcompactMessageTokens(): number {
-    return Number.parseInt(optionalEnv("SNOW_CONTEXT_MICROCOMPACT_TOKENS", "2048"), 10);
+    return Number.parseInt(optionalEnv("NEX_CONTEXT_MICROCOMPACT_TOKENS", "2048"), 10);
   },
 } as const;
 
@@ -803,20 +803,20 @@ export const qaConfig = {
 /**
  * 文档检索配置（searchDocs）。
  *
- * - `docsDomains`：官方文档域 allowlist（SNOW_DOCS_DOMAINS，逗号分隔）。默认空 →
+ * - `docsDomains`：官方文档域 allowlist（NEX_DOCS_DOMAINS，逗号分隔）。默认空 →
  * searchDocs 全 deny（无文档源可搜，fail-closed）。
- * - `docsIndexPath`：可选 JSON 文档全文索引路径（SNOW_DOCS_INDEX_PATH）。配置后 searchDocs
+ * - `docsIndexPath`：可选 JSON 文档全文索引路径（NEX_DOCS_INDEX_PATH）。配置后 searchDocs
  * 优先走本地索引；未配置时才降级为域名限定 webSearch。
  */
 export const docsConfig = {
   get docsDomains(): string[] {
-    return optionalEnv("SNOW_DOCS_DOMAINS", "")
+    return optionalEnv("NEX_DOCS_DOMAINS", "")
       .split(",")
       .map((s) => s.trim().toLowerCase())
       .filter((s) => s.length > 0);
   },
   get docsIndexPath(): string {
-    return optionalEnv("SNOW_DOCS_INDEX_PATH", "");
+    return optionalEnv("NEX_DOCS_INDEX_PATH", "");
   },
 } as const;
 
@@ -847,7 +847,7 @@ export const prConfig = {
  *
  * V10 架构说明：V9 服务器远程浏览器链路（Docker + Chromium + Xvfb + FFmpeg +
  * WebRTC + TURN）已全部删除。V10 Desktop 浏览器由 Electron + WebContentsView
- * 本地承载，partition 隔离（persist:snowharness-browser-{userId}）。以下
+ * 本地承载，partition 隔离（persist:nexharness-browser-{userId}）。以下
  * networkAllowlist / blockPrivateNetwork / maxUploadFileMb 等通用限制仍用于
  * Desktop Browser Tool 策略校验。profileRetentionDays /
  * sessionIdleTimeoutMinutes 等字段保留但当前无消费者，供未来 Desktop 策略扩展使用。
@@ -868,77 +868,77 @@ export const prConfig = {
  */
 export const browserConfig = {
   get profileRetentionDays(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_PROFILE_RETENTION_DAYS", "30"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_PROFILE_RETENTION_DAYS", "30"), 10);
     return Number.isFinite(n) && n > 0 ? n : 30;
   },
   get sessionIdleTimeoutMinutes(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_SESSION_IDLE_TIMEOUT_MIN", "30"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_SESSION_IDLE_TIMEOUT_MIN", "30"), 10);
     return Number.isFinite(n) && n > 0 ? n : 30;
   },
   get sessionRetentionDays(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_SESSION_RETENTION_DAYS", "30"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_SESSION_RETENTION_DAYS", "30"), 10);
     return Number.isFinite(n) && n > 0 ? n : 30;
   },
   get maxContexts(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_MAX_CONTEXTS", "8"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_MAX_CONTEXTS", "8"), 10);
     return Number.isFinite(n) && n > 0 ? n : 8;
   },
   get maxTabsPerSession(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_MAX_TABS_PER_SESSION", "8"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_MAX_TABS_PER_SESSION", "8"), 10);
     return Number.isFinite(n) && n > 0 ? n : 8;
   },
   get maxDownloadsPerThread(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_MAX_DOWNLOADS_PER_THREAD", "100"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_MAX_DOWNLOADS_PER_THREAD", "100"), 10);
     return Number.isFinite(n) && n > 0 ? n : 100;
   },
   /** V9 阶段 8：下载文件落工作区的子目录名（相对 Thread 工作区根）。默认 "downloads"。 */
   get downloadsDirName(): string {
-    const s = optionalEnv("SNOW_BROWSER_DOWNLOADS_DIR_NAME", "downloads").trim();
+    const s = optionalEnv("NEX_BROWSER_DOWNLOADS_DIR_NAME", "downloads").trim();
     // 防路径注入：禁止空、禁止 .. / 绝对路径 / 路径分隔符
     if (!s || s.includes("..") || s.startsWith("/") || s.includes("/") || s.includes("\\")) {
       return "downloads";
     }
-    // X49 修复：拒绝内部目录名——.snow/.git/node_modules 等会被工作区 API 拒绝读取
-    const internalDirs = [".snow", ".git", "node_modules", ".next", ".cache", ".config"];
+    // X49 修复：拒绝内部目录名——.nex/.git/node_modules 等会被工作区 API 拒绝读取
+    const internalDirs = [".nex", ".git", "node_modules", ".next", ".cache", ".config"];
     if (internalDirs.includes(s.toLowerCase())) {
       return "downloads";
     }
     return s;
   },
   get lockTtlMinutes(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_LOCK_TTL_MIN", "5"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_LOCK_TTL_MIN", "5"), 10);
     return Number.isFinite(n) && n > 0 ? n : 5;
   },
   get defaultViewport(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_DEFAULT_VIEWPORT", "1280"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_DEFAULT_VIEWPORT", "1280"), 10);
     return Number.isFinite(n) && n > 0 ? n : 1280;
   },
   get networkAllowlist(): string[] {
     // F13 修复：默认 "*" 允许所有外部 URL（配合 blockPrivateNetwork 保护内网）。
     // 旧实现默认空 → fail-closed deny 全部外部 URL，开箱即用 AI 任何外部导航被拒绝。
     // 生产环境应配置具体 allowlist 收紧策略。
-    return optionalEnv("SNOW_BROWSER_NETWORK_ALLOWLIST", "*")
+    return optionalEnv("NEX_BROWSER_NETWORK_ALLOWLIST", "*")
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
   },
   get blockPrivateNetwork(): boolean {
     // X50 修复：使用统一 boolean parser，接受 1/TRUE/yes/on 等常见写法
-    return parseBooleanEnv("SNOW_BROWSER_BLOCK_PRIVATE_NETWORK", true);
+    return parseBooleanEnv("NEX_BROWSER_BLOCK_PRIVATE_NETWORK", true);
   },
   /** X39 修复：browserUploadFile 单文件大小上限（MB）。0 = 不限制。
    * 默认 50MB——上传前先 stat 检查 size，超限直接拒绝，避免把大文件整体读进 Node 内存。
    * Playwright setInputFiles 也需要把文件完整读进内存传 buffer，无上限会拖垮进程。 */
   get maxUploadFileMb(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_MAX_UPLOAD_FILE_MB", "50"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_MAX_UPLOAD_FILE_MB", "50"), 10);
     return Number.isFinite(n) && n >= 0 ? n : 50;
   },
   /** 阶段九：browserUploadFile 允许的 MIME 类型列表（逗号分隔）。
    * 默认 "*" = 允许所有类型。生产环境可配置具体类型收紧策略，例如：
-   * SNOW_BROWSER_UPLOAD_ALLOWED_MIME_TYPES="image/png,image/jpeg,application/pdf,text/csv"
+   * NEX_BROWSER_UPLOAD_ALLOWED_MIME_TYPES="image/png,image/jpeg,application/pdf,text/csv"
    * 空=拒绝所有上传（fail-closed）。 */
   get uploadAllowedMimeTypes(): string[] {
-    return optionalEnv("SNOW_BROWSER_UPLOAD_ALLOWED_MIME_TYPES", "*")
+    return optionalEnv("NEX_BROWSER_UPLOAD_ALLOWED_MIME_TYPES", "*")
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
@@ -947,7 +947,7 @@ export const browserConfig = {
    * POST/PATCH/PUT 请求在读取 body 前先检查 Content-Length，超限直接 413。 */
   get maxApiBodyBytes(): number {
     const n = Number.parseInt(
-      optionalEnv("SNOW_BROWSER_MAX_API_BODY_BYTES", String(1024 * 1024)),
+      optionalEnv("NEX_BROWSER_MAX_API_BODY_BYTES", String(1024 * 1024)),
       10,
     );
     return Number.isFinite(n) && n > 0 ? n : 1024 * 1024;
@@ -955,7 +955,7 @@ export const browserConfig = {
   /** 阶段十一：浏览器写 API 速率限制（每用户每分钟请求数）。默认 60。
    * 超限返回 429。0 = 不限制。 */
   get apiRateLimitPerMinute(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_BROWSER_API_RATE_LIMIT_PER_MINUTE", "60"), 10);
+    const n = Number.parseInt(optionalEnv("NEX_BROWSER_API_RATE_LIMIT_PER_MINUTE", "60"), 10);
     return Number.isFinite(n) && n >= 0 ? n : 60;
   },
 } as const;
@@ -1012,19 +1012,19 @@ export function assertRuntimeConfig(): void {
 
 /**
  * skill 匹配 LLM 兜底（可选）。
- * 默认 off（零 LLM 是设计优点）；设 SNOW_SKILL_LLM_FALLBACK=on 启用——
+ * 默认 off（零 LLM 是设计优点）；设 NEX_SKILL_LLM_FALLBACK=on 启用——
  * 关键词匹配失败时调 LLM 判断用户意图与 skill 描述是否语义匹配。
  */
 export const skillMatcherConfig = {
   get llmFallback(): boolean {
-    return optionalEnv("SNOW_SKILL_LLM_FALLBACK", "off") === "on";
+    return optionalEnv("NEX_SKILL_LLM_FALLBACK", "off") === "on";
   },
 } as const;
 
 /**
  * skill 匹配停用词配置（env 覆盖,逗号分隔,叠加默认停用词）。
  *
- * - SNOW_SKILL_STOPWORDS="词1,词2,word3"：自定义停用词,与默认集合并去重。
+ * - NEX_SKILL_STOPWORDS="词1,词2,word3"：自定义停用词,与默认集合并去重。
  * - 不设或空串：仅使用默认停用词。
  *
  * 中文停用词过滤"用于/这是/一个"等无区分度词;英文停用词过滤"use/the/and"等。
@@ -1034,7 +1034,7 @@ export const skillMatcherConfig = {
 export const skillStopwordsConfig = {
   /** 自定义停用词(已 trim 去空,保留原大小写);未配置 → 空数组。 */
   get custom(): string[] {
-    const raw = optionalEnv("SNOW_SKILL_STOPWORDS", "");
+    const raw = optionalEnv("NEX_SKILL_STOPWORDS", "");
     if (!raw) return [];
     return raw
       .split(",")

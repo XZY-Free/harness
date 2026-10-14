@@ -54,15 +54,15 @@ export async function register() {
 
     // V10 Phase 5：启动 Agent Bridge WebSocket 服务器（仅生产环境）。
     // Desktop 通过 WebSocket 连接 + ed25519 challenge-response 认证后，
-    // Server 可向其分发浏览器操作 RPC。端口通过 SNOW_BRIDGE_PORT 环境变量
+    // Server 可向其分发浏览器操作 RPC。端口通过 NEX_BRIDGE_PORT 环境变量
     // 配置，默认 3002。开发/测试环境不启动（Desktop 端可独立 mock）。
-    if (appConfig.isProd || process.env.SNOW_BRIDGE_PORT) {
+    if (appConfig.isProd || process.env.NEX_BRIDGE_PORT) {
       const { BridgeServer, setBridgeServer } = await import("./lib/desktop-bridge/bridge-server");
-      const bridgePort = Number.parseInt(process.env.SNOW_BRIDGE_PORT ?? "3002", 10);
+      const bridgePort = Number.parseInt(process.env.NEX_BRIDGE_PORT ?? "3002", 10);
       const bridgeServer = new BridgeServer({ port: bridgePort });
       await bridgeServer.start();
       setBridgeServer(bridgeServer);
-      console.log(`[snowharness:bridge] Agent Bridge server started on port ${bridgePort}`);
+      console.log(`[nexharness:bridge] Agent Bridge server started on port ${bridgePort}`);
     }
   }
 }

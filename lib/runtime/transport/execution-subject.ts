@@ -9,7 +9,7 @@
  *
  * 公共 wire（05 专项唯一 mapper）：executionSubjectToPublicAgentSubject 输出严格
  * {subject_id, subject_kind: platform_user|platform_service}；旧
- * snowharness.execution_subject namespaced metadata / tenant_id / JSON string
+ * nexharness.execution_subject namespaced metadata / tenant_id / JSON string
  * serializer 已物理删除，禁止任何第二 Authority。
  */
 
@@ -19,7 +19,7 @@ export interface ExecutionSubject {
   tenantId: string;
   /** 明确主体类型（user/service 等）。 */
   subjectType: "user" | "service";
-  /** SnowHarness 内部稳定主体 ID。 */
+  /** NexHarness 内部稳定主体 ID。 */
   subjectId: string;
 }
 

@@ -12,7 +12,7 @@ afterEach(async () => {
 
 describe("openDesktopDatabase", () => {
   it("在真实 SQLite 文件执行 migration 并可持久化 tab", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "snow-desktop-db-"));
+    const dir = await mkdtemp(join(tmpdir(), "nex-desktop-db-"));
     tempDirs.push(dir);
     const database = await openDesktopDatabase(
       join(dir, "desktop.sqlite"),

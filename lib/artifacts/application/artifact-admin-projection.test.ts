@@ -31,7 +31,7 @@ describe("artifact admin projection", () => {
           bundleDigest: `sha256:${"c".repeat(64)}`,
           subjectName: "runtime.tar",
           subjectDigest: `sha256:${"a".repeat(64)}`,
-          verificationEngine: "snow-harness",
+          verificationEngine: "nexharness",
           verificationEngineVersion: "1",
           createdAt: new Date("2026-08-11T00:00:30.000Z"),
         },

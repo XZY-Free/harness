@@ -44,11 +44,11 @@ const MIME: Record<string, string> = {
 type PreviewEntry = { server: Server; port: number; token: string };
 
 const globalForPreview = globalThis as unknown as {
-  __snowPreviews?: Map<string, PreviewEntry>;
-  __snowPreviewCleanup?: boolean;
+  __nexPreviews?: Map<string, PreviewEntry>;
+  __nexPreviewCleanup?: boolean;
 };
-const previews = globalForPreview.__snowPreviews ?? new Map<string, PreviewEntry>();
-globalForPreview.__snowPreviews = previews;
+const previews = globalForPreview.__nexPreviews ?? new Map<string, PreviewEntry>();
+globalForPreview.__nexPreviews = previews;
 
 /** V9 当前：从 Cookie 头解析 preview-token（内置浏览器首次带 ?token= 加载后，子资源走 cookie 鉴权）。 */
 function parsePreviewTokenCookie(cookieHeader: string | undefined): string | undefined {
@@ -149,8 +149,8 @@ function closeAllPreviews(): void {
   previews.clear();
 }
 
-if (!globalForPreview.__snowPreviewCleanup) {
-  globalForPreview.__snowPreviewCleanup = true;
+if (!globalForPreview.__nexPreviewCleanup) {
+  globalForPreview.__nexPreviewCleanup = true;
   process.once("SIGTERM", closeAllPreviews);
   process.once("SIGINT", closeAllPreviews);
   process.once("beforeExit", closeAllPreviews);
@@ -294,10 +294,10 @@ export class DevServerPreviewRuntime implements PreviewRuntime {
     // dev server 输出重定向到 bind mount 日志文件，启动失败时可 tail 诊断
     // （原 execDetached 立即返回、stdout/stderr 丢弃，端口冲突/依赖缺失/语法错无法排查）。
     const devLogRel = `${threadId}/devserver.log`;
-    const devLogContainer = `/workspace/.snow/runtime/${devLogRel}`;
+    const devLogContainer = `/workspace/.nex/runtime/${devLogRel}`;
     await execDetached(
       entry.containerName,
-      `mkdir -p /workspace/.snow/runtime/${threadId} && PORT=${entry.port} HOST=0.0.0.0 npm run dev > ${devLogContainer} 2>&1`,
+      `mkdir -p /workspace/.nex/runtime/${threadId} && PORT=${entry.port} HOST=0.0.0.0 npm run dev > ${devLogContainer} 2>&1`,
     );
 
     const ok = await pollReady(`http://127.0.0.1:${entry.port}/`, runtimeConfig.readyTimeoutMs);
@@ -310,7 +310,7 @@ export class DevServerPreviewRuntime implements PreviewRuntime {
         const { readFile } = await import("node:fs/promises");
         const hostLog = resolvePath(
           workspaceRoot(threadId),
-          ".snow/runtime",
+          ".nex/runtime",
           `${threadId}`,
           "devserver.log",
         );

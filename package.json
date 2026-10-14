@@ -1,8 +1,8 @@
 {
-  "name": "snow-harness",
+  "name": "nexharness",
   "version": "0.1.0",
-  "description": "SnowHarness Web and macOS desktop client",
-  "author": "SnowHarness Contributors",
+  "description": "NexHarness Web and macOS desktop client",
+  "author": "NexHarness Contributors",
   "main": "desktop/bundle/main/index.js",
   "private": true,
   "scripts": {
@@ -29,7 +29,7 @@
     "db:seed": "tsx lib/db/seed.ts",
     "auth:bootstrap-admin": "tsx scripts/bootstrap-local-admin.ts",
     "db:verify-fresh": "tsx scripts/verify-fresh-db.mts",
-    "build:runtime": "docker build -t snow-harness-runtime:node22 docker/runtime",
+    "build:runtime": "docker build -t nexharness-runtime:node22 docker/runtime",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

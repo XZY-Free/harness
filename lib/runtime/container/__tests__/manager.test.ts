@@ -34,11 +34,11 @@ import {
 import { clearPorts, getPort } from "@/lib/runtime/container/ports";
 
 const TID = "thread-b-test";
-const origWorkspaces = process.env.SNOW_WORKSPACES_DIR;
+const origWorkspaces = process.env.NEX_WORKSPACES_DIR;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.SNOW_WORKSPACES_DIR = resolve(".test-workspaces-container-mgr");
+  process.env.NEX_WORKSPACES_DIR = resolve(".test-workspaces-container-mgr");
   __clearContainerRegistryForTest();
   clearPorts();
   image.ensureRuntimeImage.mockResolvedValue(undefined);
@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env.SNOW_WORKSPACES_DIR = origWorkspaces;
+  process.env.NEX_WORKSPACES_DIR = origWorkspaces;
   __clearContainerRegistryForTest();
   clearPorts();
 });
@@ -59,12 +59,12 @@ describe("container manager", () => {
 
     expect(image.ensureRuntimeImage).toHaveBeenCalledTimes(1);
     // 惰性重拉：run 前先清理同名旧容器
-    expect(cli.removeContainer).toHaveBeenCalledWith(`snow-thread-${TID}`);
+    expect(cli.removeContainer).toHaveBeenCalledWith(`nex-thread-${TID}`);
     expect(cli.runContainer).toHaveBeenCalledTimes(1);
     const opts = cli.runContainer.mock.calls[0]?.[0];
     expect(opts).toMatchObject({
-      name: `snow-thread-${TID}`,
-      image: "snow-harness-runtime:node22",
+      name: `nex-thread-${TID}`,
+      image: "nexharness-runtime:node22",
       threadId: TID,
       memory: "1g",
       cpus: "1.0",

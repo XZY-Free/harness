@@ -354,7 +354,7 @@ export async function seedAgentCallExecutionScenario(options?: {
 
   // ─── 真实 CredentialRef（provider=env，唯一 TEST token）───
   const credentialRefId = randomUUID();
-  const credentialEnvVar = `SNOWHARNESS_TEST_AGENT_CRED_${randomUUID().replace(/-/g, "")}`;
+  const credentialEnvVar = `NEXHARNESS_TEST_AGENT_CRED_${randomUUID().replace(/-/g, "")}`;
   const credentialToken = `test-external-token-${randomUUID()}`;
   await db.insert(credentialRefTable).values({
     id: credentialRefId,
@@ -548,7 +548,7 @@ export async function seedAgentCallExecutionScenario(options?: {
       });
       // 新 CredentialRef（不同 token + env）。
       const newCredentialRefId = randomUUID();
-      const newCredentialEnvVar = `SNOWHARNESS_TEST_AGENT_CRED_${randomUUID().replace(/-/g, "")}`;
+      const newCredentialEnvVar = `NEXHARNESS_TEST_AGENT_CRED_${randomUUID().replace(/-/g, "")}`;
       const newCredentialToken = `new-external-token-${randomUUID()}`;
       await db.insert(credentialRefTable).values({
         id: newCredentialRefId,

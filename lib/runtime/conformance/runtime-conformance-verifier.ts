@@ -43,7 +43,7 @@ import {
  * 不得使用临时 Git 分支、localhost 或方案版本路径。
  */
 export const RUNTIME_CONFORMANCE_PREDICATE_TYPE =
-  "https://snowharness.dev/attestation/runtime-conformance/v1";
+  "https://nexharness.dev/attestation/runtime-conformance/v1";
 
 // ─── 验证器接口 ──────────────────────────────────────────
 

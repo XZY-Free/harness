@@ -22,7 +22,7 @@ const moduleRoot = join(repoRoot, "native", "workspace-lock");
 const NODE_GYP_CANDIDATES = [join(repoRoot, "node_modules", ".pnpm")];
 
 function findNodeGyp() {
-  const configured = process.env.SNOWHARNESS_NODE_GYP_PATH?.trim();
+  const configured = process.env.NEXHARNESS_NODE_GYP_PATH?.trim();
   if (configured && existsSync(configured)) return configured;
   const direct = join(repoRoot, "node_modules", "node-gyp", "bin", "node-gyp.js");
   if (existsSync(direct)) return direct;
@@ -41,7 +41,7 @@ function findNodeGyp() {
 const nodeGyp = findNodeGyp();
 if (!nodeGyp) {
   console.error(
-    "[build:workspace-lock] 未找到 node-gyp。请先在仓库根执行 `pnpm install`，或设置 SNOWHARNESS_NODE_GYP_PATH。",
+    "[build:workspace-lock] 未找到 node-gyp。请先在仓库根执行 `pnpm install`，或设置 NEXHARNESS_NODE_GYP_PATH。",
   );
   process.exit(1);
 }

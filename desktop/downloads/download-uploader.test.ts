@@ -20,7 +20,7 @@ import { uploadFileToWorkspace } from "./download-uploader";
 // 保存原始 fetch 引用，便于 afterEach 恢复
 const originalFetch = globalThis.fetch;
 
-const TEST_TMP_DIR = resolve(tmpdir(), "snowharness-uploader-test");
+const TEST_TMP_DIR = resolve(tmpdir(), "nexharness-uploader-test");
 
 beforeEach(async () => {
   await rm(TEST_TMP_DIR, { recursive: true, force: true });

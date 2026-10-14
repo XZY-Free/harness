@@ -30,7 +30,7 @@ import { E2E_AUTH_STATE } from "./lib/test-support/e2e-credentials";
  * 刻意不用 3000：开发者本机常驻 `pnpm dev` 占用 3000，若与之冲突，
  * e2e 会误连开发库并跳过正式链引导。独立端口保证本地与 CI 行为一致。
  */
-export const E2E_PORT = Number(process.env.SNOW_E2E_PORT ?? 3100);
+export const E2E_PORT = Number(process.env.NEX_E2E_PORT ?? 3100);
 export const E2E_ORIGIN = `http://localhost:${E2E_PORT}`;
 
 export default defineConfig({

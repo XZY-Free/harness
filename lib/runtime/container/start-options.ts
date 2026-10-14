@@ -33,7 +33,7 @@ async function writeSecretEnvFile(
   if (!/^[a-zA-Z0-9-]+$/.test(threadId)) {
     throw new Error(`非法 threadId（含不安全字符）：${threadId}`);
   }
-  const filePath = join(dir, `.snow/runtime/${threadId}/secret-env-${Date.now()}.env`);
+  const filePath = join(dir, `.nex/runtime/${threadId}/secret-env-${Date.now()}.env`);
   await mkdir(dirname(filePath), { recursive: true });
   const lines = Object.entries(secrets).map(([key, value]) => {
     const escaped = value.replace(/'/g, "'\\''");

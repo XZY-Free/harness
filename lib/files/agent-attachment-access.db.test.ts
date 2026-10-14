@@ -16,11 +16,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAgentAttachmentReferences, readAgentAttachment } from "./agent-attachment-access";
 
 const TEST_ROOT = resolve(".test-agent-attachment-workspaces");
-const originalRoot = process.env.SNOW_WORKSPACES_DIR;
+const originalRoot = process.env.NEX_WORKSPACES_DIR;
 let scenarios: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>[] = [];
 
 beforeEach(async () => {
-  process.env.SNOW_WORKSPACES_DIR = TEST_ROOT;
+  process.env.NEX_WORKSPACES_DIR = TEST_ROOT;
   await resetDatabase(db);
   await rm(TEST_ROOT, { recursive: true, force: true });
   scenarios = [];
@@ -31,7 +31,7 @@ afterEach(async () => {
     delete process.env[scenario.credentialEnvVar];
     await scenario.provider.close();
   }
-  process.env.SNOW_WORKSPACES_DIR = originalRoot;
+  process.env.NEX_WORKSPACES_DIR = originalRoot;
   await rm(TEST_ROOT, { recursive: true, force: true });
 });
 

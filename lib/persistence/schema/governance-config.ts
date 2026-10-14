@@ -2,7 +2,7 @@
  * 治理配置 schema：GovernanceConfigSet + GovernanceConfigRevision（关口02 02-6）。
  *
  * 事实源：02-6 冻结实施方案 §5 / §54-P0
- * （docs/V12/01/SnowHarness_专题01_关口02_02-6_Policy_Permission_最终冻结实施方案.md）。
+ * （docs/V12/01/NexHarness_专题01_关口02_02-6_Policy_Permission_最终冻结实施方案.md）。
  *
  * 关键不变量：
  * - UNIQUE(tenantId, configSetKey)：租户内稳定 key 唯一；正式 key = "runtime-execution"。

@@ -7,12 +7,12 @@ import { buildExternalSource, matchDomain } from "./source";
 /**
  * searchDocs。
  *
- * 优先检索本地全文索引。配置 `SNOW_DOCS_INDEX_PATH` 后会：
+ * 优先检索本地全文索引。配置 `NEX_DOCS_INDEX_PATH` 后会：
  * - 接受 legacy `DocIndexEntry[]` 源文件；
- * - 或接受已编译的 `snow-docs-index` 索引文件；
+ * - 或接受已编译的 `nex-docs-index` 索引文件；
  * - 自动构建/刷新 sidecar 索引（版本 + sourceDigest 管理）。
  *
- * 未配置索引时才降级为域名限定的 webSearch。两条路径都受 `SNOW_DOCS_DOMAINS`
+ * 未配置索引时才降级为域名限定的 webSearch。两条路径都受 `NEX_DOCS_DOMAINS`
  * fail-closed 治理保护。
  */
 
@@ -34,7 +34,7 @@ type DocIndexChunk = {
 };
 
 type CompiledDocIndex = {
-  kind: "snow-docs-index";
+  kind: "nex-docs-index";
   version: number;
   builtAt: string;
   sourcePath: string | null;
@@ -56,7 +56,7 @@ export async function searchDocs(params: {
 }): Promise<SearchResult_> {
   const docsDomains = docsConfig.docsDomains;
   if (docsDomains.length === 0) {
-    return { ok: false, denied: true, reason: "文档域 allowlist 为空（SNOW_DOCS_DOMAINS 未配置）" };
+    return { ok: false, denied: true, reason: "文档域 allowlist 为空（NEX_DOCS_DOMAINS 未配置）" };
   }
 
   if (params.indexEntries) {
@@ -201,7 +201,7 @@ function parseDocEntries(parsed: unknown): DocIndexEntry[] {
     if (Array.isArray(obj.entries)) return obj.entries.map(normalizeEntry);
     if (Array.isArray(obj.documents)) return obj.documents.map(normalizeEntry);
   }
-  throw new Error("SNOW_DOCS_INDEX_PATH 必须指向 DocIndexEntry[] 或 snow-docs-index 文件");
+  throw new Error("NEX_DOCS_INDEX_PATH 必须指向 DocIndexEntry[] 或 nex-docs-index 文件");
 }
 
 function normalizeEntry(value: unknown): DocIndexEntry {
@@ -223,7 +223,7 @@ function isCompiledIndex(value: unknown): value is CompiledDocIndex {
   return (
     !!v &&
     typeof v === "object" &&
-    v.kind === "snow-docs-index" &&
+    v.kind === "nex-docs-index" &&
     typeof v.version === "number" &&
     Array.isArray(v.chunks) &&
     !!v.postings &&
@@ -242,7 +242,7 @@ function buildCompiledIndex(params: {
     .flatMap((entry) => chunkEntry(entry));
   const postings = buildPostings(chunks);
   return {
-    kind: "snow-docs-index",
+    kind: "nex-docs-index",
     version: DOC_INDEX_VERSION,
     builtAt: new Date().toISOString(),
     sourcePath: params.sourcePath,

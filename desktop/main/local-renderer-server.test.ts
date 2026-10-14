@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 async function createRendererFiles(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "snow-renderer-"));
+  const directory = await mkdtemp(join(tmpdir(), "nex-renderer-"));
   await writeFile(join(directory, "index.html"), "<main>本地桌面页面</main>");
   await writeFile(join(directory, "app.js"), "console.log('renderer')");
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -30,14 +30,14 @@ async function startUpstream(handler: Parameters<typeof createServer>[0]): Promi
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   );
-  return `http://127.0.0.1:${address.port}/snowharness`;
+  return `http://127.0.0.1:${address.port}/nexharness`;
 }
 
 describe("startLocalRendererServer", () => {
   it("为 Desktop 路由返回本地打包页面", async () => {
     const server = await startLocalRendererServer({
       rendererDir: await createRendererFiles(),
-      serverOrigin: "https://api.example.com/snowharness",
+      serverOrigin: "https://api.example.com/nexharness",
     });
     cleanups.push(() => server.close());
 
@@ -50,7 +50,7 @@ describe("startLocalRendererServer", () => {
   it("提供本地打包的静态资源", async () => {
     const server = await startLocalRendererServer({
       rendererDir: await createRendererFiles(),
-      serverOrigin: "https://api.example.com/snowharness",
+      serverOrigin: "https://api.example.com/nexharness",
     });
     cleanups.push(() => server.close());
 
@@ -82,7 +82,7 @@ describe("startLocalRendererServer", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       method: "GET",
-      url: "/snowharness/api/threads?limit=20",
+      url: "/nexharness/api/threads?limit=20",
     });
   });
 
@@ -91,12 +91,12 @@ describe("startLocalRendererServer", () => {
       response.setHeader("content-type", "application/json");
       response.setHeader(
         "set-cookie",
-        "snow_session=opaque; Path=/snowharness; HttpOnly; SameSite=Lax",
+        "nex_session=opaque; Path=/nexharness; HttpOnly; SameSite=Lax",
       );
       response.end(
         JSON.stringify({
           origin: request.headers.origin,
-          desktopOrigin: request.headers["x-snowharness-desktop-origin"],
+          desktopOrigin: request.headers["x-nexharness-desktop-origin"],
         }),
       );
     });
@@ -117,7 +117,7 @@ describe("startLocalRendererServer", () => {
       desktopOrigin: server.origin,
     });
     expect(response.headers.get("set-cookie")).toContain("Path=/");
-    expect(response.headers.get("set-cookie")).not.toContain("Path=/snowharness");
+    expect(response.headers.get("set-cookie")).not.toContain("Path=/nexharness");
   });
 
   it("页面取消 SSE 订阅时关闭上游连接", async () => {
@@ -160,7 +160,7 @@ describe("startLocalRendererServer", () => {
   it("不将任意本地路径作为远端代理", async () => {
     const server = await startLocalRendererServer({
       rendererDir: await createRendererFiles(),
-      serverOrigin: "https://api.example.com/snowharness",
+      serverOrigin: "https://api.example.com/nexharness",
     });
     cleanups.push(() => server.close());
 

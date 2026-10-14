@@ -43,7 +43,7 @@ import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 async function markPrepared(invocationId: string, attemptId: string) {
   const evidence = { kind: "transient-generation-candidate", invocationId, attemptId };
@@ -100,12 +100,12 @@ function batchOf(seq: number, delta: string, type = "response.delta") {
 
 describe("A11：Hosted transient 的当前代际隔离", () => {
   beforeEach(async () => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
     await resetDatabase(db);
   });
 
   afterEach(() => {
-    process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+    process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
   });
 
   it("TRANSIENT-GEN-01: 当前代际的 delta 被接纳，投递项带同一代际标记", async () => {

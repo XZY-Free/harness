@@ -1,6 +1,6 @@
 node_modules
 .next/
-# e2e 隔离构建产物（见 next.config.ts 的 SNOW_DIST_DIR）
+# e2e 隔离构建产物（见 next.config.ts 的 NEX_DIST_DIR）
 .next-e2e/
 .next-fresh-db/
 out/
@@ -30,7 +30,7 @@ upstreams/
 .data/
 
 # V3.2 后台任务运行时日志（host 平台目录 / container workspace bind mount）
-.snow/
+.nex/
 
 # 旧版本留下的本地上传文件（新上传链路不再写入此目录）
 public/uploads/

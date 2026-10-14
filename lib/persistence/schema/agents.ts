@@ -9,7 +9,7 @@
  * docs/architecture/domain-model.md 、
  * docs/architecture/agent-control-plane.md 。
  *
- * Agent 是员工目录中的一种可治理能力资产，仅在 Route 绑定时参与执行；SnowHarness
+ * Agent 是员工目录中的一种可治理能力资产，仅在 Route 绑定时参与执行；NexHarness
  * 始终是 Harness，Agent 不是 Thread 或基础执行的前提。Agent 保存稳定身份、负责人、
  * 生命周期和当前发布摘要。
  * AgentRevision 保存 Agent 的平台认可外部合同修订：绑定的 AgentContractSnapshot、模型策略、
@@ -125,7 +125,7 @@ export const agentRevisionTable = mysqlTable(
     /**
      * 绑定的不可变 AgentContractSnapshot id（逻辑外键 → AgentContractSnapshot.id）。
      * 创建 Revision 时必须精确引用一个同 tenant/Agent 的 Snapshot；发布证据从该
-     * 结构化快照冻结。SnowHarness 对 Agent 一律按源码不可见黑盒处理——Revision 的
+     * 结构化快照冻结。NexHarness 对 Agent 一律按源码不可见黑盒处理——Revision 的
      * 唯一权威来源是 AgentContractSnapshot，创建后不可换绑（合同变化必须
      * new Snapshot → new AgentRevision）。
      */

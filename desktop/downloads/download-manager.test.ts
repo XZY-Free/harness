@@ -137,9 +137,9 @@ describe("DownloadManager", () => {
       });
       manager.updateProgress(record.id, 100);
 
-      const updated = manager.completeDownload(record.id, "/tmp/snowharness/a.txt");
+      const updated = manager.completeDownload(record.id, "/tmp/nexharness/a.txt");
       expect(updated).not.toBeNull();
-      expect(updated?.savedPath).toBe("/tmp/snowharness/a.txt");
+      expect(updated?.savedPath).toBe("/tmp/nexharness/a.txt");
       expect(updated?.state).toBe("completed");
       expect(updated?.receivedBytes).toBe(100);
       expect(updated?.completedAt).not.toBeNull();
@@ -422,10 +422,10 @@ describe("DownloadManager", () => {
         mimeType: "text/plain",
         totalBytes: 100,
       });
-      manager.completeDownload(record.id, "/tmp/snowharness/a.txt");
+      manager.completeDownload(record.id, "/tmp/nexharness/a.txt");
       manager.startUpload(record.id);
       const failed = manager.failUpload(record.id, "Server 5xx");
-      expect(failed?.savedPath).toBe("/tmp/snowharness/a.txt");
+      expect(failed?.savedPath).toBe("/tmp/nexharness/a.txt");
       expect(failed?.state).toBe("upload_failed");
     });
 
@@ -438,10 +438,10 @@ describe("DownloadManager", () => {
         mimeType: "text/plain",
         totalBytes: 100,
       });
-      manager.completeDownload(record.id, "/tmp/snowharness/a.txt");
+      manager.completeDownload(record.id, "/tmp/nexharness/a.txt");
       manager.startUpload(record.id);
       const uploaded = manager.completeUpload(record.id, "downloads/a.txt");
-      expect(uploaded?.savedPath).toBe("/tmp/snowharness/a.txt");
+      expect(uploaded?.savedPath).toBe("/tmp/nexharness/a.txt");
       expect(uploaded?.workspacePath).toBe("downloads/a.txt");
     });
   });

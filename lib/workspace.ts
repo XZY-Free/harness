@@ -37,7 +37,7 @@ export class WorkspacePathError extends Error {}
  * threadId 合法格式：UUID 与等价字母数字-串。
  *
  * threadId 直接拼入 `workspaceRoot = join(base, threadId)` 与容器 shell 命令
- * (`mkdir -p /workspace/.snow/runtime/${threadId}`)。若允许 `..` / `/` / shell 元字符，
+ * (`mkdir -p /workspace/.nex/runtime/${threadId}`)。若允许 `..` / `/` / shell 元字符，
  * `join` 会解析 `..` 逃逸 workspaces 根,且 `safeJoin` / `assertRealPathInsideWorkspace`
  * 的边界锚点基于已污染的 root,两层防御同时失效 → 任意文件读写 + 容器内命令注入。
  *
@@ -394,7 +394,7 @@ export async function listWorkspaceFiles(
       () => [],
     );
     for (const entry of entries) {
-      // V5-B1：前台 + Studio 前台都默认隐藏内部运行时目录（防泄露 .snow/.git/node_modules 等）。
+      // V5-B1：前台 + Studio 前台都默认隐藏内部运行时目录（防泄露 .nex/.git/node_modules 等）。
       if (skipInternal && entry.isDirectory() && isInternalDirName(entry.name)) {
         continue;
       }
@@ -416,7 +416,7 @@ export async function listWorkspaceFiles(
  * 都传 skipInternal=true，避免内部目录泄露给员工或管理员视觉。
  */
 export const INTERNAL_DIR_NAMES: ReadonlySet<string> = new Set([
-  ".snow",
+  ".nex",
   ".git",
   ".next",
   "node_modules",
@@ -432,7 +432,7 @@ export function isInternalDirName(name: string): boolean {
 
 /**
  * V5-B1：检查相对路径是否落入内部目录（任意一段匹配 INTERNAL_DIR_NAMES）。
- * 前台 read API 用此函数拒绝读取 .snow/.git/node_modules 等内部目录下的文件——
+ * 前台 read API 用此函数拒绝读取 .nex/.git/node_modules 等内部目录下的文件——
  * 即使文件存在也不暴露（404），防止员工从文件路径推断内部结构。
  */
 export function isInternalPath(relPath: string): boolean {

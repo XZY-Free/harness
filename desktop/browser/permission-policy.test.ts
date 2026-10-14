@@ -215,21 +215,21 @@ describe("permission-policy checkUrlSafety (V10 Phase 4)", () => {
 
 describe("permission-policy isServerUrl (V10 Phase 4)", () => {
   it("匹配 Server origin 返回 true", () => {
-    expect(isServerUrl("https://snow.example.com/path", ["https://snow.example.com"])).toBe(true);
+    expect(isServerUrl("https://nex.example.com/path", ["https://nex.example.com"])).toBe(true);
   });
 
   it("不匹配返回 false", () => {
-    expect(isServerUrl("https://evil.example.com/path", ["https://snow.example.com"])).toBe(false);
+    expect(isServerUrl("https://evil.example.com/path", ["https://nex.example.com"])).toBe(false);
   });
 
   it("无效 URL 返回 false", () => {
-    expect(isServerUrl("not a url", ["https://snow.example.com"])).toBe(false);
+    expect(isServerUrl("not a url", ["https://nex.example.com"])).toBe(false);
   });
 
   it("多个 Server origin 中有一个匹配返回 true", () => {
     expect(
       isServerUrl("http://localhost:3000/desktop", [
-        "https://snow.example.com",
+        "https://nex.example.com",
         "http://localhost:3000",
       ]),
     ).toBe(true);
@@ -240,12 +240,12 @@ describe("permission-policy isServerUrl (V10 Phase 4)", () => {
   });
 
   it("空 origin 列表返回 false", () => {
-    expect(isServerUrl("https://snow.example.com", [])).toBe(false);
+    expect(isServerUrl("https://nex.example.com", [])).toBe(false);
   });
 
   it("path 不影响 origin 匹配", () => {
     expect(
-      isServerUrl("https://snow.example.com/deep/nested/path", ["https://snow.example.com"]),
+      isServerUrl("https://nex.example.com/deep/nested/path", ["https://nex.example.com"]),
     ).toBe(true);
   });
 });

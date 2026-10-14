@@ -30,16 +30,16 @@ import {
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// vitest 不加载 .env.test，需手动设置 SNOW_VITEST_IDENTITY_FIXTURE=enabled（与 identity.test.ts 一致）。
-const ORIGINAL_AUTH_MODE = process.env.SNOW_VITEST_IDENTITY_FIXTURE;
+// vitest 不加载 .env.test，需手动设置 NEX_VITEST_IDENTITY_FIXTURE=enabled（与 identity.test.ts 一致）。
+const ORIGINAL_AUTH_MODE = process.env.NEX_VITEST_IDENTITY_FIXTURE;
 
 beforeEach(async () => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = "enabled";
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = "enabled";
   await resetDatabase(db);
 });
 
 afterEach(() => {
-  process.env.SNOW_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
+  process.env.NEX_VITEST_IDENTITY_FIXTURE = ORIGINAL_AUTH_MODE;
 });
 
 // ─── 辅助：seed enabled Agent ─────────────────────────────
@@ -389,7 +389,7 @@ describe("POST /api/threads/{thread_id}/turns", () => {
       tenantId,
       threadId,
       storageProvider: "workspace",
-      resourceRef: `.snow/files/attachment/${attachmentId}/content`,
+      resourceRef: `.nex/files/attachment/${attachmentId}/content`,
       resourceFingerprint: `sha256:${"d".repeat(64)}`,
       originalFilename: "申请材料.pdf",
       contentType: "application/pdf",

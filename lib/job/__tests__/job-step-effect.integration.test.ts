@@ -253,7 +253,7 @@ async function seedToolCallOwnerEffect(input: {
     requestDigest: computeEffectRequestDigest({ toolCall: toolCallId }),
     effectType: "update",
     targetSummaryJson: { total: 1, description: "tool side effect" },
-    externalIdempotencyKey: `snow-tool:${toolCallId}`,
+    externalIdempotencyKey: `nex-tool:${toolCallId}`,
     // 与 Tool 执行超时 / 副作用未确认的真实路径（markToolCallUnknownEffect）一致：
     // 调用已开始但结果未核实时必须是 unknown_effect，不能是 not_started。
     initialEffectState: "unknown_effect",
@@ -345,7 +345,7 @@ describe("T32 Job step Effect 多态 owner", () => {
         targetSummaryJson: { total: 1, description: "index collection:kb" },
         authority,
         provider: TEST_PROVIDER,
-        externalIdempotencyKey: `snow-job-step:${operationKey}`,
+        externalIdempotencyKey: `nex-job-step:${operationKey}`,
       },
       externalWrites,
     );

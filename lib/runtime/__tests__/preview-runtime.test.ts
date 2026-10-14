@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const ws = vi.hoisted(() => ({
-  isInternalPath: vi.fn((relPath: string) => relPath.split("/").includes(".snow")),
+  isInternalPath: vi.fn((relPath: string) => relPath.split("/").includes(".nex")),
   readWorkspaceFile: vi.fn(),
   safeJoin: vi.fn((threadId: string, rel: string) => `/tmp/ws-${threadId}/${rel}`),
   workspaceRoot: vi.fn((id: string) => `/tmp/ws-${id}`),
@@ -145,7 +145,7 @@ describe("StaticPreviewRuntime 鉴权（05-P2-8）", () => {
     const handle = await staticPreviewRuntime.start(TID);
     const r = await httpRequest(
       handle.port,
-      `/.snow/files/attachment/123e4567-e89b-12d3-a456-426614174000/content?token=${handle.token}`,
+      `/.nex/files/attachment/123e4567-e89b-12d3-a456-426614174000/content?token=${handle.token}`,
     );
 
     expect(r.status).toBe(404);

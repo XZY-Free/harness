@@ -197,7 +197,7 @@ describe("AgentActionExecutor", () => {
       tenantId: scenario.tenantId,
       threadId: scenario.threadId,
       storageProvider: "workspace",
-      resourceRef: `.snow/files/attachment/${attachmentId}/content`,
+      resourceRef: `.nex/files/attachment/${attachmentId}/content`,
       resourceFingerprint: `sha256:${"a".repeat(64)}`,
       originalFilename: "工资证明.pdf",
       contentType: "application/pdf",
@@ -249,7 +249,7 @@ describe("AgentActionExecutor", () => {
         media_type: "application/pdf",
       },
     ]);
-    expect(JSON.stringify(references)).not.toContain(".snow/files/attachment");
+    expect(JSON.stringify(references)).not.toContain(".nex/files/attachment");
     expect(await db.select().from(workspaceAttachmentAccessGrant)).toHaveLength(1);
   });
 

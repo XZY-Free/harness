@@ -28,7 +28,7 @@ import { type Server, type ServerResponse, createServer } from "node:http";
 
 /** Provider 公开的 Capability Manifest（任务能力描述，非函数列表）。 */
 export const A2A_TEST_PROVIDER_CAPABILITY_MANIFEST = {
-  schema_version: "snowharness.capability_manifest@1",
+  schema_version: "nexharness.capability_manifest@1",
   capabilities: [
     { id: "general_assistance", description: "常规企业助手任务" },
     { id: "context_aware_task", description: "依赖平台上下文的文档/上下文任务" },
@@ -38,7 +38,7 @@ export const A2A_TEST_PROVIDER_CAPABILITY_MANIFEST = {
 
 /** Provider 公开的 Invocation Context Contract（三种 necessity）。 */
 export const A2A_TEST_PROVIDER_CONTEXT_CONTRACT = {
-  schema_version: "snowharness.invocation_context_contract@1",
+  schema_version: "nexharness.invocation_context_contract@1",
   required: [{ context_kind: "execution_subject" }],
   preferred: [
     { context_kind: "current_datetime" },
@@ -219,8 +219,8 @@ export async function startA2ATestProvider(
           protocolVersion: cardProtocolVersion,
           preferredTransport: "JSONRPC",
           capabilities: { streaming: cardStreaming, push_notifications: false },
-          "snowharness:capability_manifest": A2A_TEST_PROVIDER_CAPABILITY_MANIFEST,
-          "snowharness:invocation_context_contract": A2A_TEST_PROVIDER_CONTEXT_CONTRACT,
+          "nexharness:capability_manifest": A2A_TEST_PROVIDER_CAPABILITY_MANIFEST,
+          "nexharness:invocation_context_contract": A2A_TEST_PROVIDER_CONTEXT_CONTRACT,
         }),
       );
       return;

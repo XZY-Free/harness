@@ -33,7 +33,7 @@
  *   （`New` 表示新记录输入，非新版架构）
  * - next.config.ts / .next / Next.js 依赖（框架命名）
  * - 第三方 /v1 API 常量（外部协议版本）
- * - DSSE predicateType URI（如 https://snowharness.dev/conformance/runtime/v1，
+ * - DSSE predicateType URI（如 https://nexharness.dev/conformance/runtime/v1，
  *   Conformance suiteRevision 属独立版本域）
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";

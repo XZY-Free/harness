@@ -27,13 +27,13 @@ vi.mock("@/lib/ai/provider", () => ({
 }));
 
 const TEST_DIR = resolve(".test-visual-verdict");
-const origEvidenceDir = process.env.SNOW_RUNTIME_EVIDENCE_DIR;
+const origEvidenceDir = process.env.NEX_RUNTIME_EVIDENCE_DIR;
 const origKey = process.env.LLM_API_KEY;
 const origModel = process.env.QA_VISUAL_MODEL;
 const TID = "vv-thread";
 
 beforeEach(async () => {
-  process.env.SNOW_RUNTIME_EVIDENCE_DIR = TEST_DIR;
+  process.env.NEX_RUNTIME_EVIDENCE_DIR = TEST_DIR;
   process.env.LLM_API_KEY = "";
   // biome-ignore lint/performance/noDelete: 测试恢复 env 原状需 delete
   delete process.env.QA_VISUAL_MODEL;
@@ -44,7 +44,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  process.env.SNOW_RUNTIME_EVIDENCE_DIR = origEvidenceDir;
+  process.env.NEX_RUNTIME_EVIDENCE_DIR = origEvidenceDir;
   process.env.LLM_API_KEY = origKey;
   if (origModel !== undefined) process.env.QA_VISUAL_MODEL = origModel;
   else {

@@ -19,7 +19,7 @@ import { assertSafeExternalUrlResolved } from "./url-safety";
  * ask 批准升级（§38：正式 Permission 全链只 allow/pause/block，无 ask）。
  *
  * 抓取：超时 / 体积上限 / Content-Type 白名单。HTML→text 确定性抽取（不调 LLM）。
- * 原文落 artifact 文件（.snow/runtime/{threadId}/external/{fetchId}.txt），不落 DB blob。
+ * 原文落 artifact 文件（.nex/runtime/{threadId}/external/{fetchId}.txt），不落 DB blob。
  * 大网页若抽取后仍超 toolOutputThreshold，由 a oversized tool output 机制自动摘要。
  */
 
@@ -191,7 +191,7 @@ export async function rawFetch(params: {
       url,
       fetchImpl,
       signal: controller.signal,
-      headers: { "user-agent": "snow-harness-webfetch/1.0" },
+      headers: { "user-agent": "nexharness-webfetch/1.0" },
       validateRedirect: async (nextUrl) => {
         // : redirect 目标也过 SSRF 守卫(含 DNS rebinding),防 redirect 到内网/元数据绕过入口校验。
         try {

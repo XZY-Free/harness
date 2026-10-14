@@ -16,9 +16,9 @@ function required(name: string): string {
 
 export function createWorkspaceHostFromEnvironment(): WorkspaceHostBroker {
   assertScopeLockProviderAvailable();
-  const root = required("SNOWHARNESS_WORKSPACE_HOST_ROOT");
-  const snapshotRoot = required("SNOWHARNESS_SNAPSHOT_STORAGE_ROOT");
-  const hostIdentity = process.env.SNOWHARNESS_WORKSPACE_HOST_IDENTITY?.trim();
+  const root = required("NEXHARNESS_WORKSPACE_HOST_ROOT");
+  const snapshotRoot = required("NEXHARNESS_SNAPSHOT_STORAGE_ROOT");
+  const hostIdentity = process.env.NEXHARNESS_WORKSPACE_HOST_IDENTITY?.trim();
   return new WorkspaceHostBroker({
     root,
     // 未显式注入时使用持久化的确定性派生身份：进程重启不换身份。
@@ -29,8 +29,8 @@ export function createWorkspaceHostFromEnvironment(): WorkspaceHostBroker {
 
 export async function runWorkspaceHostProcess(): Promise<void> {
   const broker = createWorkspaceHostFromEnvironment();
-  const port = Number.parseInt(process.env.SNOWHARNESS_WORKSPACE_HOST_PORT ?? "0", 10);
-  const hostname = process.env.SNOWHARNESS_WORKSPACE_HOST_BIND?.trim() || "127.0.0.1";
+  const port = Number.parseInt(process.env.NEXHARNESS_WORKSPACE_HOST_PORT ?? "0", 10);
+  const hostname = process.env.NEXHARNESS_WORKSPACE_HOST_BIND?.trim() || "127.0.0.1";
   const serving = await listenWorkspaceHostRpc({ broker, port, hostname });
   process.stdout.write(`[workspace-host] listening ${serving.url}\n`);
   await new Promise<void>((resolve) => {

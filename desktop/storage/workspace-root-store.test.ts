@@ -49,7 +49,7 @@ describe("WorkspaceRootStore", () => {
         ctx.skip();
       }
       const { raw, db } = createDb();
-      const root = await realpath(await mkdtemp(join(tmpdir(), "snow-native-shell-")));
+      const root = await realpath(await mkdtemp(join(tmpdir(), "nex-native-shell-")));
       const outside = `${root}-outside`;
       await writeFile(outside, "test-only-outside-marker");
       const store = new WorkspaceRootStore(db);

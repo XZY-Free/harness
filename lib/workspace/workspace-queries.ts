@@ -539,7 +539,7 @@ export interface CreateManagedWorkspaceAttachmentInput {
   attachedBy: string;
 }
 
-/** 登记由 SnowHarness FileStorageProvider 保存的原文件。 */
+/** 登记由 NexHarness FileStorageProvider 保存的原文件。 */
 export async function createManagedWorkspaceAttachment(
   input: CreateManagedWorkspaceAttachmentInput,
   executor: DbOrTx = db,

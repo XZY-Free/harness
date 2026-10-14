@@ -352,7 +352,7 @@ describe("processRetryCommand", () => {
       ? workspaceConfig.root
       : resolve(process.cwd(), workspaceConfig.root);
     await writeFile(
-      join(root, ".snow", "job-inputs", fx.tenantId, inputHash.slice("sha256:".length)),
+      join(root, ".nex", "job-inputs", fx.tenantId, inputHash.slice("sha256:".length)),
       JSON.stringify({ task: "changed" }),
     );
 

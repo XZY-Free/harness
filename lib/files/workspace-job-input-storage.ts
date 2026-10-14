@@ -12,7 +12,7 @@ function rootForTenant(tenantId: string): string {
   if (!TENANT_ID.test(tenantId)) throw new Error("JobInputStorageTenantInvalid");
   const configured = workspaceConfig.root;
   const base = isAbsolute(configured) ? configured : resolve(process.cwd(), configured);
-  return join(base, ".snow", "job-inputs", tenantId);
+  return join(base, ".nex", "job-inputs", tenantId);
 }
 
 async function assertStorageDirectories(root: string, create: boolean): Promise<boolean> {

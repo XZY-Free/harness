@@ -208,8 +208,8 @@ describe("WorkspaceHost 控制端口契约（A06）", () => {
     const { probe, url } = await listenBroker();
     const remote = createRemoteWorkspaceHost(url);
     const checkpointIntentId = "00000000-0000-4000-8000-00000000000b";
-    // 控制面根与 Broker 同源：realpath(root) + ".snow"（macOS 的 /var → /private/var）。
-    const controlRoot = path.join(await realpath(hostRoot), ".snow");
+    // 控制面根与 Broker 同源：realpath(root) + ".nex"（macOS 的 /var → /private/var）。
+    const controlRoot = path.join(await realpath(hostRoot), ".nex");
     const grant = await remote.activateWriter({
       tenantId: "00000000-0000-4000-8000-000000000010",
       scopeDigest: probe.scopeDigest,
@@ -265,10 +265,10 @@ describe("WorkspaceHost 控制端口契约（A06）", () => {
       operationId: "a06-candidate",
     });
     const canonicalRoot = probe.canonicalRoot;
-    const controlRoot = path.join(await realpath(hostRoot), ".snow");
+    const controlRoot = path.join(await realpath(hostRoot), ".nex");
     // ⑥：候选**运行目录**必须在受管写根内、控制面目录外，否则随后的 activateWriter
     // 会以"Writer root 不能是控制面目录"拒绝 —— 恢复成功也无法激活。
-    const runsDir = path.join(canonicalRoot, ".snow-runs");
+    const runsDir = path.join(canonicalRoot, ".nex-runs");
     expect(preparation.candidateRoot.startsWith(`${runsDir}${path.sep}`)).toBe(true);
     expect(preparation.candidateRoot.startsWith(`${controlRoot}${path.sep}`)).toBe(false);
     expect(await pathExists(preparation.candidateRoot)).toBe(true);

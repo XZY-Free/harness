@@ -62,16 +62,16 @@ export function loadRuntimeEnvironment({
   configText,
 }: LoadRuntimeEnvironmentOptions): NodeJS.ProcessEnv {
   const config = parseConfig(configText);
-  const serverOrigin = env.SNOW_SERVER_ORIGIN?.trim() || config.serverOrigin?.trim();
-  const allowInsecureRemoteOrigin = env.SNOW_ALLOW_INSECURE_REMOTE_ORIGIN;
+  const serverOrigin = env.NEX_SERVER_ORIGIN?.trim() || config.serverOrigin?.trim();
+  const allowInsecureRemoteOrigin = env.NEX_ALLOW_INSECURE_REMOTE_ORIGIN;
 
   return {
     ...env,
-    ...(serverOrigin ? { SNOW_SERVER_ORIGIN: validateServerOrigin(serverOrigin) } : {}),
+    ...(serverOrigin ? { NEX_SERVER_ORIGIN: validateServerOrigin(serverOrigin) } : {}),
     ...(allowInsecureRemoteOrigin !== undefined
-      ? { SNOW_ALLOW_INSECURE_REMOTE_ORIGIN: allowInsecureRemoteOrigin }
+      ? { NEX_ALLOW_INSECURE_REMOTE_ORIGIN: allowInsecureRemoteOrigin }
       : config.allowInsecureRemoteOrigin
-        ? { SNOW_ALLOW_INSECURE_REMOTE_ORIGIN: "1" }
+        ? { NEX_ALLOW_INSECURE_REMOTE_ORIGIN: "1" }
         : {}),
   };
 }

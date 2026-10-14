@@ -1,7 +1,7 @@
 /**
  * A2A 0.3.0 wire 类型（lib/agents/calls/transport/a2a/a2a-types.ts）。
  *
- * A2A 是「AgentCall → 外部 Agent」的通信协议，不是 SnowHarness Runtime Protocol。
+ * A2A 是「AgentCall → 外部 Agent」的通信协议，不是 NexHarness Runtime Protocol。
  * 本文件只定义 A2A 0.3.0 wire 的冻结子集，不实现 A2A 1.x 兼容层。
  *
  * 官方 0.3.0 合同约束：

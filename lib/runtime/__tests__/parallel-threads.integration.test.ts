@@ -7,17 +7,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  *
  * 验证蓝图 §0.1 done 线：多个 thread 的预览并行，各自独立容器 + 独立端口，互不串数据。
  *
- * 默认 skip——需 docker 可用且显式 `SNOW_RUN_DOCKER_TESTS=1` + `RUNTIME_DEFAULT=container` +
+ * 默认 skip——需 docker 可用且显式 `NEX_RUN_DOCKER_TESTS=1` + `RUNTIME_DEFAULT=container` +
  * `pnpm build:runtime` 预构建镜像。CI 无 docker 时跳过，不 fail fast（plan §5 风险表）。
  */
 
-const RUN = process.env.SNOW_RUN_DOCKER_TESTS === "1";
-const origRoot = process.env.SNOW_WORKSPACES_DIR;
+const RUN = process.env.NEX_RUN_DOCKER_TESTS === "1";
+const origRoot = process.env.NEX_WORKSPACES_DIR;
 const TEST_ROOT = resolve(".test-workspaces-parallel");
 
 beforeEach(async () => {
   if (!RUN) return;
-  process.env.SNOW_WORKSPACES_DIR = TEST_ROOT;
+  process.env.NEX_WORKSPACES_DIR = TEST_ROOT;
   await mkdir(join(TEST_ROOT, "threadA"), { recursive: true });
   await mkdir(join(TEST_ROOT, "threadB"), { recursive: true });
 });
@@ -26,7 +26,7 @@ afterEach(async () => {
   if (!RUN) return;
   const { stopContainerById } = await import("@/lib/runtime/container/manager");
   await Promise.all([stopContainerById("threadA"), stopContainerById("threadB")]).catch(() => {});
-  process.env.SNOW_WORKSPACES_DIR = origRoot;
+  process.env.NEX_WORKSPACES_DIR = origRoot;
   await rm(TEST_ROOT, { recursive: true, force: true });
 });
 

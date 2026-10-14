@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getPlatformCapability, isDesktopBrowser, isWebPreview } from "./capability";
 
 afterEach(() => {
-  (globalThis as unknown as { __SNOW_PLATFORM__?: string }).__SNOW_PLATFORM__ = undefined;
+  (globalThis as unknown as { __NEX_PLATFORM__?: string }).__NEX_PLATFORM__ = undefined;
 });
 
 describe("platform capability (V10 Phase 1)", () => {
@@ -19,7 +19,7 @@ describe("platform capability (V10 Phase 1)", () => {
   });
 
   it("preload 注入 desktop-browser 后返回 desktop-browser", () => {
-    (globalThis as unknown as { __SNOW_PLATFORM__?: string }).__SNOW_PLATFORM__ = "desktop-browser";
+    (globalThis as unknown as { __NEX_PLATFORM__?: string }).__NEX_PLATFORM__ = "desktop-browser";
     expect(getPlatformCapability()).toBe("desktop-browser");
     expect(isDesktopBrowser()).toBe(true);
     expect(isWebPreview()).toBe(false);

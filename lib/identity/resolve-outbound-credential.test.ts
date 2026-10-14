@@ -31,7 +31,7 @@ import { credentialRefTable } from "@/lib/persistence/schema/tool";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const TOKEN = "external-secret-token-a2a";
-const ENV_NAME = "SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_TOKEN";
+const ENV_NAME = "NEXHARNESS_TEST_OUTBOUND_CREDENTIAL_TOKEN";
 const FINGERPRINT = `sha256:${createHash("sha256").update(TOKEN, "utf8").digest("hex")}`;
 
 let tenantId: string;
@@ -51,7 +51,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   delete process.env[ENV_NAME];
-  process.env.SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING = undefined;
+  process.env.NEXHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING = undefined;
 });
 
 async function seedCredentialRef(
@@ -145,7 +145,7 @@ describe("resolveOutboundCredential（external authority）", () => {
 
   it("bearer：env 缺失 → 拒绝", async () => {
     const refId = await seedCredentialRef({
-      vaultRef: "SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING",
+      vaultRef: "NEXHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING",
     });
     await expectAuthErrorKind(
       resolveOutboundCredential({ tenantId, identityMode: "bearer", credentialRefId: refId }),
@@ -154,9 +154,9 @@ describe("resolveOutboundCredential（external authority）", () => {
   });
 
   it("bearer：env token 空 → 拒绝", async () => {
-    process.env.SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING = "";
+    process.env.NEXHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING = "";
     const refId = await seedCredentialRef({
-      vaultRef: "SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING",
+      vaultRef: "NEXHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING",
       fingerprint: `sha256:${createHash("sha256").update("", "utf8").digest("hex")}`,
     });
     await expectAuthErrorKind(

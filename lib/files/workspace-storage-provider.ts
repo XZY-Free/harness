@@ -12,7 +12,7 @@ import {
   writeWorkspaceFileBytes,
 } from "@/lib/workspace";
 
-const MANAGED_FILE_PREFIX = ".snow/files/";
+const MANAGED_FILE_PREFIX = ".nex/files/";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** 默认单机实现：原文件保存在所属 Thread Workspace，文件名不参与物理路径。 */
@@ -48,7 +48,7 @@ function assertManagedResourceRef(resourceRef: string): void {
   const segments = resourceRef.split("/");
   if (
     segments.length !== 5 ||
-    segments[0] !== ".snow" ||
+    segments[0] !== ".nex" ||
     segments[1] !== "files" ||
     !["attachment", "artifact"].includes(segments[2] ?? "") ||
     !UUID_PATTERN.test(segments[3] ?? "") ||

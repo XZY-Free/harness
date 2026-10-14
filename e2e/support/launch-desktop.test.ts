@@ -15,12 +15,12 @@ const { applyRealKeyringCommandLine } = require("./electron-real-keyring-loader.
 
 describe("buildDesktopLaunchArgs", () => {
   it("在应用路径之前 preload 真实 keyring 修正器", () => {
-    const args = buildDesktopLaunchArgs("/tmp/snow-harness-e2e");
+    const args = buildDesktopLaunchArgs("/tmp/nexharness-e2e");
 
     expect(args[0]).toBe("-r");
     expect(args[1]).toMatch(/electron-real-keyring-loader\.cjs$/);
     expect(args[2]).toBe("--no-sandbox");
-    expect(args[3]).toBe("--user-data-dir=/tmp/snow-harness-e2e");
+    expect(args[3]).toBe("--user-data-dir=/tmp/nexharness-e2e");
     expect(args[4]).toMatch(/desktop\/package-app$/);
     expect(args).not.toContain("--password-store=gnome-libsecret");
   });

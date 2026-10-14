@@ -1,4 +1,4 @@
-/** SnowHarness 原文件存储端口。一个部署只装配一个提供器，不做隐式双写。 */
+/** NexHarness 原文件存储端口。一个部署只装配一个提供器，不做隐式双写。 */
 export interface FileStorageProvider {
   readonly name: string;
   store(input: StoreFileObjectInput): Promise<StoredFileObject>;

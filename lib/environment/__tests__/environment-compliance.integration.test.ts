@@ -97,8 +97,8 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TENANT_ID = DEFAULT_TENANT_ID;
-const REVISION_LABEL = "snow-harness.environment.revisionId";
-const TENANT_LABEL = "snow-harness.environment.tenantId";
+const REVISION_LABEL = "nexharness.environment.revisionId";
+const TENANT_LABEL = "nexharness.environment.tenantId";
 
 /** 本地优先镜像候选（macOS/Linux 的 Docker 默认共享 /private 与 /tmp）。 */
 const IMAGE_CANDIDATES = [
@@ -184,7 +184,7 @@ async function makeFixture(): Promise<EnvironmentFixture> {
   }
   const image = resolvedImage;
   const imageDigest = resolvedImageDigest;
-  const root = await mkdtemp(path.join(tmpdir(), "snow-env-compliance-"));
+  const root = await mkdtemp(path.join(tmpdir(), "nex-env-compliance-"));
   temporaryRoots.push(root);
   const controlRoot = path.join(root, "environment-control");
   const workspaceRoot = path.join(root, "workspace");
@@ -749,7 +749,7 @@ describe("R07 真实 Environment 实例化与合规", () => {
       revision: fixture.revisionInput({
         executionTarget: {
           kind: "container",
-          image: "snowharness/absent-runtime:fixed",
+          image: "nexharness/absent-runtime:fixed",
           imageDigest: `sha256:${"a".repeat(64)}`,
           entrypoint: ["/bin/sh"],
           args: ["-c", "sleep 5"],

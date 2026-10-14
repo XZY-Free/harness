@@ -62,7 +62,7 @@ export type AgentCallEventSink = (batch: {
 /**
  * AgentCall 出站认证（协议中立）。
  *
- * 只允许 none / bearer 两种 External Agent 形态；workload_token 是 SnowHarness
+ * 只允许 none / bearer 两种 External Agent 形态；workload_token 是 NexHarness
  * Runtime Protocol 专属，Agent transport 收到时本地 fail closed，
  * 绝不把内部 Workload Token 当作外部 Agent 的 Bearer Token。
  */
@@ -82,7 +82,7 @@ export function agentCallAuthHeaders(auth: AgentCallTransportAuth): Record<strin
   return { authorization: `Bearer ${auth.token}` };
 }
 
-/** Agent transport 错误分类：进入 SnowHarness 稳定错误码，不暴露供应商 SDK 异常字符串。 */
+/** Agent transport 错误分类：进入 NexHarness 稳定错误码，不暴露供应商 SDK 异常字符串。 */
 export type AgentTransportFailureKind =
   | "endpoint_auth"
   | "protocol_schema"

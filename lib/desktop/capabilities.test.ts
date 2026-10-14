@@ -12,18 +12,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const VALID_CAP: DesktopCapabilities = {
   version: DESKTOP_CAPABILITY_VERSION,
-  serverOrigin: "https://snow.example.com",
+  serverOrigin: "https://nex.example.com",
   appVersion: "0.1.0",
   ipcChannels: DESKTOP_IPC_CHANNELS,
   deviceId: null,
 };
 
 beforeEach(() => {
-  (globalThis as unknown as { snowDesktop?: unknown }).snowDesktop = undefined;
+  (globalThis as unknown as { nexDesktop?: unknown }).nexDesktop = undefined;
 });
 
 afterEach(() => {
-  (globalThis as unknown as { snowDesktop?: unknown }).snowDesktop = undefined;
+  (globalThis as unknown as { nexDesktop?: unknown }).nexDesktop = undefined;
 });
 
 describe("DESKTOP_CAPABILITY_VERSION", () => {
@@ -56,7 +56,7 @@ describe("DESKTOP_IPC_CHANNELS", () => {
 
 describe("isAllowedOrigin()", () => {
   it("https 始终允许", () => {
-    expect(isAllowedOrigin("https://snow.example.com")).toBe(true);
+    expect(isAllowedOrigin("https://nex.example.com")).toBe(true);
     expect(isAllowedOrigin("https://localhost")).toBe(true);
   });
 
@@ -153,21 +153,21 @@ describe("getDesktopCapabilities()", () => {
   });
 
   it("有合法注入时返回 capability", () => {
-    (globalThis as unknown as { snowDesktop: unknown }).snowDesktop = {
+    (globalThis as unknown as { nexDesktop: unknown }).nexDesktop = {
       capabilities: VALID_CAP,
     };
     expect(getDesktopCapabilities()).toEqual(VALID_CAP);
   });
 
   it("有非法注入时返回 null", () => {
-    (globalThis as unknown as { snowDesktop: unknown }).snowDesktop = {
+    (globalThis as unknown as { nexDesktop: unknown }).nexDesktop = {
       capabilities: { bad: true },
     };
     expect(getDesktopCapabilities()).toBeNull();
   });
 
   it("注入 null 时返回 null", () => {
-    (globalThis as unknown as { snowDesktop: unknown }).snowDesktop = { capabilities: null };
+    (globalThis as unknown as { nexDesktop: unknown }).nexDesktop = { capabilities: null };
     expect(getDesktopCapabilities()).toBeNull();
   });
 });
@@ -178,7 +178,7 @@ describe("isDesktop()", () => {
   });
 
   it("有合法注入时返回 true", () => {
-    (globalThis as unknown as { snowDesktop: unknown }).snowDesktop = {
+    (globalThis as unknown as { nexDesktop: unknown }).nexDesktop = {
       capabilities: VALID_CAP,
     };
     expect(isDesktop()).toBe(true);

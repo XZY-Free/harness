@@ -148,7 +148,7 @@ describe("Workspace host recovery integration", () => {
   beforeEach(async () => {
     await resetDatabase(db);
     await ensureDefaultTenant();
-    root = await mkdtemp(path.join(tmpdir(), "snowharness-host-recovery-"));
+    root = await mkdtemp(path.join(tmpdir(), "nexharness-host-recovery-"));
     backend = createWorkspaceBackend(createWorkspaceHostBroker({ root }));
   });
 
@@ -396,7 +396,7 @@ describe("Workspace host recovery integration", () => {
   it("WRITER-04: the same path name with a replaced disk identity is rejected by real probing", async () => {
     const broker = createWorkspaceHostBroker({ root });
     const probe = await broker.probeIdentity();
-    const identityFile = path.join(root, ".snow", "workspace-identity.json");
+    const identityFile = path.join(root, ".nex", "workspace-identity.json");
     const record = JSON.parse(await readFile(identityFile, "utf8")) as Record<string, unknown>;
     // 真实身份已更换：路径名相同，但磁盘 inode 与持久记录不再匹配。
     await writeFile(
@@ -634,7 +634,7 @@ describe("Workspace host recovery integration", () => {
       const impostor = createWorkspaceHostBroker({ root, hostIdentity: "host:replacement" });
       await expect(impostor.probeIdentity()).rejects.toBeInstanceOf(WorkspaceIdentityMismatchError);
       // 换一个全新的空目录冒充同一路径：scope 与冻结事实不同 → 拒绝。
-      const emptyElsewhere = await mkdtemp(path.join(tmpdir(), "snowharness-fresh-host-"));
+      const emptyElsewhere = await mkdtemp(path.join(tmpdir(), "nexharness-fresh-host-"));
       try {
         const freshProbe = await createWorkspaceHostBroker({
           root: emptyElsewhere,

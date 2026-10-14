@@ -15,16 +15,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_ROOT = resolve(".test-workspaces-host-exec");
 const TID = "test-host-exec";
-const orig = process.env.SNOW_WORKSPACES_DIR;
+const orig = process.env.NEX_WORKSPACES_DIR;
 
 beforeEach(async () => {
-  process.env.SNOW_WORKSPACES_DIR = TEST_ROOT;
+  process.env.NEX_WORKSPACES_DIR = TEST_ROOT;
   await mkdir(join(TEST_ROOT, TID), { recursive: true });
 });
 
 afterEach(async () => {
   vi.unstubAllEnvs();
-  process.env.SNOW_WORKSPACES_DIR = orig;
+  process.env.NEX_WORKSPACES_DIR = orig;
   await rm(TEST_ROOT, { recursive: true, force: true });
 });
 
@@ -100,25 +100,25 @@ describe("HostExecutionRuntime", () => {
         },
       }),
     ).rejects.toMatchObject({ code: "DESKTOP_EXECUTION_UNAVAILABLE", dispatched: false });
-    vi.stubEnv("SNOW_WORKSPACES_DIR", `${TEST_ROOT}-moved`);
+    vi.stubEnv("NEX_WORKSPACES_DIR", `${TEST_ROOT}-moved`);
     await expect(executor.execute(input)).rejects.toMatchObject({
       code: "WORKSPACE_LOCATION_CHANGED",
       dispatched: false,
     });
   });
   it("真实子进程不继承平台秘密，只接收显式授权的注入", async () => {
-    vi.stubEnv("SNOW_EXECUTION_TEST_SECRET", "test-only-marker");
+    vi.stubEnv("NEX_EXECUTION_TEST_SECRET", "test-only-marker");
     const runtime = new HostExecutionRuntime(TID);
     const result = await runtime.exec(
-      "node -e \"process.stdout.write(process.env.SNOW_EXECUTION_TEST_SECRET ? 'leaked' : 'absent')\"",
+      "node -e \"process.stdout.write(process.env.NEX_EXECUTION_TEST_SECRET ? 'leaked' : 'absent')\"",
     );
     expect(result.ok).toBe(true);
     expect(result.stdout).toBe("absent");
     const injected = new HostExecutionRuntime(TID, undefined, async () => ({
-      SNOW_EXECUTION_TEST_SECRET: "explicit",
+      NEX_EXECUTION_TEST_SECRET: "explicit",
     }));
     const allowed = await injected.exec(
-      "node -e \"process.stdout.write(process.env.SNOW_EXECUTION_TEST_SECRET || 'absent')\"",
+      "node -e \"process.stdout.write(process.env.NEX_EXECUTION_TEST_SECRET || 'absent')\"",
     );
     expect(allowed.stdout).toBe("explicit");
   });

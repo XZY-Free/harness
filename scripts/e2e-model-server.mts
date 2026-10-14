@@ -85,7 +85,7 @@ export function startE2eModelServer(port = 0): Promise<E2eModelServer> {
       res.end(
         JSON.stringify({
           object: "list",
-          data: [{ id: "e2e-deterministic", object: "model", owned_by: "snow-harness-e2e" }],
+          data: [{ id: "e2e-deterministic", object: "model", owned_by: "nexharness-e2e" }],
         }),
       );
       return;

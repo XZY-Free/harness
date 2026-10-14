@@ -10,7 +10,7 @@ import { resolve } from "node:path";
  *   → 使用正式 ExecutionBinding → Timeline 恢复 → Workspace / Environment 正常
  *
  * 实现方式：Playwright `_electron.launch()` 真启动 `desktop/package-app`，
- * 通过 `SNOW_SERVER_ORIGIN` 指向 e2e 测试服务器。Electron 主进程会起本地 renderer
+ * 通过 `NEX_SERVER_ORIGIN` 指向 e2e 测试服务器。Electron 主进程会起本地 renderer
  * server 承载 UI，并把 `/api/*` 代理到该 origin——即 Desktop 与 Web 共用同一套
  * Conversation API（§0.8）。
  *
@@ -36,7 +36,7 @@ const ADMIN_BASE = "/admin/api";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const PLACEHOLDER_DIGEST = `sha256:${"0".repeat(64)}`;
-const captureUi = process.env.SNOW_CAPTURE_UI === "1";
+const captureUi = process.env.NEX_CAPTURE_UI === "1";
 const captureDir = resolve(process.cwd(), "output/workbench-default-hidden-design-qa");
 
 async function capture(window: Page, name: string): Promise<void> {
