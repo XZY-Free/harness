@@ -6,6 +6,7 @@
  * - snapshot：权限快照（缓存 5~15min）+ evaluate：快照本地匹配
  * - authorize：实时授权（变更/敏感操作；fail-closed）
  * - directory：用户目录读（分钟级缓存）
+ * - enterprise：企业用户上下文装配（agent 执行链；会话主体=目标用户）
  *
  * 约定：所有失败以 throw 传播（AuthCenterUnavailableError / null=会话无效），
  * 由执法点（lib/identity/authorization.ts 等薄壳）决定 fail-closed 语义。
@@ -56,3 +57,8 @@ export {
   clearDirectoryCache,
   lookupUsers,
 } from "./directory";
+export {
+  type WireEnterpriseUserContextCandidate,
+  EnterpriseContextRpcError,
+  fetchEnterpriseUserContext,
+} from "./enterprise";

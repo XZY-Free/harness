@@ -30,6 +30,15 @@ export const identityClientConfig = {
   get requestTimeoutMs(): number {
     return readPositiveInt("NEX_IDENTITY_TIMEOUT_MS", 5_000);
   },
+  /**
+   * 企业上下文装配请求超时（毫秒）。
+   *
+   * 需覆盖 auth-center 侧刷新等待上限（ENTERPRISE_PROFILE_REFRESH_WAIT_MAX_MS = 10s）
+   * 加网络缓冲——不能沿用默认 5s，否则刷新等待会被客户端先截断。
+   */
+  get enterpriseContextTimeoutMs(): number {
+    return readPositiveInt("NEX_IDENTITY_ENTERPRISE_TIMEOUT_MS", 15_000);
+  },
   /** 会话缓存最大条目（防泄漏）。 */
   get maxSessionEntries(): number {
     return readPositiveInt("NEX_IDENTITY_MAX_ENTRIES", 5_000);

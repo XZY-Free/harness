@@ -23,11 +23,13 @@ export interface AuthCenterResponse<T> {
 
 /**
  * 发起 auth-center 请求。
+ * @param options.timeoutMs 覆盖默认单次请求超时（如企业上下文装配的刷新等待）。
  * @throws AuthCenterUnavailableError 网络失败/超时/5xx
  */
 export async function requestAuthCenter<T>(
   path: string,
   init: RequestInit = {},
+  options: { timeoutMs?: number } = {},
 ): Promise<AuthCenterResponse<T>> {
   const url = `${identityClientConfig.baseUrl}${path}`;
   let response: Response;
@@ -38,7 +40,7 @@ export async function requestAuthCenter<T>(
         "content-type": "application/json",
         ...(init.headers ?? {}),
       },
-      signal: AbortSignal.timeout(identityClientConfig.requestTimeoutMs),
+      signal: AbortSignal.timeout(options.timeoutMs ?? identityClientConfig.requestTimeoutMs),
       cache: "no-store",
     });
   } catch (error) {

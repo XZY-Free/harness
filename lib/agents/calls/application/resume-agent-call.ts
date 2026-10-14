@@ -47,8 +47,10 @@ import {
   AgentTransportError,
 } from "@/lib/agents/calls/transport/agent-transport";
 import type { PlatformContextEnvironment } from "@/lib/context/enrichment/build-invocation-context-bundle";
+import { db } from "@/lib/db/client";
 import { loadEnterpriseUserAccessPolicy } from "@/lib/identity/enterprise-user-access-policy";
-import { getUserIdentityForTenant } from "@/lib/identity/user-identity-queries";
+import { userIdentity } from "@/lib/persistence/schema/identity";
+import { and, eq } from "drizzle-orm";
 
 /** resumeAgentCall 冻结 API 入参。 */
 export interface ResumeAgentCallCommand {
@@ -181,10 +183,18 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
     if (!env?.executionSubject || env.executionSubject.subjectType !== "user") {
       throw new AgentCallResumeError("resume 缺少可信用户主体", "context_missing");
     }
-    const currentIdentity = await getUserIdentityForTenant(
-      env.executionSubject.subjectId,
-      tenantId,
-    );
+    // 停用检查直读身份 stub（同库；权威在 auth-center——只读 status 列做前置快速失败，
+    // 与 mysql-agent-call-store 的绑定终稿复核口径一致）。
+    const [currentIdentity] = await db
+      .select({ status: userIdentity.status })
+      .from(userIdentity)
+      .where(
+        and(
+          eq(userIdentity.id, env.executionSubject.subjectId),
+          eq(userIdentity.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
     if (currentIdentity?.status === "disabled") {
       throw new AgentCallResumeError(
         "企业用户已停用，禁止恢复原 AgentCall",
