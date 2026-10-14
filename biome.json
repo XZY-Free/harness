@@ -1,9 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "organizeImports": { "enabled": true },
+  "organizeImports": {
+    "enabled": true
+  },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true }
+    "rules": {
+      "recommended": true
+    }
   },
   "formatter": {
     "enabled": true,
@@ -29,7 +33,8 @@
       "desktop/renderer-dist/**",
       "desktop/package-app/**",
       "output/**",
-      "release/**"
+      "release/**",
+      "tmp/**"
     ]
   },
   "overrides": [

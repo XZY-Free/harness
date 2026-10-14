@@ -22,7 +22,8 @@ export async function assertAgentSubjectPermission(
   };
   const decision =
     subject.subjectType === "user"
-      ? await checkActionScope(tenantId, subject.subjectId, request)
+      ? // 执行链授权恒走实时（fail-closed；快照 TTL 不覆盖运行期撤销）。
+        await checkActionScope(tenantId, subject.subjectId, request, { realtime: true })
       : checkServiceActionScope(subject.subjectId, request);
   if (!decision.allowed) throw new AgentCallPermissionError();
 }

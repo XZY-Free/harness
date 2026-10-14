@@ -1,3 +1,4 @@
+import { evaluateSnapshot, getSnapshot } from "@/lib/identity-client";
 /**
  * 统一管理后台导航可见性解析（S11-W01）。
  *
@@ -24,7 +25,6 @@
  * ```
  */
 import { ACTION_CODES, type ActionCode } from "@/lib/identity/action-codes";
-import { evaluatePermission, loadPermissionContext } from "@/lib/identity/permission-context";
 import type { Principal } from "@/lib/identity/resolver";
 
 /** 8 个一级菜单 ID（与 nav.tsx ITEMS 顺序一致）。 */
@@ -122,21 +122,22 @@ const ALL_HIDDEN: StudioNavVisibility = {
  * 计算 8 个一级菜单的可见性。
  *
  * 流程：
- * 先检查真实 studio.access，再按有效角色/范围计算菜单；任何异常全部隐藏。
+ * 先检查真实 studio.access（权限快照本地匹配），再按有效授权计算菜单；
+ * 任何异常全部隐藏（fail-closed）。
  */
 export async function computeStudioNavVisibility(
   principal: Principal,
 ): Promise<StudioNavVisibility> {
   try {
-    const context = await loadPermissionContext(principal.tenantId, principal.userIdentityId);
+    const snapshot = await getSnapshot(principal.tenantId, principal.userIdentityId);
     if (
-      !evaluatePermission(context, {
+      !evaluateSnapshot(snapshot, {
         actionCode: "studio.access",
         resource: { type: "tenant", id: principal.tenantId },
       }).allowed
     )
       return ALL_HIDDEN;
-    const allowedActions: ReadonlySet<string> = new Set(context.grants.map((g) => g.actionCode));
+    const allowedActions: ReadonlySet<string> = new Set(snapshot.grants.map((g) => g.actionCode));
 
     // 没有任何 action 绑定 → 全部隐藏（fail-closed）
     if (allowedActions.size === 0) {

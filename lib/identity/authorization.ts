@@ -1,36 +1,42 @@
 /**
- * 动作资源授权守卫。
+ * 动作资源授权守卫（消费方薄壳）。
  *
- * 事实源：
- * - docs/architecture/security.md §5
- * - docs/architecture/api-and-events.md §9
+ * nexharness 已不是授权权威：role/assignment/policy 数据与评测引擎都在 auth-center
+ * （消费方模型，见 docs/split 施工图 v4）。本模块保留历史签名，内部分两路：
  *
- * 服务端只依赖 action_code + resource_scope 判断；UI 菜单权限不能代替服务端 action_code。
- * - 空 allowlist、未知 action、无法解析 scope 全部拒绝（fail-closed）。
- * - 外部角色只通过 principal_binding 映射，不直接出现在业务判断分支。
- * - 管理员也不能读取 Credential 原值（由 route 层配合 Credential 不可见规则保证）。
+ * - **实时授权**（变更/敏感操作、显式 `realtime: true`、快照不可用时的兜底）：
+ *   auth-center `POST /api/authorize`，fail-closed。
+ * - **快照本地匹配**（默认路径，快照命中时）：auth-center 权限快照（提前展开的
+ *   允许清单）缓存在进程内，直接做清单匹配，不做角色模板推导。
  *
- * 身份分发：
- * - Principal（employee/admin audience）→ 查 role_action_binding。
- * - ServicePrincipal → 查 CI/CD 动作白名单（无 resource_scope 绑定）。
- * - WorkloadPrincipal（runtime/gateway）→ 不走 action scope（由 ExecutionBinding 约束）→ 拒绝。
+ * 覆盖投影 `resolveActionScopeCoverage` 恒走快照（导航/入口可见性）；快照不可用
+ * 时返回空覆盖（fail-closed，不误暴露入口）。
+ *
+ * 身份分发（不变）：
+ * - Principal（employee/admin）→ 上述两路。
+ * - ServicePrincipal → CI/CD 动作白名单（本地，无 resource_scope 绑定）。
+ * - WorkloadPrincipal（runtime/gateway）→ 不走 action scope → 拒绝。
  */
 import type { ApiErrorCode } from "@/lib/error-codes";
 import { apiError, generateRequestId } from "@/lib/http";
+import {
+  authorizeForUser,
+  coverageFromSnapshot,
+  evaluateSnapshot,
+  getSnapshot,
+  peekSnapshot,
+} from "@/lib/identity-client";
 import {
   type ActionCode,
   type ResourceScopeType,
   isKnownActionCode,
 } from "@/lib/identity/action-codes";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
-import type { ResourceScope } from "@/lib/identity/resource-scope";
-import { scopeCovers } from "@/lib/identity/resource-scope";
 import {
   type ServicePrincipal,
   isServiceActionAllowed,
   isServicePrincipal,
 } from "@/lib/identity/service-identity";
-import { evaluatePermission, loadPermissionContext } from "./permission-context";
 
 /** 授权检查请求：action_code + 目标资源。 */
 export interface ActionScopeRequest {
@@ -48,58 +54,38 @@ export interface ActionScopeCoverage {
   authorizationDigest: string;
 }
 
-/** 列表与单资源检查共用 evaluatePermission。 */
+/**
+ * 列表与单资源检查共用同一评测语义（快照本地匹配版）。
+ * 快照不可用时返回空覆盖（fail-closed；入口不显示、列表为空）。
+ */
 export async function resolveActionScopeCoverage(
   tenantId: string,
   userIdentityId: string,
   request: { actionCode: ActionCode; resourceType: ResourceScopeType },
 ): Promise<ActionScopeCoverage> {
-  const context = await loadPermissionContext(
-    tenantId,
-    userIdentityId,
-    undefined,
-    request.actionCode === "agent.invoke" ? "agent_catalog" : [],
-  );
-  const resourceIds = new Set<string>();
-  let wildcard = false;
-  if (context.active) {
-    for (const grant of context.grants) {
-      if (grant.actionCode !== request.actionCode) continue;
-      if (grant.resourceScope.type === request.resourceType) {
-        wildcard ||= grant.resourceScope.wildcard === true;
-        for (const id of grant.resourceScope.ids ?? []) resourceIds.add(id);
-      }
-      if (
-        request.actionCode === "agent.invoke" &&
-        request.resourceType === "agent" &&
-        grant.resourceScope.type === "tenant"
-      )
-        wildcard ||=
-          grant.resourceScope.wildcard === true ||
-          grant.resourceScope.ids?.includes(tenantId) === true;
-    }
-    if (request.resourceType === "agent" && request.actionCode === "agent.invoke") {
-      // 有明确策略的资源总是按策略检查，旧 wildcard 不得覆盖限制。
-      for (const agent of context.agents) {
-        if (
-          evaluatePermission(context, {
-            actionCode: request.actionCode,
-            resource: { type: "agent", id: agent.id },
-          }).allowed
-        )
-          resourceIds.add(agent.id);
-        else resourceIds.delete(agent.id);
-      }
-      wildcard = false;
-    }
+  try {
+    const snapshot = await getSnapshot(tenantId, userIdentityId);
+    const coverage = coverageFromSnapshot(snapshot, request);
+    return {
+      actionCode: request.actionCode,
+      resourceType: request.resourceType,
+      wildcard: coverage.wildcard,
+      resourceIds: coverage.resourceIds,
+      authorizationDigest: coverage.authorizationDigest,
+    };
+  } catch (error) {
+    console.error(
+      "[identity-client] 权限快照不可用，覆盖查询 fail-closed 返回空覆盖：",
+      error instanceof Error ? error.message : error,
+    );
+    return {
+      actionCode: request.actionCode,
+      resourceType: request.resourceType,
+      wildcard: false,
+      resourceIds: [],
+      authorizationDigest: "unavailable",
+    };
   }
-  return {
-    actionCode: request.actionCode,
-    resourceType: request.resourceType,
-    wildcard,
-    resourceIds: [...resourceIds].sort(),
-    authorizationDigest: context.digest,
-  };
 }
 
 /** 授权失败原因。 */
@@ -112,37 +98,49 @@ export type AuthorizationDenyReason =
 /**
  * 检查员工/管理员主体是否拥有 action scope。
  *
- * 流程：
- * 1. actionCode 不在稳定目录 → false（unknown_action）。
- * 2. 查用户当前有效的 role_action_binding → 空 → false（empty_allowlist）。
- * 3. 遍历绑定，解析 resource_scope → scopeCovers(request.resource) → true。
- * 4. 全部不匹配 → false（action_scope_denied）。
- *
- * @returns true=允许，false=拒绝
+ * @param options.realtime 强制走 auth-center 实时授权（变更/敏感操作、执行链）。
+ *   缺省时：快照命中（进程缓存且未过期）走本地清单匹配；未命中走实时授权。
  */
 export async function checkActionScope(
   tenantId: string,
   userIdentityId: string,
   request: ActionScopeRequest,
+  options: { realtime?: boolean } = {},
 ): Promise<{ allowed: boolean; reason?: AuthorizationDenyReason }> {
   // 未知 action 一律拒绝（fail-closed）。
   if (!isKnownActionCode(request.actionCode)) {
     return { allowed: false, reason: "unknown_action" };
   }
 
-  const context = await loadPermissionContext(tenantId, userIdentityId, undefined, [request]);
-  const result = evaluatePermission(context, request);
-  return result.allowed
-    ? { allowed: true }
-    : {
+  if (!options.realtime) {
+    const snapshot = peekSnapshot(tenantId, userIdentityId);
+    if (snapshot) {
+      const decision = evaluateSnapshot(snapshot, request);
+      if (decision.allowed) return { allowed: true };
+      return {
         allowed: false,
-        reason: context.grants.some((g) => g.actionCode === request.actionCode)
+        reason: snapshot.grants.some((g) => g.actionCode === request.actionCode)
           ? "action_scope_denied"
           : "empty_allowlist",
       };
+    }
+  }
+
+  try {
+    const result = await authorizeForUser(userIdentityId, [request]);
+    const decision = result.decisions[0];
+    if (!decision) return { allowed: false, reason: "action_scope_denied" };
+    return decision.allowed ? { allowed: true } : { allowed: false, reason: "action_scope_denied" };
+  } catch (error) {
+    console.error(
+      "[identity-client] 实时授权不可用，fail-closed 拒绝：",
+      error instanceof Error ? error.message : error,
+    );
+    return { allowed: false, reason: "action_scope_denied" };
+  }
 }
 
-/** Turn 选择 Agent 的正式服务端授权入口。 */
+/** Turn 选择 Agent 的正式服务端授权入口（实时）。 */
 export function requireAgentInvokeScope(
   principal: Principal | WorkloadPrincipal | ServicePrincipal,
   agentId: string,
@@ -158,11 +156,8 @@ export function requireAgentInvokeScope(
 /**
  * 检查 Service Identity 是否拥有 action scope。
  *
- * Service Identity 不走 role_action_binding（无 principal_binding）。
- * 授权由 CICD_SERVICE_ALLOWED_ACTIONS 白名单决定（workload-token.ts）。
- * 资源 scope 由 route 层单独校验（如 CI/CD 只能提交本项目的 attestation）。
- *
- * @returns true=允许（action 在白名单内），false=拒绝
+ * Service Identity 不走 principal 授权（无 principal_binding）。
+ * 授权由 CICD_SERVICE_ALLOWED_ACTIONS 白名单决定（本地 workload-token 模块）。
  */
 export function checkServiceActionScope(
   serviceId: string,
@@ -180,11 +175,8 @@ export function checkServiceActionScope(
 /**
  * 统一授权入口：根据主体类型分发检查，失败返回 403 ACTION_SCOPE_DENIED 响应。
  *
- * 用法：
- * ```ts
- * const r = await requireActionScope(principal, { actionCode: "agent.publish", resource: { type: "agent", id: agentId } }, requestId);
- * if (!r.ok) return r.response;
- * ```
+ * 员工/管理员主体恒走**实时授权**（这是执法点，不做快照缓存）——变更与
+ * 敏感操作 100% 实时、auth-center 不可达时 fail-closed。
  *
  * @param principal Principal、ServicePrincipal 或 WorkloadPrincipal
  * @param request action_code + resource
@@ -198,10 +190,12 @@ export async function requireActionScope(
   let result: { allowed: boolean; reason?: AuthorizationDenyReason };
 
   if ("userIdentityId" in principal) {
-    // Principal（employee/admin）
-    result = await checkActionScope(principal.tenantId, principal.userIdentityId, request);
+    // Principal（employee/admin）→ auth-center 实时授权。
+    result = await checkActionScope(principal.tenantId, principal.userIdentityId, request, {
+      realtime: true,
+    });
   } else if (isServicePrincipal(principal)) {
-    // CI/CD Service Identity
+    // CI/CD Service Identity → 本地白名单。
     result = checkServiceActionScope(principal.serviceId ?? "", request);
   } else {
     // runtime/gateway workload — 不走 action scope

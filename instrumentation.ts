@@ -22,12 +22,8 @@ export async function register() {
     loadAppEnvFiles(APP_ENV);
     assertRuntimeConfig();
 
-    // 企业用户模式必须在迁移、健康检查和请求服务前完成私有适配器装配；
-    // 开源主仓不提供具体目录连接器，也不自动回退默认适配器。
-    const { assertIdentityExtensionsReady } = await import(
-      "./lib/identity/identity-extension-bootstrap"
-    );
-    await assertIdentityExtensionsReady();
+    // 统一登录与企业用户目录已归 auth-center（消费方模型，见 docs/split 施工图 v4）：
+    // 本仓不再装配身份扩展，登录入口 302 到 auth-center，票据回跳由 middleware.ts 兑换。
 
     const { assertFileStorageReady } = await import("./lib/files/storage-bootstrap");
     await assertFileStorageReady();
