@@ -1,4 +1,4 @@
-# nexharness-client 拆分·前置改造实施记录（阶段③ 第 1 步）
+# nexharness-client 拆分实施记录（阶段③ · 前置改造 + 搬迁）
 
 - 日期：2026-10-14
 - 分支：`split/03-client`
@@ -59,6 +59,43 @@
 - **Studio 页面冒烟 25/25**（`tmp/studio-pages-smoke.mjs`）：未登录 → auth-center 跳转（returnTo 正确）；15 个页面渲染；建技能 → 详情页（新建 200 路径）；security/settings 外链指向 auth-center；/chat AuthGate 通过。
 - 回归：消费方联调 **9/9** · 收尾轮综合验证 **7/7**。
 
-## 下一步
+## 第 2 步：搬迁（2026-10-14 完成）
 
-合入 main → 动搬迁（`split/03-client` 第 2 步）：建 nexharness-client 新仓（Vite SPA）、搬迁 app 页层/组件/桌面/SDK、路由与数据层适配、桌面打包冒烟。
+**新仓**：`XZY-Free/nexharness-client`（public，全新历史，首提交 402c60f / 284 文件）。
+
+### 搬迁清单
+
+| 类别 | 内容 |
+|---|---|
+| Web 页层 | app/ 页面/布局/globals/图标 → `src/routes/`（react-router 路由表 src/app.tsx）+ `src/styles/globals.css` |
+| 组件 | components/ 全量（零改源） |
+| 客户端库 | lib/client、api-fetch、utils、i18n、control-plane-client（全量）、desktop 协议、identity-client 纯函数（evaluate + types）、action-codes、企业属性词表、branding 前端侧、runtime/thread-title 依赖链 |
+| 桌面 | desktop/ 全量（57 跟踪文件）+ 构建脚本 ×3 + vite.desktop.config.ts |
+| 资产 | public/brand、theme-init.js、图标 |
+
+### 关键适配（零改源策略）
+
+- **next shim 双解析**：`next/link`、`next/navigation` → `src/shims/`（Web 版基于 react-router；桌面沿用自有 shim），vite alias + tsconfig paths 同源，搬迁组件零 import 修改。
+- `use client` 保留（Vite 下无操作；rollup MODULE_LEVEL_DIRECTIVE 告警已静默）。
+- `process.env.NEXT_PUBLIC_NEX_BASE_PATH` 由 vite define 注入（与 NEX_BASE_PATH 同源）。
+- **postcss.config.mjs（@tailwindcss/postcss）随迁**——漏拷曾致首轮无样式（冒烟截图发现）；补配后 CSS 产物 8KB→148KB 全量。
+- 新增：ticket-exchange（引导期票据兑换）、runtime-config（auth-center 地址）、六个手写路由（login/not-found/route-error/studio-layout/studio-analytics/chat-thread）。
+- 删除 brand-initial.tsx（server 组件；SPA 用 BrandProvider 直挂）。
+
+### nexharness 侧收敛（API 服务化）
+
+- 删除 219 项（app 页层/组件/桌面/pub 资产/middleware/桌面脚本）+ control-plane-client fetch 面 5 项。
+- 保留（服务端值消费，两端各一份）：`lib/client`（activity 投影等）、`lib/control-plane-client/contracts`。
+- 新增 `app/api/session/exchange`；package.json 移除桌面 scripts 与 main 字段。
+- 验证：typecheck / lint / build 全绿（clean `.next`）。
+
+### 验证（全绿）
+
+- 客户端：typecheck / lint / build ✓；桌面 renderer 构建 ✓ + 桌面主进程 tsc ✓；**SPA 冒烟 15/15**（tmp/client-smoke.mjs：未登录跳转 → auth-center 登录 → 票据回跳 → exchange 落地 → chat/studio 全页 → 会话复用 → 未登录负向）。
+- CI：nexharness-client 1m13s 绿（run 38574527707）。
+
+### 备注
+
+- dev 联调：client `pnpm dev`（:5173，代理 nexharness :3210）；auth-center 允许名单需含 `http://localhost:5173`。
+- 桌面首次开发需 `pnpm approve-builds` 放行 electron/better-sqlite3 构建脚本（pnpm 10 默认拦截）。
+- 桌面打包冒烟（electron-builder / electron 实机启动）未在本轮执行，待补；nexharness 侧 drizzle/co 旧桌面引用已随迁移清理。
