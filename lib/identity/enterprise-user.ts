@@ -5,25 +5,22 @@
  * 不包含任何企业目录连接器、凭证或网络调用。
  */
 import { computeCanonicalDigest, rfc8785Canonicalize } from "@/lib/crypto/rfc-8785-canonicalize";
+import {
+  ENTERPRISE_ATTRIBUTE_CATALOG,
+  type EnterpriseAttributeDescriptor,
+  type EnterpriseAttributeKey,
+} from "@/lib/identity/enterprise-attribute-catalog";
 
-export const ENTERPRISE_ATTRIBUTE_KEYS = [
-  "employeeNo",
-  "departmentName",
-  "buName",
-  "jobName",
-  "sourceSetId",
+export {
+  ENTERPRISE_ATTRIBUTE_CATALOG,
+  ENTERPRISE_ATTRIBUTE_KEYS,
+} from "@/lib/identity/enterprise-attribute-catalog";
+export type {
+  EnterpriseAttributeDescriptor,
+  EnterpriseAttributeKey,
+  EnterpriseAttributeValueType,
+} from "@/lib/identity/enterprise-attribute-catalog";
 
-  "departmentCode",
-  "buCode",
-  "factoryCode",
-  "jobLevel",
-  "enterprisePermissions",
-  "dataScopes",
-  "authorizationGroups",
-] as const;
-
-export type EnterpriseAttributeKey = (typeof ENTERPRISE_ATTRIBUTE_KEYS)[number];
-export type EnterpriseAttributeValueType = "string" | "number" | "boolean" | "json";
 export type EnterpriseProfileStatus = "active" | "disabled";
 export type EnterpriseProfileValidationCode =
   | "enterprise_profile_incomplete"
@@ -31,107 +28,6 @@ export type EnterpriseProfileValidationCode =
   | "enterprise_profile_status_invalid"
   | "enterprise_profile_attribute_unknown"
   | "enterprise_profile_attribute_type_invalid";
-
-export interface EnterpriseAttributeDescriptor {
-  key: EnterpriseAttributeKey;
-  valueType: EnterpriseAttributeValueType;
-  sensitive: boolean;
-  agentProjectionAllowed: boolean;
-  includedInFingerprint: boolean;
-}
-
-/**
- * 首批固定目录。企业权限和数据范围是授权事实，永远不允许作为 Agent 字段投影。
- * 新字段必须伴随本目录、同步模型与投影策略的同一版本变更，不能由上游自由透传。
- */
-export const ENTERPRISE_ATTRIBUTE_CATALOG: Readonly<
-  Record<EnterpriseAttributeKey, EnterpriseAttributeDescriptor>
-> = {
-  departmentName: {
-    key: "departmentName",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  buName: {
-    key: "buName",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  jobName: {
-    key: "jobName",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  sourceSetId: {
-    key: "sourceSetId",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: false,
-    includedInFingerprint: true,
-  },
-  authorizationGroups: {
-    key: "authorizationGroups",
-    valueType: "json",
-    sensitive: true,
-    agentProjectionAllowed: false,
-    includedInFingerprint: true,
-  },
-  employeeNo: {
-    key: "employeeNo",
-    valueType: "string",
-    sensitive: true,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  departmentCode: {
-    key: "departmentCode",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  buCode: {
-    key: "buCode",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  factoryCode: {
-    key: "factoryCode",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  jobLevel: {
-    key: "jobLevel",
-    valueType: "string",
-    sensitive: false,
-    agentProjectionAllowed: true,
-    includedInFingerprint: true,
-  },
-  enterprisePermissions: {
-    key: "enterprisePermissions",
-    valueType: "json",
-    sensitive: true,
-    agentProjectionAllowed: false,
-    includedInFingerprint: true,
-  },
-  dataScopes: {
-    key: "dataScopes",
-    valueType: "json",
-    sensitive: true,
-    agentProjectionAllowed: false,
-    includedInFingerprint: true,
-  },
-};
 
 export interface EnterpriseUserProfileSnapshot {
   externalSubject: string;

@@ -61,6 +61,8 @@ export const API_ERROR_CODES = {
   EVENT_SEQUENCE_GAP: { http: 409, retryable: true },
   EXECUTION_OWNERSHIP_CHANGED: { http: 409, retryable: false },
   IDEMPOTENCY_CONFLICT: { http: 409, retryable: false },
+  /** : 身份中心（auth-center）不可用（fail-closed）。 */
+  IDENTITY_SERVICE_UNAVAILABLE: { http: 503, retryable: true },
   JOB_ALREADY_TERMINAL: { http: 409, retryable: false },
   JOB_INPUT_NO_LONGER_AVAILABLE: { http: 422, retryable: false },
   JOB_USER_ACTION_NOT_ALLOWED: { http: 409, retryable: false },

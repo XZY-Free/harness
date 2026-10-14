@@ -1,4 +1,5 @@
 import { getSkillById, getSkillVersionById, updateSkill } from "@/lib/capability/skill-queries";
+import { getSkillSyncInfo } from "@/lib/capability/skill-studio-queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import {
   hasStudioAction,
@@ -40,7 +41,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const currentVersion = sk.currentVersionId
     ? await getSkillVersionById({ tenantId, skillVersionId: sk.currentVersionId })
     : null;
-  return jsonOk({ skill: sk, currentVersion });
+  // 同步技能附同步绑定信息（详情页只读展示；本地技能恒 null）。
+  const syncInfo =
+    sk.sourceType === "capability_market" ? await getSkillSyncInfo(tenantId, id) : null;
+  return jsonOk({ skill: sk, currentVersion, syncInfo });
 }
 
 /**

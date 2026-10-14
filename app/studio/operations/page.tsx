@@ -1,12 +1,13 @@
-import { StudioGatePage } from "@/components/studio/gate-page";
+"use client";
+
 import { RouteActivationPanel } from "@/components/studio/route-activation-panel";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { hasStudioActionInAnyScope } from "@/lib/identity/studio-access";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
+import { useStudioContext } from "@/components/studio/studio-shell";
+import { snapshotAllowsAnyScope } from "@/lib/client/studio-permissions";
 
 /**
  * 统一管理后台 — 运营页。
@@ -17,14 +18,12 @@ import { requireStudioPagePermission } from "@/lib/studio/page-auth";
  * 事实源：
  * - docs/architecture/runtime-control-plane.md
  *   「运营」：使用量、成本、队列、配额、失败与服务水平
+ *
+ * 门禁由 StudioShell 承担；canManage 为快照轻量断言（服务端 RouteSet API 兜底）。
  */
-export const dynamic = "force-dynamic";
-
-export default async function OperationsPage() {
-  const gate = await requireStudioPagePermission("studio.access");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-
-  const canManageRoutes = await hasStudioActionInAnyScope(gate.principal, "route.update");
+export default function OperationsPage() {
+  const { snapshot } = useStudioContext();
+  const canManageRoutes = snapshotAllowsAnyScope(snapshot, "route.update");
 
   return (
     <StudioPage title="运营" description="管理员工侧智能体发布，并查看平台使用情况。" width="wide">

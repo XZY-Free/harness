@@ -1,14 +1,25 @@
+"use client";
+
+import { useApiData } from "@/components/hooks/use-api-data";
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { SkillCreator } from "@/components/studio/skill-creator";
 import { SkillSyncButton } from "@/components/studio/skill-sync-button";
 import { StudioPage } from "@/components/studio/studio-page";
+import { useStudioContext } from "@/components/studio/studio-shell";
 import { Badge } from "@/components/ui/badge";
-import { listSkillsWithSync } from "@/lib/capability/skill-studio-queries";
-import { hasStudioAction } from "@/lib/identity/studio-access";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
+import { snapshotAllowsTenantAction } from "@/lib/client/studio-permissions";
 import Link from "next/link";
 
-export const dynamic = "force-dynamic";
+/** /studio/api/skills?withSync=1 列表行（wire 形状，仅取展示所需字段）。 */
+interface SkillListWireRow {
+  readonly id: string;
+  readonly skillKey: string;
+  readonly displayName: string | null;
+  readonly sourceType: string;
+  readonly lifecycleState: string;
+  readonly syncState?: string | null;
+  readonly lastSyncedAt?: string | null;
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   local: "本地创建",
@@ -32,17 +43,19 @@ const SYNC_STATE_LABEL: Record<string, string> = {
   error: "同步失败",
 };
 
-export default async function SkillsPage() {
-  const gate = await requireStudioPagePermission("skill.read");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-
-  const canWrite = await hasStudioAction(gate.principal, "skill.write");
-  const skills = canWrite
-    ? await listSkillsWithSync(gate.principal.tenantId)
-    : await listSkillsWithSync(gate.principal.tenantId, {
-        ownerUserId: gate.principal.userIdentityId,
-        includePublic: true,
-      });
+/**
+ * Studio 技能列表页（页面数据 API 化）。
+ *
+ * - 数据来自 GET /studio/api/skills?withSync=1（owner 权限隔离在服务端；403 → 门禁页）。
+ * - skill.write 决定新建/同步入口显隐（快照轻量断言）。
+ */
+export default function SkillsPage() {
+  const { snapshot } = useStudioContext();
+  const canWrite = snapshotAllowsTenantAction(snapshot, "skill.write");
+  const { data, loading, httpStatus, errorMessage } = useApiData<SkillListWireRow[]>(
+    "/studio/api/skills?withSync=1",
+  );
+  const skills = data ?? [];
 
   return (
     <StudioPage
@@ -59,7 +72,18 @@ export default async function SkillsPage() {
       width="wide"
     >
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs">
-        {skills.length === 0 ? (
+        {httpStatus !== null ? (
+          <div className="px-5 py-6">
+            <StudioGatePage
+              status={httpStatus === 0 ? 500 : httpStatus}
+              message={errorMessage ?? "加载失败，请稍后重试"}
+            />
+          </div>
+        ) : loading ? (
+          <div className="px-5 py-12 text-center text-sm leading-6 text-muted-foreground">
+            正在加载…
+          </div>
+        ) : skills.length === 0 ? (
           <div
             data-slot="skills-empty-state"
             className="px-5 py-12 text-center text-sm leading-6 text-muted-foreground"
@@ -107,7 +131,7 @@ export default async function SkillsPage() {
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap text-muted-foreground">
                       {skill.lastSyncedAt
-                        ? skill.lastSyncedAt.toLocaleString("zh-CN", { hour12: false })
+                        ? new Date(skill.lastSyncedAt).toLocaleString("zh-CN", { hour12: false })
                         : "—"}
                     </td>
                   </tr>

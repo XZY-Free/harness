@@ -1,3 +1,6 @@
+"use client";
+
+import { useApiData } from "@/components/hooks/use-api-data";
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { PromptDiff } from "@/components/studio/prompt-diff";
 import { SkillDeleteButton } from "@/components/studio/skill-delete-button";
@@ -9,13 +12,44 @@ import {
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { getSkillById } from "@/lib/capability/skill-queries";
-import { getSkillSyncInfo, listSkillVersions } from "@/lib/capability/skill-studio-queries";
-import { hasStudioAction } from "@/lib/identity/studio-access";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
-import { notFound } from "next/navigation";
+import { useStudioContext } from "@/components/studio/studio-shell";
+import { snapshotAllowsTenantAction } from "@/lib/client/studio-permissions";
+import { useParams } from "next/navigation";
 
-export const dynamic = "force-dynamic";
+/** GET /studio/api/skills/[id] 响应（wire 形状）。 */
+interface SkillDetailWire {
+  skill: {
+    id: string;
+    skillKey: string;
+    displayName: string | null;
+    description: string | null;
+    sourceType: string;
+    lifecycleState: string;
+    visibilityScope: string;
+    currentVersionId: string | null;
+  };
+  currentVersion: unknown;
+  syncInfo: {
+    syncState: string;
+    remoteAssetId: string;
+    remoteName: string | null;
+    remoteDisplayName: string | null;
+    remoteVersion: string | null;
+    remoteContentHash: string | null;
+    lastSyncedAt: string | null;
+    lastError: string | null;
+  } | null;
+}
+
+/** GET /studio/api/skills/[id]/versions 行（wire 形状）。 */
+interface SkillVersionWire {
+  readonly id: string;
+  readonly versionNo: number;
+  readonly revisionState: string;
+  readonly createdAt: string;
+  readonly contentRef: string | null;
+  readonly manifestJson: unknown;
+}
 
 const LIFECYCLE_LABEL: Record<string, string> = {
   draft: "草稿",
@@ -30,24 +64,46 @@ const VISIBILITY_LABEL: Record<string, string> = {
   owner: "仅负责人可见",
 };
 
-export default async function SkillDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const gate = await requireStudioPagePermission("skill.read");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
+/**
+ * Studio 技能详情页（页面数据 API 化）。
+ *
+ * - 数据来自 GET /studio/api/skills/[id] 与 /versions（服务端 skill.read 守卫；403 → 门禁页）。
+ * - skill.write 决定写入口显隐（快照轻量断言）；同步技能只读（服务端兜底）。
+ */
+export default function SkillDetailPage() {
+  const { snapshot } = useStudioContext();
+  const params = useParams<{ id: string }>();
+  const id = params?.id ?? "";
+  const canWrite = snapshotAllowsTenantAction(snapshot, "skill.write");
 
-  const { tenantId } = gate.principal;
-  const { id } = await params;
-  const skill = await getSkillById({ tenantId, skillId: id });
-  if (!skill) notFound();
+  const detail = useApiData<SkillDetailWire>(`/studio/api/skills/${id}`);
+  const versionsState = useApiData<SkillVersionWire[]>(`/studio/api/skills/${id}/versions`);
 
-  const versions = await listSkillVersions(tenantId, id);
-  const canWrite = await hasStudioAction(gate.principal, "skill.write");
+  if (detail.httpStatus === 404) {
+    return <StudioGatePage status={404} message="技能不存在或已删除。" />;
+  }
+  if (detail.httpStatus !== null && detail.httpStatus !== 404) {
+    return (
+      <StudioGatePage
+        status={detail.httpStatus === 0 ? 500 : detail.httpStatus}
+        message={detail.errorMessage ?? "加载失败，请稍后重试"}
+      />
+    );
+  }
+  if (detail.loading || !detail.data) {
+    return (
+      <StudioPage title="技能" description="正在加载…" width="wide">
+        <div className="rounded-xl border border-border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
+          正在加载…
+        </div>
+      </StudioPage>
+    );
+  }
+
+  const { skill, syncInfo } = detail.data;
+  const versions = versionsState.data ?? [];
   const isSynced = skill.sourceType === "capability_market";
   const effectiveCanWrite = canWrite && !isSynced;
-  const syncInfo = isSynced ? await getSkillSyncInfo(tenantId, id) : null;
 
   return (
     <StudioPage
@@ -89,7 +145,7 @@ export default async function SkillDetailPage({
               remoteContentHash={syncInfo.remoteContentHash}
               lastSyncedAt={
                 syncInfo.lastSyncedAt
-                  ? syncInfo.lastSyncedAt.toLocaleString("zh-CN", { hour12: false })
+                  ? new Date(syncInfo.lastSyncedAt).toLocaleString("zh-CN", { hour12: false })
                   : null
               }
               lastError={syncInfo.lastError}

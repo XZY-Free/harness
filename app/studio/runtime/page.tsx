@@ -1,26 +1,25 @@
-import { StudioGatePage } from "@/components/studio/gate-page";
+"use client";
+
 import { RuntimeControlPanel } from "@/components/studio/runtime-control-panel";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsLinkRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { hasStudioActionInAnyScope } from "@/lib/identity/studio-access";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
+import { useStudioContext } from "@/components/studio/studio-shell";
+import { snapshotAllowsAnyScope } from "@/lib/client/studio-permissions";
 
 /**
  * 统一管理后台 — Runtime 治理页（07 §10/§11）。
  *
- * 替换 S11-W01 占位：接入 Runtime/RuntimeRevision 发布治理控制面板；
+ * 接入 Runtime/RuntimeRevision 发布治理控制面板；
  * Route 操作按 07 §12 优先复用已有 DeploymentRoute/Activation UI，仅提供跳转。
+ *
+ * 门禁由 StudioShell 承担；canPublish 为快照轻量断言（服务端 RuntimeRevision API 兜底）。
  */
-export const dynamic = "force-dynamic";
-
-export default async function RuntimePage() {
-  const gate = await requireStudioPagePermission("studio.access");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-
-  const canPublish = await hasStudioActionInAnyScope(gate.principal, "runtime.publish");
+export default function RuntimePage() {
+  const { snapshot } = useStudioContext();
+  const canPublish = snapshotAllowsAnyScope(snapshot, "runtime.publish");
 
   return (
     <StudioPage

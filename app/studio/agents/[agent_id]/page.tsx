@@ -1,51 +1,143 @@
+"use client";
+
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioPage } from "@/components/studio/studio-page";
+import { useStudioContext } from "@/components/studio/studio-shell";
+import { apiFetch } from "@/lib/api-fetch";
 import {
-  loadAgentContractSnapshotsByAgent,
-  projectAgentContractWire,
-} from "@/lib/agents/application/submit-agent-contract-registration";
-import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
-import { getAgentById } from "@/lib/agents/persistence/agent-queries";
-import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
-import type { AgentContractSnapshotDTO } from "@/lib/control-plane-client";
-import { hasStudioAction } from "@/lib/identity/studio-access";
-import { listEnabledRouteProjections } from "@/lib/routes/application/deployment-route-service";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
+  snapshotAllowsAgentAction,
+  snapshotAllowsTenantAction,
+} from "@/lib/client/studio-permissions";
+import {
+  type AgentContractSnapshotDTO,
+  type AgentDTO,
+  type AgentRevisionDTO,
+  ControlPlaneRequestError,
+  createControlPlaneClient,
+} from "@/lib/control-plane-client";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-export const dynamic = "force-dynamic";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
-export default async function AgentDetailsPage({
-  params,
-}: { params: Promise<{ agent_id: string }> }) {
-  const gate = await requireStudioPagePermission("studio.access");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-  const { agent_id: id } = await params;
+const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
+
+/** 修订的接口需求（只读展示用；wire JSON）。 */
+interface InterfaceRequirements {
+  enterprise_user_context?: { allowed_fields?: string[]; profile_requirement?: string };
+  host_controls?: { confirmation_action_keys?: string[] };
+}
+
+interface AgentDetailData {
+  readonly agent: AgentDTO;
+  readonly contract: AgentContractSnapshotDTO | null;
+  readonly revision: AgentRevisionDTO | null;
+  readonly routeCount: number;
+}
+
+type LoadState =
+  | { status: "loading" }
+  | { status: "denied"; message: string }
+  | { status: "not_found" }
+  | { status: "error"; message: string }
+  | { status: "ok"; data: AgentDetailData };
+
+/**
+ * 智能体详情页（页面数据 API 化）。
+ *
+ * 数据来源：
+ * - GET /admin/api/agents/[id]（agent）+ /revisions + /contracts（control-plane-client）
+ * - GET /admin/api/deployment-routes?target_kind=agent（发布配置计数）
+ * - 权限判定走权限快照轻量断言（canRead / canConfigure / canManageAccess；服务端 API 兜底）。
+ */
+export default function AgentDetailsPage() {
+  const { principal, snapshot, authCenterBaseUrl } = useStudioContext();
+  const params = useParams<{ agent_id: string }>();
+  const id = params?.agent_id ?? "";
   const canRead =
-    (await hasStudioAction(gate.principal, "agent.read")) ||
-    (await hasStudioAction(gate.principal, "agent.read", { type: "agent", id }));
-  if (!canRead) return <StudioGatePage status={403} message="当前账号不能查看这个智能体。" />;
-  const agent = await getAgentById(gate.principal.tenantId, id);
-  if (!agent || agent.deletedAt) notFound();
-  const [snapshots, revision, routes, canConfigure] = await Promise.all([
-    loadAgentContractSnapshotsByAgent(mysqlAgentContractStore, gate.principal.tenantId, id),
-    agent.currentRevisionId ? getRevisionById(agent.currentRevisionId) : null,
-    listEnabledRouteProjections(gate.principal.tenantId, id, "default"),
-    hasStudioAction(gate.principal, "agent.revision.create", { type: "agent", id }),
-  ]);
-  const contracts = snapshots.map(
-    (snapshot) => projectAgentContractWire(snapshot) as unknown as AgentContractSnapshotDTO,
-  );
-  const contract =
-    contracts.find((item) => item.snapshot_id === revision?.agentContractSnapshotId) ??
-    contracts[0] ??
-    null;
-  const requirements = revision?.agentInterfaceRequirementsJson as
-    | {
-        enterprise_user_context?: { allowed_fields?: string[]; profile_requirement?: string };
-        host_controls?: { confirmation_action_keys?: string[] };
+    snapshotAllowsTenantAction(snapshot, "agent.read") ||
+    (id !== "" && snapshotAllowsAgentAction(snapshot, "agent.read", id));
+  const canConfigure =
+    id !== "" && snapshotAllowsAgentAction(snapshot, "agent.revision.create", id);
+
+  const [state, setState] = useState<LoadState>({ status: "loading" });
+
+  useEffect(() => {
+    if (!id) return;
+    if (!canRead) {
+      setState({ status: "denied", message: "当前账号不能查看这个智能体。" });
+      return;
+    }
+    let active = true;
+    setState({ status: "loading" });
+    void (async () => {
+      try {
+        const agent = await client.agents.get(id);
+        const [contractsResponse, routesResponse] = await Promise.all([
+          client.agents.listContracts(id),
+          apiFetch(
+            `/admin/api/deployment-routes?target_kind=agent&agent_id=${encodeURIComponent(id)}&scope_key=default`,
+            { cache: "no-store" },
+          )
+            .then(async (response) =>
+              response.ok ? ((await response.json()) as { items?: unknown[] }) : null,
+            )
+            .catch(() => null),
+        ]);
+        let revision: AgentRevisionDTO | null = null;
+        if (agent.current_revision_id) {
+          revision = await client.agents.getRevision(agent.current_revision_id).catch(() => null);
+        }
+        if (!active) return;
+        const contracts = contractsResponse.items;
+        const contract =
+          contracts.find((item) => item.snapshot_id === revision?.agent_contract_snapshot_id) ??
+          contracts[0] ??
+          null;
+        setState({
+          status: "ok",
+          data: { agent, contract, revision, routeCount: routesResponse?.items?.length ?? 0 },
+        });
+      } catch (error) {
+        if (!active) return;
+        const httpStatus = error instanceof ControlPlaneRequestError ? error.status : 0;
+        if (httpStatus === 404) {
+          setState({ status: "not_found" });
+          return;
+        }
+        if (httpStatus === 401) {
+          setState({ status: "error", message: "登录状态已失效，请刷新后重新登录。" });
+          return;
+        }
+        setState({ status: "error", message: "加载失败，请稍后重试。" });
       }
-    | undefined;
+    })();
+    return () => {
+      active = false;
+    };
+  }, [id, canRead]);
+
+  if (state.status === "loading") {
+    return (
+      <StudioPage title="智能体" width="wide">
+        <div className="rounded-xl border border-border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
+          正在加载…
+        </div>
+      </StudioPage>
+    );
+  }
+  if (state.status === "denied") {
+    return <StudioGatePage status={403} message={state.message} />;
+  }
+  if (state.status === "not_found") {
+    return <StudioGatePage status={404} message="智能体不存在或已删除。" />;
+  }
+  if (state.status === "error") {
+    return <StudioGatePage status={500} message={state.message} />;
+  }
+
+  const { agent, contract, revision, routeCount } = state.data;
+  const requirements = (revision?.agent_interface_requirements ??
+    null) as InterfaceRequirements | null;
   const labels: Record<string, string> = {
     employeeNo: "员工编号",
     departmentCode: "部门编号",
@@ -54,14 +146,13 @@ export default async function AgentDetailsPage({
     jobLevel: "职级",
   };
   const canManageAccess =
-    agent.ownerUserId === gate.principal.userIdentityId ||
-    (await hasStudioAction(gate.principal, "user.manage"));
+    agent.owner_user_id === principal.id || snapshotAllowsTenantAction(snapshot, "user.manage");
   const fields = requirements?.enterprise_user_context?.allowed_fields ?? [];
-  const authCenterBase = (process.env.NEX_AUTH_CENTER_URL ?? "").replace(/\/+$/, "");
-  const accessConsoleUrl = authCenterBase ? `${authCenterBase}/console/agents/${id}` : "";
+  const accessConsoleUrl = authCenterBaseUrl ? `${authCenterBaseUrl}/console/agents/${id}` : "";
+
   return (
     <StudioPage
-      title={agent.displayName}
+      title={agent.display_name}
       width="wide"
       actions={
         canConfigure ? (
@@ -84,9 +175,9 @@ export default async function AgentDetailsPage({
         <div>
           <h2 className="text-sm text-muted-foreground">登记状态</h2>
           <p className="mt-2 font-medium">
-            {agent.lifecycleState === "disabled"
+            {agent.lifecycle_state === "disabled"
               ? "已停用"
-              : agent.lifecycleState === "retired"
+              : agent.lifecycle_state === "retired"
                 ? "已退役"
                 : "已登记"}
           </p>
@@ -94,14 +185,14 @@ export default async function AgentDetailsPage({
         <div>
           <h2 className="text-sm text-muted-foreground">使用设置</h2>
           <p className="mt-2 font-medium">
-            {revision ? `第 ${revision.revisionNo} 版 · 已保存` : "尚未设置"}
+            {revision ? `第 ${revision.revision_no} 版 · 已保存` : "尚未设置"}
           </p>
         </div>
         <div>
           <h2 className="text-sm text-muted-foreground">员工使用入口</h2>
-          <p className="mt-2 font-medium">{routes.length ? "已提交发布配置" : "尚未发布"}</p>
+          <p className="mt-2 font-medium">{routeCount ? "已提交发布配置" : "尚未发布"}</p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            {routes.length
+            {routeCount
               ? "发布配置已存在，员工目录及实际连接是否可用仍需验证。"
               : "完成服务连接并发布后，员工才能通过平台使用。"}
           </p>
@@ -201,7 +292,7 @@ export default async function AgentDetailsPage({
         <dl className="mt-4 space-y-3 text-sm">
           <div>
             <dt>服务标识</dt>
-            <dd className="mt-1 break-all text-muted-foreground">{agent.agentKey}</dd>
+            <dd className="mt-1 break-all text-muted-foreground">{agent.agent_key}</dd>
           </div>
           <div>
             <dt>服务版本</dt>
@@ -218,7 +309,7 @@ export default async function AgentDetailsPage({
           <div>
             <dt>最近更新</dt>
             <dd className="mt-1 text-muted-foreground">
-              {agent.updatedAt.toLocaleString("zh-CN")}
+              {agent.updated_at ? new Date(agent.updated_at).toLocaleString("zh-CN") : "—"}
             </dd>
           </div>
         </dl>

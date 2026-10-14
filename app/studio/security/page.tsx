@@ -1,11 +1,12 @@
-import { StudioGatePage } from "@/components/studio/gate-page";
+"use client";
+
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsLinkRow,
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
+import { useStudioContext } from "@/components/studio/studio-shell";
 
 /**
  * 统一管理后台 — 安全与审计页（S11-W01 整合）。
@@ -17,14 +18,13 @@ import { requireStudioPagePermission } from "@/lib/studio/page-auth";
  * 事实源：
  * - docs/architecture/runtime-control-plane.md
  *   「安全与审计」：Policy、Permission、Credential 引用、Effect、Audit 和事件处置
+ *
+ * 门禁（studio.access）由 StudioShell 统一承担（页面数据 API 化）；
+ * auth-center 管理台地址来自 /studio/api/context（服务端环境注入）。
  */
-export const dynamic = "force-dynamic";
-
-export default async function SecurityPage() {
-  const gate = await requireStudioPagePermission("studio.access");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-  const authCenterBase = (process.env.NEX_AUTH_CENTER_URL ?? "").replace(/\/+$/, "");
-  const authCenterConsoleUrl = authCenterBase ? `${authCenterBase}/console/settings` : "";
+export default function SecurityPage() {
+  const { authCenterBaseUrl } = useStudioContext();
+  const authCenterConsoleUrl = authCenterBaseUrl ? `${authCenterBaseUrl}/console/settings` : "";
 
   return (
     <StudioPage

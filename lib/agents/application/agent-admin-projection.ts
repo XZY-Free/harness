@@ -84,5 +84,7 @@ export async function loadAgentRevisionAdminProjection(
     ineligibility_reasons: eligibility.ineligibilityReasons,
     created_at: revision.createdAt.toISOString(),
     published_at: revision.publishedAt?.toISOString() ?? null,
+    agent_interface_requirements:
+      (revision.agentInterfaceRequirementsJson as Record<string, unknown> | null) ?? null,
   };
 }

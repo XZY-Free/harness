@@ -1,10 +1,8 @@
-import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
  * 统一管理后台 — 观测与评测页（S11-W01 占位）。
@@ -15,13 +13,10 @@ import { requireStudioPagePermission } from "@/lib/studio/page-auth";
  * 事实源：
  * - docs/architecture/runtime-control-plane.md
  *   「观测与评测」：Event、Trace、Observation、Evaluation、实验和告警
+ *
+ * 门禁（studio.access）由 StudioShell 统一承担（页面数据 API 化）。
  */
-export const dynamic = "force-dynamic";
-
-export default async function ObservabilityPage() {
-  const gate = await requireStudioPagePermission("studio.access");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-
+export default function ObservabilityPage() {
   const unavailable = (
     <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">尚未开放</span>
   );

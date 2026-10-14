@@ -1,10 +1,8 @@
-import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsLinkRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
  * 统一管理后台 — 能力与知识页（S11-W01 占位）。
@@ -16,13 +14,10 @@ import { requireStudioPagePermission } from "@/lib/studio/page-auth";
  * 事实源：
  * - docs/architecture/runtime-control-plane.md
  *   「能力与知识」：Skill、Tool、Knowledge、模型、连接、来源和风险变化
+ *
+ * 门禁（studio.access）由 StudioShell 统一承担（页面数据 API 化）。
  */
-export const dynamic = "force-dynamic";
-
-export default async function CapabilitiesPage() {
-  const gate = await requireStudioPagePermission("studio.access");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-
+export default function CapabilitiesPage() {
   return (
     <StudioPage title="能力与知识" description="管理员工工作时可以使用的技能与智能体。">
       <StudioSettingsSection title="可用能力">

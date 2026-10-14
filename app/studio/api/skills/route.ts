@@ -6,7 +6,7 @@ import {
   setCurrentSkillVersion,
   updateSkill,
 } from "@/lib/capability/skill-queries";
-import { listSkills } from "@/lib/capability/skill-studio-queries";
+import { listSkills, listSkillsWithSync } from "@/lib/capability/skill-studio-queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { buildSkillMd } from "@/lib/skill/frontmatter";
@@ -33,9 +33,15 @@ export async function GET(req: NextRequest) {
   if (!r.ok) return r.response;
   const { tenantId, userIdentityId } = r.principal;
   const isSkillAdmin = await hasStudioAction(r.principal, "skill.write");
+  // withSync=1：附同步绑定信息（Studio 技能列表页）；旧调用方不带参数，行为不变。
+  const withSync = req.nextUrl.searchParams.get("withSync") === "1";
   const skills = isSkillAdmin
-    ? await listSkills(tenantId)
-    : await listSkills(tenantId, { ownerUserId: userIdentityId, includePublic: true });
+    ? withSync
+      ? await listSkillsWithSync(tenantId)
+      : await listSkills(tenantId)
+    : withSync
+      ? await listSkillsWithSync(tenantId, { ownerUserId: userIdentityId, includePublic: true })
+      : await listSkills(tenantId, { ownerUserId: userIdentityId, includePublic: true });
   return jsonOk(skills);
 }
 

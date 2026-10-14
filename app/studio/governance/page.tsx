@@ -1,25 +1,43 @@
+"use client";
+
+import { useApiData } from "@/components/hooks/use-api-data";
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { GovernanceEditor } from "@/components/studio/governance-editor";
 import { StudioPage } from "@/components/studio/studio-page";
-import { loadGovernanceConfigFromDB } from "@/lib/governance/governance-repository";
-import { hasStudioAction } from "@/lib/identity/studio-access";
-import { requireStudioPagePermission } from "@/lib/studio/page-auth";
+import { useStudioContext } from "@/components/studio/studio-shell";
+import { snapshotAllowsTenantAction } from "@/lib/client/studio-permissions";
+
+/** /studio/api/governance GET 响应（wire 形状，与编辑器 props 对齐）。 */
+interface GovernanceWire {
+  set: { versionNo: number };
+  config: {
+    protectedPaths: string[];
+    commandDenyList: string[];
+    formatOnWrite: boolean;
+    verifyBeforeDelivery: boolean;
+    harnessLoopLimits?: {
+      maxLoopSteps?: number;
+      maxAgentCalls?: number;
+      maxToolCalls?: number;
+      maxKnowledgeSearches?: number;
+      maxConsecutiveSameAction?: number;
+    };
+  };
+  revision: { revisionNo: number; publishedAt: string | null };
+}
 
 /**
- * Studio Governance 配置页（关口02 02-6 · 冻结方案 §29 / §54-P2）。
+ * Studio Governance 配置页（关口02 02-6 · 冻结方案 §29 / §54-P2 · 页面数据 API 化）。
  *
- * - policy.read 即可查看当前生效 Governance 配置（fail-closed 读取，绝不回退默认值）。
- * - governance.config.publish 时渲染可编辑表单；保存走 PUT + If-Match/ETag（§33）。
- * server component 取 DB current published config + 判定写权限，传给 client。
+ * - policy.read 即可查看当前生效 Governance 配置（接口 fail-closed，绝不回退默认值；403 → 门禁页）。
+ * - governance.config.publish 时渲染可编辑表单（快照轻量断言）；保存走 PUT + If-Match/ETag（§33）。
+ * - server component 直读已移除：数据来自 GET /studio/api/governance。
  */
-export const dynamic = "force-dynamic";
-
-export default async function GovernancePage() {
-  const gate = await requireStudioPagePermission("policy.read");
-  if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
-
-  const canWrite = await hasStudioAction(gate.principal, "governance.config.publish");
-  const loaded = await loadGovernanceConfigFromDB(gate.principal.tenantId);
+export default function GovernancePage() {
+  const { snapshot } = useStudioContext();
+  const canWrite = snapshotAllowsTenantAction(snapshot, "governance.config.publish");
+  const { data, loading, httpStatus, errorMessage } =
+    useApiData<GovernanceWire>("/studio/api/governance");
 
   return (
     <StudioPage
@@ -32,13 +50,24 @@ export default async function GovernancePage() {
     >
       <section aria-label="保护规则" className="space-y-3">
         <h2 className="px-0.5 text-sm font-semibold text-foreground">保护规则</h2>
-        <GovernanceEditor
-          initialConfig={loaded.config}
-          initialVersionNo={loaded.set.versionNo}
-          canWrite={canWrite}
-          revisionNo={loaded.revision.revisionNo}
-          publishedAt={loaded.revision.publishedAt?.toISOString() ?? null}
-        />
+        {httpStatus !== null ? (
+          <StudioGatePage
+            status={httpStatus === 0 ? 500 : httpStatus}
+            message={errorMessage ?? "加载失败，请稍后重试"}
+          />
+        ) : loading || !data ? (
+          <div className="rounded-xl border border-border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
+            正在加载…
+          </div>
+        ) : (
+          <GovernanceEditor
+            initialConfig={data.config}
+            initialVersionNo={data.set.versionNo}
+            canWrite={canWrite}
+            revisionNo={data.revision.revisionNo}
+            publishedAt={data.revision.publishedAt}
+          />
+        )}
       </section>
     </StudioPage>
   );

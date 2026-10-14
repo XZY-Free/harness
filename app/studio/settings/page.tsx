@@ -1,22 +1,24 @@
+"use client";
+
 import { AppearanceSetting } from "@/components/studio/appearance-setting";
 import { StudioPage } from "@/components/studio/studio-page";
 import {
   StudioSettingsRow,
   StudioSettingsSection,
 } from "@/components/studio/studio-settings-section";
+import { useStudioContext } from "@/components/studio/studio-shell";
 
 /**
  * Agent Studio Settings 页（消费方模型 v4 改造）。
  *
  * 成员与权限（用户 / 角色 / 授权解释器）已整体迁移至统一身份中心 auth-center
  * 的控制台（/console/settings）——本页保留浏览器本地的外观偏好，并为成员与
- * 权限提供跳转入口。页面不再持有任何身份数据与门禁逻辑（权威在 auth-center）。
+ * 权限提供跳转入口。页面不再持有任何身份数据（权威在 auth-center）；
+ * auth-center 管理台地址来自 /studio/api/context（服务端环境注入）。
  */
-export const dynamic = "force-dynamic";
-
 export default function SettingsPage() {
-  const authCenterBase = (process.env.NEX_AUTH_CENTER_URL ?? "").replace(/\/+$/, "");
-  const consoleUrl = authCenterBase ? `${authCenterBase}/console/settings` : "";
+  const { authCenterBaseUrl } = useStudioContext();
+  const consoleUrl = authCenterBaseUrl ? `${authCenterBaseUrl}/console/settings` : "";
 
   return (
     <StudioPage

@@ -67,6 +67,8 @@ export interface AgentRevisionDTO {
   ineligibility_reasons: string[];
   created_at: string;
   published_at: string | null;
+  /** 绑定的接口需求（企业用户上下文 allowed_fields / host controls 等只读展示用；可为 null）。 */
+  agent_interface_requirements: Record<string, unknown> | null;
 }
 
 /** AgentRevision 列表响应。 */

@@ -1,4 +1,5 @@
-import { evaluateSnapshot, getSnapshot } from "@/lib/identity-client";
+import { evaluateSnapshot } from "@/lib/identity-client/evaluate";
+import type { PermissionSnapshot } from "@/lib/identity-client/snapshot";
 /**
  * 统一管理后台导航可见性解析（S11-W01）。
  *
@@ -8,24 +9,14 @@ import { evaluateSnapshot, getSnapshot } from "@/lib/identity-client";
  * 「后台信息架构」8 个一级导航：智能体 / 能力与知识 / 会话与协作 / Runtime 与环境 /
  * 观测与评测 / 安全与审计 / 运营 / 平台设置
  *
- * 职责：
- * - 给定 Principal，批量查询其 role_action_binding，按 8 个一级菜单的 action 集合
- * 计算可见性。
- * - 任何一个关联 action 允许 → 该菜单可见（"任意匹配"语义）。
- * - 运营沿用审计导出权限；平台设置与页面门禁统一使用 user.manage。
+ * 消费方模型 v4：可见性由**权限快照**（auth-center 预展开清单）本地投影——
+ * `navVisibilityFromSnapshot` 为纯函数（/studio/api/context 接口消费）。
  *
  * 安全边界：
  * - 菜单可见性只是 UX 层，不能代替服务端 Action Scope 校验（每个写 API 仍走 requireActionScope）。
  * - 解析失败 fail-closed：异常时所有菜单隐藏（避免误暴露）。
- *
- * 使用：
- * ```ts
- * const visibility = await computeStudioNavVisibility(principal);
- * if (visibility.agents) <Link href="/studio/agents">智能体</Link>
- * ```
  */
-import { ACTION_CODES, type ActionCode } from "@/lib/identity/action-codes";
-import type { Principal } from "@/lib/identity/resolver";
+import type { ActionCode } from "@/lib/identity/action-codes";
 
 /** 8 个一级菜单 ID（与 nav.tsx ITEMS 顺序一致）。 */
 export const STUDIO_NAV_IDS = [
@@ -96,17 +87,6 @@ export interface StudioNavVisibility {
   readonly settings: boolean;
 }
 
-const ALL_VISIBLE: StudioNavVisibility = {
-  agents: true,
-  capabilities: true,
-  conversations: true,
-  runtime: true,
-  observability: true,
-  security: true,
-  operations: true,
-  settings: true,
-};
-
 const ALL_HIDDEN: StudioNavVisibility = {
   agents: false,
   capabilities: false,
@@ -119,24 +99,21 @@ const ALL_HIDDEN: StudioNavVisibility = {
 };
 
 /**
- * 计算 8 个一级菜单的可见性。
+ * 由权限快照投影 8 个一级菜单可见性（纯函数，不做 IO）。
  *
- * 流程：
- * 先检查真实 studio.access（权限快照本地匹配），再按有效授权计算菜单；
- * 任何异常全部隐藏（fail-closed）。
+ * 流程：先检查真实 studio.access（快照本地匹配），再按有效授权计算菜单；
+ * 快照 inactive / 无绑定 / 异常时全部隐藏（fail-closed）。
  */
-export async function computeStudioNavVisibility(
-  principal: Principal,
-): Promise<StudioNavVisibility> {
+export function navVisibilityFromSnapshot(snapshot: PermissionSnapshot): StudioNavVisibility {
   try {
-    const snapshot = await getSnapshot(principal.tenantId, principal.userIdentityId);
     if (
       !evaluateSnapshot(snapshot, {
         actionCode: "studio.access",
-        resource: { type: "tenant", id: principal.tenantId },
+        resource: { type: "tenant", id: snapshot.tenantId },
       }).allowed
-    )
+    ) {
       return ALL_HIDDEN;
+    }
     const allowedActions: ReadonlySet<string> = new Set(snapshot.grants.map((g) => g.actionCode));
 
     // 没有任何 action 绑定 → 全部隐藏（fail-closed）
@@ -160,23 +137,7 @@ export async function computeStudioNavVisibility(
     }
     return result;
   } catch {
-    // 查询失败 fail-closed，所有菜单隐藏
+    // 投影失败 fail-closed，所有菜单隐藏
     return ALL_HIDDEN;
   }
-}
-
-/**
- * 检查单个菜单项是否可见（用于子页 / API 校验时复用）。
- *
- * 注意：此函数只查可见性，不替代服务端 Action Scope 校验。
- * 写操作仍需调用 requireActionScope。
- */
-export async function isNavVisible(principal: Principal, navId: StudioNavId): Promise<boolean> {
-  const visibility = await computeStudioNavVisibility(principal);
-  return visibility[navId];
-}
-
-/** 调试用：返回所有合法 ActionCode（仅供测试与文档）。 */
-export function getAllKnownActionCodes(): readonly ActionCode[] {
-  return ACTION_CODES;
 }
