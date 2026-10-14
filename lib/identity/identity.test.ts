@@ -676,7 +676,7 @@ describe("local-authentication", () => {
     // 旧的 <12 长度校验会误拒这类合规密码，正是前端提示 8–128 却在设密提交时被卡的 UAT 断点。
     const completed = await completePasswordEnrollment({
       headers: setupHeaders,
-      password: "Nex2026",
+      password: "Nexa2026",
     });
     expect(completed.status).toBe("authenticated");
   });
