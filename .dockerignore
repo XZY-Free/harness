@@ -6,7 +6,6 @@ out
 output
 release
 tmp
-test-results
 *.tsbuildinfo
 .playwright-cli
 .nex

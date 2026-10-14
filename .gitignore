@@ -1,8 +1,5 @@
 node_modules
 .next/
-# e2e 隔离构建产物（见 next.config.ts 的 NEX_DIST_DIR）
-.next-e2e/
-.next-fresh-db/
 out/
 build
 .DS_Store
@@ -15,11 +12,10 @@ yarn-error.log*
 .env
 .env*.local
 
-coverage
 next-env.d.ts
 tsconfig.tsbuildinfo
 
-# 上游参考源（只读参考，不纳入本仓库；仓库地址见 docs/02-开发计划与源码清单.md）
+# 上游参考源（只读参考，不纳入本仓库）
 upstreams/
 # 预览运行时工作区（运行时生成的用户项目，仅根目录；勿匹配 app/studio/workspaces 路由目录）
 /workspaces/
@@ -43,39 +39,18 @@ desktop/dist/
 desktop/release/
 /release/
 
-# 基准测试输出（临时产物，不提交）
-benchmark-reports/
-
-# Playwright 临时产物（trace / screenshot / video / 测试报告）
-test-results/
+# 本地工具状态
 .playwright-cli/
-playwright-report/
 
-# ─── 文档与方案文件（仅推送工程代码，不上传方案 / 审计 / 设计文档）───
-# docs/ 整个目录：架构、方案、审计报告、周报等
+# ─── 文档（本地留存，不入库）───
 docs/
-# 例外（受版本管理，需 git add -f，因为父目录已排除）：
-#   docs/topic-01/evidence/ 下的受控基线 —— 验证计划、验收矩阵、schema 证据、
-#   测试清单、跳过用例受控允许清单 skipped-test-registry.json，
-#   以及 scripts/ 下的验收脚本本身。
-#   docs/contracts/scripts/contract_rules.py —— contracts:verify 与契约测试依赖
-#   的规则模块（与同目录 generate_openapi.py / validate_contracts.py 同为验收入口）。
-#   docs/V12/02/snowharness-execution-design/schema-dictionary.json —— fresh-db
-#   阶段「四方 Schema 对比」的权威设计字典。
-# 本地产物（流程自身重写，不得入库）：验收结果与跳过用例记录。
-docs/topic-01/evidence/artifacts/
 # 散落在其他目录的方案 / 调试 / 记忆文档
 .debug/
-.omc/
 .workbuddy/
 .codebuddy/
-# 根目录设计 QA 方案
-design-qa.md
 # 截图 / 临时产物 / 临时 SQL
 output/
 tmp/
-# 关口02 本地临时 vitest 配置与编译缓存
-.tmp-writable/
 
 # 任何纯文本文档与 Office 文档（防止方案 / 笔记误传）
 *.txt
