@@ -94,8 +94,27 @@
 - 客户端：typecheck / lint / build ✓；桌面 renderer 构建 ✓ + 桌面主进程 tsc ✓；**SPA 冒烟 15/15**（tmp/client-smoke.mjs：未登录跳转 → auth-center 登录 → 票据回跳 → exchange 落地 → chat/studio 全页 → 会话复用 → 未登录负向）。
 - CI：nexharness-client 1m13s 绿（run 38574527707）。
 
+### 桌面打包冒烟（2026-10-14 补做，完成）
+
+- **工具链打通**：`pnpm.onlyBuiltDependencies`（electron/better-sqlite3/esbuild）声明后，
+  `pnpm rebuild electron` 装配二进制（本地 @electron/get 缓存命中 43.4.1，零下载；electron 版本
+  精确固定 43.4.1 对齐原仓）。
+- **全链验证**：`build:desktop`（renderer + main/preload esbuild + package-app 组装）
+  → `rebuild:desktop-native`（better-sqlite3 v13 N-API prebuilt 直接兼容 electron 43，免重建）
+  → `electron-builder`（mac arm64 未签名测试包：dmg/zip 142M + blockmap；`electronDist` 本地复用）。
+- **实机启动冒烟**：打包产物 `.app` 启动存活 12s、无严重错误、日志零告警。
+  （受限沙箱环境需 `--no-sandbox`；真实桌面环境不受影响。）
+- **两处修复**（客户端仓 ae5815d）：
+  1. `build-desktop.mjs` 补 app-icon.icns 复制（main 以 `__dirname/../app-icon.icns` 加载，
+     esbuild 产物不含静态资源——原仓既有告警）；
+  2. `window.ts` 窗口 icon 按平台条件化——macOS 由 .app bundle 决定（icon 仅 Windows/Linux
+     有效），且 Electron nativeImage 不支持 ic12/PNG 编码的新版 icns 解码，macOS 下不传。
+- **边界**：`fs.Stats constructor is deprecated` 弃用告警来自依赖侧（electron 主进程 node 集成），
+  非本项目代码；签名/公证链（CSC_LINK / APPLE_ID 等）待正式发布时配置。
+
 ### 备注
 
 - dev 联调：client `pnpm dev`（:5173，代理 nexharness :3210）；auth-center 允许名单需含 `http://localhost:5173`。
-- 桌面首次开发需 `pnpm approve-builds` 放行 electron/better-sqlite3 构建脚本（pnpm 10 默认拦截）。
-- 桌面打包冒烟（electron-builder / electron 实机启动）未在本轮执行，待补；nexharness 侧 drizzle/co 旧桌面引用已随迁移清理。
+- 桌面首次开发需放行 electron/better-sqlite3 构建脚本（pnpm 10 默认拦截；已用
+  `pnpm.onlyBuiltDependencies` 固化，无需手动 approve-builds）。
+- nexharness 侧 drizzle/co 旧桌面引用已随迁移清理。
