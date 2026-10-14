@@ -1,9 +1,8 @@
 {
   "name": "nexharness",
   "version": "0.1.0",
-  "description": "NexHarness Web and macOS desktop client",
+  "description": "NexHarness 智能体运行层（API 服务；Web/Desktop 客户端见 XZY-Free/nexharness-client）",
   "author": "NexHarness Contributors",
-  "main": "desktop/bundle/main/index.js",
   "private": true,
   "scripts": {
     "build:workspace-lock": "node scripts/build-workspace-lock.mjs",
@@ -32,13 +31,7 @@
     "worker:runtime-dispatch-retry": "tsx scripts/workers/runtime-dispatch-retry-worker.ts",
     "worker:tool-execution": "tsx scripts/workers/tool-execution-worker.ts",
     "worker:start": "tsx scripts/workers/worker-entrypoint.ts",
-    "routes:rebuild-eligibility": "tsx scripts/routes-rebuild-eligibility.ts",
-    "dev:desktop": "pnpm build:desktop && pnpm rebuild:desktop-native && electron desktop/package-app",
-    "build:desktop": "pnpm build:desktop-renderer && tsc -p desktop/tsconfig.json && node scripts/build-desktop.mjs",
-    "build:desktop-renderer": "node scripts/build-desktop-renderer.mjs",
-    "rebuild:desktop-native": "node scripts/rebuild-desktop-native.mjs",
-    "package:desktop": "pnpm build:desktop && pnpm rebuild:desktop-native && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config desktop/electron-builder.yml --mac --arm64",
-    "package:desktop:signed": "pnpm build:desktop && pnpm rebuild:desktop-native && electron-builder --config desktop/electron-builder.yml --mac --arm64"
+    "routes:rebuild-eligibility": "tsx scripts/routes-rebuild-eligibility.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.50",

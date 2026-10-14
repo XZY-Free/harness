@@ -1,4 +1,14 @@
-import type { WorkspacePanelView } from "@/components/workspace-panel/types";
+/**
+ * 工作区面板视图（原 @/components/workspace-panel/types；组件层已迁至
+ * nexharness-client，两端为同一联合同步维护：
+ * nexharness-client/components/workspace-panel/types.ts）。
+ */
+type WorkspacePanelView =
+  | { kind: "artifact"; artifactId: string; title?: string }
+  | { kind: "app" }
+  | { kind: "preview"; url: string; title?: string }
+  | { kind: "file"; path: string; title?: string }
+  | { kind: "progress"; title?: string };
 
 /**
  * V5-D1：会话产物选择规则。
