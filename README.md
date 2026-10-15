@@ -34,7 +34,7 @@ client (Web SPA / Desktop)          auth-center (身份权威)
 
 `lib/runtime/harness-loop/` 是智能体主循环：每步由模型输出**一个结构化行动**（`HARNESS_NEXT_ACTION`），平台执行后回灌观测：
 
-- 行动类型：`tool_call` / `agent_call` / `agent_resume` / `knowledge_search` / `request_user_input` / 最终回复
+- 行动类型（`HARNESS_ACTION_TYPES`）：`knowledge.search` / `tool.call` / `agent.call` / `agent.resume` / `request_user_input` / `respond`
 - 循环上限可配（`maxLoopSteps` / `maxAgentCalls` / `maxToolCalls` / `maxKnowledgeSearches`）
 - 能力目录（capability catalog）约束可调用的工具与 Agent，模型不得编造工具或观测
 - `request_user_input` 受可信身份拦截：员工身份由宿主可信上下文提供，禁止向用户索要工号 / 密码 / 令牌
@@ -63,7 +63,7 @@ client (Web SPA / Desktop)          auth-center (身份权威)
 
 ## 技术栈
 
-- **框架**：Next.js 16（App Router，仅 Route Handler：`/api`、`/gateway`、`/runtime`、`/studio/api`、`/admin/api`）
+- **框架**：Next.js 16（App Router，仅 Route Handler：`/api`、`/gateway`、`/runtime`、`/preview`、`/studio/api`、`/admin/api`）
 - **AI**：Vercel AI SDK 6 + `@ai-sdk/openai-compatible`（OpenAI 兼容端点）
 - **DB**：MySQL + Drizzle ORM（`mysql2` 驱动，`DATABASE_URL`）
 - **运行时隔离**：Docker（容器模式）/ 宿主进程（host 模式，rlimit + sandbox）
@@ -128,15 +128,17 @@ Worker：`pnpm worker:start` 或各 `pnpm worker:*`（见下）。
 | `NEX_CHAT_MODEL` / `NEX_TITLE_MODEL` | | 模型名 |
 | `NEX_REASONING_EFFORT` / `NEX_MAX_OUTPUT_TOKENS` | | 模型推理参数 |
 | `NEX_AUTH_CENTER_URL` | | auth-center 地址（登录跳转 / 会话校验 / 授权） |
-| `NEX_WORKSPACES_DIR` | | 工作区根目录（默认 `workspaces`） |
 | `NEX_CONTROL_PLANE_PUBLIC_URL` | | External Runtime 场景下平台网关回调基地址 |
 | `NEX_CONTEXT_HANDLE_SECRET` | | context_handle HMAC 签名密钥（生产必填，≥32 字符） |
+| `NEXHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET` / `WORKLOAD_SIGNING_KEY_ID` | | Workload Token 签发密钥与 key id（fail-closed） |
+| `NEX_WORKSPACES_DIR` | | 工作区根目录（默认 `workspaces`） |
+| `NEX_FILE_IMAGE_UPLOAD_MAX_MB` / `NEX_FILE_DOCUMENT_UPLOAD_MAX_MB` | | 图片 / 文档上传上限 |
 
-运行时 / 部署 / secret（可选，不配则功能降级）：`RUNTIME_DEFAULT_TYPE`、`RUNTIME_IMAGE`、`RUNTIME_MEMORY_LIMIT`、`RUNTIME_CPUS`、`RUNTIME_NETWORK_POLICY`、`RUNTIME_NETWORK_ALLOWLIST`、`SECRET_MASTER_KEY`（未配置 → secretMount fail-closed）、`DEPLOY_CICD_*` 等；完整清单见 `.env.example`。
+运行时 / 部署（可选，不配则功能降级）：`RUNTIME_DEFAULT`（`host` / `container`）、`RUNTIME_NETWORK_POLICY`、`RUNTIME_QUOTA_*`（CPU / 内存 / 磁盘 / 超时 / 句柄 / PID 上限）、`RUNTIME_DEGRADE_ON_DOCKER_UNAVAILABLE`、`DEPLOY_CICD_WEBHOOK_URL` / `DEPLOY_CICD_STATUS_URL` / `DEPLOY_ENVIRONMENTS` 等；完整清单见 `.env.example` 与 `lib/config.ts`。
 
 ## 说明
 
 - **认证**：消费方模型——本仓不建账号；管理员由 auth-center 侧 `auth:bootstrap-admin` 初始化，本仓经 `NEX_AUTH_CENTER_URL` 校验会话。
 - **Worker**：入口 `scripts/workers/`（`hosted-provisioning` / `workspace-host` / `control-plane-outbox` / `runtime-dispatch-retry` / `tool-execution` / `environment-lease-cleanup`），生产以 `pnpm worker:start` 或各 `worker:*` 运行。
-- **目录**：`app/`（Route Handler：`/api`、`/gateway`、`/runtime`、`/studio/api`、`/admin/api`）、`lib/`（运行内核 / 控制面 / 身份消费 / 持久化等）、`drizzle/`（迁移）、`scripts/`（构建、worker 与运维脚本）、`docker/`（运行时镜像）、`deploy/`（部署材料）。
+- **目录**：`app/`（Route Handler：`/api`、`/gateway`、`/runtime`、`/preview`、`/studio/api`、`/admin/api`）、`lib/`（运行内核 / 控制面 / 身份消费 / 持久化等）、`drizzle/`（迁移）、`scripts/`（构建、worker 与运维脚本）、`docker/`（运行时镜像）、`deploy/`（部署材料）。
 - **验证口径**（阶段①b 清场后）：`typecheck` / `lint` / `build` / 冒烟；CI 为最简四步。
