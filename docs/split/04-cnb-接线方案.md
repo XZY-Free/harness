@@ -96,6 +96,10 @@
 
 ## 9. 企业侧缺口分析（2026-10-15 复核发现 · 切换日硬前置）
 
+> **更新（2026-10-15 晚）：G1–G5 代码侧已解决** —— 企业能力已移植到三仓 `enterprise/private-hr-integration` 分支
+> （nexharness Nacos/COS/身份拦截；auth-center 企业 SSO；client 资料恢复/桌面认证），本地启动冒烟通过。
+> 详见 `05-企业线对齐记录.md`。剩余为部署侧项（框架仓条目扩容 / Nacos yaml 映射），随切换日执行。
+
 复核「企业私有分支（`enterprise/private-hr-integration`）→ 拆分后三仓」的能力对齐，确认以下缺口必须在切换日之前解决，否则企业版能力上线即缺失：
 
 | # | 缺口 | 现状 | 影响 |
