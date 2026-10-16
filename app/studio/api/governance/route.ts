@@ -8,7 +8,7 @@ import {
   GovernanceVersionConflictError,
   publishGovernanceConfig,
 } from "@/lib/governance/publish-governance-config";
-import { ETAG_HEADER, getRequestId, jsonError, jsonOk, parseIfMatch } from "@/lib/http";
+import { ETAG_HEADER, apiSuccess, getRequestId, jsonError, parseIfMatch } from "@/lib/http";
 import { actorFromPrincipal } from "@/lib/identity/audit";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import type { GovernanceConfig } from "@/lib/persistence/schema/governance-config";
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     throw err;
   }
 
-  return jsonOk(
+  return apiSuccess(
     {
       set: {
         id: loaded.set.id,
@@ -110,7 +110,7 @@ export async function PUT(req: NextRequest) {
       actor: actorFromPrincipal(principal),
       requestId,
     });
-    return jsonOk(
+    return apiSuccess(
       {
         set: {
           id: result.set.id,

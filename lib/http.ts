@@ -8,7 +8,7 @@
  * - X-Request-ID 透传或平台生成；RFC 3339 UTC 时间；不透明 cursor；资源隐藏式 404。
  * - 可编辑资源 PUT/PATCH 用 ETag/If-Match，冲突 412。
  *
- * 下方 `jsonOk`/`jsonError`/`omitThreadSecrets` 供尚未迁移到 v1 envelope 的旧路由使用，
+ * 下方 `jsonError`/`omitThreadSecrets` 供尚未迁移到 v1 envelope 的旧路由使用，
  * 新路由必须使用 `apiSuccess`/`apiError` 出口。
  */
 import { type ApiErrorCode, errorDefinition } from "@/lib/error-codes";
@@ -161,15 +161,10 @@ export function decodeCursor(cursor: string): unknown {
 }
 
 // ---------------------------------------------------------------------------
-// 旧路由出口（尚未迁移到 v1 envelope 的路由使用）。新 v1 路由禁止使用。
+// 待迁移出口（成功响应已全部迁至 apiSuccess；剩余旧路由错误出口待迁移）。
 // ---------------------------------------------------------------------------
 
-/** 旧路由信封，新 v1 路由用 apiSuccess。 */
-export function jsonOk<T>(data: T, init?: ResponseInit): Response {
-  return Response.json({ ok: true, data }, init);
-}
-
-/** 旧路由信封，新 v1 路由用 apiError。 */
+/** 旧路由错误信封，新 v1 路由用 apiError。 */
 export function jsonError(status: number, code: string, message: string): Response {
   return Response.json({ ok: false, error: { code, message } }, { status });
 }

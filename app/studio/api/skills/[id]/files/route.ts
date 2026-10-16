@@ -1,5 +1,5 @@
 import { getSkillById } from "@/lib/capability/skill-queries";
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
 import { SkillRepoError, listSkillFiles, readSkillFile, writeSkillFile } from "@/lib/skill/repo";
@@ -21,9 +21,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (path) {
       const content = await readSkillFile(sk.skillKey, path);
       if (content === null) return jsonError(404, "file_not_found", "文件不存在");
-      return jsonOk({ path, content });
+      return apiSuccess({ path, content });
     }
-    return jsonOk({ files: await listSkillFiles(sk.skillKey) });
+    return apiSuccess({ files: await listSkillFiles(sk.skillKey) });
   } catch (e) {
     return jsonError(400, "invalid_path", (e as Error).message);
   }
@@ -57,5 +57,5 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (e instanceof SkillRepoError) return jsonError(400, "invalid_path", e.message);
     return jsonError(500, "write_failed", (e as Error).message);
   }
-  return jsonOk({ path });
+  return apiSuccess({ path });
 }

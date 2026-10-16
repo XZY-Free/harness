@@ -3,7 +3,7 @@ import {
   getSkillVersionById,
   setCurrentSkillVersion,
 } from "@/lib/capability/skill-queries";
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
@@ -82,5 +82,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
     return jsonError(500, "audit_failed", "审计写入失败");
   }
-  return jsonOk({ skillId: id, currentVersionId: versionId });
+  return apiSuccess({ skillId: id, currentVersionId: versionId });
 }

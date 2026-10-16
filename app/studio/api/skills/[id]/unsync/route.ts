@@ -1,6 +1,6 @@
 import { getSkillById, updateSkill } from "@/lib/capability/skill-queries";
 import { getSyncBindingByLocalSkill, updateSyncBinding } from "@/lib/capability/skill-sync-queries";
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import type { NextRequest } from "next/server";
@@ -52,5 +52,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch {
     /* 审计非关键 */
   }
-  return jsonOk({ skillId: id, status: "archived" });
+  return apiSuccess({ skillId: id, status: "archived" });
 }

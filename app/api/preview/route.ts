@@ -5,7 +5,7 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { getRequestId, jsonError, jsonOk, resourceNotFound } from "@/lib/http";
+import { apiSuccess, getRequestId, jsonError, resourceNotFound } from "@/lib/http";
 import { resolveRuntimes } from "@/lib/runtime/registry";
 
 /**
@@ -50,13 +50,13 @@ export async function POST(request: Request) {
     const preview = resolveRuntimes(threadId).preview;
     if (action === "stop") {
       await preview.stop(threadId);
-      return jsonOk({ status: "idle" });
+      return apiSuccess({ status: "idle" });
     }
     const handle = await preview.start(threadId);
     const url = apiPath(
       handle.kind === "static" ? `/preview/${threadId}/index.html` : `/preview/${threadId}/`,
     );
-    return jsonOk({ status: "ready", url });
+    return apiSuccess({ status: "ready", url });
   } catch (error) {
     // P2-3:不回显 err.message,防泄露内部信息。
     return jsonError(500, "preview_failed", "预览启动失败");

@@ -4,7 +4,7 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { getRequestId, jsonError, jsonOk, resourceNotFound } from "@/lib/http";
+import { apiSuccess, getRequestId, jsonError, resourceNotFound } from "@/lib/http";
 import {
   WorkspacePathError,
   WorkspaceRevisionConflict,
@@ -110,13 +110,13 @@ export async function GET(
       return jsonError(404, "file_not_found", "文件不存在");
     }
     if (stat.size > MAX_SERVE_SIZE) {
-      return jsonOk({ path: relPath, content: null, stat, too_large: true });
+      return apiSuccess({ path: relPath, content: null, stat, too_large: true });
     }
     const content = await readWorkspaceFile(threadId, relPath);
     if (content === null) {
       return jsonError(404, "file_not_found", "文件不存在");
     }
-    return jsonOk({ path: relPath, content, stat });
+    return apiSuccess({ path: relPath, content, stat });
   } catch (error) {
     if (error instanceof WorkspacePathError) {
       return jsonError(400, "invalid_path", error.message);
@@ -193,7 +193,7 @@ export async function PUT(
       body.content,
       expectedRevision,
     );
-    return jsonOk({ path: relPath, stat });
+    return apiSuccess({ path: relPath, stat });
   } catch (error) {
     if (error instanceof WorkspaceRevisionConflict) {
       // 409：携带当前内容与 revision，供前端 diff/merge

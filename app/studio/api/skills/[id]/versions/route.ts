@@ -6,7 +6,7 @@ import {
   setCurrentSkillVersion,
 } from "@/lib/capability/skill-queries";
 import { listSkillVersions } from "@/lib/capability/skill-studio-queries";
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
 import { SkillRepoError, commitSkillVersion, getSkillHeadSha } from "@/lib/skill/repo";
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!r.ok) return r.response;
   const { tenantId } = r.principal;
   const { id } = await params;
-  return jsonOk(await listSkillVersions(tenantId, id));
+  return apiSuccess(await listSkillVersions(tenantId, id));
 }
 
 /**
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!swapped) {
       return jsonError(409, "version_conflict", "skill 当前版本已被并发修改,请刷新后重试");
     }
-    return jsonOk({
+    return apiSuccess({
       skillId: id,
       versionId: existing.id,
       version: existing.versionNo,
@@ -127,5 +127,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch {
     /* 审计非关键路径，不阻断 */
   }
-  return jsonOk({ skillId: id, versionId: version.id, version: version.versionNo, commitSha });
+  return apiSuccess({ skillId: id, versionId: version.id, version: version.versionNo, commitSha });
 }

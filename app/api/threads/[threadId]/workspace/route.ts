@@ -4,7 +4,7 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { getRequestId, jsonError, jsonOk, resourceNotFound } from "@/lib/http";
+import { apiSuccess, getRequestId, jsonError, resourceNotFound } from "@/lib/http";
 import { WorkspacePathError, listWorkspaceFiles } from "@/lib/workspace";
 import type { NextRequest } from "next/server";
 
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ thre
 
   try {
     const files = await listWorkspaceFiles(threadId, { skipInternal: true });
-    return jsonOk({ threadId: threadId, files });
+    return apiSuccess({ threadId: threadId, files });
   } catch (error) {
     if (error instanceof WorkspacePathError) {
       return jsonError(400, "invalid_path", error.message);

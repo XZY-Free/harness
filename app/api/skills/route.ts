@@ -1,4 +1,4 @@
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { getSkillProvider } from "@/lib/skill/provider";
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   try {
     const summaries = await getSkillProvider().listAvailableSkills(tenantId);
     const visible = summaries.filter((s) => s.uiVisible);
-    return jsonOk(
+    return apiSuccess(
       visible.map((s) => ({
         id: s.skillId,
         name: s.displayName || s.name,
@@ -42,6 +42,6 @@ export async function GET(request: NextRequest) {
     logger.warn("[/api/skills] 拉取可用 Skill 失败，返回空列表", {
       error: error instanceof Error ? error.message : String(error),
     });
-    return jsonOk([]);
+    return apiSuccess([]);
   }
 }

@@ -7,7 +7,7 @@ import {
   updateSkill,
 } from "@/lib/capability/skill-queries";
 import { listSkills, listSkillsWithSync } from "@/lib/capability/skill-studio-queries";
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { buildSkillMd } from "@/lib/skill/frontmatter";
 import {
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     : withSync
       ? await listSkillsWithSync(tenantId, { ownerUserId: userIdentityId, includePublic: true })
       : await listSkills(tenantId, { ownerUserId: userIdentityId, includePublic: true });
-  return jsonOk(skills);
+  return apiSuccess(skills);
 }
 
 /**
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
   } catch {
     /* 审计非关键路径，不阻断 */
   }
-  return jsonOk({ skillId: sk.id, versionId: version.id, commitSha });
+  return apiSuccess({ skillId: sk.id, versionId: version.id, commitSha });
 }
 
 function defaultSkillBody(name: string): string {

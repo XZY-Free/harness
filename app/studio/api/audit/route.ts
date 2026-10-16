@@ -1,4 +1,4 @@
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import {
   STUDIO_AUDIT_ACTIONS,
@@ -44,5 +44,5 @@ export async function GET(req: NextRequest) {
     targetId,
     action: action as StudioAuditAction | undefined,
   });
-  return jsonOk({ logs });
+  return apiSuccess({ logs });
 }

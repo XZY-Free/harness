@@ -1,5 +1,5 @@
 import { capabilityMarketConfig } from "@/lib/config";
-import { jsonError, jsonOk } from "@/lib/http";
+import { apiSuccess, jsonError } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { type SyncResult, runSync } from "@/lib/skill/sync/sync-service";
@@ -67,5 +67,5 @@ export async function POST(req: NextRequest) {
   } catch {
     /* 审计非关键 */
   }
-  return jsonOk(result);
+  return apiSuccess(result);
 }

@@ -4,7 +4,7 @@ import {
   parseBrandPatch,
 } from "@/lib/branding/brand-contract";
 import { getBrandStore } from "@/lib/branding/brand-store";
-import { apiError, getRequestId, jsonOk } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
@@ -27,7 +27,7 @@ export async function PUT(req: NextRequest): Promise<Response> {
   try {
     const patch = parseBrandPatch(body);
     const snapshot = await getBrandStore().update(patch, guarded.principal.userIdentityId);
-    return jsonOk({ brand: snapshot.contract, pinned: snapshot.pinned, etag: snapshot.etag });
+    return apiSuccess({ brand: snapshot.contract, pinned: snapshot.pinned, etag: snapshot.etag });
   } catch (error) {
     if (error instanceof BrandFieldPinnedError) {
       return apiError("BRAND_FIELD_PINNED", error.message, { requestId });
