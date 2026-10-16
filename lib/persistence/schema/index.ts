@@ -39,7 +39,6 @@ export * from "@/lib/persistence/schema/governance-config";
 export * from "@/lib/persistence/schema/idempotency";
 export * from "@/lib/persistence/schema/identity";
 export * from "@/lib/persistence/schema/job";
-export * from "@/lib/persistence/schema/knowledge";
 export * from "@/lib/persistence/schema/memory";
 export * from "@/lib/persistence/schema/permission";
 export * from "@/lib/persistence/schema/projection";
