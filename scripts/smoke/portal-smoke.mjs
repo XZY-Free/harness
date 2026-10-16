@@ -60,7 +60,7 @@ async function resolveTicket(ticket) {
 async function main() {
   await new Promise((resolve) => consumer.listen(3299, resolve));
   console.log("consumer target listening on :3299");
-  console.log(`\n== auth-center 门户浏览器冒烟 ==\n`);
+  console.log("\n== auth-center 门户浏览器冒烟 ==\n");
 
   const browser = await chromium.launch();
   const context = await browser.newContext();
