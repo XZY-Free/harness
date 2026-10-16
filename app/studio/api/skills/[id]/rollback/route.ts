@@ -3,7 +3,7 @@ import {
   getSkillVersionById,
   setCurrentSkillVersion,
 } from "@/lib/capability/skill-queries";
-import { apiSuccess, jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
@@ -21,6 +21,7 @@ import type { NextRequest } from "next/server";
  * 审计写失败 → 500 audit_failed（Known gap：version 可能已切换）。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
   const { tenantId, userIdentityId: actorUserId } = r.principal;
@@ -28,15 +29,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body = (await req.json().catch(() => ({}))) as { versionId?: string };
   const { versionId } = body;
-  if (!versionId) return jsonError(400, "missing_version", "缺少 versionId");
+  if (!versionId) return apiError("MISSING_REQUIRED_FIELD", "缺少 versionId", { requestId });
 
   const sk = await getSkillById({ tenantId, skillId: id });
-  if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
+  if (!sk) return apiError("SKILL_NOT_FOUND", "skill 不存在", { requestId });
   // P1-5: owner 隔离——非 admin 仅能回滚自己 ownerUserId 的 skill
-  const denied = await assertSkillWriteAccess(sk, r.principal);
+  const denied = await assertSkillWriteAccess(sk, r.principal, requestId);
   if (denied) return denied;
   // 02 文档 §7.2：同步 Skill 只读,拒绝回滚版本
-  const synced = rejectSyncedSkillWrite(sk);
+  const synced = rejectSyncedSkillWrite(sk, requestId);
   if (synced) return synced;
   const ver = await getSkillVersionById({ tenantId, skillVersionId: versionId });
   if (!ver || ver.skillId !== id) {
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         error: String(auditError),
       });
     }
-    return jsonError(404, "version_not_found", "版本不存在或不属于该 skill");
+    return apiError("SKILL_VERSION_NOT_FOUND", "版本不存在或不属于该 skill", { requestId });
   }
   // P1-14: CAS——仅当 currentVersionId 仍是读取时的值才回滚,防并发 publish/rollback 互覆盖
   const swapped = await setCurrentSkillVersion({
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     expectedCurrentVersionId: sk.currentVersionId,
   });
   if (!swapped) {
-    return jsonError(409, "version_conflict", "skill 当前版本已被并发修改,请刷新后重试");
+    return apiError("VERSION_CONFLICT", "skill 当前版本已被并发修改,请刷新后重试", { requestId });
   }
   try {
     await recordAdminAudit({
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       skillId: id,
       error: String(error),
     });
-    return jsonError(500, "audit_failed", "审计写入失败");
+    return apiError("AUDIT_WRITE_FAILED", "审计写入失败", { requestId });
   }
   return apiSuccess({ skillId: id, currentVersionId: versionId });
 }

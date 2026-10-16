@@ -1,4 +1,4 @@
-import { jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { registerDevice } from "@/lib/identity/device-queries";
 /**
  * Desktop 设备注册端点。
@@ -24,6 +24,7 @@ const registrationSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const requestId = getRequestId(request);
   let principal: Awaited<ReturnType<typeof resolvePrincipal>>;
   try {
     principal = await resolvePrincipal(request.headers);
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const parsed = registrationSchema.safeParse(body);
   if (!parsed.success) {
-    return jsonError(400, "invalid_device_registration", "设备注册信息无效");
+    return apiError("DEVICE_REGISTRATION_INVALID", "设备注册信息无效", { requestId });
   }
 
   // 正式 Device 唯一键是 (tenantId, deviceKey)；deviceId 即 deviceKey，name→deviceName，version→appVersion。
@@ -50,19 +51,16 @@ export async function POST(request: Request) {
   });
   // owner/绑定冲突：设备不属于当前主体，或 publicKey 与提交不符（已绑定其他身份）
   if (device.userId !== principal.userIdentityId || device.publicKey !== parsed.data.publicKey) {
-    return jsonError(409, "device_binding_conflict", "设备标识已绑定到其他身份");
+    return apiError("DEVICE_BINDING_CONFLICT", "设备标识已绑定到其他身份", { requestId });
   }
   if (device.deviceState !== "active") {
-    return jsonError(409, "device_revoked", "设备已撤销，请重新登录生成新设备身份");
+    return apiError("DEVICE_REVOKED", "设备已撤销，请重新登录生成新设备身份", { requestId });
   }
 
   // 响应保留公共 API 语义：deviceId/status 映射自 deviceKey/deviceState，并返回 tenantId 供 Desktop 持久化。
-  return Response.json({
-    ok: true,
-    data: {
-      deviceId: device.deviceKey,
-      status: device.deviceState,
-      tenantId: principal.tenantId,
-    },
+  return apiSuccess({
+    deviceId: device.deviceKey,
+    status: device.deviceState,
+    tenantId: principal.tenantId,
   });
 }

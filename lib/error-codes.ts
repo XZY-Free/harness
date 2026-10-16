@@ -131,6 +131,75 @@ export const API_ERROR_CODES = {
   HARNESS_LOOP_STEP_LIMIT_EXCEEDED: { http: 422, retryable: false },
   KNOWLEDGE_ACTION_FAILED: { http: 503, retryable: true },
   TOOL_ACTION_FAILED: { http: 503, retryable: true },
+
+  // ─── 通用请求错误（原 jsonError 旧出口迁移，HTTP 状态与迁移前一致）───
+  /** 请求体或参数结构非法。 */
+  INVALID_REQUEST: { http: 400, retryable: false },
+  /** 缺少必填字段/头。 */
+  MISSING_REQUIRED_FIELD: { http: 400, retryable: false },
+  /** If-Match 头缺失，无法做乐观并发控制。 */
+  IF_MATCH_REQUIRED: { http: 400, retryable: false },
+  /** 资源名冲突（唯一键重复）。 */
+  NAME_CONFLICT: { http: 409, retryable: false },
+  /** 乐观并发冲突：资源已被并发修改。 */
+  VERSION_CONFLICT: { http: 409, retryable: true },
+  /** 方法不被该端点支持。 */
+  METHOD_NOT_ALLOWED: { http: 405, retryable: false },
+  /** 请求体超出允许大小。 */
+  PAYLOAD_TOO_LARGE: { http: 413, retryable: false },
+  /** 服务端内部错误（不含敏感细节）。 */
+  INTERNAL_ERROR: { http: 500, retryable: true },
+  /** 依赖服务（存储/外部系统）暂不可用。 */
+  DEPENDENCY_UNAVAILABLE: { http: 503, retryable: true },
+
+  // ─── Skill / Studio 域（原 jsonError 旧出口迁移）───
+  SKILL_NOT_FOUND: { http: 404, retryable: false },
+  SKILL_NAME_IMMUTABLE: { http: 400, retryable: false },
+  SKILL_VALIDATION_FAILED: { http: 400, retryable: false },
+  SKILL_VERSION_NOT_FOUND: { http: 404, retryable: false },
+  SKILL_NO_CHANGES: { http: 400, retryable: false },
+  SKILL_SYNC_NOT_CONFIGURED: { http: 400, retryable: false },
+  SKILL_SYNC_FAILED: { http: 500, retryable: true },
+  SKILL_CREATE_FAILED: { http: 500, retryable: true },
+  SKILL_COMMIT_FAILED: { http: 500, retryable: true },
+  SKILL_WRITE_FAILED: { http: 500, retryable: true },
+  SYNCED_SKILL_READONLY: { http: 403, retryable: false },
+  NOT_SYNCED_SKILL: { http: 403, retryable: false },
+  SKILL_FILE_NOT_FOUND: { http: 404, retryable: false },
+  /** 非资源所有者，无权修改。 */
+  NOT_OWNER: { http: 403, retryable: false },
+
+  // ─── Governance / Policy 域（原 jsonError 旧出口迁移）───
+  GOVERNANCE_CONFIG_INVALID: { http: 400, retryable: false },
+  GOVERNANCE_SET_STATE: { http: 409, retryable: false },
+  GOVERNANCE_LOAD_FAILED: { http: 500, retryable: true },
+  POLICY_INVALID: { http: 400, retryable: false },
+  POLICY_SET_STATE: { http: 409, retryable: false },
+  POLICY_LOAD_FAILED: { http: 500, retryable: true },
+  /** 审计动作或查询参数非法。 */
+  INVALID_ACTION: { http: 400, retryable: false },
+  AUDIT_WRITE_FAILED: { http: 500, retryable: true },
+
+  // ─── 用户 Workspace / Preview 域（原 jsonError 旧出口迁移）───
+  WORKSPACE_PATH_INVALID: { http: 400, retryable: false },
+  WORKSPACE_FILE_NOT_FOUND: { http: 404, retryable: false },
+  WORKSPACE_REVISION_CONFLICT: { http: 409, retryable: true },
+  PREVIEW_FAILED: { http: 500, retryable: true },
+  RUNTIME_RESTART_FAILED: { http: 500, retryable: true },
+
+  // ─── Desktop 域（原 jsonError 旧出口迁移）───
+  DEVICE_REGISTRATION_INVALID: { http: 400, retryable: false },
+  DEVICE_BINDING_CONFLICT: { http: 409, retryable: false },
+  DEVICE_REVOKED: { http: 409, retryable: false },
+  DEVICE_ALREADY_REVOKED: { http: 409, retryable: false },
+  DEVICE_NOT_FOUND: { http: 404, retryable: false },
+  WORKSPACE_REGISTRATION_INVALID: { http: 400, retryable: false },
+  DESKTOP_WORKSPACE_UNAVAILABLE: { http: 409, retryable: true },
+
+  // ─── 下载凭证域（原 jsonError 旧出口迁移）───
+  DOWNLOAD_TOKEN_INVALID: { http: 403, retryable: false },
+  ATTACHMENT_STORAGE_UNAVAILABLE: { http: 503, retryable: true },
+  ARTIFACT_STORAGE_UNAVAILABLE: { http: 503, retryable: true },
 } as const satisfies Readonly<Record<string, ApiErrorDefinition>>;
 
 export type ApiErrorCode = keyof typeof API_ERROR_CODES;

@@ -15,7 +15,7 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { getRequestId, jsonError, resourceNotFound } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { logger } from "@/lib/logger";
 import { resolveRuntimes } from "@/lib/runtime/registry";
 
@@ -57,12 +57,11 @@ export async function POST(
     logger.error("[/api/threads/{threadId}/runtime/restart] 重启失败", {
       error: String(error),
     });
-    return jsonError(500, "runtime_restart_failed", "AppRuntime 重启失败");
+    return apiError("RUNTIME_RESTART_FAILED", "AppRuntime 重启失败", { requestId });
   }
 
   const status = preview.status(threadId);
-  return Response.json({
-    ok: true,
+  return apiSuccess({
     status: status
       ? { state: status.state, port: status.port ?? null }
       : { state: "idle", port: null },
@@ -70,6 +69,8 @@ export async function POST(
 }
 
 // GET 不支持（防止误触发重启）
-export async function GET() {
-  return jsonError(405, "method_not_allowed", "请使用 POST 方法");
+export async function GET(request: Request) {
+  return apiError("METHOD_NOT_ALLOWED", "请使用 POST 方法", {
+    requestId: getRequestId(request),
+  });
 }

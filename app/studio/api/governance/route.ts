@@ -8,7 +8,7 @@ import {
   GovernanceVersionConflictError,
   publishGovernanceConfig,
 } from "@/lib/governance/publish-governance-config";
-import { ETAG_HEADER, apiSuccess, getRequestId, jsonError, parseIfMatch } from "@/lib/http";
+import { ETAG_HEADER, apiError, apiSuccess, getRequestId, parseIfMatch } from "@/lib/http";
 import { actorFromPrincipal } from "@/lib/identity/audit";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import type { GovernanceConfig } from "@/lib/persistence/schema/governance-config";
@@ -24,6 +24,7 @@ export const dynamic = "force-dynamic";
  * - fail-closed：DB 缺失/非 published/digest 错/跨租户 → 500（绝不回退 INITIAL_GOVERNANCE_CONFIG）。
  */
 export async function GET(req: NextRequest) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "policy.read");
   if (!r.ok) return r.response;
   const tenantId = r.principal.tenantId;
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
     loaded = await loadGovernanceConfigFromDB(tenantId);
   } catch (err) {
     if (err instanceof GovernanceLoadError) {
-      return jsonError(500, "governance_load_failed", err.message);
+      return apiError("GOVERNANCE_LOAD_FAILED", err.message, { requestId });
     }
     throw err;
   }
@@ -77,18 +78,18 @@ export async function PUT(req: NextRequest) {
   // If-Match 必填（§33）。
   const ifMatch = parseIfMatch(req);
   if (!ifMatch) {
-    return jsonError(400, "if_match_required", "缺少必填头 If-Match");
+    return apiError("IF_MATCH_REQUIRED", "缺少必填头 If-Match", { requestId });
   }
   const expectedVersionNo = Number(ifMatch);
   if (!Number.isInteger(expectedVersionNo) || expectedVersionNo < 1) {
-    return jsonError(400, "if_match_invalid", "If-Match 不是合法 versionNo");
+    return apiError("REQUEST_SCHEMA_INVALID", "If-Match 不是合法 versionNo", { requestId });
   }
 
   let body: { config?: unknown };
   try {
     body = await req.json();
   } catch {
-    return jsonError(400, "invalid_body", "请求体不是合法 JSON");
+    return apiError("INVALID_REQUEST", "请求体不是合法 JSON", { requestId });
   }
 
   let newConfig: GovernanceConfig;
@@ -97,7 +98,7 @@ export async function PUT(req: NextRequest) {
     newConfig = body.config as GovernanceConfig;
   } catch (err) {
     if (err instanceof GovernanceConfigValidationError) {
-      return jsonError(400, "governance_config_invalid", err.message);
+      return apiError("GOVERNANCE_CONFIG_INVALID", err.message, { requestId });
     }
     throw err;
   }
@@ -131,13 +132,13 @@ export async function PUT(req: NextRequest) {
     );
   } catch (err) {
     if (err instanceof GovernanceVersionConflictError) {
-      return jsonError(412, "etag_mismatch", err.message);
+      return apiError("ETAG_MISMATCH", err.message, { requestId });
     }
     if (err instanceof GovernanceSetStateError) {
-      return jsonError(409, "governance_set_state", err.message);
+      return apiError("GOVERNANCE_SET_STATE", err.message, { requestId });
     }
     if (err instanceof GovernanceLoadError) {
-      return jsonError(500, "governance_load_failed", err.message);
+      return apiError("GOVERNANCE_LOAD_FAILED", err.message, { requestId });
     }
     throw err;
   }

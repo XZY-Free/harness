@@ -1,4 +1,4 @@
-import { ETAG_HEADER, apiSuccess, getRequestId, jsonError, parseIfMatch } from "@/lib/http";
+import { ETAG_HEADER, apiError, apiSuccess, getRequestId, parseIfMatch } from "@/lib/http";
 import { actorFromPrincipal } from "@/lib/identity/audit";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import {
@@ -23,6 +23,7 @@ export const dynamic = "force-dynamic";
  * - fail-closed：Set 缺失 / 非 published / 跨租户 → 500。
  */
 export async function GET(req: NextRequest) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "policy.read");
   if (!r.ok) return r.response;
   const tenantId = r.principal.tenantId;
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     loaded = await loadPolicySetAndRules(tenantId);
   } catch (err) {
     if (err instanceof PolicyLoadError) {
-      return jsonError(500, "policy_load_failed", err.message);
+      return apiError("POLICY_LOAD_FAILED", err.message, { requestId });
     }
     throw err;
   }
@@ -87,18 +88,18 @@ export async function PUT(req: NextRequest) {
 
   const ifMatch = parseIfMatch(req);
   if (!ifMatch) {
-    return jsonError(400, "if_match_required", "缺少必填头 If-Match");
+    return apiError("IF_MATCH_REQUIRED", "缺少必填头 If-Match", { requestId });
   }
   const expectedVersionNo = Number(ifMatch);
   if (!Number.isInteger(expectedVersionNo) || expectedVersionNo < 1) {
-    return jsonError(400, "if_match_invalid", "If-Match 不是合法 versionNo");
+    return apiError("REQUEST_SCHEMA_INVALID", "If-Match 不是合法 versionNo", { requestId });
   }
 
   let body: { defaultDecision?: unknown; rules?: unknown };
   try {
     body = await req.json();
   } catch {
-    return jsonError(400, "invalid_body", "请求体不是合法 JSON");
+    return apiError("INVALID_REQUEST", "请求体不是合法 JSON", { requestId });
   }
 
   let defaultDecision: "allow" | "pause" | "block";
@@ -109,7 +110,7 @@ export async function PUT(req: NextRequest) {
     // 校验由 createPolicyRevision 内的 validateRules/validateDefaultDecision 统一 fail-closed；
     // 这里仅做形状兜底，具体错误码由服务层 PolicyValidationError 返回。
   } catch {
-    return jsonError(400, "invalid_body", "请求体形状不合法");
+    return apiError("INVALID_REQUEST", "请求体形状不合法", { requestId });
   }
 
   try {
@@ -152,16 +153,16 @@ export async function PUT(req: NextRequest) {
     );
   } catch (err) {
     if (err instanceof PolicyVersionConflictError) {
-      return jsonError(412, "etag_mismatch", err.message);
+      return apiError("ETAG_MISMATCH", err.message, { requestId });
     }
     if (err instanceof PolicySetStateError) {
-      return jsonError(409, "policy_set_state", err.message);
+      return apiError("POLICY_SET_STATE", err.message, { requestId });
     }
     if (err instanceof PolicyValidationError) {
-      return jsonError(400, "policy_invalid", err.message);
+      return apiError("POLICY_INVALID", err.message, { requestId });
     }
     if (err instanceof PolicyLoadError) {
-      return jsonError(500, "policy_load_failed", err.message);
+      return apiError("POLICY_LOAD_FAILED", err.message, { requestId });
     }
     throw err;
   }

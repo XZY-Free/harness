@@ -25,32 +25,33 @@
  * - 403 invalid_token（token 无效/已过期/已使用/threadId 不匹配）
  * - 404 file_not_found（文件不存在 / 内部目录 / 越界）
  */
-import { jsonError } from "@/lib/http";
+import { apiError, getRequestId } from "@/lib/http";
 import { isInternalPath, readWorkspaceFileBytes } from "@/lib/workspace";
 import { consumeUploadToken } from "@/lib/workspace-upload-token";
 import type { NextRequest } from "next/server";
 
 export async function GET(request: NextRequest, props: { params: Promise<{ threadId: string }> }) {
+  const requestId = getRequestId(request);
   const { threadId } = await props.params;
   const token = new URL(request.url).searchParams.get("token");
   if (!token) {
-    return jsonError(400, "missing_token", "缺少下载凭证");
+    return apiError("MISSING_REQUIRED_FIELD", "缺少下载凭证", { requestId });
   }
 
   const entry = consumeUploadToken(token);
   if (!entry || entry.threadId !== threadId) {
-    return jsonError(403, "invalid_token", "凭证无效或已过期");
+    return apiError("DOWNLOAD_TOKEN_INVALID", "凭证无效或已过期", { requestId });
   }
 
   // 内部目录下的文件一律返回 404（不暴露存在性，防枚举）
   if (isInternalPath(entry.workspacePath)) {
-    return jsonError(404, "file_not_found", "文件不存在");
+    return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
   }
 
   try {
     const bytes = await readWorkspaceFileBytes(threadId, entry.workspacePath);
     if (bytes === null) {
-      return jsonError(404, "file_not_found", "文件不存在");
+      return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
     }
     return new Response(bytes as unknown as BodyInit, {
       status: 200,
@@ -61,6 +62,6 @@ export async function GET(request: NextRequest, props: { params: Promise<{ threa
     });
   } catch {
     // 越界 / symlink 等异常一律返回 404（不区分，防枚举）
-    return jsonError(404, "file_not_found", "文件不存在");
+    return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
   }
 }

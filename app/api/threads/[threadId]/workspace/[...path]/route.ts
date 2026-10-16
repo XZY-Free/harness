@@ -4,7 +4,7 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { apiSuccess, getRequestId, jsonError, resourceNotFound } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   WorkspacePathError,
   WorkspaceRevisionConflict,
@@ -32,13 +32,13 @@ import type { NextRequest } from "next/server";
  * - safeJoin / symlink / realpath 防护仍在 lib/workspace.ts 各函数内
  * - isInternalPath：内部目录（.nex/.git/node_modules 等）下的文件一律 404，不暴露存在性
  *
- * GET 响应（默认 JSON 信封）：{ ok: true, data: { path, content, stat:{size,mtime,isDirectory,revision} } }
+ * GET 响应（apiSuccess 裸资源）：{ path, content, stat:{size,mtime,isDirectory,revision} }
  *   - 404 文件不存在 / 内部目录下的路径（不区分，防枚举）
  *   - 400 invalid_path（越界 / symlink）
  *
  * PUT 请求体：{ content: string, revision?: string }
  *   - revision 提供：与当前文件 revision 不匹配 → 409 conflict（携带当前内容+revision）
- *   - revision 匹配或为空 → 原子写入，返回 { ok:true, data:{ path, stat } }
+ *   - revision 匹配或为空 → 原子写入，返回裸资源 { path, stat }
  *   - 400 invalid_path（越界 / symlink / 内部目录）
  */
 export async function GET(
@@ -70,7 +70,7 @@ export async function GET(
 
   // 内部目录下的文件一律返回 404（不暴露存在性）
   if (isInternalPath(relPath)) {
-    return jsonError(404, "file_not_found", "文件不存在");
+    return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
   }
 
   const rawMode = shouldReturnRaw(req);
@@ -84,14 +84,14 @@ export async function GET(
       // X42 修复：raw 模式同样受 size 上限保护。
       const preStat = await workspaceStat(threadId, relPath);
       if (preStat === null) {
-        return jsonError(404, "file_not_found", "文件不存在");
+        return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
       }
       if (preStat.size > MAX_SERVE_SIZE) {
-        return jsonError(413, "too_large", "文件过大，请下载查看");
+        return apiError("PAYLOAD_TOO_LARGE", "文件过大，请下载查看", { requestId });
       }
       const bytes = await readWorkspaceFileBytes(threadId, relPath);
       if (bytes === null) {
-        return jsonError(404, "file_not_found", "文件不存在");
+        return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
       }
       const contentType = contentTypeForPath(relPath);
       return new Response(bytes as unknown as BodyInit, {
@@ -107,19 +107,19 @@ export async function GET(
     // X42/X43 修复：JSON 模式先 stat，超阈值返回 too_large 标记（不带 content）
     const stat = await workspaceStat(threadId, relPath);
     if (stat === null) {
-      return jsonError(404, "file_not_found", "文件不存在");
+      return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
     }
     if (stat.size > MAX_SERVE_SIZE) {
       return apiSuccess({ path: relPath, content: null, stat, too_large: true });
     }
     const content = await readWorkspaceFile(threadId, relPath);
     if (content === null) {
-      return jsonError(404, "file_not_found", "文件不存在");
+      return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
     }
     return apiSuccess({ path: relPath, content, stat });
   } catch (error) {
     if (error instanceof WorkspacePathError) {
-      return jsonError(400, "invalid_path", error.message);
+      return apiError("WORKSPACE_PATH_INVALID", error.message, { requestId });
     }
     throw error;
   }
@@ -172,17 +172,17 @@ export async function PUT(
 
   // 内部目录下的文件一律拒绝写（与读一致，防枚举）
   if (isInternalPath(relPath)) {
-    return jsonError(404, "file_not_found", "文件不存在");
+    return apiError("WORKSPACE_FILE_NOT_FOUND", "文件不存在", { requestId });
   }
 
   let body: { content?: unknown; revision?: unknown };
   try {
     body = (await req.json()) as { content?: unknown; revision?: unknown };
   } catch {
-    return jsonError(400, "invalid_body", "请求体不是合法 JSON");
+    return apiError("INVALID_REQUEST", "请求体不是合法 JSON", { requestId });
   }
   if (typeof body.content !== "string") {
-    return jsonError(400, "invalid_body", "content 必须为字符串");
+    return apiError("INVALID_REQUEST", "content 必须为字符串", { requestId });
   }
   const expectedRevision = typeof body.revision === "string" ? body.revision : undefined;
 
@@ -197,21 +197,16 @@ export async function PUT(
   } catch (error) {
     if (error instanceof WorkspaceRevisionConflict) {
       // 409：携带当前内容与 revision，供前端 diff/merge
-      return Response.json(
-        {
-          ok: false,
-          error: {
-            code: "revision_conflict",
-            message: "文件已被修改，请查看差异后合并",
-            currentRevision: error.currentRevision,
-            currentContent: error.currentContent,
-          },
+      return apiError("WORKSPACE_REVISION_CONFLICT", "文件已被修改，请查看差异后合并", {
+        requestId,
+        details: {
+          current_revision: error.currentRevision,
+          current_content: error.currentContent,
         },
-        { status: 409 },
-      );
+      });
     }
     if (error instanceof WorkspacePathError) {
-      return jsonError(400, "invalid_path", error.message);
+      return apiError("WORKSPACE_PATH_INVALID", error.message, { requestId });
     }
     throw error;
   }

@@ -6,7 +6,7 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getFileStorageProvider } from "@/lib/files/storage-bootstrap";
-import { getRequestId, jsonError, resourceNotFound } from "@/lib/http";
+import { apiError, getRequestId, resourceNotFound } from "@/lib/http";
 import { getWorkspaceAttachmentById } from "@/lib/workspace/workspace-queries";
 
 interface RouteContext {
@@ -49,7 +49,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const provider = await getFileStorageProvider();
   if (attachment.storageProvider !== provider.name) {
-    return jsonError(503, "attachment_storage_unavailable", "附件存储暂不可用");
+    return apiError("ATTACHMENT_STORAGE_UNAVAILABLE", "附件存储暂不可用", { requestId });
   }
 
   const bytes = await provider.read({

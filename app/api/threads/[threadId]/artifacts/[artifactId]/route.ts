@@ -7,7 +7,7 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getFileStorageProvider } from "@/lib/files/storage-bootstrap";
-import { getRequestId, jsonError, resourceNotFound } from "@/lib/http";
+import { apiError, getRequestId, resourceNotFound } from "@/lib/http";
 
 interface RouteContext {
   params: Promise<{ threadId: string; artifactId: string }>;
@@ -44,7 +44,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   }
   const provider = await getFileStorageProvider();
   if (artifact.storageProvider !== provider.name) {
-    return jsonError(503, "artifact_storage_unavailable", "产物存储暂不可用");
+    return apiError("ARTIFACT_STORAGE_UNAVAILABLE", "产物存储暂不可用", { requestId });
   }
   const content = await provider.read({
     tenantId: principal.tenantId,

@@ -1,5 +1,5 @@
 import { capabilityMarketConfig } from "@/lib/config";
-import { apiSuccess, jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { type SyncResult, runSync } from "@/lib/skill/sync/sync-service";
@@ -14,15 +14,16 @@ import type { NextRequest } from "next/server";
  * conflict 项单独分组,提示用户改映射名或取消同步。
  */
 export async function POST(req: NextRequest) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
   const { tenantId, userIdentityId: actorUserId } = r.principal;
 
   if (!capabilityMarketConfig.endpoint) {
-    return jsonError(
-      400,
-      "sync_not_configured",
+    return apiError(
+      "SKILL_SYNC_NOT_CONFIGURED",
       "capability-market endpoint 未配置（NEX_CAPABILITY_MARKET_ENDPOINT）,无法同步",
+      { requestId },
     );
   }
 
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     } catch {
       /* 审计非关键 */
     }
-    return jsonError(500, "sync_failed", msg);
+    return apiError("SKILL_SYNC_FAILED", msg, { requestId });
   }
 
   try {

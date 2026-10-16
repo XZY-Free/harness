@@ -113,22 +113,23 @@ export async function POST(request: Request, context: RouteContext) {
   const file = formData.get("file") as File | null;
 
   if (!file || !file.size) {
-    return Response.json({ error: "未选择文件" }, { status: 400 });
+    return apiError("REQUEST_SCHEMA_INVALID", "未选择文件", { requestId });
   }
 
   const mimeType = file.type || "";
   const fileName = file.name || "unknown";
   if (fileName.length > 512) {
-    return Response.json({ error: "文件名过长，上限 512 个字符" }, { status: 400 });
+    return apiError("REQUEST_SCHEMA_INVALID", "文件名过长，上限 512 个字符", { requestId });
   }
   const ext = extOf(fileName);
 
   // 图片与文档统一保存原文件；解析属于消费方业务，不属于上传接口。
   if (IMAGE_TYPES.has(mimeType)) {
     if (file.size > fileStorageConfig.imageUploadMaxBytes) {
-      return Response.json(
-        { error: `图片过大，上限 ${fileStorageConfig.imageUploadMaxBytes / 1024 / 1024}MB` },
-        { status: 400 },
+      return apiError(
+        "PAYLOAD_TOO_LARGE",
+        `图片过大，上限 ${fileStorageConfig.imageUploadMaxBytes / 1024 / 1024}MB`,
+        { requestId },
       );
     }
     return await handleFileUpload(principal, threadId, file, idempotencyKey, requestId);
@@ -136,22 +137,19 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (isDocument(fileName, mimeType)) {
     if (file.size > fileStorageConfig.documentUploadMaxBytes) {
-      return Response.json(
-        {
-          error: `文档过大，上限 ${fileStorageConfig.documentUploadMaxBytes / 1024 / 1024}MB`,
-        },
-        { status: 400 },
+      return apiError(
+        "PAYLOAD_TOO_LARGE",
+        `文档过大，上限 ${fileStorageConfig.documentUploadMaxBytes / 1024 / 1024}MB`,
+        { requestId },
       );
     }
     return await handleFileUpload(principal, threadId, file, idempotencyKey, requestId);
   }
 
-  return Response.json(
-    {
-      error:
-        "不支持的文件类型（支持图片 PNG/JPG/GIF/WebP 及 PDF/DOCX/PPTX/XLSX/TXT/MD/CSV/RTF 等文档）",
-    },
-    { status: 400 },
+  return apiError(
+    "REQUEST_SCHEMA_INVALID",
+    "不支持的文件类型（支持图片 PNG/JPG/GIF/WebP 及 PDF/DOCX/PPTX/XLSX/TXT/MD/CSV/RTF 等文档）",
+    { requestId },
   );
 }
 
@@ -264,7 +262,7 @@ async function handleFileUpload(
       threadId,
       error: err instanceof Error ? err.message : "unknown_error",
     });
-    return Response.json({ error: "服务器写入失败" }, { status: 500 });
+    return apiError("ATTACHMENT_STORAGE_UNAVAILABLE", "服务器写入失败", { requestId });
   }
 }
 

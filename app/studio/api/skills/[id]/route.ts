@@ -1,6 +1,6 @@
 import { getSkillById, getSkillVersionById, updateSkill } from "@/lib/capability/skill-queries";
 import { getSkillSyncInfo } from "@/lib/capability/skill-studio-queries";
-import { apiSuccess, jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   hasStudioAction,
   requireStudioAction,
@@ -23,21 +23,23 @@ import type { NextRequest } from "next/server";
 async function assertSkillWriteAccess(
   sk: { id: string; ownerUserId: string | null },
   principal: Awaited<ReturnType<typeof resolveStudioPrincipal>>,
+  requestId: string,
 ): Promise<Response | null> {
   const isSkillAdmin = await hasStudioAction(principal, "skill.write");
   if (isSkillAdmin) return null;
   if (sk.ownerUserId === principal.userIdentityId) return null;
-  return jsonError(403, "not_owner", "非 skill 所有者,无权修改");
+  return apiError("NOT_OWNER", "非 skill 所有者,无权修改", { requestId });
 }
 
 /** GET /studio/api/skills/[id] → skill + 当前版本（受 skill.read 守卫）。 */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "skill.read");
   if (!r.ok) return r.response;
   const { tenantId } = r.principal;
   const { id } = await params;
   const sk = await getSkillById({ tenantId, skillId: id });
-  if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
+  if (!sk) return apiError("SKILL_NOT_FOUND", "skill 不存在", { requestId });
   const currentVersion = sk.currentVersionId
     ? await getSkillVersionById({ tenantId, skillVersionId: sk.currentVersionId })
     : null;
@@ -52,19 +54,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
  * name 不可改（目录名即身份锁定）。受 skill.write 守卫 + S1（11-P2-6）owner 隔离。
  */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
   const { tenantId, userIdentityId: actorUserId } = r.principal;
   const { id } = await params;
   const sk = await getSkillById({ tenantId, skillId: id });
-  if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
+  if (!sk) return apiError("SKILL_NOT_FOUND", "skill 不存在", { requestId });
 
   // S1（11-P2-6）：owner 权限检查(admin 可改所有,非 admin 只能改自己的)
-  const accessDenied = await assertSkillWriteAccess(sk, r.principal);
+  const accessDenied = await assertSkillWriteAccess(sk, r.principal, requestId);
   if (accessDenied) return accessDenied;
 
   // 02 文档 §7.2：同步 Skill 只读,拒绝编辑
-  const synced = rejectSyncedSkillWrite(sk);
+  const synced = rejectSyncedSkillWrite(sk, requestId);
   if (synced) return synced;
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -74,7 +77,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     visibility?: string;
   };
   if (body.name !== undefined && body.name !== sk.skillKey) {
-    return jsonError(400, "name_immutable", "skill name 不可改（目录名锁定）");
+    return apiError("SKILL_NAME_IMMUTABLE", "skill name 不可改（目录名锁定）", { requestId });
   }
 
   // category 丢弃；visibility 仅当 body.visibility 提供才传（否则保留原值）
@@ -132,19 +135,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
  * 受 skill.write 守卫 + S1（11-P2-6）owner 隔离。
  */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
   const { tenantId, userIdentityId: actorUserId } = r.principal;
   const { id } = await params;
   const sk = await getSkillById({ tenantId, skillId: id });
-  if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
+  if (!sk) return apiError("SKILL_NOT_FOUND", "skill 不存在", { requestId });
 
   // S1（11-P2-6）：owner 权限检查(admin 可删所有,非 admin 只能删自己的)
-  const accessDenied = await assertSkillWriteAccess(sk, r.principal);
+  const accessDenied = await assertSkillWriteAccess(sk, r.principal, requestId);
   if (accessDenied) return accessDenied;
 
   // 02 文档 §7.2：同步 Skill 不走普通归档,需走取消同步（/unsync）
-  const synced = rejectSyncedSkillWrite(sk);
+  const synced = rejectSyncedSkillWrite(sk, requestId);
   if (synced) return synced;
 
   // 软停用（lifecycleState=disabled），不物理删。

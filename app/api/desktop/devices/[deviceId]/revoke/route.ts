@@ -1,5 +1,5 @@
 import { getBridgeServer } from "@/lib/desktop-bridge/bridge-server";
-import { jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { getDeviceForUser, revokeDevice } from "@/lib/identity/device-queries";
 /**
  * Desktop 设备撤销端点。
@@ -21,6 +21,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ deviceId: string }> },
 ) {
+  const requestId = getRequestId(request);
   const { deviceId } = await params;
 
   let principal: Awaited<ReturnType<typeof resolvePrincipal>>;
@@ -36,12 +37,12 @@ export async function POST(
   // deviceId 即正式模型的 deviceKey（public API 语义）；跨租户/非 owner 一律 404 隐藏存在性。
   const device = await getDeviceForUser(principal.tenantId, deviceId, principal.userIdentityId);
   if (!device) {
-    return jsonError(404, "device_not_found", "设备不存在或无权访问");
+    return apiError("DEVICE_NOT_FOUND", "设备不存在或无权访问", { requestId });
   }
 
   // 幂等拒绝：已 revoked 不重复撤销，保留首次 revokedAt
   if (device.deviceState === "revoked") {
-    return jsonError(409, "device_already_revoked", "设备已撤销");
+    return apiError("DEVICE_ALREADY_REVOKED", "设备已撤销", { requestId });
   }
 
   // 执行撤销（按 (tenantId, deviceKey) 二元键）
@@ -49,7 +50,7 @@ export async function POST(
   if (!revoked) {
     // 并发场景：getDeviceForUser 返回 active 但 revokeDevice affectedRows=0
     // （可能并发被另一个请求撤销，或外键级联删除）
-    return jsonError(404, "device_not_found", "设备撤销失败：设备可能已被删除");
+    return apiError("DEVICE_NOT_FOUND", "设备撤销失败：设备可能已被删除", { requestId });
   }
 
   // 主动断开该设备已建立的 WebSocket 连接（如果 BridgeServer 在运行）
@@ -70,18 +71,17 @@ export async function POST(
   }
 
   // 响应保留公共 API 语义：deviceId/name/status 映射自 deviceKey/deviceName/deviceState。
-  return Response.json({
-    ok: true,
-    data: {
-      deviceId: revoked.deviceKey,
-      name: revoked.deviceName,
-      status: revoked.deviceState,
-      revokedAt: revoked.revokedAt,
-    },
+  return apiSuccess({
+    deviceId: revoked.deviceKey,
+    name: revoked.deviceName,
+    status: revoked.deviceState,
+    revokedAt: revoked.revokedAt,
   });
 }
 
 // GET 不支持（撤销是写操作）
-export async function GET() {
-  return jsonError(405, "method_not_allowed", "请使用 POST 方法");
+export async function GET(request: Request) {
+  return apiError("METHOD_NOT_ALLOWED", "请使用 POST 方法", {
+    requestId: getRequestId(request),
+  });
 }

@@ -19,7 +19,7 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { getRequestId, resourceNotFound } from "@/lib/http";
+import { apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { readWorkspaceFile } from "@/lib/workspace";
 import type { NextRequest } from "next/server";
 
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ thre
   const content = await readWorkspaceFile(threadId, relPath);
 
   if (content === null) {
-    return Response.json({ ok: true, lines: [], hasLog: false });
+    return apiSuccess({ lines: [], hasLog: false });
   }
 
   // 取尾部 MAX_LOG_LINES 行
@@ -62,8 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ thre
   const lines = allLines.slice(-MAX_LOG_LINES);
   const truncated = allLines.length > MAX_LOG_LINES;
 
-  return Response.json({
-    ok: true,
+  return apiSuccess({
     lines,
     hasLog: true,
     truncated,

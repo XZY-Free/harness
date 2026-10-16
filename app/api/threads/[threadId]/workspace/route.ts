@@ -4,7 +4,7 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { apiSuccess, getRequestId, jsonError, resourceNotFound } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { WorkspacePathError, listWorkspaceFiles } from "@/lib/workspace";
 import type { NextRequest } from "next/server";
 
@@ -19,7 +19,7 @@ import type { NextRequest } from "next/server";
  * 鉴权：员工身份（Employee API 不走 action scope），经 Thread.ownerUserId 鉴权；
  * Thread 不存在 / 非 owner / 已删除一律 404（隐藏式，不泄露存在）。
  *
- * 响应：{ ok: true, data: { threadId, files: string[] } }
+ * 响应（apiSuccess 裸资源）：{ threadId, files: string[] }
  *   - 404 thread 不存在 / 非 owner
  *   - 400 invalid_path（workspace 根为符号链接等 safeJoin/symlink 错误）
  */
@@ -50,8 +50,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ thre
     return apiSuccess({ threadId: threadId, files });
   } catch (error) {
     if (error instanceof WorkspacePathError) {
-      return jsonError(400, "invalid_path", error.message);
+      return apiError("WORKSPACE_PATH_INVALID", error.message, { requestId });
     }
-    return jsonError(500, "internal_error", "服务器内部错误");
+    return apiError("INTERNAL_ERROR", "服务器内部错误", { requestId });
   }
 }

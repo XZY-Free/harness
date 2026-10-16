@@ -7,9 +7,6 @@
  * - 成功响应直接返回资源（异步命令返回状态 + 可跟踪 id），不再包裹 `ok` 字段。
  * - X-Request-ID 透传或平台生成；RFC 3339 UTC 时间；不透明 cursor；资源隐藏式 404。
  * - 可编辑资源 PUT/PATCH 用 ETag/If-Match，冲突 412。
- *
- * 下方 `jsonError`/`omitThreadSecrets` 供尚未迁移到 v1 envelope 的旧路由使用，
- * 新路由必须使用 `apiSuccess`/`apiError` 出口。
  */
 import { type ApiErrorCode, errorDefinition } from "@/lib/error-codes";
 
@@ -158,25 +155,4 @@ export function encodeCursor(payload: unknown): string {
 export function decodeCursor(cursor: string): unknown {
   const json = Buffer.from(cursor, "base64url").toString("utf-8");
   return JSON.parse(json);
-}
-
-// ---------------------------------------------------------------------------
-// 待迁移出口（成功响应已全部迁至 apiSuccess；剩余旧路由错误出口待迁移）。
-// ---------------------------------------------------------------------------
-
-/** 旧路由错误信封，新 v1 路由用 apiError。 */
-export function jsonError(status: number, code: string, message: string): Response {
-  return Response.json({ ok: false, error: { code, message } }, { status });
-}
-
-/**
- * 从 thread 对象剥离密文/敏感列，供旧 HTTP 响应边界统一调用。
- * 防 cicdApiToken（AES-256-GCM 密文）经 Studio list/detail 接口泄露给前端。
- * 旧路由用；v1 资源投影由专门投影层统一处理。
- */
-export function omitThreadSecrets<T extends { cicdApiToken?: unknown }>(
-  thread: T,
-): Omit<T, "cicdApiToken"> {
-  const { cicdApiToken: _drop, ...rest } = thread;
-  return rest;
 }

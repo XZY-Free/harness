@@ -3,7 +3,7 @@ import {
   readAgentAttachment,
 } from "@/lib/files/agent-attachment-access";
 import { gatewaySchemaInvalidTable } from "@/lib/gateway/route-helpers";
-import { getRequestId, jsonError, resourceNotFound } from "@/lib/http";
+import { apiError, getRequestId, resourceNotFound } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +46,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof AgentAttachmentAccessError) {
       if (error.code === "storage_unavailable") {
-        return jsonError(503, "attachment_storage_unavailable", "附件存储暂不可用");
+        return apiError("ATTACHMENT_STORAGE_UNAVAILABLE", "附件存储暂不可用", { requestId });
       }
       return resourceNotFound(requestId, "附件引用不存在或不可用");
     }

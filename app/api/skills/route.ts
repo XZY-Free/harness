@@ -1,4 +1,4 @@
-import { apiSuccess, jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { getSkillProvider } from "@/lib/skill/provider";
@@ -20,11 +20,12 @@ import type { NextRequest } from "next/server";
  * `name` 优先取 `displayName`，`category` 取 `tags[0]`。
  */
 export async function GET(request: NextRequest) {
+  const requestId = getRequestId(request);
   let tenantId: string;
   try {
     tenantId = (await resolveStudioPrincipal(request.headers)).tenantId;
   } catch {
-    return jsonError(401, "unauthorized", "未授权");
+    return apiError("AUTHENTICATION_REQUIRED", "未授权", { requestId });
   }
   try {
     const summaries = await getSkillProvider().listAvailableSkills(tenantId);

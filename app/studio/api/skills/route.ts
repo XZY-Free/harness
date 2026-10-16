@@ -7,7 +7,7 @@ import {
   updateSkill,
 } from "@/lib/capability/skill-queries";
 import { listSkills, listSkillsWithSync } from "@/lib/capability/skill-studio-queries";
-import { apiSuccess, jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { buildSkillMd } from "@/lib/skill/frontmatter";
 import {
@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
  * 受 skill.write 守卫。name 撞唯一 → 409；非法 name → 400。
  */
 export async function POST(req: NextRequest) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
   const { tenantId, userIdentityId: actorUserId } = r.principal;
@@ -66,14 +67,14 @@ export async function POST(req: NextRequest) {
   };
 
   const name = body.name?.trim();
-  if (!name) return jsonError(400, "missing_name", "缺少 name");
+  if (!name) return apiError("MISSING_REQUIRED_FIELD", "缺少 name", { requestId });
   try {
     assertValidSkillName(name);
   } catch (e) {
-    return jsonError(400, "invalid_name", (e as Error).message);
+    return apiError("SKILL_VALIDATION_FAILED", (e as Error).message, { requestId });
   }
   const existing = await getSkillByKey({ tenantId, skillKey: name });
-  if (existing) return jsonError(409, "name_conflict", `skill「${name}」已存在`);
+  if (existing) return apiError("NAME_CONFLICT", `skill「${name}」已存在`, { requestId });
 
   const description = body.description?.trim() ?? "";
   const tools = body.tools ?? [];
@@ -108,17 +109,17 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     // S1（11-P1-5）：校验失败(SkillValidationError)→ 400 阻断,不回退
     if (e instanceof SkillValidationError) {
-      return jsonError(400, "skill_validation_failed", e.message);
+      return apiError("SKILL_VALIDATION_FAILED", e.message, { requestId });
     }
     if (e instanceof SkillRepoError) {
       const headSha = await getSkillHeadSha(name);
       if (headSha) {
         commitSha = headSha;
       } else {
-        return jsonError(500, "commit_failed", e.message);
+        return apiError("SKILL_COMMIT_FAILED", e.message, { requestId });
       }
     } else {
-      return jsonError(500, "commit_failed", (e as Error).message);
+      return apiError("SKILL_COMMIT_FAILED", (e as Error).message, { requestId });
     }
   }
 
@@ -146,7 +147,7 @@ export async function POST(req: NextRequest) {
       lifecycleState: "disabled",
       expectedVersionNo: sk.versionNo,
     }).catch(() => {});
-    return jsonError(500, "skill_create_failed", (e as Error).message);
+    return apiError("SKILL_CREATE_FAILED", (e as Error).message, { requestId });
   }
 
   try {

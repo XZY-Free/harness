@@ -2,7 +2,7 @@ import {
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
-import { jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   DesktopWorkspaceUnavailableError,
   ensureDesktopWorkspace,
@@ -20,6 +20,7 @@ const requestSchema = z
   .strict();
 
 export async function POST(request: Request): Promise<Response> {
+  const requestId = getRequestId(request);
   let principal: Awaited<ReturnType<typeof resolveEmployeePrincipal>>;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
@@ -31,7 +32,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return jsonError(400, "invalid_workspace_registration", "本地目录信息无效");
+    return apiError("WORKSPACE_REGISTRATION_INVALID", "本地目录信息无效", { requestId });
   }
 
   try {
@@ -42,17 +43,14 @@ export async function POST(request: Request): Promise<Response> {
       displayName: parsed.data.display_name,
       storageScopeDigest: parsed.data.storage_scope_digest,
     });
-    return Response.json({
-      ok: true,
-      data: {
-        workspace_id: result.workspaceId,
-        binding_id: result.bindingId,
-        display_name: result.displayName,
-      },
+    return apiSuccess({
+      workspace_id: result.workspaceId,
+      binding_id: result.bindingId,
+      display_name: result.displayName,
     });
   } catch (error) {
     if (error instanceof DesktopWorkspaceUnavailableError) {
-      return jsonError(409, "desktop_workspace_unavailable", error.message);
+      return apiError("DESKTOP_WORKSPACE_UNAVAILABLE", error.message, { requestId });
     }
     throw error;
   }

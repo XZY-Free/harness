@@ -1,4 +1,4 @@
-import { apiSuccess, jsonError } from "@/lib/http";
+import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import {
   STUDIO_AUDIT_ACTIONS,
@@ -20,6 +20,7 @@ import type { NextRequest } from "next/server";
 const ACTION_SET: ReadonlySet<string> = new Set(STUDIO_AUDIT_ACTIONS);
 
 export async function GET(req: NextRequest) {
+  const requestId = getRequestId(req);
   const r = await requireStudioAction(req, "audit.read");
   if (!r.ok) return r.response;
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
   const action = sp.get("action") ?? undefined;
 
   if (action !== undefined && !ACTION_SET.has(action)) {
-    return jsonError(400, "invalid_action", "未知审计动作");
+    return apiError("INVALID_ACTION", "未知审计动作", { requestId });
   }
 
   const logs = await listStudioAuditEvents({
