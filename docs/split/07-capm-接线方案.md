@@ -1,7 +1,7 @@
 # nexharness 基于 capability-market 的完善方案（阶段⑥）
 
-- 日期：2026-10-15
-- 状态：**草案，待拍板**（D1–D4 决策点见 §4）
+- 日期：2026-10-15 起草 / **2026-10-16 定稿**
+- 状态：**已定稿，可进入实施**（D1–D4 + 契约三项 + 鉴权均拍板，见 §4/§8；无待决项）
 - 口径：nexharness = 消费方完善，**不重建** capability-market（下称 capm）已立权威的任何基础设施
 - 上游依据：本会话对《智能体 Harness 工程指南 v1.1.0》三层+横切架构的核对结论，及对外部开源项目推荐清单的评估（终评见 §7）
 
@@ -75,7 +75,7 @@
 | B3 | annotations 入 catalog | MCP tool annotations（readOnlyHint / destructiveHint / openWorldHint）+ outputSchema 进 capability catalog，与 permission 执法联动（destructiveHint → 强制审批） |
 
 验证：tool/mcp 同步四态对拍（new / changed / blocked / not_found）+ 跨边界版本身份一致性（capm content_hash 与绑定记录 remoteAssetId/version 对拍）。
-前置待确认：capm `scope=syncable` 对 tool/mcp 的支持度（代码见 assetType 已支持，syncable scope 待联调验证）。
+**capm `scope=syncable` 对 tool/mcp 支持度 —— 已确认就绪（2026-10-16 实测）**：`asset_type` 过滤（`capabilities.service.ts:234`）与 `scope=syncable` 过滤（同文件 `:332`，按 `access_state==='blocked'` 排除）是**正交的两层**，先按 asset_type 再按 scope；且 `:373` 已有 `assetType==='tool'` 分支。故 tool/mcp 天然支持 syncable，**无待确认项**。
 
 ### 阶段 C：模型集成与输出治理增强（P1）
 
@@ -127,3 +127,58 @@
 | Langfuse / Arize Phoenix | 备选 | OTel GenAI 为主（D1），Langfuse 为自托管备选看板 |
 | OpenTelemetry GenAI Conventions | **采纳（标准）** | 全清单唯一标准级收益 |
 | K8s Agent Sandbox | 评估项 | WarmPool 思路可借；其本身非隔离边界（靠 gVisor/Kata），D2 出 ADR |
+
+---
+
+## 8. Phase 1A 接口契约定稿（2026-10-16 实测核对 + 用户拍板）
+
+> 本节是阶段 A 的可实施细化：两端接口已实测对齐，三项悬空问题定稿。
+
+### 8.1 两端契约对照（实测）
+
+| 维度 | nexharness 现状 | capm 提供 |
+|---|---|---|
+| 检索入口 | `searchKnowledgeEvidence({tenantId, executionSubject, allowedKnowledgeBaseIds, query, limit})` | `POST /api/knowledge-search/hybrid` |
+| 入参 | `allowedKnowledgeBaseIds` / `query` / `limit` | `query`（必填，≤1024）+ `knowledge_base_ids`（必填，≥1）+ `top_k`（默认10，1–100）+ `rerank`（默认 true）+ 可选 `filters` / `document_ids` |
+| 鉴权 | `executionSubject`（tenant + subject） | `PlatformTokenAuthGuard`（Bearer token；admin token 旁路） |
+| 返回 | `KnowledgeSearchResult{status, hits[]}` | `{query, items: HybridSearchResult[], total, reranked}` |
+| 能力 | 仅 LIKE 简易匹配 | fulltext + vector + graph 三路召回 + rerank |
+| 失败语义 | ok/empty/denied/unavailable | fail-closed 抛 503（`SearchServiceUnavailableError`） |
+
+**capm `HybridSearchResult` 关键字段**：`result_type`(chunk/entity/relation/evidence) / `chunk_id` / `document_id` / `knowledge_base_id` / `snippet` / `score` / `sources` / `source_scores` / `citation{chunk_id,document_id,document_title,content_hash,document_version,updated_at,source_uri}`。
+
+### 8.2 决策定稿（三项）
+
+**① ID 体系打通 —— capm 为权威（取代原「id 映射」说法）**
+- 两仓 KB 主键本就同格式（uuid 字符串；capm `varchar(64)` 足以容纳 nexharness `varchar(36)`），**无需映射表**。
+- 定稿：**capm 为 KB id 权威**；把 nexharness 本地那批 KB 数据（LIKE 占位期测试数据）迁到 capm 或清空重录，此后 id 全程用 capm 的，nexharness 只存该 id 作引用。
+- 影响：nexharness 不再本地生成 KB id（目录来源改为 capm）。
+
+**② 鉴权 —— 配固定内部 token（非「不鉴权」）**
+- 定稿：capm 侧建一个内部 client + token，nexharness 配 `NEX_CAPABILITY_MARKET_TOKEN`（与 skill 同步同一套）。
+- 理由：capm 的 `access-filter` 按调用方身份做租户过滤；**完全跳过鉴权会让租户隔离失效**。固定 token 既保留隔离、又免除联调负担；**待联调 auth-center 时统一换真实用户身份透传**。
+
+**③ 字段映射 —— 3 必需全兼容，revisionId 暂非必填**
+- **必需 3 字段**（nexharness 热路径 `evidenceHitToFragment` 真正依赖）：`chunkId` ← `chunk_id`；`chunkHash` ← `citation.content_hash`；`documentId` ← `document_id`。**capm 全有。**
+- **`revisionId` 暂设非必填**（可空）：只作 `sourceRef` 审计溯源旁注，capm 无对应时留空或暂用 `citation.document_version` 占位；**待与 capm 侧讨论是否引入版本概念后再定**（用户 2026-10-16 明确）。
+- **去掉无消费方字段**：`documentKey` / `knowledgeBaseDisplayName` / `revisionHash` 从 fragment/sourceRef 移除（热路径零使用）。
+- `revisionPublishedAt` → 用 `citation.updated_at` 兜底填 `freshness.updatedAt`。
+
+### 8.3 实施顺序（先 capm 后 nexharness）
+
+- **1A-1（capm 侧）**：KB 数据迁入/清空重录（capm 为权威）+ 建内部 client/token。
+- **1A-2（nexharness 侧）**：`KnowledgeResolver` / `knowledge.search` 执行器**同接口换实现**（LIKE → capm hybrid）；新增 `degraded` 语义（E1-b）；admin knowledge 路由 10 个 + 五表退役（D2；前置 E2 已核对 enterprise 分支仅本仓同路径、无额外引用）。
+
+### 8.4 目录端点已存在；鉴权分裂按「先默认、后续统一」处理（2026-10-16 定稿）
+
+**已确认（实测）**：capm **已有**目录端点 —— `GET /api/knowledge-bases`（列表，`ListKnowledgeBasesQueryDto`）+ `GET /api/knowledge-bases/:id`（详情）。**无需新增端点**。
+
+**鉴权分裂现状**：
+| capm 端点 | Guard |
+|---|---|
+| `POST /knowledge-search/hybrid`（检索） | `PlatformTokenAuthGuard`（平台 token） |
+| `GET /knowledge-bases`（目录）+ knowledge-assets 管理端点 | `AdminTokenGuard`（管理台特权 token） |
+
+**定稿（用户 2026-10-16）**：**先给默认 token，不为此纠结**。nexharness 侧对这两类端点**都配默认 token 值**（检索用平台默认 token、目录用 admin 默认 token），保证 Phase 1A 可跑通；**待联调 auth-center 时，capm 侧统一优化为统一鉴权**（用户明确后续处理）。
+- 实现：配置项留默认值（可被 env 覆盖），不引入映射/适配层；不新增 capm 代码改动。
+- 与 8.2② 的固定内部 token 同处理：**统一在 auth-center 联调阶段收敛**。

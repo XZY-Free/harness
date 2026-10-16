@@ -297,3 +297,14 @@ D1–D7 已全部定稿（§7）。以下三项是本轮复核暴露的新缺口
 4. **跨边界对齐**用 capm 的 `content_hash`（绑定记录已有 `remoteAssetId`/version），无需 schema_hash 跨仓。
 
 **收益**：零迁移、零中间态（正是「一步到位」的本意），且比「上移」更干净。**结论：B2 撤销，Phase 1B 不含 hash 相关项。**
+
+---
+
+## 9. Phase 1A 接口契约补充定稿（2026-10-16，详见 07 §8）
+
+Phase 1A 启动前的两端契约实测核对结论（三项用户拍板 + 一项新发现）：
+
+- **D2-附1（ID 体系）**：capm 为 KB id 权威，**无需映射表**（两仓主键同格式）；nexharness 本地那批 LIKE 占位期 KB 数据迁入 capm 或清空重录。
+- **D2-附2（鉴权）**：配**固定内部 token**（`NEX_CAPABILITY_MARKET_TOKEN`，与 skill 同步同一套）——**不跳过鉴权**（否则 capm `access-filter` 的租户过滤失效）；待联调 auth-center 时换真实用户身份透传。
+- **D2-附3（字段）**：nexharness 热路径仅**必需 3 字段**（`chunkId`←`chunk_id`、`chunkHash`←`citation.content_hash`、`documentId`←`document_id`）——capm 全有；**`revisionId` 暂设非必填**（可空，待与 capm 讨论版本概念）；`documentKey`/`knowledgeBaseDisplayName`/`revisionHash` 无消费方，移除；`revisionPublishedAt` 用 `citation.updated_at` 兜底。
+- **新发现 N1（已定稿）**：capm **目录端点已存在**（`GET /api/knowledge-bases`），但用 **`AdminTokenGuard`**，与检索 `POST /knowledge-search/hybrid` 的 **`PlatformTokenAuthGuard`** 是**两套鉴权**。**定稿：先给默认 token 让 Phase 1A 跑通，不为此纠结；待联调 auth-center 时由 capm 侧统一鉴权**（用户 2026-10-16 明确）。nexharness 对两类端点各配默认 token 值（可 env 覆盖），不引入适配层、不改 capm。
