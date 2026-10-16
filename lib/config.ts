@@ -339,27 +339,53 @@ export const skillsConfig = {
 } as const;
 
 /**
- * capability-market 同步源配置（02 文档 §八）。
+ * capability-market 配置（同步源 + 知识检索源）。
  *
- * capability-market 仅作为后台手动同步的上游来源,运行时（chat / resolver / tools）
- * 不访问。配置缺失时同步 API 明确失败,运行时不受影响。
+ * **同步**（后台手动）：`NEX_CAPABILITY_MARKET_ENDPOINT` + `NEX_CAPABILITY_MARKET_TOKEN`
+ * （admin token，调 /capabilities 族；仅后台同步使用，运行时 chat/resolver/tools 不访问）。
+ *
+ * **知识检索**（运行时）：`POST /knowledge-search/hybrid`（平台 token，走
+ * PlatformTokenAuthGuard + access-filter 租户过滤）与 `GET /knowledge-bases`
+ * （目录，走 AdminTokenGuard，故用 admin token）。运行时检索**实时**访问，
+ * 不可达时按「degraded」语义降级（见 knowledge 检索接线）。
  *
  * endpoint 语义：`NEX_CAPABILITY_MARKET_ENDPOINT` 是 **API base**（如
- * `http://localhost:3000/api`），同步客户端在此后追加 `/capabilities` 等子路径。
- * 请勿含尾斜杠,避免出现 `//capabilities`。
+ * `http://localhost:3000/api`），客户端在此后追加 `/capabilities`、`/knowledge-search/hybrid`
+ * 等子路径。请勿含尾斜杠,避免出现 `//capabilities`。
  */
 export const capabilityMarketConfig = {
-  /** capability-market API base（同步入口必填，缺失则同步 API 失败）。 */
+  /** capability-market API base（同步/检索入口必填，缺失则相应 API 失败）。 */
   get endpoint(): string {
     return optionalEnv("NEX_CAPABILITY_MARKET_ENDPOINT", "");
   },
-  /** 同步用 Bearer token。 */
+  /** 同步用 Bearer token（admin token，调 /capabilities 族）。 */
   get token(): string | null {
     return process.env.NEX_CAPABILITY_MARKET_TOKEN ?? null;
+  },
+  /**
+   * 知识检索用平台 token（调 /knowledge-search/hybrid；走 PlatformTokenAuthGuard）。
+   * 与同步 token 不同：检索需要 access-filter 租户过滤，必须用平台 client token。
+   */
+  get searchToken(): string | null {
+    return process.env.NEX_CAPABILITY_MARKET_SEARCH_TOKEN ?? null;
+  },
+  /**
+   * 知识目录（GET /knowledge-bases）用 admin token。
+   * capm 目录端点走 AdminTokenGuard，与检索的平台 token 是两套鉴权；
+   * 待联调 auth-center 时 capm 侧统一鉴权后收敛（用户 2026-10-16 定）。
+   */
+  get catalogToken(): string | null {
+    return process.env.NEX_CAPABILITY_MARKET_CATALOG_TOKEN ?? null;
   },
   /** 同步请求超时（ms，默认 10000；artifact 下载单独按流式超时保护）。 */
   get timeoutMs(): number {
     return Number.parseInt(optionalEnv("NEX_CAPABILITY_MARKET_TIMEOUT_MS", "10000"), 10) || 10000;
+  },
+  /** 知识检索请求超时（ms，默认 15000；三路召回+重排较慢，比同步超时更长）。 */
+  get searchTimeoutMs(): number {
+    return (
+      Number.parseInt(optionalEnv("NEX_CAPABILITY_MARKET_SEARCH_TIMEOUT_MS", "15000"), 10) || 15000
+    );
   },
 } as const;
 
