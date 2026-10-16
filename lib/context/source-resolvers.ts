@@ -51,10 +51,12 @@ import { eq } from "drizzle-orm";
  * - empty：确实无结果（数据存在但无匹配）。
  * - denied：权限拒绝（用户/Agent 无权访问该源）。
  * - unavailable：服务不可用（索引故障、依赖未就绪）。
+ * - degraded：依赖服务不可达但只读可降级继续（如 capm 连不上）——
+ *   与 unavailable 区分：unavailable=真不可用，degraded=服务不可达。
  *
- * 关键不变量：unavailable 不得伪装为 empty，否则模型会回答“没有相关规定”。
+ * 关键不变量：unavailable/degraded 不得伪装为 empty，否则模型会回答“没有相关规定”。
  */
-export const SOURCE_RESULT_STATUSES = ["ok", "empty", "denied", "unavailable"] as const;
+export const SOURCE_RESULT_STATUSES = ["ok", "empty", "denied", "unavailable", "degraded"] as const;
 export type SourceResultStatus = (typeof SOURCE_RESULT_STATUSES)[number];
 
 /** 源查询结果。 */
@@ -707,6 +709,17 @@ export class KnowledgeResolver implements SourceResolver {
         status: "unavailable",
         fragments: [],
         reasonCode: result.reasonCode ?? "knowledge_search_failed",
+        detail: result.detail,
+      };
+    }
+
+    // capm 服务不可达 → degraded（只读可降级继续，不伪装 empty）
+    if (result.status === "degraded") {
+      return {
+        sourceType: this.sourceType,
+        status: "degraded",
+        fragments: [],
+        reasonCode: result.reasonCode ?? "knowledge_unavailable",
         detail: result.detail,
       };
     }

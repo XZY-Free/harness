@@ -39,12 +39,33 @@ export function createPlatformHarnessActionExecutors(params: {
         query: action.payload.query,
         limit: action.payload.maxResults,
       });
+      // denied / unavailable（索引未就绪等真不可用）→ 抛错（不伪装为空结果）
       if (result.status === "denied" || result.status === "unavailable") {
         throw new Error(result.reasonCode ?? "KNOWLEDGE_ACTION_FAILED");
       }
+      // degraded（capm 服务不可达）→ 不抛错，降级继续：
+      // 产出「无知识上下文 + 标注 knowledge_unavailable」的 observation，
+      // 让模型明确知道「没查到是因为服务不可达，不是知识库没有」。
+      if (result.status === "degraded") {
+        return {
+          authorityRef: `harness-action:${action.actionId}`,
+          observation: {
+            observationType: "knowledge",
+            summary:
+              "知识检索服务暂不可达，本次未获得知识证据（请勿据此判断知识库中是否存在相关内容）",
+            sourceRefs: [],
+            data: {
+              status: result.status,
+              reasonCode: result.reasonCode ?? "knowledge_unavailable",
+              knowledgeUnavailable: true,
+              hits: [],
+            },
+          },
+        };
+      }
       const sourceRefs = result.hits.map(
         (hit) =>
-          `knowledge_document:${hit.documentId}:revision:${hit.revisionId}:chunk:${hit.chunkId}`,
+          `knowledge_document:${hit.documentId}:revision:${hit.revisionId ?? "unknown"}:chunk:${hit.chunkId}`,
       );
       const summary =
         result.status === "empty"

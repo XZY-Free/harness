@@ -109,8 +109,9 @@ export async function assembleContextView(request: ContextQueryRequest): Promise
   const statusPriority: Record<SourceResultStatus, number> = {
     empty: 0,
     ok: 1,
-    unavailable: 2,
-    denied: 3,
+    degraded: 2, // 服务不可达但可降级继续——问题态，高于 ok，低于真不可用
+    unavailable: 3,
+    denied: 4,
   };
   for (const result of results) {
     const previous = sourceStatus[result.sourceType];

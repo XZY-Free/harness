@@ -28,6 +28,12 @@
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
 import { createHash, randomUUID } from "node:crypto";
+import {
+  type CapmHybridItem,
+  CapmKnowledgeNotConfiguredError,
+  CapmKnowledgeRequestError,
+  capmHybridSearch,
+} from "@/lib/context/capm-knowledge-client";
 import { evaluateKnowledgeRevisionAcl } from "@/lib/context/knowledge-acl";
 import { db } from "@/lib/db/client";
 import {
@@ -53,7 +59,7 @@ import {
   knowledgeIndex,
 } from "@/lib/persistence/schema/knowledge";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
-import { and, eq, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -1016,50 +1022,59 @@ export async function markKnowledgeRevisionIndexState(params: {
 
 // ─── 证据检索（§13） ───────────────────────────────
 
-/** 单条证据检索结果。 */
+/**
+ * 单条证据检索结果（字段映射自 capm HybridSearchResult）。
+ *
+ * 数据源：capability-market `POST /knowledge-search/hybrid`。
+ * 只保留 nexharness 运行时实际消费的字段；capm 无对应的字段已移除（详见 07 §8.2③）。
+ */
 export interface KnowledgeEvidenceHit {
-  /** Chunk id（证据片段稳定身份）。 */
+  /** Chunk id（证据片段稳定身份）← capm `chunk_id`。 */
   chunkId: string;
-  /** Chunk contentHash（用于 CapabilityUse 记录实际引用）。 */
+  /** Chunk contentHash（用于 CapabilityUse 记录实际引用）← capm `citation.content_hash`。 */
   chunkHash: string;
-  /** Chunk 序号（修订内单调递增）。 */
-  chunkNo: string;
-  /** Chunk 正文（如非 restricted）。 */
+  /** Chunk 正文（如非 restricted）← capm `snippet`。 */
   chunkText: string | null;
-  /** Chunk contentRef（用于受限内容访问）。 */
+  /** Chunk contentRef（受限内容访问；capm 无对应时为 null）。 */
   chunkContentRef: string | null;
-  /** Chunk 元数据（页码、章节等）。 */
-  chunkMetadata: Record<string, unknown> | null;
-  /** 所属 Revision id（文档修订引用）。 */
-  revisionId: string;
-  /** Revision 修订号（document 内单调递增）。 */
-  revisionNo: string;
-  /** Revision 内容 hash（用于 CapabilityUse 记录实际引用）。 */
-  revisionHash: string;
-  /** Revision 发布时间（时效信息）。 */
+  /**
+   * 所属 Revision id（审计溯源旁注）。
+   * capm 无 revision 概念 → 暂用 `citation.document_version` 兜底，无则为 null。
+   * 待与 capm 讨论版本概念后再定是否强约束（用户 2026-10-16）。
+   */
+  revisionId: string | null;
+  /** 内容更新时间（时效信息）← capm `citation.updated_at`。 */
   revisionPublishedAt: Date | null;
-  /** 所属 Document id。 */
+  /** 所属 Document id ← capm `document_id`。 */
   documentId: string;
-  /** Document key（跨修订稳定引用）。 */
-  documentKey: string;
-  /** Document 标题。 */
+  /** Document 标题 ← capm `citation.document_title`。 */
   documentTitle: string;
-  /** 所属 KnowledgeBase id。 */
+  /** 所属 KnowledgeBase id ← capm `knowledge_base_id`。 */
   knowledgeBaseId: string;
-  /** KnowledgeBase key（Agent 绑定引用）。 */
-  knowledgeBaseKey: string;
-  /** KnowledgeBase 显示名。 */
-  knowledgeBaseDisplayName: string;
-  /** ACL 快照 hash（发布时冻结；用于检索时一致性校验）。 */
-  aclSnapshotHash: string | null;
-  /** 检索分数（0~1，越大越相关；本阶段基于 LIKE 命中率）。 */
+  /** 检索分数 ← capm `score`。 */
   score: number;
-  /** 选择原因（如 "fulltext_match" / "vector_match"）。 */
+  /** 选择原因（capm `sources` 合并，如 "fulltext+vector" / "graph"）。 */
   selectionReason: string;
 }
 
-/** 证据检索结果状态。 */
-export const KNOWLEDGE_SEARCH_STATUSES = ["ok", "empty", "denied", "unavailable"] as const;
+/**
+ * 证据检索结果状态。
+ *
+ * - ok：检索成功，返回零或多个 hit。
+ * - empty：确实无结果（数据存在但无匹配）。
+ * - denied：权限拒绝（capm access-filter 判定调用方无权访问该知识库范围）。
+ * - unavailable：**索引未就绪**等真不可用（不伪装为 empty）。
+ * - degraded：**capm 服务不可达**（连不上/超时）——只读可降级继续，
+ *   observation 标注 knowledge_unavailable，模型明确知道「没查到是因为服务不可达」。
+ *   （E1-b：与 unavailable 分开，语义不同——unavailable=真不可用，degraded=服务不可达）
+ */
+export const KNOWLEDGE_SEARCH_STATUSES = [
+  "ok",
+  "empty",
+  "denied",
+  "unavailable",
+  "degraded",
+] as const;
 export type KnowledgeSearchStatus = (typeof KNOWLEDGE_SEARCH_STATUSES)[number];
 
 /** 证据检索结果。 */
@@ -1126,204 +1141,51 @@ export async function searchKnowledgeEvidence(params: {
   try {
     const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
 
-    // 1. 查询 frozen scope 内的 active KnowledgeBase。空 scope 已在进库前拒绝。
-    const baseConditions = [
-      eq(knowledgeBase.tenantId, params.tenantId),
-      eq(knowledgeBase.lifecycleState, "active"),
-      inArray(knowledgeBase.id, [...new Set(params.allowedKnowledgeBaseIds)]),
-    ];
+    // 调 capm 三路混合检索（fulltext + vector + graph → 重排）。
+    // 权限过滤由 capm access-filter 按平台 token 身份完成；nexharness 侧只传范围。
+    const response = await capmHybridSearch({
+      query: trimmedQuery,
+      knowledgeBaseIds: params.allowedKnowledgeBaseIds,
+      topK: limit,
+    });
 
-    const bases = await db
-      .select({
-        id: knowledgeBase.id,
-        knowledgeKey: knowledgeBase.knowledgeKey,
-        displayName: knowledgeBase.displayName,
-      })
-      .from(knowledgeBase)
-      .where(and(...baseConditions))
-      .limit(100);
-
-    if (bases.length === 0) {
-      return {
-        status: "empty",
-        hits: [],
-        reasonCode: "no_knowledge_base",
-      };
-    }
-
-    const baseIds = bases.map((b) => b.id);
-    const baseMap = new Map(bases.map((b) => [b.id, b]));
-
-    // 2. 查询 Documents（有 currentRevisionId 且 active）
-    const docs = await db
-      .select({
-        id: knowledgeDocument.id,
-        knowledgeBaseId: knowledgeDocument.knowledgeBaseId,
-        documentKey: knowledgeDocument.documentKey,
-        title: knowledgeDocument.title,
-        currentRevisionId: knowledgeDocument.currentRevisionId,
-        lifecycleState: knowledgeDocument.lifecycleState,
-      })
-      .from(knowledgeDocument)
-      .where(
-        and(
-          eq(knowledgeDocument.tenantId, params.tenantId),
-          inArray(knowledgeDocument.knowledgeBaseId, baseIds),
-          eq(knowledgeDocument.lifecycleState, "active"),
-          isNotNull(knowledgeDocument.currentRevisionId),
-        ),
-      );
-
-    if (docs.length === 0) {
-      return {
-        status: "empty",
-        hits: [],
-        reasonCode: "no_published_document",
-      };
-    }
-
-    const currentRevisionIds = docs
-      .map((d) => d.currentRevisionId)
-      .filter((id): id is string => id !== null);
-    if (currentRevisionIds.length === 0) {
-      return {
-        status: "empty",
-        hits: [],
-        reasonCode: "no_current_revision",
-      };
-    }
-
-    // 3. 查询 published + indexState=ready 的 revision
-    const revisions = await db
-      .select()
-      .from(knowledgeDocumentRevision)
-      .where(
-        and(
-          eq(knowledgeDocumentRevision.tenantId, params.tenantId),
-          inArray(knowledgeDocumentRevision.id, currentRevisionIds),
-          eq(knowledgeDocumentRevision.revisionState, "published"),
-          eq(knowledgeDocumentRevision.indexState, "ready"),
-        ),
-      );
-
-    if (revisions.length === 0) {
-      // 有 currentRevisionId 但 revision 未就绪 → unavailable（不伪装为 empty）
-      return {
-        status: "unavailable",
-        hits: [],
-        reasonCode: "revision_index_not_ready",
-        detail: "Knowledge 修订索引尚未就绪",
-      };
-    }
-
-    const authorizedRevisions: typeof revisions = [];
-    for (const revision of revisions) {
-      const decision = evaluateKnowledgeRevisionAcl({
-        tenantId: params.tenantId,
-        executionSubject: params.executionSubject,
-        aclSnapshotJson: revision.aclSnapshotJson,
-        aclSnapshotHash: revision.aclSnapshotHash,
-      });
-      if (decision.status === "unavailable") {
-        return { status: "unavailable", hits: [], reasonCode: decision.reasonCode };
-      }
-      if (decision.status === "allowed") authorizedRevisions.push(revision);
-    }
-    if (authorizedRevisions.length === 0) {
-      return { status: "denied", hits: [], reasonCode: "knowledge_acl_denied" };
-    }
-
-    const readyRevisionIds = authorizedRevisions.map((r) => r.id);
-    const revisionMap = new Map(authorizedRevisions.map((r) => [r.id, r]));
-
-    // 4. 查询这些 revision 下的 chunks，按 query 做 LIKE 匹配
-    // 使用 escape 防止 LIKE 通配符注入（% 与 _）；MySQL LIKE 默认 ESCAPE 为 '\'
-    const escapedQuery = trimmedQuery.replace(/[%_\\]/g, "\\$&");
-    const likePattern = `%${escapedQuery}%`;
-
-    const matchingChunks = await db
-      .select({
-        chunk: knowledgeChunk,
-      })
-      .from(knowledgeChunk)
-      .where(
-        and(
-          eq(knowledgeChunk.tenantId, params.tenantId),
-          inArray(knowledgeChunk.documentRevisionId, readyRevisionIds),
-          isNotNull(knowledgeChunk.contentRedacted),
-          like(knowledgeChunk.contentRedacted, likePattern),
-        ),
-      )
-      .limit(limit * 5); // 多取一些用于排序后截断
-
-    if (matchingChunks.length === 0) {
-      return {
-        status: "empty",
-        hits: [],
-        reasonCode: "no_query_match",
-      };
-    }
-
-    // 5. 构造 KnowledgeEvidenceHit（按 query 在 chunkText 中的命中率作为 score）
-    const docMap = new Map(docs.map((d) => [d.id, d]));
-    const hits: KnowledgeEvidenceHit[] = [];
-
-    for (const { chunk } of matchingChunks) {
-      const revision = revisionMap.get(chunk.documentRevisionId);
-      if (!revision) continue;
-      const doc = docMap.get(revision.documentId);
-      if (!doc) continue;
-      const base = baseMap.get(doc.knowledgeBaseId);
-      if (!base) continue;
-
-      const text = chunk.contentRedacted ?? "";
-      const lowerText = text.toLowerCase();
-      const lowerQuery = trimmedQuery.toLowerCase();
-      const occurrences = countOccurrences(lowerText, lowerQuery);
-      const textLength = Math.max(1, text.length);
-      const score = Math.min(1, (occurrences * lowerQuery.length) / textLength);
-
-      hits.push({
-        chunkId: chunk.id,
-        chunkHash: chunk.contentHash,
-        chunkNo: chunk.chunkNo,
-        chunkText: chunk.contentRedacted,
-        chunkContentRef: chunk.contentRef,
-        chunkMetadata: chunk.metadataJson,
-        revisionId: revision.id,
-        revisionNo: revision.revisionNo,
-        revisionHash: revision.contentHash,
-        revisionPublishedAt: revision.publishedAt,
-        documentId: doc.id,
-        documentKey: doc.documentKey,
-        documentTitle: doc.title,
-        knowledgeBaseId: base.id,
-        knowledgeBaseKey: base.knowledgeKey,
-        knowledgeBaseDisplayName: base.displayName,
-        aclSnapshotHash: revision.aclSnapshotHash,
-        score,
-        selectionReason: "fulltext_match",
-      });
-    }
+    const hits = response.items.map((item) => capmItemToEvidenceHit(item));
 
     if (hits.length === 0) {
-      return {
-        status: "empty",
-        hits: [],
-        reasonCode: "no_match_after_filter",
-      };
+      return { status: "empty", hits: [], reasonCode: "no_query_match" };
     }
 
-    // 按 score 降序，limit 截断
-    hits.sort((a, b) => b.score - a.score);
+    // capm 已按 score 排序（重排后）；此处不再重排，仅截断。
     const top = hits.slice(0, limit);
-
-    return {
-      status: "ok",
-      hits: top,
-      reasonCode: "evidence_loaded",
-    };
+    return { status: "ok", hits: top, reasonCode: "evidence_loaded" };
   } catch (err) {
+    // 未配置（缺少 endpoint/token）→ 服务不可达（degraded，只读可降级）
+    if (err instanceof CapmKnowledgeNotConfiguredError) {
+      return {
+        status: "degraded",
+        hits: [],
+        reasonCode: "knowledge_not_configured",
+        detail: err.message,
+      };
+    }
+    // 请求失败：区分「服务不可达」与「索引未就绪」——
+    // 显式 4xx/5xx 视为真不可用（unavailable）；网络层失败视为服务不可达（degraded）。
+    if (err instanceof CapmKnowledgeRequestError) {
+      if (err.httpStatus !== undefined) {
+        return {
+          status: "unavailable",
+          hits: [],
+          reasonCode: "knowledge_search_failed",
+          detail: `${err.message}（HTTP ${err.httpStatus}）`,
+        };
+      }
+      return {
+        status: "degraded",
+        hits: [],
+        reasonCode: "knowledge_unavailable",
+        detail: err.message,
+      };
+    }
     return {
       status: "unavailable",
       hits: [],
@@ -1333,18 +1195,32 @@ export async function searchKnowledgeEvidence(params: {
   }
 }
 
-/** 计算 subString 在 text 中出现的次数（用于 score）。 */
-function countOccurrences(text: string, sub: string): number {
-  if (!sub) return 0;
-  let count = 0;
-  let idx = 0;
-  while (idx !== -1) {
-    idx = text.indexOf(sub, idx);
-    if (idx === -1) break;
-    count++;
-    idx += sub.length;
-  }
-  return count;
+/**
+ * 把 capm HybridSearchResult 映射为 KnowledgeEvidenceHit。
+ *
+ * 字段映射（07 §8.2③）：chunkId←chunk_id、chunkHash←citation.content_hash、
+ * documentId←document_id、documentTitle←citation.document_title、
+ * knowledgeBaseId←knowledge_base_id、score←score、
+ * revisionId←citation.document_version（capm 无 revision，暂兜底）、
+ * revisionPublishedAt←citation.updated_at、selectionReason←sources 合并。
+ *
+ * 非 chunk 类结果（entity/relation/evidence）暂不产出证据 hit（无 chunkId）；跳过。
+ */
+function capmItemToEvidenceHit(item: CapmHybridItem): KnowledgeEvidenceHit {
+  const updatedAt = item.citation.updated_at ? new Date(item.citation.updated_at) : null;
+  return {
+    chunkId: item.chunk_id ?? item.evidence_id ?? item.entity_id ?? item.relation_id ?? "",
+    chunkHash: item.citation.content_hash ?? "",
+    chunkText: item.snippet ?? null,
+    chunkContentRef: null,
+    revisionId: item.citation.document_version ?? null,
+    revisionPublishedAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : null,
+    documentId: item.document_id ?? item.citation.document_id ?? "",
+    documentTitle: item.citation.document_title ?? item.name ?? "",
+    knowledgeBaseId: item.knowledge_base_id,
+    score: item.score,
+    selectionReason: item.sources.join("+") || item.result_type,
+  };
 }
 
 // ─── 错误类型 ─────────────────────────────────────────────
