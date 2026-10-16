@@ -148,3 +148,83 @@ export async function capmHybridSearch(params: CapmSearchParams): Promise<CapmHy
   }
   return body;
 }
+
+/** capm 知识库目录项（GET /knowledge-bases 返回元素）。 */
+export interface CapmKnowledgeBaseItem {
+  id: string;
+  name: string;
+  display_name: string | null;
+  description: string | null;
+  owner_team: string | null;
+  category: string | null;
+  lifecycle_state: string;
+  visibility: string;
+  quality_state: string;
+  permission_policy: string | null;
+  document_count: number;
+  entity_count: number;
+  relation_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** capm 知识库目录响应。 */
+export interface CapmKnowledgeBaseList {
+  items: CapmKnowledgeBaseItem[];
+  total: number;
+}
+
+/** 目录查询参数。 */
+export interface CapmCatalogParams {
+  /** 只取 active 生命周期的知识库（默认 true）。 */
+  activeOnly?: boolean;
+  limit?: number;
+}
+
+/**
+ * 查询 capm 知识库目录（GET /knowledge-bases）。
+ *
+ * 鉴权：`NEX_CAPABILITY_MARKET_CATALOG_TOKEN`（admin token）——
+ * capm 目录端点走 AdminTokenGuard，与检索的平台 token 是两套鉴权
+ * （待 auth-center 联调统一）。
+ *
+ * 注意：capm 目录端点按 admin 特权返回**全量**（不做租户过滤）；租户/可见性
+ * 过滤在检索时由 access-filter 按平台 token 身份完成。
+ */
+export async function capmListKnowledgeBases(
+  params: CapmCatalogParams = {},
+): Promise<CapmKnowledgeBaseList> {
+  const endpoint = requireEndpoint();
+  const token = capabilityMarketConfig.catalogToken;
+  if (!token) throw new CapmKnowledgeNotConfiguredError();
+
+  const query = new URLSearchParams();
+  if (params.activeOnly !== false) query.set("lifecycle_state", "active");
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  const url = `${endpoint}/knowledge-bases${query.size > 0 ? `?${query}` : ""}`;
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      headers: { accept: "application/json", authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(capabilityMarketConfig.searchTimeoutMs),
+    });
+  } catch (err) {
+    throw new CapmKnowledgeRequestError(
+      `capm 目录请求失败：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!resp.ok) {
+    throw new CapmKnowledgeRequestError(
+      `capm 目录返回 ${resp.status}：${resp.statusText}`,
+      resp.status,
+    );
+  }
+
+  const body = (await resp.json().catch(() => null)) as CapmKnowledgeBaseList | null;
+  if (!body || !Array.isArray(body.items)) {
+    throw new CapmKnowledgeRequestError("capm 目录响应非法（缺 items）");
+  }
+  return body;
+}

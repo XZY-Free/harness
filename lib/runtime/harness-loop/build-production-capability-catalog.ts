@@ -122,11 +122,11 @@ async function buildCapabilityCatalog(
       limit: 500,
     })
   ).map((base) => {
-    sourceRefs.push(`knowledge-base:${base.id}:version:${base.versionNo}`);
+    sourceRefs.push(`knowledge-base:${base.id}:version:${base.updated_at}`);
     return {
       sourceRef: `knowledge-base:${base.id}`,
       knowledgeBaseId: base.id,
-      displayName: base.displayName,
+      displayName: base.display_name ?? base.name,
       description: base.description ?? "",
     };
   });

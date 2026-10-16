@@ -30,9 +30,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   type CapmHybridItem,
+  type CapmKnowledgeBaseItem,
   CapmKnowledgeNotConfiguredError,
   CapmKnowledgeRequestError,
   capmHybridSearch,
+  capmListKnowledgeBases,
 } from "@/lib/context/capm-knowledge-client";
 import { evaluateKnowledgeRevisionAcl } from "@/lib/context/knowledge-acl";
 import { db } from "@/lib/db/client";
@@ -237,12 +239,21 @@ export class KnowledgeAclIntegrityError extends Error {
   }
 }
 
-/** 仅列出对 Trusted Subject 可发现的 KnowledgeBase，供 Capability Catalog 冻结 scope。 */
+/**
+ * 列出可发现的知识库（供 Capability Catalog 冻结 scope）。
+ *
+ * 数据源：capm `GET /knowledge-bases`（capm 为 KB 权威）。
+ * **直接返回 capm 目录项（CapmKnowledgeBaseItem），不做字段适配**——
+ * 消费方直接读 capm 字段（id / display_name / description / updated_at）。
+ * 租户/可见性过滤在检索时由 capm access-filter 按平台 token 身份完成。
+ *
+ * 失败语义：capm 不可达/未配置 → 抛错（由 catalog 组装侧决定降级与否）。
+ */
 export async function listDiscoverableKnowledgeBases(params: {
   tenantId: string;
   executionSubject: ExecutionSubject;
   limit?: number;
-}): Promise<KnowledgeBase[]> {
+}): Promise<CapmKnowledgeBaseItem[]> {
   if (
     !params.executionSubject ||
     params.executionSubject.tenantId !== params.tenantId ||
@@ -252,66 +263,11 @@ export async function listDiscoverableKnowledgeBases(params: {
   ) {
     return [];
   }
-  const bases = await listKnowledgeBases(params.tenantId, {
-    lifecycleStates: ["active"],
+  const list = await capmListKnowledgeBases({
+    activeOnly: true,
     limit: params.limit ?? 500,
   });
-  if (bases.length === 0) return [];
-  const documents = await db
-    .select({
-      knowledgeBaseId: knowledgeDocument.knowledgeBaseId,
-      currentRevisionId: knowledgeDocument.currentRevisionId,
-    })
-    .from(knowledgeDocument)
-    .where(
-      and(
-        eq(knowledgeDocument.tenantId, params.tenantId),
-        eq(knowledgeDocument.lifecycleState, "active"),
-        inArray(
-          knowledgeDocument.knowledgeBaseId,
-          bases.map((base) => base.id),
-        ),
-        isNotNull(knowledgeDocument.currentRevisionId),
-      ),
-    );
-  const revisionIds = documents
-    .map((document) => document.currentRevisionId)
-    .filter((id): id is string => id !== null);
-  if (revisionIds.length === 0) return [];
-  const revisions = await db
-    .select()
-    .from(knowledgeDocumentRevision)
-    .where(
-      and(
-        eq(knowledgeDocumentRevision.tenantId, params.tenantId),
-        inArray(knowledgeDocumentRevision.id, revisionIds),
-        eq(knowledgeDocumentRevision.revisionState, "published"),
-        eq(knowledgeDocumentRevision.indexState, "ready"),
-      ),
-    );
-  const baseByRevision = new Map(
-    documents
-      .filter(
-        (document): document is typeof document & { currentRevisionId: string } =>
-          document.currentRevisionId !== null,
-      )
-      .map((document) => [document.currentRevisionId, document.knowledgeBaseId]),
-  );
-  const allowedBaseIds = new Set<string>();
-  for (const revision of revisions) {
-    const decision = evaluateKnowledgeRevisionAcl({
-      tenantId: params.tenantId,
-      executionSubject: params.executionSubject,
-      aclSnapshotJson: revision.aclSnapshotJson,
-      aclSnapshotHash: revision.aclSnapshotHash,
-    });
-    if (decision.status === "unavailable") {
-      throw new KnowledgeAclIntegrityError(decision.reasonCode);
-    }
-    const baseId = baseByRevision.get(revision.id);
-    if (decision.status === "allowed" && baseId) allowedBaseIds.add(baseId);
-  }
-  return bases.filter((base) => allowedBaseIds.has(base.id));
+  return list.items;
 }
 
 /**
