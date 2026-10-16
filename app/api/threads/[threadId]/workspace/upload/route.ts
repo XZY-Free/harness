@@ -1,3 +1,4 @@
+import { browserConfig } from "@/lib/config";
 /**
  * Workspace 流式上传 API（正式 v1）。
  *
@@ -32,14 +33,13 @@ import {
   resolveEmployeePrincipal,
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { browserConfig } from "@/lib/config";
 import { apiError, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   WorkspacePathError,
   isInternalPath,
   listWorkspaceFiles,
-  writeWorkspaceFileFromStream,
   workspaceStat,
+  writeWorkspaceFileFromStream,
 } from "@/lib/workspace";
 import type { NextRequest } from "next/server";
 
