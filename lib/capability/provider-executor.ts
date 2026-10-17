@@ -13,6 +13,7 @@ export {
   type ProductionProviderExecutor,
   type ProductionProviderExecutorRegistry,
 } from "./provider-execution";
+import { createMarketToolExecutor } from "@/lib/capability/market-tool-executor";
 import { createMcpExecutor } from "@/lib/capability/mcp-executor";
 import { redactArguments } from "@/lib/capability/redact-arguments";
 
@@ -23,7 +24,10 @@ export function createProductionProviderExecutorRegistry(
 ): ProductionProviderExecutorRegistry {
   const executors = new Map<string, ProductionProviderExecutor>([
     ["webhook\u0000webhook.post_json", createWebhookExecutor(options)],
+    // 市场来源能力（执行归 capm）：mcp 走 capm MCP 网关；capm tool 走 capm tools 网关
     ["mcp\u0000mcp.call", createMcpExecutor()],
+    ["custom\u0000market.tool.call", createMarketToolExecutor()],
+    ["script\u0000market.tool.call", createMarketToolExecutor()],
     ["builtin\u0000builtin.web_search", createBuiltinWebExecutor("web_search")],
     ["builtin\u0000builtin.web_fetch", createBuiltinWebExecutor("web_fetch")],
     [

@@ -3,13 +3,17 @@ export function providerExecutorKind(
   providerType: string,
   metadata: Record<string, unknown>,
 ): string | null {
+  // nexharness 自有能力（本地执行）
   if (providerType === "webhook") return "webhook.post_json";
-  // MCP：经 capm 网关执行（POST {capm}/mcp/call/:toolName）；操作（工具名）调用时才有，
-  // 不依赖 metadata.operation。
+  if (providerType === "builtin") {
+    const operation = metadata.operation;
+    return operation === "web_search" || operation === "web_fetch" || operation === "shell"
+      ? `builtin.${operation}`
+      : null;
+  }
+  // 市场来源能力（执行归 capm）：mcp 走 capm MCP 网关；capm tool 走 capm tools 网关。
+  // 操作（工具名 / toolKey）调用时才有，不依赖 metadata.operation。
   if (providerType === "mcp") return "mcp.call";
-  if (providerType !== "builtin") return null;
-  const operation = metadata.operation;
-  return operation === "web_search" || operation === "web_fetch" || operation === "shell"
-    ? `builtin.${operation}`
-    : null;
+  if (providerType === "custom" || providerType === "script") return "market.tool.call";
+  return null;
 }

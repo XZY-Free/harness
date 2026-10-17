@@ -64,6 +64,12 @@ export interface ExecutorSupport {
   supports(providerType: string, executorKind: string): boolean;
 }
 
+/** 判定该 providerType 是否需要 connection.endpointRef 才可执行。 */
+function requiresEndpointConnection(providerType: string): boolean {
+  // webhook 直连用户 URL；mcp/custom/script 是市场来源能力，endpointRef = capm API base。
+  return ["webhook", "mcp", "custom", "script"].includes(providerType);
+}
+
 /**
  * 判定一个 Tool 是否可执行。
  *
@@ -116,8 +122,10 @@ export function resolveToolExecutability(
       detail: `${facts.provider.providerType}/${executorKind}`,
     };
   }
-  // 4. webhook 必须可用的 connection
-  if (facts.provider.providerType === "webhook") {
+  // 4. 需要 endpoint 的类型必须可用的 connection
+  //    - webhook：直连用户 URL；
+  //    - mcp / custom / script（市场来源能力）：endpointRef = capm API base（执行归 capm）。
+  if (requiresEndpointConnection(facts.provider.providerType)) {
     if (
       !facts.connection ||
       facts.connection.lifecycleState !== "enabled" ||
@@ -126,7 +134,7 @@ export function resolveToolExecutability(
       return {
         executable: false,
         reasonCode: "provider_connection_unavailable",
-        detail: "webhook 需要 enabled 且带 endpointRef 的 connection",
+        detail: `${facts.provider.providerType} 需要 enabled 且带 endpointRef 的 connection`,
       };
     }
   }
