@@ -1,4 +1,5 @@
 import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
+import { aiConfig } from "@/lib/config";
 import type { ContextBudgetConfig } from "@/lib/context/budget";
 import {
   BASE_CONTEXT_SOURCES,
@@ -33,6 +34,10 @@ import {
   type CapabilityCatalogSnapshot,
   verifyCapabilityCatalogSnapshot,
 } from "@/lib/runtime/harness-loop/capability-catalog";
+import {
+  buildTranscriptFromThread,
+  runMemoryTriggers,
+} from "@/lib/runtime/harness-loop/memory-triggers";
 import type { ContextHandle } from "@/lib/runtime/runtime-protocol";
 import {
   type ExecutionSubject,
@@ -241,6 +246,26 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const selectedFragments = view.fragments.slice(0, limits.maxItems);
+
+  // 记忆触发（② flush + ③ 压缩）：此处 view.tokenAccounting.inputTokens 是**上下文真实占用**，
+  // 是判断"是否接近压缩/该沉淀记忆"最准确的信号。失败不阻断上下文返回（记忆是增强能力）。
+  try {
+    const subjectThreadId = binding.subject.type === "thread" ? binding.subject.threadId : null;
+    const transcript = subjectThreadId
+      ? await buildTranscriptFromThread(principal.tenantId, subjectThreadId)
+      : "";
+    await runMemoryTriggers({
+      tenantId: principal.tenantId,
+      invocationId: principal.invocationId,
+      threadId: subjectThreadId,
+      inputTokens: view.tokenAccounting.inputTokens,
+      transcript,
+      modelRef: aiConfig.chatModel,
+    });
+  } catch {
+    /* 记忆触发非关键路径 */
+  }
+
   // T33：冻结的初始压缩材料不允许被预算或 max_items 静默丢弃——丢弃等于运行时改变模型输入。
   if (binding.common.initialCompression && !selectedFragments.some(isInitialCompressionFragment)) {
     return gatewaySchemaInvalidTable(
