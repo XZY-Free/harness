@@ -13,6 +13,7 @@ export {
   type ProductionProviderExecutor,
   type ProductionProviderExecutorRegistry,
 } from "./provider-execution";
+import { createMcpExecutor } from "@/lib/capability/mcp-executor";
 import { redactArguments } from "@/lib/capability/redact-arguments";
 
 export function createProductionProviderExecutorRegistry(
@@ -22,6 +23,7 @@ export function createProductionProviderExecutorRegistry(
 ): ProductionProviderExecutorRegistry {
   const executors = new Map<string, ProductionProviderExecutor>([
     ["webhook\u0000webhook.post_json", createWebhookExecutor(options)],
+    ["mcp\u0000mcp.call", createMcpExecutor()],
     ["builtin\u0000builtin.web_search", createBuiltinWebExecutor("web_search")],
     ["builtin\u0000builtin.web_fetch", createBuiltinWebExecutor("web_fetch")],
     [

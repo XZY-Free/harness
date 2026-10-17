@@ -21,6 +21,8 @@ export interface ProviderExecutionInput {
   endpoint: string;
   /** 来自持久 ToolCall，不接受模型传入执行上下文。 */
   threadId?: string;
+  /** Tool 内稳定操作标识（ToolCall.operationId）；mcp 执行器用它作为远端工具名。 */
+  operationId?: string;
   arguments: Record<string, unknown>;
   executionSubject: ExecutionSubject;
   invocationId: string;
