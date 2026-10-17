@@ -41,6 +41,11 @@ export async function register() {
     const { startIdleSweep } = await import("./lib/runtime/container/manager");
     startIdleSweep();
 
+    // 记忆 TTL 归档 sweep：按分类 TTL 归档过期记忆（不物理删，退出检索）。
+    // 此前 archiveExpiredMemoryEntries 无调用方 → 遗忘功能空转；此处接上真实触发。
+    const { startMemoryTtlSweep } = await import("./lib/context/memory-ttl-sweep");
+    startMemoryTtlSweep();
+
     // V10 Phase 2：V9 浏览器 idle 释放 sweep 和 retention 清理 sweep 已删除。
     // 原 V9 在此启动 browserIdleTimer（每分钟释放 idle Playwright context）和
     // browserRetentionTimer（每小时清理过期 UserBrowserProfile / BrowserSession /
