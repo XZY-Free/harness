@@ -222,7 +222,7 @@ export async function searchMemorySemantic(params: {
     // entryId 解析：优先 chunk metadata（若 capm 返回），否则从 document_title 前缀
     // `memory:<entryId>` 解析（本模块写入时固定该约定）。
     const entryIdFromTitle = (title: string | undefined): string =>
-      title && title.startsWith("memory:") ? title.slice("memory:".length) : "";
+      title?.startsWith("memory:") ? title.slice("memory:".length) : "";
     return (body.items ?? [])
       .map((it) => {
         const fromMeta =
