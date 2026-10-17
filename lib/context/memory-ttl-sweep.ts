@@ -61,8 +61,7 @@ export function startMemoryTtlSweep(): void {
   // 不阻塞进程退出
   timer.unref?.();
   logger.info(
-    `[memory-ttl] TTL 归档 sweep 已启动（间隔 ${Math.round(interval / 1000)}s，` +
-      `阈值 expiresAt ≤ now）`,
+    `[memory-ttl] TTL 归档 sweep 已启动（间隔 ${Math.round(interval / 1000)}s，阈值 expiresAt ≤ now）`,
   );
 }
 
