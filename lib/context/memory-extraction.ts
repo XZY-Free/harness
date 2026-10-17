@@ -345,6 +345,26 @@ async function writeFact(params: {
     .update(memoryEntry)
     .set({ extractionRunId: params.runId })
     .where(eq(memoryEntry.id, result.entry.id));
+
+  // 索引进 capm（语义检索设施归 capm；失败不阻断——索引是增强能力）
+  try {
+    const { indexMemoryEntry } = await import("@/lib/context/capm-memory-index");
+    const docRef = await indexMemoryEntry({
+      entryId: result.entry.id,
+      tenantId: params.tenantId,
+      content: params.fact,
+      contentHash,
+      category: params.category,
+      scopeType: params.primaryScope.scopeType,
+      scopeRef: params.primaryScope.scopeRef ?? null,
+    });
+    await db
+      .update(memoryEntry)
+      .set({ indexedRevisionRef: docRef })
+      .where(eq(memoryEntry.id, result.entry.id));
+  } catch {
+    /* capm 不可达/未配置：跳过索引，检索回退本地相关度排序 */
+  }
   return result.entry.id;
 }
 

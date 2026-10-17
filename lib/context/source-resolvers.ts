@@ -14,6 +14,7 @@ import {
   searchKnowledgeEvidence,
 } from "@/lib/context/knowledge-queries";
 import {
+  listActiveMemoryEntriesByIds,
   listActiveMemoryEntriesByScopes,
   recordMemoryRetrieval,
 } from "@/lib/context/memory-queries";
@@ -557,38 +558,72 @@ export class MemoryResolver implements SourceResolver {
     scopes.push({ scopeType: "organization", scopeRef: null });
 
     try {
-      // 1. 本地结构化过滤（scope + 时效 + 未失效）；多取一些供相关度重排
-      const entries = await listActiveMemoryEntriesByScopes(ctx.tenantId, scopes, {
-        limit: Math.max(this.limit, ctx.query ? this.limit * 3 : this.limit),
-      });
+      // 1. capm 语义召回（三路召回 + 重排；语义检索设施归 capm）
+      //    失败 → 合理降级为本地相关度排序（不伪装 empty）。
+      let semanticHits: Array<{ memoryEntryId: string; score: number }> = [];
+      let degraded = false;
+      if (ctx.query && ctx.query.trim().length > 0) {
+        try {
+          const { searchMemorySemantic } = await import("@/lib/context/capm-memory-index");
+          const hits = await searchMemorySemantic({
+            query: ctx.query,
+            limit: Math.max(this.limit, ctx.maxItems ?? this.limit),
+          });
+          semanticHits = hits.map((h) => ({ memoryEntryId: h.memoryEntryId, score: h.score }));
+        } catch {
+          // capm 不可达/未配置 → 降级本地相关度（只读继续）
+          degraded = true;
+        }
+      }
+
+      // 2. 本地结构化过滤（scope + 时效 + 未失效）——语义命中与本地求交
+      const semanticIds = semanticHits.map((h) => h.memoryEntryId);
+      const scoreById = new Map(semanticHits.map((h) => [h.memoryEntryId, h.score]));
+
+      let entries: MemoryEntry[];
+      if (semanticIds.length > 0) {
+        // 语义命中的条目：按 id 精确回填（仍受 tenant/active 约束）
+        entries = await listActiveMemoryEntriesByIds(ctx.tenantId, semanticIds);
+      } else {
+        // 无语义命中（无 query / capm 降级）：本地结构化 + 相关度排序
+        entries = await listActiveMemoryEntriesByScopes(ctx.tenantId, scopes, {
+          limit: Math.max(this.limit, ctx.query ? this.limit * 3 : this.limit),
+        });
+      }
 
       if (entries.length === 0) {
         return {
           sourceType: this.sourceType,
-          status: "empty",
+          status: degraded ? "degraded" : "empty",
           fragments: [],
-          reasonCode: "no_active_memory",
+          reasonCode: degraded ? "memory_unavailable" : "no_active_memory",
         };
       }
 
-      // 2. query 感知重排（修复「检索不看 query」）；无 query 时按时效
-      const ranked = rankMemoryCandidates(
-        entries.map((e) => ({
-          id: e.id,
-          content: e.contentRedacted,
-          memoryCategory: e.memoryCategory,
-          updatedAt: e.updatedAt,
-          retrievalCount: e.retrievalCount,
-        })),
-        { query: ctx.query ?? null },
-      ).slice(0, this.limit);
+      // 3. 排序：有语义得分 → 按 capm score；否则本地相关度
+      let top: MemoryEntry[];
+      if (semanticIds.length > 0) {
+        top = entries
+          .map((e) => ({ e, score: scoreById.get(e.id) ?? 0 }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, this.limit)
+          .map((x) => x.e);
+      } else {
+        const ranked = rankMemoryCandidates(
+          entries.map((e) => ({
+            id: e.id,
+            content: e.contentRedacted,
+            memoryCategory: e.memoryCategory,
+            updatedAt: e.updatedAt,
+            retrievalCount: e.retrievalCount,
+          })),
+          { query: ctx.query ?? null },
+        ).slice(0, this.limit);
+        const byId = new Map(entries.map((e) => [e.id, e]));
+        top = ranked.map((r) => byId.get(r.id)).filter((e): e is MemoryEntry => e !== undefined);
+      }
 
-      const byId = new Map(entries.map((e) => [e.id, e]));
-      const top = ranked
-        .map((r) => byId.get(r.id))
-        .filter((e): e is MemoryEntry => e !== undefined);
-
-      // 3. 记录命中（retrievalCount++，用于晋升/降权；失败不阻断）
+      // 4. 记录命中（retrievalCount++，用于晋升/降权；失败不阻断）
       void recordMemoryRetrieval(
         ctx.tenantId,
         top.map((e) => e.id),
@@ -599,7 +634,7 @@ export class MemoryResolver implements SourceResolver {
         sourceType: this.sourceType,
         status: "ok",
         fragments,
-        reasonCode: ctx.query ? "memory_relevance_ranked" : "memory_loaded",
+        reasonCode: semanticIds.length > 0 ? "memory_semantic_ranked" : "memory_relevance_ranked",
       };
     } catch (err) {
       return {
