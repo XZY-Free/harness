@@ -1,5 +1,7 @@
+import { runWithCapmAuth } from "@/lib/capability-market/auth";
 import { capabilityMarketConfig } from "@/lib/config";
 import { apiError, apiSuccess, getRequestId } from "@/lib/http";
+import { readSessionToken } from "@/lib/identity-client";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { type SyncResult, runSync } from "@/lib/skill/sync/sync-service";
@@ -29,7 +31,10 @@ export async function POST(req: NextRequest) {
 
   let result: SyncResult;
   try {
-    result = await runSync({ tenantId, actorUserId });
+    // 把用户登录 token 注入 capm 调用作用域（主路径）；无则落 env 兜底。
+    result = await runWithCapmAuth(readSessionToken(req.headers), () =>
+      runSync({ tenantId, actorUserId }),
+    );
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.warn("[/studio/api/skills/sync] 同步失败", { error: msg });

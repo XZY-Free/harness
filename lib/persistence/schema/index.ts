@@ -64,6 +64,7 @@ export * from "@/lib/persistence/schema/skill-sync";
 export * from "@/lib/persistence/schema/tool-call";
 export * from "@/lib/persistence/schema/tool-execution";
 export * from "@/lib/persistence/schema/tool";
+export * from "@/lib/persistence/schema/tool-sync";
 export * from "@/lib/persistence/schema/trace";
 export * from "@/lib/persistence/schema/usage";
 export * from "@/lib/persistence/schema/user-action-request";

@@ -15,16 +15,21 @@
  * - GET /api/capabilities/:id/versions/:version/artifact → zip 流（响应头 X-Content-Hash/ETag）
  */
 
+import { capmAuthHeaders } from "@/lib/capability-market/auth";
 import { capabilityMarketConfig } from "@/lib/config";
 
 /** 同步源未配置或不可用。 */
 export class CapabilityMarketClientError extends Error {}
 
+/**
+ * 同步请求鉴权头。
+ *
+ * 优先请求作用域用户登录 token；兜底 env `NEX_CAPABILITY_MARKET_TOKEN`
+ * （capm 未接入 auth-center 校验用户 token 期间；联调后删除该 env）。
+ */
 function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { accept: "application/json" };
-  const token = capabilityMarketConfig.token;
-  if (token) headers.authorization = `Bearer ${token}`;
-  return headers;
+  const auth = capmAuthHeaders(capabilityMarketConfig.token);
+  return { accept: "application/json", authorization: auth.authorization };
 }
 
 function requireEndpoint(): string {
@@ -78,10 +83,14 @@ interface CapabilitiesListResponse {
 }
 
 /**
- * 分页拉取所有可同步 Skill（asset_type=skill&scope=syncable）。
+ * 分页拉取所有可同步资产（asset_type + scope=syncable）。
  * scope=syncable 已在平台侧过滤掉 blocked 资产;hide 资产任何 scope 不可见。
+ *
+ * @param assetType 资产类型（skill / tool / mcp；默认 skill，兼容既有调用方）
  */
-export async function listSyncableSkills(): Promise<CapabilityListItem[]> {
+export async function listSyncableAssets(
+  assetType: "skill" | "tool" | "mcp" = "skill",
+): Promise<CapabilityListItem[]> {
   const endpoint = requireEndpoint();
   const out: CapabilityListItem[] = [];
   const limit = 100;
@@ -89,7 +98,7 @@ export async function listSyncableSkills(): Promise<CapabilityListItem[]> {
   // 上限保护：最多 50 页（5000 个资产）,避免异常无限循环
   for (let page = 0; page < 50; page++) {
     const url =
-      `${endpoint}/capabilities?asset_type=skill&scope=syncable` +
+      `${endpoint}/capabilities?asset_type=${assetType}&scope=syncable` +
       `&limit=${limit}&offset=${offset}`;
     const body = await fetchJson<CapabilitiesListResponse>(url, {
       method: "GET",
@@ -103,6 +112,11 @@ export async function listSyncableSkills(): Promise<CapabilityListItem[]> {
     offset += limit;
   }
   return out;
+}
+
+/** 兼容既有调用方：拉取可同步 Skill。 */
+export async function listSyncableSkills(): Promise<CapabilityListItem[]> {
+  return listSyncableAssets("skill");
 }
 
 // ─── check-updates ──────────────────────────────────────────
@@ -144,6 +158,46 @@ export async function checkUpdates(
 
 // ─── sync manifest ──────────────────────────────────────────
 
+/** capm tool_detail（asset_type=tool 时的详情）。 */
+export interface CapmToolDetail {
+  tool_key: string;
+  plugin_name: string | null;
+  plugin_version: string | null;
+  entry_command: string | null;
+  runtime: string | null;
+  input_schema: unknown;
+  output_schema: unknown;
+  risk_level: string | null;
+}
+
+/** capm mcp tools 快照项。 */
+export interface CapmMcpToolSnapshot {
+  name: string;
+  description?: string | null;
+  input_schema?: unknown;
+  input_schema_hash?: string;
+  /** MCP tool annotations（若 capm 采集）；当前 capm probe 未采集，可能缺失。 */
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    openWorldHint?: boolean;
+    idempotentHint?: boolean;
+  };
+  output_schema?: unknown;
+}
+
+/** capm mcp_detail（asset_type=mcp 时的详情）。 */
+export interface CapmMcpDetail {
+  transport: string | null;
+  endpoint_url: string | null;
+  auth_type: string | null;
+  protocol_version: string | null;
+  server_info: unknown;
+  tools: CapmMcpToolSnapshot[] | null;
+  probe_state: string | null;
+  registry_source: string | null;
+}
+
 export interface SyncItem {
   asset_id: string;
   asset_type: string;
@@ -162,6 +216,8 @@ export interface SyncItem {
     permission_policy: string | null;
     tags: string[] | null;
   } | null;
+  tool_detail: CapmToolDetail | null;
+  mcp_detail: CapmMcpDetail | null;
   rule_id: string | null;
   restriction_type: string | null;
   error_code?: string | null;

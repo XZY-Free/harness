@@ -15,6 +15,13 @@
       "when": 1792164574984,
       "tag": "0001_serious_khan",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1792204952358,
+      "tag": "0002_useful_spyke",
+      "breakpoints": true
     }
   ]
 }

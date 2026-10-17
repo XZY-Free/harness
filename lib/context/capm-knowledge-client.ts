@@ -16,6 +16,7 @@
  * unavailable（索引未就绪等真不可用）或 degraded（服务不可达，只读可降级）。
  */
 
+import { capmAuthHeaders } from "@/lib/capability-market/auth";
 import { capabilityMarketConfig } from "@/lib/config";
 
 /** capm 检索端点未配置。 */
@@ -107,8 +108,13 @@ function requireEndpoint(): string {
  */
 export async function capmHybridSearch(params: CapmSearchParams): Promise<CapmHybridResponse> {
   const endpoint = requireEndpoint();
-  const token = capabilityMarketConfig.searchToken;
-  if (!token) throw new CapmKnowledgeNotConfiguredError();
+  // 鉴权：优先请求作用域用户 token；兜底 env SEARCH_TOKEN（联调后删）
+  let authHeader: string;
+  try {
+    authHeader = capmAuthHeaders(capabilityMarketConfig.searchToken).authorization;
+  } catch {
+    throw new CapmKnowledgeNotConfiguredError();
+  }
 
   const url = `${endpoint}/knowledge-search/hybrid`;
   let resp: Response;
@@ -118,7 +124,7 @@ export async function capmHybridSearch(params: CapmSearchParams): Promise<CapmHy
       headers: {
         "content-type": "application/json",
         accept: "application/json",
-        authorization: `Bearer ${token}`,
+        authorization: authHeader,
       },
       body: JSON.stringify({
         query: params.query,
@@ -195,8 +201,13 @@ export async function capmListKnowledgeBases(
   params: CapmCatalogParams = {},
 ): Promise<CapmKnowledgeBaseList> {
   const endpoint = requireEndpoint();
-  const token = capabilityMarketConfig.catalogToken;
-  if (!token) throw new CapmKnowledgeNotConfiguredError();
+  // 鉴权：优先请求作用域用户 token；兜底 env CATALOG_TOKEN（联调后删）
+  let authHeader: string;
+  try {
+    authHeader = capmAuthHeaders(capabilityMarketConfig.catalogToken).authorization;
+  } catch {
+    throw new CapmKnowledgeNotConfiguredError();
+  }
 
   const query = new URLSearchParams();
   if (params.activeOnly !== false) query.set("lifecycle_state", "active");
@@ -206,7 +217,7 @@ export async function capmListKnowledgeBases(
   let resp: Response;
   try {
     resp = await fetch(url, {
-      headers: { accept: "application/json", authorization: `Bearer ${token}` },
+      headers: { accept: "application/json", authorization: authHeader },
       signal: AbortSignal.timeout(capabilityMarketConfig.searchTimeoutMs),
     });
   } catch (err) {
