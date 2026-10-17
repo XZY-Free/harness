@@ -34,6 +34,7 @@ export const STUDIO_AUDIT_ACTIONS = [
   "skills.matched",
   "skills.synced",
   "skills.unsynced",
+  "tools.synced",
   "workspace.file.written",
   "workspace.file.deleted",
   "tool.high_risk.executed",
