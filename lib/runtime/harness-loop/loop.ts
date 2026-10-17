@@ -162,23 +162,6 @@ export interface HarnessLoopParams {
   actionDeadlineAt?: Date;
   abortSignal?: AbortSignal;
   modelRef: string;
-  /**
-   * 记忆 flush 端口（可选）。会话收口时调用，用于在上下文压缩前沉淀记忆
-   * （对标 OpenClaw memoryFlush）。
-   *
-   * 由装配方决定触发策略（是否越过压缩阈值、提取哪些回合）；Loop 只负责在
-   * **正确时机**（turn 收口、正文生成后）调用。失败不阻断回答。
-   */
-  memoryFlushPort?: HarnessMemoryFlushPort;
-}
-
-/**
- * 记忆 flush 端口：turn 收口时落后台沉淀记忆。
- *
- * @param view 本轮循环视图（含 observations/actionHistory，供提取器取素材）
- */
-export interface HarnessMemoryFlushPort {
-  flush(view: HarnessLoopView): Promise<void>;
 }
 
 export interface HarnessLoopResult {
@@ -640,15 +623,6 @@ export class HarnessLoop {
     await this.params.eventWriter.write("execution.completed", {
       finish_reason: "execution.completed",
     });
-    // 记忆 flush：turn 收口后落后台沉淀（对标 OpenClaw memoryFlush）。
-    // 失败绝不影响本轮回答——记忆是增强能力，不是关键路径。
-    if (this.params.memoryFlushPort) {
-      try {
-        await this.params.memoryFlushPort.flush(this.buildView());
-      } catch {
-        /* 记忆 flush 非关键，静默 */
-      }
-    }
     return {
       completed: true,
       responseText,

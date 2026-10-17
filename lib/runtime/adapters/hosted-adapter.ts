@@ -33,7 +33,6 @@ import {
   HarnessLoop,
   HarnessLoopError,
   type HarnessLoopRecoveryPort,
-  type HarnessMemoryFlushPort,
 } from "@/lib/runtime/harness-loop/loop";
 import {
   type AuthorityIdentity,
@@ -396,8 +395,6 @@ export interface HostedHarnessLoopParams {
   decisionPort?: HarnessDecisionPort;
   /** respond 行动提交后才允许生成最终正文。 */
   finalResponsePort?: HarnessFinalResponsePort;
-  /** 记忆 flush 端口（turn 收口时落后台沉淀；可选）。 */
-  memoryFlushPort?: HarnessMemoryFlushPort;
   /** 统一行动执行器注册表；缺失的已提交行动必须 fail closed。 */
   actionExecutors?: HarnessActionExecutors;
   /** 从持久行动事件恢复 Loop 状态。 */
@@ -529,7 +526,6 @@ export class HostedHarnessLoop {
       capabilityCatalog: this.params.capabilityCatalog,
       decisionPort: this.params.decisionPort ?? missingDecisionPort,
       finalResponsePort: this.params.finalResponsePort ?? missingFinalResponsePort,
-      memoryFlushPort: this.params.memoryFlushPort,
       executors: this.params.actionExecutors ?? {},
       limits: this.params.executionLimits
         ? {
@@ -660,7 +656,6 @@ export interface CreateHostedAdapterParams {
   transientEventBatchSink?: TransientEventBatchSink;
   decisionPort?: HarnessDecisionPort;
   finalResponsePort?: HarnessFinalResponsePort;
-  memoryFlushPort?: HarnessMemoryFlushPort;
   actionExecutors?: HarnessActionExecutors;
   recoveryPort?: HarnessLoopRecoveryPort;
   /** 实际执行本轮的模型标识。 */
@@ -769,7 +764,6 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           authority: startParams.authority,
           ingressClient,
           decisionPort: params.decisionPort,
-          memoryFlushPort: params.memoryFlushPort,
           finalResponsePort: params.finalResponsePort,
           actionExecutors: params.actionExecutors,
           recoveryPort: params.recoveryPort,
