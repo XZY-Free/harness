@@ -1,0 +1,4 @@
+ALTER TABLE `MemoryCandidate` DROP CONSTRAINT `MemoryCandidate_exactly_one_source_ck`;--> statement-breakpoint
+ALTER TABLE `MemorySource` MODIFY COLUMN `sourceType` enum('thread_item','job','artifact','extraction_run') NOT NULL;--> statement-breakpoint
+ALTER TABLE `MemoryCandidate` ADD `sourceExtractionRunId` varchar(36);--> statement-breakpoint
+ALTER TABLE `MemoryCandidate` ADD CONSTRAINT `MemoryCandidate_exactly_one_source_ck` CHECK (((`MemoryCandidate`.`sourceItemId` IS NOT NULL) + (`MemoryCandidate`.`sourceJobId` IS NOT NULL) + (`MemoryCandidate`.`sourceArtifactId` IS NOT NULL) + (`MemoryCandidate`.`sourceExtractionRunId` IS NOT NULL)) = 1);

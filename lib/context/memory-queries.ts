@@ -81,18 +81,21 @@ export function deriveSourceFromCandidate(params: {
   sourceItemId?: string | null;
   sourceJobId?: string | null;
   sourceArtifactId?: string | null;
+  sourceExtractionRunId?: string | null;
 }): { sourceType: MemorySourceType; sourceId: string } {
-  const { sourceItemId, sourceJobId, sourceArtifactId } = params;
-  const nonEmpty = [sourceItemId, sourceJobId, sourceArtifactId].filter(
+  const { sourceItemId, sourceJobId, sourceArtifactId, sourceExtractionRunId } = params;
+  const nonEmpty = [sourceItemId, sourceJobId, sourceArtifactId, sourceExtractionRunId].filter(
     (v) => v != null && v !== "",
   );
   if (nonEmpty.length !== 1) {
     throw new Error(
-      `deriveSourceFromCandidate: source_item_id/source_job_id/source_artifact_id 恰一个非空（实际 ${nonEmpty.length} 个非空）`,
+      `deriveSourceFromCandidate: source_item_id/source_job_id/source_artifact_id/source_extraction_run_id 恰一个非空（实际 ${nonEmpty.length} 个非空）`,
     );
   }
   if (sourceItemId) return { sourceType: "thread_item", sourceId: sourceItemId };
   if (sourceJobId) return { sourceType: "job", sourceId: sourceJobId };
+  if (sourceExtractionRunId)
+    return { sourceType: "extraction_run", sourceId: sourceExtractionRunId };
   // sourceArtifactId 一定非空（上方校验保证恰一个非空）
   return { sourceType: "artifact", sourceId: sourceArtifactId as string };
 }
@@ -281,6 +284,7 @@ export async function insertMemoryCandidate(params: {
   sourceItemId?: string | null;
   sourceJobId?: string | null;
   sourceArtifactId?: string | null;
+  sourceExtractionRunId?: string | null;
   proposedScopeType: MemoryScopeType;
   proposedScopeRef?: string | null;
   memoryType: string;
@@ -315,6 +319,7 @@ export async function insertMemoryCandidate(params: {
     sourceItemId: params.sourceItemId ?? null,
     sourceJobId: params.sourceJobId ?? null,
     sourceArtifactId: params.sourceArtifactId ?? null,
+    sourceExtractionRunId: params.sourceExtractionRunId ?? null,
     proposedScopeType: params.proposedScopeType,
     proposedScopeRef: params.proposedScopeRef ?? null,
     memoryType: params.memoryType,
@@ -368,6 +373,8 @@ export async function createMemoryCandidateWithEntry(params: {
   sourceItemId?: string | null;
   sourceJobId?: string | null;
   sourceArtifactId?: string | null;
+  /** 来源提取批次（自动提取路径）。 */
+  sourceExtractionRunId?: string | null;
   proposedScopeType: MemoryScopeType;
   proposedScopeRef?: string | null;
   memoryType: string;
@@ -391,6 +398,7 @@ export async function createMemoryCandidateWithEntry(params: {
     sourceItemId: params.sourceItemId,
     sourceJobId: params.sourceJobId,
     sourceArtifactId: params.sourceArtifactId,
+    sourceExtractionRunId: params.sourceExtractionRunId,
   });
 
   // 1. 创建 MemoryEntry（计算 entryKey 用于规范化去重）
@@ -442,6 +450,7 @@ export async function createMemoryCandidateWithEntry(params: {
     candidateState: "accepted",
     decisionReasonCodesJson: params.decisionReasonCodesJson ?? null,
     resolvedMemoryEntryId: entryId,
+    sourceExtractionRunId: params.sourceExtractionRunId,
     sourceHash: params.sourceHash,
     rationaleCode: params.rationaleCode,
     tx: client,

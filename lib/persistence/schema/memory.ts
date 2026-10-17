@@ -95,7 +95,7 @@ export type SensitivityClass = (typeof SENSITIVITY_CLASSES)[number];
  * 记忆来源类型（memory_source.source_type）。
  * 标识 MemoryEntry 的来源事实类型，与 candidate 的 source_item_id/source_job_id/source_artifact_id 对应。
  */
-export const MEMORY_SOURCE_TYPES = ["thread_item", "job", "artifact"] as const;
+export const MEMORY_SOURCE_TYPES = ["thread_item", "job", "artifact", "extraction_run"] as const;
 export type MemorySourceType = (typeof MEMORY_SOURCE_TYPES)[number];
 
 /**
@@ -136,12 +136,14 @@ export const memoryCandidate = mysqlTable(
     sourceThreadId: varchar("sourceThreadId", { length: 36 }),
     /** 来源 Turn（逻辑外键 → Turn.id；可空）。 */
     sourceTurnId: varchar("sourceTurnId", { length: 36 }),
-    /** 来源 Thread Item（逻辑外键 → ThreadItem.id；与 sourceJobId/sourceArtifactId 恰一个非空）。 */
+    /** 来源 Thread Item（逻辑外键 → ThreadItem.id；四者恰一个非空）。 */
     sourceItemId: varchar("sourceItemId", { length: 36 }),
-    /** 来源 Job（逻辑外键 → Job.id；与 sourceItemId/sourceArtifactId 恰一个非空）。 */
+    /** 来源 Job（逻辑外键 → Job.id；四者恰一个非空）。 */
     sourceJobId: varchar("sourceJobId", { length: 36 }),
-    /** 来源 Artifact（逻辑外键 → Artifact.id；与 sourceItemId/sourceJobId 恰一个非空）。 */
+    /** 来源 Artifact（逻辑外键 → Artifact.id；四者恰一个非空）。 */
     sourceArtifactId: varchar("sourceArtifactId", { length: 36 }),
+    /** 来源提取批次（逻辑外键 → MemoryExtractionRun.id；自动提取的候选走此来源）。 */
+    sourceExtractionRunId: varchar("sourceExtractionRunId", { length: 36 }),
     /** 来源事实自身的 hash；必须由平台回读来源后校验，不能信任 Runtime。 */
     sourceHash: varchar("sourceHash", { length: 128 }).notNull(),
     proposedScopeType: mysqlEnum("proposedScopeType", MEMORY_SCOPE_TYPES).notNull(),
@@ -198,7 +200,7 @@ export const memoryCandidate = mysqlTable(
     ),
     exactlyOneSourceCk: check(
       "MemoryCandidate_exactly_one_source_ck",
-      sql`((${t.sourceItemId} IS NOT NULL) + (${t.sourceJobId} IS NOT NULL) + (${t.sourceArtifactId} IS NOT NULL)) = 1`,
+      sql`((${t.sourceItemId} IS NOT NULL) + (${t.sourceJobId} IS NOT NULL) + (${t.sourceArtifactId} IS NOT NULL) + (${t.sourceExtractionRunId} IS NOT NULL)) = 1`,
     ),
     acceptedEntryCk: check(
       "MemoryCandidate_accepted_entry_ck",

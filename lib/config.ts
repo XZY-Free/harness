@@ -710,6 +710,17 @@ export const contextConfig = {
   get microcompactMessageTokens(): number {
     return Number.parseInt(optionalEnv("NEX_CONTEXT_MICROCOMPACT_TOKENS", "2048"), 10);
   },
+  /**
+   * 压缩前记忆 flush 的预留 token 下限（对标 OpenClaw reserveTokensFloor）。
+   * 触发线 = 上下文窗口 - 本值 - flushSoftThresholdTokens。
+   */
+  get flushReserveTokens(): number {
+    return Number.parseInt(optionalEnv("NEX_MEMORY_FLUSH_RESERVE_TOKENS", "20000"), 10);
+  },
+  /** 压缩前记忆 flush 的软阈值（对标 OpenClaw softThresholdTokens）。 */
+  get flushSoftThresholdTokens(): number {
+    return Number.parseInt(optionalEnv("NEX_MEMORY_FLUSH_SOFT_THRESHOLD_TOKENS", "4000"), 10);
+  },
 } as const;
 
 /**
