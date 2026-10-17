@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { providerExecutorKind } from "@/lib/capability/provider-executor-kind";
+import { createProductionProviderExecutorRegistry } from "@/lib/capability/provider-executor";
 import { redactArguments } from "@/lib/capability/redact-arguments";
 import {
   type ToolCall,
@@ -7,6 +7,10 @@ import {
   createToolCall,
   updateToolCallState,
 } from "@/lib/capability/tool-call-queries";
+import {
+  type ToolExecutabilityResult,
+  resolveToolExecutability,
+} from "@/lib/capability/tool-executability";
 import {
   computeToolExecutionContractDigest,
   parseToolExecutionContract,
@@ -85,6 +89,22 @@ export class ToolApplicationError extends Error {
     super(message);
     this.name = "ToolApplicationError";
   }
+}
+
+/** 把统一可执行性判定的 reasonCode 映射为既有 ToolApplicationError 错误码。 */
+function mapExecutabilityError(verdict: ToolExecutabilityResult): ToolApplicationError {
+  const codeByReason: Record<string, string> = {
+    schema_revision_not_published: "TOOL_UNAVAILABLE",
+    tool_not_enabled: "TOOL_UNAVAILABLE",
+    provider_not_enabled: "TOOL_UNAVAILABLE",
+    provider_executor_kind_unknown: "PROVIDER_EXECUTOR_UNAVAILABLE",
+    provider_executor_unavailable: "PROVIDER_EXECUTOR_UNAVAILABLE",
+    provider_connection_unavailable: "PROVIDER_CONNECTION_UNAVAILABLE",
+    unsupported_auth_method: "PROVIDER_AUTH_UNSUPPORTED",
+    execution_contract_integrity: "TOOL_EXECUTION_CONTRACT_MISMATCH",
+  };
+  const code = codeByReason[verdict.reasonCode ?? ""] ?? "TOOL_UNAVAILABLE";
+  return new ToolApplicationError(code, verdict.detail ?? "Tool 不可执行");
 }
 
 export async function applyToolCall(input: ApplyToolCallInput): Promise<ApplyToolCallResult> {
@@ -196,38 +216,42 @@ async function applyToolCallTx(
   }
   validateArguments(asRecord(facts.revision.inputSchemaJson), input.arguments);
   const executionContract = parseToolExecutionContract(facts.revision.executionContractJson);
-  const executorKind = providerExecutorKind(
-    facts.provider.providerType,
-    executionContract.providerOperationMetadata,
+  // 统一可执行性判定（与 catalog 装载共用同一事实源）
+  const verdict = resolveToolExecutability(
+    {
+      tool: { id: facts.tool.id, lifecycleState: facts.tool.lifecycleState },
+      provider: {
+        id: facts.provider.id,
+        providerType: facts.provider.providerType,
+        lifecycleState: facts.provider.lifecycleState,
+        connectionId: facts.provider.connectionId,
+      },
+      revision: {
+        id: facts.revision.id,
+        revisionState: facts.revision.revisionState,
+        executionContractDigest: facts.revision.executionContractDigest,
+        contract: executionContract,
+      },
+      connection: facts.connection
+        ? {
+            id: facts.connection.id,
+            lifecycleState: facts.connection.lifecycleState,
+            endpointRef: facts.connection.endpointRef,
+            authMethod: facts.connection.authMethod,
+          }
+        : null,
+    },
+    createProductionProviderExecutorRegistry(),
   );
-  if (!executorKind) {
-    throw new ToolApplicationError(
-      "PROVIDER_EXECUTOR_UNAVAILABLE",
-      "Provider 没有 production executor",
-    );
+  if (!verdict.executable) {
+    throw mapExecutabilityError(verdict);
   }
-  if (
-    facts.provider.providerType === "webhook" &&
-    (!facts.connection ||
-      facts.connection.lifecycleState !== "enabled" ||
-      !facts.connection.endpointRef)
-  ) {
-    throw new ToolApplicationError("PROVIDER_CONNECTION_UNAVAILABLE", "Webhook Connection 不可用");
-  }
-  if (
-    computeToolExecutionContractDigest(executionContract) !==
-      facts.revision.executionContractDigest ||
-    facts.revision.executionContractDigest !== catalogTool.executionContractDigest
-  ) {
+  const executorKind = verdict.executorKind as string;
+  // 交叉校验：实际 revision 的 digest 必须与冻结目录一致（apply 独有）
+  if (facts.revision.executionContractDigest !== catalogTool.executionContractDigest) {
     throw new ToolApplicationError(
       "TOOL_EXECUTION_CONTRACT_MISMATCH",
       "执行合同摘要与冻结目录不一致",
-    );
-  }
-  if (facts.connection && !["none", "bearer"].includes(facts.connection.authMethod)) {
-    throw new ToolApplicationError(
-      "PROVIDER_AUTH_UNSUPPORTED",
-      "Webhook Connection 的 authMethod 没有 production resolver",
     );
   }
   const frozenPolicy = await loadFrozenPolicyRevision(

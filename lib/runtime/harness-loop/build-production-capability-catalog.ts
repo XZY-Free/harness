@@ -3,12 +3,9 @@ import {
   resolveAgentActionBinding,
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { createProductionProviderExecutorRegistry } from "@/lib/capability/provider-executor";
-import { providerExecutorKind } from "@/lib/capability/provider-executor-kind";
 import { getCurrentSkillVersion, listSkillsForMatching } from "@/lib/capability/skill-queries";
-import {
-  computeToolExecutionContractDigest,
-  parseToolExecutionContract,
-} from "@/lib/capability/tool-execution-contract";
+import { resolveToolExecutability } from "@/lib/capability/tool-executability";
+import { parseToolExecutionContract } from "@/lib/capability/tool-execution-contract";
 import {
   getConnectionById,
   getCurrentToolSchemaRevision,
@@ -311,38 +308,51 @@ async function loadAuthorizedTools(
         tenantId: input.tenantId,
         toolId: tool.id,
       });
-      if (!revision || revision.revisionState !== "published") continue;
+      if (!revision) continue;
       const provider = await getToolProviderById({
         tenantId: input.tenantId,
         providerId: tool.providerId,
       });
-      if (!provider || provider.lifecycleState !== "enabled") continue;
-      const contract = parseToolExecutionContract(revision.executionContractJson);
-      const executorKind = providerExecutorKind(
-        provider.providerType,
-        contract.providerOperationMetadata,
-      );
-      if (!executorKind || !registry.supports(provider.providerType, executorKind)) continue;
+      if (!provider) continue;
       const connection = provider.connectionId
         ? await getConnectionById({
             tenantId: input.tenantId,
             connectionId: provider.connectionId,
           })
         : null;
-      if (
-        provider.providerType === "webhook" &&
-        (!connection || connection.lifecycleState !== "enabled" || !connection.endpointRef)
-      ) {
+      const contract = parseToolExecutionContract(revision.executionContractJson);
+      // 统一可执行性判定（与 apply-tool-call 共用同一事实源，避免两处漏改）
+      const verdict = resolveToolExecutability(
+        {
+          tool: { id: tool.id, lifecycleState: tool.lifecycleState },
+          provider: {
+            id: provider.id,
+            providerType: provider.providerType,
+            lifecycleState: provider.lifecycleState,
+            connectionId: provider.connectionId,
+          },
+          revision: {
+            id: revision.id,
+            revisionState: revision.revisionState,
+            executionContractDigest: revision.executionContractDigest,
+            contract,
+          },
+          connection: connection
+            ? {
+                id: connection.id,
+                lifecycleState: connection.lifecycleState,
+                endpointRef: connection.endpointRef,
+                authMethod: connection.authMethod,
+              }
+            : null,
+        },
+        registry,
+      );
+      if (!verdict.executable) {
+        unavailableFacts.push(`tool_unavailable:${tool.id}:${verdict.reasonCode}`);
         continue;
       }
-      if (connection && !["none", "bearer"].includes(connection.authMethod)) {
-        unavailableFacts.push(`tool_unavailable:${tool.id}:unsupported_auth_method`);
-        continue;
-      }
-      if (computeToolExecutionContractDigest(contract) !== revision.executionContractDigest) {
-        unavailableFacts.push(`tool_unavailable:${tool.id}:execution_contract_integrity`);
-        continue;
-      }
+      const executorKind = verdict.executorKind as string;
       const executionTarget =
         executorKind === "builtin.shell"
           ? input.workspaceUnavailable || scope.toolThreadId === null
