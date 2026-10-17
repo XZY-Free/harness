@@ -1051,6 +1051,65 @@ export async function supersedeMemoryEntry(params: {
 }
 
 /**
+ * 事后撤销：把一条被取代 / 归档的记忆恢复为 active（D5「事后可撤销」）。
+ *
+ * 对标 Graphiti 的反向失效——发现自动沉淀或演化错了，能撤回而不必删。
+ *
+ * 行为：
+ * - archived → active（清 expiredAt）。
+ * - superseded → active，并**对称地**把取代它的那条重新标记为 superseded
+ *   （撤销取代，避免两条同时 active 出现矛盾）；同时断开互指。
+ *
+ * @returns 恢复后的条目；不存在返回 null。
+ */
+export async function restoreMemoryEntry(
+  tenantId: string,
+  entryId: string,
+): Promise<MemoryEntry | null> {
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const [entry] = await tx
+      .select()
+      .from(memoryEntry)
+      .where(and(eq(memoryEntry.tenantId, tenantId), eq(memoryEntry.id, entryId)))
+      .for("update")
+      .limit(1);
+    if (!entry) return null;
+
+    // 若被某条取代：对称失效取代者，避免矛盾并存
+    if (entry.supersededByEntryId) {
+      await tx
+        .update(memoryEntry)
+        .set({
+          memoryState: "superseded",
+          invalidAt: now,
+          expiredAt: now,
+          updatedAt: now,
+        })
+        .where(eq(memoryEntry.id, entry.supersededByEntryId));
+    }
+
+    await tx
+      .update(memoryEntry)
+      .set({
+        memoryState: "active",
+        invalidAt: null,
+        expiredAt: null,
+        supersededByEntryId: null,
+        updatedAt: now,
+      })
+      .where(eq(memoryEntry.id, entry.id));
+
+    const [updated] = await tx
+      .select()
+      .from(memoryEntry)
+      .where(eq(memoryEntry.id, entry.id))
+      .limit(1);
+    return updated ?? null;
+  });
+}
+
+/**
  * 沿演化链追溯某条记忆的完整历史（从最旧到最新）。
  *
  * 反向走 supersedesEntryId（本条取代了谁），再正向补出后续取代它的条目。

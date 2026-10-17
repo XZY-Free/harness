@@ -1,6 +1,8 @@
 import {
   archiveMemoryEntry,
   getMemoryEntryById,
+  getMemoryEvolutionChain,
+  restoreMemoryEntry,
   updateMemoryEntry,
 } from "@/lib/context/memory-queries";
 import {
@@ -48,12 +50,18 @@ function projectEntry(entry: {
   scopeType: string;
   scopeRef: string | null;
   memoryType: string;
+  memoryCategory: string;
   contentRef: string | null;
   contentRedacted: string | null;
   contentHash: string;
   sensitivityClass: string;
   memoryState: string;
   validFrom: Date;
+  invalidAt?: Date | null;
+  expiredAt?: Date | null;
+  supersedesEntryId?: string | null;
+  supersededByEntryId?: string | null;
+  retrievalCount?: number;
   expiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -61,12 +69,18 @@ function projectEntry(entry: {
   entry_id: string;
   scope: { type: string; ref: string | null };
   memory_type: string;
+  memory_category: string;
   content_ref: string | null;
   content_redacted: string | null;
   content_hash: string;
   sensitivity_class: string;
   memory_state: string;
   valid_from: string;
+  invalid_at: string | null;
+  expired_at: string | null;
+  supersedes_entry_id: string | null;
+  superseded_by_entry_id: string | null;
+  retrieval_count: number;
   expires_at: string | null;
   created_at: string;
   updated_at: string;
@@ -75,12 +89,18 @@ function projectEntry(entry: {
     entry_id: entry.id,
     scope: { type: entry.scopeType, ref: entry.scopeRef },
     memory_type: entry.memoryType,
+    memory_category: entry.memoryCategory,
     content_ref: entry.contentRef,
     content_redacted: entry.sensitivityClass === "restricted" ? null : entry.contentRedacted,
     content_hash: entry.contentHash,
     sensitivity_class: entry.sensitivityClass,
     memory_state: entry.memoryState,
     valid_from: entry.validFrom.toISOString(),
+    invalid_at: entry.invalidAt ? entry.invalidAt.toISOString() : null,
+    expired_at: entry.expiredAt ? entry.expiredAt.toISOString() : null,
+    supersedes_entry_id: entry.supersedesEntryId ?? null,
+    superseded_by_entry_id: entry.supersededByEntryId ?? null,
+    retrieval_count: entry.retrievalCount ?? 0,
     expires_at: entry.expiresAt ? entry.expiresAt.toISOString() : null,
     created_at: entry.createdAt.toISOString(),
     updated_at: entry.updatedAt.toISOString(),
@@ -102,6 +122,19 @@ export async function GET(request: Request): Promise<Response> {
   const entryId = extractEntryId(request.url);
   if (!entryId) {
     return resourceNotFound(requestId, "entry_id 缺失");
+  }
+
+  // ?action=evolution：返回完整演化链（对标 Graphiti 时序追溯）
+  const action = new URL(request.url).searchParams.get("action");
+  if (action === "evolution") {
+    const chain = await getMemoryEvolutionChain(principal.tenantId, entryId);
+    if (chain.length === 0) {
+      return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
+    }
+    return apiSuccess(
+      { entries: chain.map(projectEntry) },
+      { status: 200, headers: { [REQUEST_ID_HEADER]: requestId } },
+    );
   }
 
   const entry = await getMemoryEntryById(principal.tenantId, entryId);
@@ -137,6 +170,22 @@ export async function PATCH(request: Request): Promise<Response> {
     return schemaInvalidTable(requestId, "请求体必须是 JSON 对象");
   }
   const b = body as Record<string, unknown>;
+
+  // 事后撤销（D5「事后可撤销」）：{ action: "restore" } 把归档/被取代的记忆恢复为 active
+  if (b.action === "restore") {
+    const existing = await getMemoryEntryById(principal.tenantId, entryId);
+    if (!existing) {
+      return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
+    }
+    const restored = await restoreMemoryEntry(principal.tenantId, entryId);
+    if (!restored) {
+      return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
+    }
+    return apiSuccess(projectEntry(restored), {
+      status: 200,
+      headers: { [REQUEST_ID_HEADER]: requestId },
+    });
+  }
 
   const updates: { contentRedacted?: string; contentRef?: string; expiresAt?: Date | null } = {};
 
