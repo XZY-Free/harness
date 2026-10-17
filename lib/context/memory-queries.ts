@@ -28,6 +28,7 @@ import { db } from "@/lib/db/client";
 import {
   type CandidateState,
   type MemoryCandidate,
+  type MemoryCategory,
   type MemoryEntry,
   type MemoryScopeType,
   type MemorySource,
@@ -370,6 +371,8 @@ export async function createMemoryCandidateWithEntry(params: {
   proposedScopeType: MemoryScopeType;
   proposedScopeRef?: string | null;
   memoryType: string;
+  /** 记忆分类（受控值；缺省 project）。决定 TTL 与检索过滤。 */
+  memoryCategory?: string | null;
   contentRef?: string | null;
   contentRedacted?: string | null;
   contentHash: string;
@@ -406,13 +409,15 @@ export async function createMemoryCandidateWithEntry(params: {
     scopeType: params.proposedScopeType,
     scopeRef: params.proposedScopeRef ?? null,
     memoryType: params.memoryType,
+    memoryCategory: (params.memoryCategory ?? "project") as MemoryCategory,
     contentRef: params.contentRef ?? null,
     contentRedacted: params.contentRedacted ?? null,
     contentHash: params.contentHash,
     sensitivityClass: params.sensitivityClass,
     memoryState: "active",
     validFrom: now,
-    expiresAt: null,
+    // TTL：按分类取默认策略（feedback/decision 有时效；user/project/reference 不过期）
+    expiresAt: resolveMemoryTtl(params.memoryCategory ?? "project", now),
     createdAt: now,
     updatedAt: now,
   });
@@ -597,13 +602,14 @@ export async function resolveMemoryCandidate(params: {
       scopeType,
       scopeRef: scopeRef ?? null,
       memoryType: locked.memoryType,
+      memoryCategory: categoryFromMemoryType(locked.memoryType),
       contentRef: locked.contentRef,
       contentRedacted: locked.contentRedacted,
       contentHash: locked.contentHash,
       sensitivityClass: locked.sensitivityClass,
       memoryState: "active",
       validFrom: now,
-      expiresAt: null,
+      expiresAt: resolveMemoryTtl(categoryFromMemoryType(locked.memoryType), now),
       createdAt: now,
       updatedAt: now,
     });
@@ -731,7 +737,13 @@ export async function listActiveMemoryEntriesByScopes(
     /** scopeRef 为 null 表示该 scope 类型不绑定具体 ref（如 user_preference/organization）。 */
     scopeRef?: string | null;
   }>,
-  options?: { limit?: number },
+  options?: {
+    limit?: number;
+    /** 需要排除的条目 id（capm 语义召回已覆盖的，避免重复）。 */
+    excludeIds?: ReadonlyArray<string>;
+    /** 只取这些分类（缺省不限）。 */
+    categories?: ReadonlyArray<string>;
+  },
 ): Promise<MemoryEntry[]> {
   if (scopes.length === 0) return [];
 
@@ -761,18 +773,65 @@ export async function listActiveMemoryEntriesByScopes(
   }
   const orCondition = conditions.length === 1 ? first : sql.join(conditions, sql` OR `);
 
+  // 时效：未过期；且未被取代（invalidAt 为空）——已失效的历史条目退出检索
+  const extra: ReturnType<typeof sql>[] = [
+    sql`(${memoryEntry.expiresAt} IS NULL OR ${memoryEntry.expiresAt} > ${now})`,
+    sql`${memoryEntry.invalidAt} IS NULL`,
+  ];
+  if (options?.excludeIds && options.excludeIds.length > 0) {
+    extra.push(sql`${memoryEntry.id} NOT IN ${options.excludeIds}`);
+  }
+  if (options?.categories && options.categories.length > 0) {
+    extra.push(sql`${memoryEntry.memoryCategory} IN ${options.categories}`);
+  }
+
   const rows = await db
+    .select()
+    .from(memoryEntry)
+    .where(and(orCondition, ...extra))
+    .orderBy(sql`${memoryEntry.updatedAt} DESC`)
+    .limit(limit);
+  return rows;
+}
+
+/**
+ * 按 id 批量取 active 记忆（供 capm 语义召回结果回填结构化字段）。
+ *
+ * 只返回仍 active 的条目（capm 命中但本地已归档的会被过滤）。
+ */
+export async function listActiveMemoryEntriesByIds(
+  tenantId: string,
+  ids: ReadonlyArray<string>,
+): Promise<MemoryEntry[]> {
+  if (ids.length === 0) return [];
+  return db
     .select()
     .from(memoryEntry)
     .where(
       and(
-        orCondition,
-        sql`(${memoryEntry.expiresAt} IS NULL OR ${memoryEntry.expiresAt} > ${now})`,
+        eq(memoryEntry.tenantId, tenantId),
+        eq(memoryEntry.memoryState, "active"),
+        sql`${memoryEntry.id} IN ${ids}`,
       ),
-    )
-    .orderBy(sql`${memoryEntry.updatedAt} DESC`)
-    .limit(limit);
-  return rows;
+    );
+}
+
+/**
+ * 记录一次检索命中（retrievalCount++ / lastRetrievedAt=now）。
+ *
+ * 对标 Mem0 retrieval_count，用于晋升/降权。批量、失败不抛（统计非关键）。
+ */
+export async function recordMemoryRetrieval(
+  tenantId: string,
+  ids: ReadonlyArray<string>,
+): Promise<void> {
+  if (ids.length === 0) return;
+  const now = new Date();
+  await db
+    .update(memoryEntry)
+    .set({ retrievalCount: sql`${memoryEntry.retrievalCount} + 1`, lastRetrievedAt: now })
+    .where(and(eq(memoryEntry.tenantId, tenantId), sql`${memoryEntry.id} IN ${ids}`))
+    .catch(() => undefined);
 }
 
 // ─── 仓储：用户控制（S07-C04 §11 用户控制） ────────────────
@@ -893,114 +952,6 @@ export async function updateMemoryEntry(
   return getMemoryEntryById(tenantId, entryId);
 }
 
-// ─── 迁移：Thread.pinnedFacts → MemoryEntry（S07-C04 旧数据迁移） ──
-
-/**
- * 迁移结果。
- */
-export interface PinnedFactsMigrationResult {
-  threadId: string;
-  migratedCount: number;
-  skippedCount: number;
-  /** 跳过原因码（如 ["empty_facts", "already_migrated"]）。 */
-  reasonCodes: string[];
-}
-
-/**
- * 把 Thread.pinnedFacts 迁移为 thread scope 的 MemoryEntry（§迁移与删除）。
- *
- * 行为：
- * - pinnedFacts 为 null/空数组 → skipped（reasonCode=empty_facts）。
- * - 每条 fact 创建一个 thread scope 的 MemoryEntry（scopeRef=threadId）。
- * - 敏感内容先分类：detectSensitiveContent 命中 → sensitivityClass=restricted，否则 internal。
- * - memoryState=active，memoryType="pinned_fact"。
- * - 幂等：相同 contentHash + thread scope 的 Entry 不重复创建（UNIQUE entryKey 保证）。
- *
- * @returns 迁移结果（migratedCount + skippedCount + reasonCodes）。
- */
-export async function migrateThreadPinnedFacts(params: {
-  tenantId: string;
-  threadId: string;
-  pinnedFacts: string[] | null;
-}): Promise<PinnedFactsMigrationResult> {
-  const { tenantId, threadId, pinnedFacts } = params;
-  const reasonCodes: string[] = [];
-
-  if (!pinnedFacts || pinnedFacts.length === 0) {
-    return {
-      threadId,
-      migratedCount: 0,
-      skippedCount: 0,
-      reasonCodes: ["empty_facts"],
-    };
-  }
-
-  let migratedCount = 0;
-  let skippedCount = 0;
-
-  for (const fact of pinnedFacts) {
-    const trimmed = fact.trim();
-    if (!trimmed) {
-      skippedCount++;
-      continue;
-    }
-
-    const contentHash = computeMemoryContentHash(trimmed);
-    const entryKey = computeMemoryEntryKey({
-      tenantId,
-      scopeType: "thread",
-      scopeRef: threadId,
-      memoryType: "pinned_fact",
-      contentHash,
-    });
-
-    // 检查是否已迁移（幂等）
-    const [existing] = await db
-      .select({ id: memoryEntry.id })
-      .from(memoryEntry)
-      .where(eq(memoryEntry.entryKey, entryKey))
-      .limit(1);
-
-    if (existing) {
-      skippedCount++;
-      continue;
-    }
-
-    // 敏感分类
-    const isSensitive = detectSensitiveContent(trimmed);
-    const sensitivityClass: SensitivityClass = isSensitive ? "restricted" : "internal";
-
-    // 创建 thread scope MemoryEntry
-    await db.insert(memoryEntry).values({
-      tenantId,
-      entryKey,
-      scopeType: "thread",
-      scopeRef: threadId,
-      memoryType: "pinned_fact",
-      contentRedacted: trimmed,
-      contentRef: null,
-      contentHash,
-      sensitivityClass,
-      memoryState: "active",
-      validFrom: new Date(),
-      expiresAt: null,
-    });
-
-    migratedCount++;
-  }
-
-  if (skippedCount > 0) {
-    reasonCodes.push("skipped_empty_or_duplicate");
-  }
-
-  return {
-    threadId,
-    migratedCount,
-    skippedCount,
-    reasonCodes,
-  };
-}
-
 /**
  * 计算 MemoryEntry 的规范化去重键 entryKey。
  *
@@ -1023,4 +974,229 @@ export function computeMemoryEntryKey(params: {
   ];
   const raw = parts.join("|");
   return `sha256:${createHash("sha256").update(raw, "utf8").digest("hex")}`;
+}
+
+// ─── 演化：双时态取代（对标 Graphiti）────────────────────────
+
+/**
+ * 双时态取代：旧记忆不物理删，标记失效并由新记忆接管。
+ *
+ * 对标 Graphiti 的 temporal edge invalidation——矛盾信息不删除，而是：
+ * - 旧条目：memoryState=superseded + invalidAt（事件时间：现实世界失效）+ expiredAt（系统时间：系统知悉）；
+ * - 新条目：supersedesEntryId 指向旧条目；
+ * - 旧条目：supersededByEntryId 指向新条目。
+ *
+ * 时间语义：
+ * - `invalidAt` 取新条目 validFrom（事实从新条目生效之时起不再为真）；
+ *   调用方可显式传入（如新事实明确声明了旧事实的结束时间）。
+ * - `expiredAt` 恒为 now（系统此刻标记失效）——与 invalidAt 是两回事。
+ *
+ * @returns 更新后的旧条目；任一条目不存在返回 null。
+ */
+export async function supersedeMemoryEntry(params: {
+  tenantId: string;
+  oldEntryId: string;
+  newEntryId: string;
+  /** 事件时间（现实世界失效时刻）；缺省取新条目 validFrom。 */
+  invalidAt?: Date | null;
+  tx?: DbOrTx;
+}): Promise<MemoryEntry | null> {
+  // 已有事务句柄则复用，否则自开（避免嵌套事务）
+  const run = async (tx: Tx): Promise<MemoryEntry | null> => {
+    const now = new Date();
+    const [oldEntry] = await tx
+      .select()
+      .from(memoryEntry)
+      .where(and(eq(memoryEntry.tenantId, params.tenantId), eq(memoryEntry.id, params.oldEntryId)))
+      .for("update")
+      .limit(1);
+    const [newEntry] = await tx
+      .select()
+      .from(memoryEntry)
+      .where(and(eq(memoryEntry.tenantId, params.tenantId), eq(memoryEntry.id, params.newEntryId)))
+      .limit(1);
+    if (!oldEntry || !newEntry) return null;
+
+    // 事件时间：事实在现实世界失效的时刻（缺省 = 新条目开始为真之时）
+    const invalidAt = params.invalidAt ?? newEntry.validFrom;
+
+    // 旧条目：标记取代（不物理删）
+    await tx
+      .update(memoryEntry)
+      .set({
+        memoryState: "superseded",
+        invalidAt,
+        expiredAt: now,
+        supersededByEntryId: params.newEntryId,
+        updatedAt: now,
+      })
+      .where(eq(memoryEntry.id, oldEntry.id));
+
+    // 新条目：记录它取代了谁
+    await tx
+      .update(memoryEntry)
+      .set({ supersedesEntryId: params.oldEntryId, updatedAt: now })
+      .where(eq(memoryEntry.id, newEntry.id));
+
+    const [updated] = await tx
+      .select()
+      .from(memoryEntry)
+      .where(eq(memoryEntry.id, oldEntry.id))
+      .limit(1);
+    return updated ?? null;
+  };
+
+  if (params.tx) return run(params.tx as Tx);
+  return db.transaction(run);
+}
+
+/**
+ * 沿演化链追溯某条记忆的完整历史（从最旧到最新）。
+ *
+ * 反向走 supersedesEntryId（本条取代了谁），再正向补出后续取代它的条目。
+ */
+export async function getMemoryEvolutionChain(
+  tenantId: string,
+  entryId: string,
+): Promise<MemoryEntry[]> {
+  const chain: MemoryEntry[] = [];
+  const seen = new Set<string>();
+
+  // 反向：一直向上找"被取代者"
+  let cursorId: string | null = entryId;
+  while (cursorId && !seen.has(cursorId)) {
+    seen.add(cursorId);
+    const [row] = await db
+      .select()
+      .from(memoryEntry)
+      .where(and(eq(memoryEntry.tenantId, tenantId), eq(memoryEntry.id, cursorId)))
+      .limit(1);
+    if (!row) break;
+    chain.unshift(row);
+    cursorId = row.supersedesEntryId;
+  }
+
+  // 正向：从起点一直向下找"取代者"
+  let forwardId: string | null = chain.length > 0 ? (chain[chain.length - 1]?.id ?? null) : entryId;
+  while (forwardId) {
+    const [row] = await db
+      .select()
+      .from(memoryEntry)
+      .where(and(eq(memoryEntry.tenantId, tenantId), eq(memoryEntry.id, forwardId)))
+      .limit(1);
+    if (!row?.supersededByEntryId || seen.has(row.supersededByEntryId)) break;
+    seen.add(row.supersededByEntryId);
+    const [next] = await db
+      .select()
+      .from(memoryEntry)
+      .where(and(eq(memoryEntry.tenantId, tenantId), eq(memoryEntry.id, row.supersededByEntryId)))
+      .limit(1);
+    if (!next) break;
+    chain.push(next);
+    forwardId = next.id;
+  }
+
+  return chain;
+}
+
+// ─── 遗忘：TTL 到期归档（对标 Mem0 整合遗忘）────────────────
+
+/**
+ * 归档一条到期记忆（memoryState: active → archived）。
+ *
+ * 到期不物理删除：保留历史，仅退出检索。与 archiveMemoryEntry 的区别是本函数
+ * 面向「系统按 TTL 自动归档」，archiveMemoryEntry 面向「用户主动删除」。
+ */
+export async function expireMemoryEntry(
+  tenantId: string,
+  entryId: string,
+): Promise<MemoryEntry | null> {
+  const now = new Date();
+  await db
+    .update(memoryEntry)
+    .set({ memoryState: "archived", expiredAt: now, updatedAt: now })
+    .where(and(eq(memoryEntry.tenantId, tenantId), eq(memoryEntry.id, entryId)));
+  return getMemoryEntryById(tenantId, entryId);
+}
+
+/**
+ * 批量归档已到期记忆（TTL 扫描；由定时任务调用）。
+ *
+ * 只归档 active 且 expiresAt 已过期的条目；返回归档条数。
+ * 幂等：重复执行不会重复归档（已 archived 的不再匹配）。
+ */
+export async function archiveExpiredMemoryEntries(params?: {
+  tenantId?: string;
+  limit?: number;
+}): Promise<number> {
+  const now = new Date();
+  const limit = params?.limit ?? 500;
+  const conditions = [
+    eq(memoryEntry.memoryState, "active"),
+    sql`${memoryEntry.expiresAt} IS NOT NULL AND ${memoryEntry.expiresAt} <= ${now}`,
+  ];
+  if (params?.tenantId) conditions.push(eq(memoryEntry.tenantId, params.tenantId));
+
+  // 先查出待归档 id（MySQL 不支持 UPDATE ... LIMIT + JOIN 的通用写法）
+  const rows = await db
+    .select({ id: memoryEntry.id })
+    .from(memoryEntry)
+    .where(and(...conditions))
+    .limit(limit);
+  if (rows.length === 0) return 0;
+
+  const ids = rows.map((r) => r.id);
+  await db
+    .update(memoryEntry)
+    .set({ memoryState: "archived", expiredAt: now, updatedAt: now })
+    .where(sql`${memoryEntry.id} IN ${ids}`);
+  return ids.length;
+}
+
+/**
+ * 由旧 memoryType（自由字符串）推导记忆分类（受控值）。
+ *
+ * 兼容历史数据：无法识别时归 project（长期有效，不过期）。
+ */
+export function categoryFromMemoryType(memoryType: string): MemoryCategory {
+  const map: Record<string, MemoryCategory> = {
+    preference: "user",
+    user_preference: "user",
+    profile: "user",
+    feedback: "feedback",
+    correction: "feedback",
+    skill_usage: "feedback",
+    decision: "decision",
+    task_decision: "decision",
+    project_fact: "project",
+    project: "project",
+    reference: "reference",
+  };
+  return map[memoryType] ?? "project";
+}
+
+/**
+ * 记忆 TTL 策略（按分类，对标 Mem0 整合遗忘）。
+ *
+ * - feedback / skill_usage：短（30 天）——反馈时效性强。
+ * - decision：中（180 天）——技术决策有效期较长。
+ * - user / project / reference：不过期（null）——稳定偏好与在办工作长期有效。
+ *
+ * @param category 记忆分类
+ * @returns 有效的过期时刻；null 表示不过期。
+ */
+export function resolveMemoryTtl(category: string, from: Date = new Date()): Date | null {
+  const DAY = 24 * 60 * 60 * 1000;
+  const ttlDaysByCategory: Record<string, number | null> = {
+    feedback: 30,
+    decision: 180,
+    user: null,
+    project: null,
+    reference: null,
+    // 旧 memoryType 兼容（未收敛分类的历史数据）
+    skill_usage: 30,
+  };
+  const days = ttlDaysByCategory[category];
+  if (days === undefined || days === null) return null;
+  return new Date(from.getTime() + days * DAY);
 }
