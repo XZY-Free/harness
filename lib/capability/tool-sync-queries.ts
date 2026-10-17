@@ -55,10 +55,10 @@ export async function getToolSyncBindingByRemoteAsset(params: {
   return row ?? null;
 }
 
-/** 按本地 Tool id 取绑定（unsync / Studio 展示）。一个本地 Tool 至多一条绑定。 */
-export async function getToolSyncBindingByLocalTool(params: {
+/** 按本地 Provider id 取绑定（unsync / Studio 展示）。一个本地 Provider 至多一条绑定。 */
+export async function getToolSyncBindingByLocalProvider(params: {
   tenantId: string;
-  localToolId: string;
+  localProviderId: string;
 }): Promise<ToolSyncBinding | null> {
   const [row] = await db
     .select()
@@ -66,17 +66,17 @@ export async function getToolSyncBindingByLocalTool(params: {
     .where(
       and(
         eq(toolSyncBindingTable.tenantId, params.tenantId),
-        eq(toolSyncBindingTable.localToolId, params.localToolId),
+        eq(toolSyncBindingTable.localProviderId, params.localProviderId),
       ),
     )
     .limit(1);
   return row ?? null;
 }
 
-/** 列出租户内 syncState=active 的同步 localToolId（catalog 候选过滤用）。 */
-export async function listActiveSyncLocalToolIds(tenantId: string): Promise<string[]> {
+/** 列出租户内 syncState=active 的同步 localProviderId（catalog 候选过滤用）。 */
+export async function listActiveSyncLocalProviderIds(tenantId: string): Promise<string[]> {
   const rows = await db
-    .select({ localToolId: toolSyncBindingTable.localToolId })
+    .select({ localProviderId: toolSyncBindingTable.localProviderId })
     .from(toolSyncBindingTable)
     .where(
       and(
@@ -84,7 +84,7 @@ export async function listActiveSyncLocalToolIds(tenantId: string): Promise<stri
         eq(toolSyncBindingTable.syncState, "active"),
       ),
     );
-  return rows.map((r) => r.localToolId);
+  return rows.map((r) => r.localProviderId);
 }
 
 // ─── 写入 ──────────────────────────────────────────────────
@@ -100,8 +100,8 @@ export async function createToolSyncBinding(
     remoteVersion: string;
     remoteVersionId?: string | null;
     remoteContentHash?: string | null;
-    localToolId: string;
-    localProviderId?: string | null;
+    localProviderId: string;
+    localToolId?: string | null;
     localName: string;
     syncState?: ToolSyncState;
     lastSyncedAt?: Date | null;
@@ -118,8 +118,8 @@ export async function createToolSyncBinding(
     remoteVersion: input.remoteVersion,
     remoteVersionId: input.remoteVersionId ?? null,
     remoteContentHash: input.remoteContentHash ?? null,
-    localToolId: input.localToolId,
-    localProviderId: input.localProviderId ?? null,
+    localProviderId: input.localProviderId,
+    localToolId: input.localToolId ?? null,
     localName: input.localName,
     syncState: input.syncState ?? "active",
     lastSyncedAt: input.lastSyncedAt ?? null,
@@ -147,7 +147,7 @@ export async function updateToolSyncBinding(
     remoteVersion?: string;
     remoteVersionId?: string | null;
     remoteContentHash?: string | null;
-    localProviderId?: string | null;
+    localToolId?: string | null;
     localName?: string;
     syncState?: ToolSyncState;
     lastSyncedAt?: Date | null;
@@ -162,7 +162,7 @@ export async function updateToolSyncBinding(
   if (patch.remoteVersion !== undefined) updates.remoteVersion = patch.remoteVersion;
   if (patch.remoteVersionId !== undefined) updates.remoteVersionId = patch.remoteVersionId;
   if (patch.remoteContentHash !== undefined) updates.remoteContentHash = patch.remoteContentHash;
-  if (patch.localProviderId !== undefined) updates.localProviderId = patch.localProviderId;
+  if (patch.localToolId !== undefined) updates.localToolId = patch.localToolId;
   if (patch.localName !== undefined) updates.localName = patch.localName;
   if (patch.syncState !== undefined) updates.syncState = patch.syncState;
   if (patch.lastSyncedAt !== undefined) updates.lastSyncedAt = patch.lastSyncedAt;

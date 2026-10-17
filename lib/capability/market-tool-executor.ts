@@ -21,10 +21,15 @@ import type {
 export function createMarketToolExecutor(): ProductionProviderExecutor {
   return {
     async execute(input: ProviderExecutionInput): Promise<ProviderExecutionResult> {
+      // capm /tools/call/:toolKey 按 asset name 解析（同步时冻结进 capmToolName）
+      const capmToolKey =
+        typeof input.operationMetadata?.capmToolName === "string"
+          ? (input.operationMetadata.capmToolName as string)
+          : (input.operationId ?? "");
       return callCapmMarket({
         capmBase: input.endpoint,
         segment: "tools",
-        name: input.operationId ?? "",
+        name: capmToolKey,
         arguments: input.arguments,
         timeoutMs: input.timeoutMs,
         responseMaxBytes: input.responseMaxBytes,

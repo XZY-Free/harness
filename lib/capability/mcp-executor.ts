@@ -19,10 +19,16 @@ import type {
 export function createMcpExecutor(): ProductionProviderExecutor {
   return {
     async execute(input: ProviderExecutionInput): Promise<ProviderExecutionResult> {
+      // capm 侧 MCP 工具名为 `{asset}__{tool}`（同步时冻结进 operationMetadata.capmToolName）；
+      // 本地 toolKey 因命名约束可能被规范化，故优先用冻结的远端名。
+      const capmToolName =
+        typeof input.operationMetadata?.capmToolName === "string"
+          ? (input.operationMetadata.capmToolName as string)
+          : (input.operationId ?? "");
       return callCapmMarket({
         capmBase: input.endpoint,
         segment: "mcp",
-        name: input.operationId ?? "",
+        name: capmToolName,
         arguments: input.arguments,
         timeoutMs: input.timeoutMs,
         responseMaxBytes: input.responseMaxBytes,

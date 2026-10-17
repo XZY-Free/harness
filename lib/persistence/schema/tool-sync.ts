@@ -65,14 +65,12 @@ export const toolSyncBindingTable = mysqlTable(
     remoteVersionId: varchar("remoteVersionId", { length: 256 }),
     /** 远端 content hash（capability-market content_hash）。 */
     remoteContentHash: varchar("remoteContentHash", { length: 256 }),
-    /** 本地 Tool id（正式 Tool 表）。 */
-    localToolId: varchar("localToolId", { length: 36 })
+    /** 本地 ToolProvider id（正式 ToolProvider 表）——同步锚点。 */
+    localProviderId: varchar("localProviderId", { length: 36 })
       .notNull()
-      .references(() => toolTable.id),
-    /** 本地 ToolProvider id（正式 ToolProvider 表）。 */
-    localProviderId: varchar("localProviderId", { length: 36 }).references(
-      () => toolProviderTable.id,
-    ),
+      .references(() => toolProviderTable.id),
+    /** 本地主 Tool id（tool=该工具；mcp=首个工具；可空）。 */
+    localToolId: varchar("localToolId", { length: 36 }).references(() => toolTable.id),
     /** 本地 toolKey（冗余存储，用于展示与冲突检查）。 */
     localName: varchar("localName", { length: 128 }).notNull(),
     syncState: varchar("syncState", { length: 32 }).notNull().default("active"),
@@ -91,7 +89,10 @@ export const toolSyncBindingTable = mysqlTable(
       t.tenantId,
       t.remoteAssetId,
     ),
-    tenantLocalToolIdx: index("ToolSyncBinding_tenant_localTool_idx").on(t.tenantId, t.localToolId),
+    tenantLocalProviderIdx: index("ToolSyncBinding_tenant_localProvider_idx").on(
+      t.tenantId,
+      t.localProviderId,
+    ),
     tenantSyncStateIdx: index("ToolSyncBinding_tenant_syncState_idx").on(t.tenantId, t.syncState),
   }),
 );

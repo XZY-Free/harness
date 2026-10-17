@@ -23,6 +23,12 @@ export interface ProviderExecutionInput {
   threadId?: string;
   /** Tool 内稳定操作标识（ToolCall.operationId）；mcp 执行器用它作为远端工具名。 */
   operationId?: string;
+  /**
+   * 执行合同的 providerOperationMetadata（冻结字段）。
+   * 市场型能力用它承载远端调用名等（如 mcp 的 remoteToolName），
+   * 避免本地 toolKey 规范化后与远端名不一致。
+   */
+  operationMetadata?: Record<string, unknown>;
   arguments: Record<string, unknown>;
   executionSubject: ExecutionSubject;
   invocationId: string;

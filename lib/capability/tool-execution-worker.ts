@@ -279,6 +279,7 @@ export function createToolExecutionWorker(
           endpoint: binding.endpointRef ?? "",
           threadId: toolCall.threadId ?? undefined,
           operationId: toolCall.operationId,
+          operationMetadata: contract.providerOperationMetadata,
           arguments: toolCall.argumentsRedactedJson as Record<string, unknown>,
           executionSubject: subject,
           invocationId: toolCall.invocationId,
