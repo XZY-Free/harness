@@ -175,7 +175,9 @@ async function importMcpAsset(
       toolId: tool.id,
       description: `${item.asset_name}__${toolKey}@${item.resolved_version}`,
       inputSchema: t.input_schema ?? { type: "object", properties: {} },
-      outputSchema: null,
+      outputSchema: t.output_schema ?? null,
+      // annotations 存入 riskMetadataJson（catalog 消费；缺失则 null 降级）
+      riskMetadata: t.annotations ? { mcpAnnotations: t.annotations } : null,
       executionContract: defaultExecutionContract("read"),
       // 执行经 capm /mcp/call/:toolName：capm 侧命名为 `{asset}__{tool}`（见 capm mcp-proxy）
       metadata: { capmToolName: `${item.asset_name}__${toolKey}` },
@@ -287,6 +289,7 @@ async function publishRevision(input: {
   description: string;
   inputSchema: unknown;
   outputSchema: unknown;
+  riskMetadata?: unknown;
   executionContract: ReturnType<typeof defaultExecutionContract>;
   metadata: Record<string, unknown>;
 }): Promise<void> {
@@ -303,6 +306,7 @@ async function publishRevision(input: {
     description: input.description,
     inputSchemaJson: input.inputSchema,
     outputSchemaJson: input.outputSchema ?? undefined,
+    riskMetadataJson: input.riskMetadata ?? undefined,
     executionContractJson: contract,
     createdBy: input.actorUserId,
   });

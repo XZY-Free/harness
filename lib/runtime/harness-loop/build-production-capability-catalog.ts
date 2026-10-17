@@ -384,6 +384,8 @@ async function loadAuthorizedTools(
         displayName: tool.displayName,
         description: revision.description ?? tool.description ?? "",
         inputSchema: asRecord(revision.inputSchemaJson),
+        outputSchema: asOptionalRecord(revision.outputSchemaJson),
+        annotations: extractMcpAnnotations(revision.riskMetadataJson),
         sideEffect: contract.sideEffectMode,
         idempotent: contract.idempotencySupport !== "none",
       });
@@ -398,4 +400,29 @@ function asRecord(value: unknown): Record<string, unknown> {
     throw new Error("CAPABILITY_CATALOG_TOOL_SCHEMA_INVALID");
   }
   return value as Record<string, unknown>;
+}
+
+/** 可选对象投影（缺失/非法 → null，消费方降级）。 */
+function asOptionalRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** 从 riskMetadataJson 提取 MCP annotations（本地存于 mcpAnnotations；缺失 → null）。 */
+function extractMcpAnnotations(
+  riskMetadataJson: unknown,
+): import("./capability-catalog").CapabilityCatalogToolAnnotations | null {
+  const meta = asOptionalRecord(riskMetadataJson);
+  const ann = meta ? asOptionalRecord(meta.mcpAnnotations) : null;
+  if (!ann) return null;
+  const take = (k: string) => (typeof ann[k] === "boolean" ? (ann[k] as boolean) : undefined);
+  const title = typeof ann.title === "string" ? ann.title : undefined;
+  const out = {
+    ...(title ? { title } : {}),
+    ...(take("readOnlyHint") !== undefined ? { readOnlyHint: take("readOnlyHint") } : {}),
+    ...(take("destructiveHint") !== undefined ? { destructiveHint: take("destructiveHint") } : {}),
+    ...(take("idempotentHint") !== undefined ? { idempotentHint: take("idempotentHint") } : {}),
+    ...(take("openWorldHint") !== undefined ? { openWorldHint: take("openWorldHint") } : {}),
+  };
+  return Object.keys(out).length > 0 ? out : null;
 }

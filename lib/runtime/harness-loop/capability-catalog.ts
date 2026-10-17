@@ -25,6 +25,14 @@ export interface CapabilityCatalogAgent {
   contextRequirements: string[];
 }
 
+export interface CapabilityCatalogToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 export interface CapabilityCatalogTool {
   executionTarget?: ToolExecutionTarget;
   toolId: string;
@@ -36,6 +44,10 @@ export interface CapabilityCatalogTool {
   displayName: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** 输出 schema（MCP tool.outputSchema 等；缺失为 null，消费方降级）。 */
+  outputSchema: Record<string, unknown> | null;
+  /** MCP tool annotations（权限/风险联动；缺失为 null，消费方降级）。 */
+  annotations: CapabilityCatalogToolAnnotations | null;
   sideEffect: "none" | "read" | "write" | "unknown";
   idempotent: boolean;
 }
@@ -208,6 +220,8 @@ export function capabilityCatalogModelView(snapshot: CapabilityCatalogSnapshot) 
       displayName: tool.displayName,
       description: tool.description,
       inputSchema: clone(tool.inputSchema),
+      outputSchema: tool.outputSchema ? clone(tool.outputSchema) : null,
+      annotations: tool.annotations ? clone(tool.annotations) : null,
       sideEffect: tool.sideEffect,
       idempotent: tool.idempotent,
     })),
