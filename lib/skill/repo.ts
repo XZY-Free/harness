@@ -1,22 +1,28 @@
+/**
+ * Skill 内容缓存（替代原 git 仓库范式）。
+ *
+ * 设计（2026-10-17 定稿）：
+ * - 工作副本：`<root>/<name>/` —— Studio 读写、编辑的目录（不含 .git）。
+ * - 版本快照：`<root>/.snapshots/<name>/<hash>/` —— 按**正文内容 hash**（sha256 hex）
+ *   分目录保存的历史快照；`createSnapshot` 落盘，运行时 `readSkillFileAtHash`
+ *   按 hash 读取（回滚 / 历史 run 复现用）。只保留当前版本之外按需清理（见 pruneSnapshots）。
+ *
+ * 与旧范式（git 仓库）的区别：
+ * - 版本身份从 git commitSha 改为**正文内容 hash**（sha256: + 64 hex）。
+ * - 不再依赖简单 git 操作；快照即目录拷贝。
+ * - `SkillVersion.contentRef` / `contentHash` 均使用该 hash，与运行时
+ *   Fragment 的 `computeFragmentContentHash`（对 SKILL.md 正文取 sha256）同源。
+ *
+ * 路径安全：沿用 resolve + startsWith 拒 `..`；realpath 校验拒 symlink 越界。
+ */
+
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { skillsConfig } from "@/lib/config";
 import { parseSkillMd } from "@/lib/skill/frontmatter";
 import { load as yamlLoad } from "js-yaml";
-import { type SimpleGit, simpleGit } from "simple-git";
-
-/**
- * Skill 目录仓库（Agent Skills 开放标准）。
- *
- * skill 不再是 DB 里一段 promptTemplate 文本，而是磁盘上一个标准 skill 目录：
- * skills/<name>/SKILL.md（YAML frontmatter name/description + 正文）+ 任意支持文件。
- * skills/ 整体是一个独立 git 仓库（范式同 workspaces/{threadId}/，父项目 gitignore 排除）。
- * 版本快照 = git commit，SkillVersion.commitSha 指向该 commit。
- *
- * 路径安全：复用 workspace.ts 的词法边界风格（resolve + startsWith 拒 `..`）。
- * skill name 校验遵循 Agent Skills 标准（小写字母数字 + 单连字符，1-64）。
- */
 
 export class SkillRepoError extends Error {}
 
@@ -24,7 +30,7 @@ export class SkillRepoError extends Error {}
  * skill 发布校验失败(缺 name/description、非法 YAML、未知 tools 等)。
  *
  * 与 SkillRepoError 区分:校验失败是用户输入问题 → 路由层返回 400;
- * 其他 SkillRepoError(无改动、git 故障)→ 500 或回退逻辑。
+ * 其他 SkillRepoError(路径越界、IO 故障)→ 500 或回退逻辑。
  */
 export class SkillValidationError extends SkillRepoError {}
 
@@ -36,15 +42,38 @@ export function assertValidSkillName(name: string): void {
   }
 }
 
-/** skills/ 仓库根（绝对路径）。 */
+/** 快照 hash 目录名格式（sha256 hex，无前缀；对应 contentHash 去掉 `sha256:`）。 */
+const SNAPSHOT_HASH_RE = /^[0-9a-f]{64}$/;
+
+/** skills 缓存根（绝对路径）。 */
 export function skillsRepoRoot(): string {
   return resolve(skillsConfig.root);
 }
 
-/** 单个 skill 目录绝对路径。 */
+/** 单个 skill 工作副本目录绝对路径。 */
 export function skillDir(name: string): string {
   assertValidSkillName(name);
   return resolve(skillsRepoRoot(), name);
+}
+
+/** 快照根目录（`<root>/.snapshots`）。 */
+function snapshotsRoot(): string {
+  return resolve(skillsRepoRoot(), ".snapshots");
+}
+
+/** 某个 skill 版本快照根（`<root>/.snapshots/<name>`）。 */
+function skillSnapshotsDir(name: string): string {
+  assertValidSkillName(name);
+  return resolve(snapshotsRoot(), name);
+}
+
+/** 某个版本的快照目录（`<root>/.snapshots/<name>/<hashHex>`）。 */
+function snapshotDir(name: string, hashHex: string): string {
+  assertValidSkillName(name);
+  if (!SNAPSHOT_HASH_RE.test(hashHex)) {
+    throw new SkillRepoError(`非法内容 hash（须 64 hex）：${hashHex}`);
+  }
+  return resolve(skillSnapshotsDir(name), hashHex);
 }
 
 /** 安全解析 skill 内文件路径，拒 `..` 越界。返回绝对路径。 */
@@ -58,34 +87,19 @@ function safeSkillFilePath(name: string, relPath: string): string {
   return target;
 }
 
-/** 确保 skills/ git 仓库已 init，返回 SimpleGit 实例（baseDir=skillsRepoRoot）。 */
-async function ensureRepo(): Promise<SimpleGit> {
-  const root = skillsRepoRoot();
-  await mkdir(root, { recursive: true });
-  const git = simpleGit({ baseDir: root });
-  if (!existsSync(join(root, ".git"))) {
-    await git.init();
-    await git.addConfig("user.name", "NexHarness");
-    await git.addConfig("user.email", "bot@nexharness.local");
-  }
-  return git;
-}
-
 function isEnoent(err: unknown): boolean {
   return err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT";
 }
 
 /**
- * 审计修复 H3：realpath 解析符号链接后校验结果仍在 skill 目录内。
+ * realpath 解析符号链接后校验结果仍在 skill 目录内。
  * safeSkillFilePath 仅做词法边界检查（resolve + startsWith），不解析 symlink。
- * 若 skill 目录内被放置了指向外部的 symlink（如 `skills/my-skill/config -> /etc/passwd`），
- * readFile / writeFile 会沿 symlink 读写外部文件。realpath 解析所有 symlink 层级后
- * 重新校验边界，堵住此穿越。
+ * 若 skill 目录内被放置了指向外部的 symlink，readFile / writeFile 会沿 symlink 读写外部文件。
+ * realpath 解析所有 symlink 层级后重新校验边界，堵住此穿越。
  *
- * 注意：root 也需 realpath 解析（macOS /var → /private/var，/tmp → /private/tmp），
- * 否则 root="/var/folders/..." 与 real="/private/var/folders/..." 比较失败。
+ * 注意：root 也需 realpath 解析（macOS /var → /private/var），否则比较失败。
  */
-async function assertRealpathInSkillRoot(root: string, target: string): Promise<void> {
+async function assertRealpathInRoot(root: string, target: string): Promise<void> {
   try {
     const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(target)]);
     if (realTarget !== realRoot && !realTarget.startsWith(realRoot + sep)) {
@@ -120,7 +134,7 @@ async function assertNoSymlinkAncestor(root: string, target: string): Promise<vo
   }
 }
 
-/** 判断 skill 目录是否存在（工作副本）。 */
+/** 判断 skill 工作副本目录是否存在。 */
 export async function skillDirExists(name: string): Promise<boolean> {
   try {
     await readdir(skillDir(name));
@@ -130,9 +144,8 @@ export async function skillDirExists(name: string): Promise<boolean> {
   }
 }
 
-/** 建空 skill 目录（不写文件）。副作用：顺带 init skills/ 仓库。 */
+/** 建空 skill 工作副本目录（不写文件）。 */
 export async function createSkillDir(name: string): Promise<void> {
-  await ensureRepo();
   await mkdir(skillDir(name), { recursive: true });
 }
 
@@ -142,10 +155,9 @@ export async function writeSkillFile(
   relPath: string,
   content: string,
 ): Promise<string> {
-  await ensureRepo();
   const root = skillDir(name);
   const target = safeSkillFilePath(name, relPath);
-  await assertRealpathInSkillRoot(root, target);
+  await assertRealpathInRoot(root, target);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, content, "utf8");
   return relPath;
@@ -156,7 +168,7 @@ export async function readSkillFile(name: string, relPath: string): Promise<stri
   const root = skillDir(name);
   const target = safeSkillFilePath(name, relPath);
   try {
-    await assertRealpathInSkillRoot(root, target);
+    await assertRealpathInRoot(root, target);
     return await readFile(target, "utf8");
   } catch (err) {
     if (isEnoent(err)) return null;
@@ -164,14 +176,14 @@ export async function readSkillFile(name: string, relPath: string): Promise<stri
   }
 }
 
-/** 递归列出 skill 工作副本所有文件（相对 skill 根的路径，跳过 .git）。 */
+/** 递归列出 skill 工作副本所有文件（相对 skill 根的路径）。 */
 export async function listSkillFiles(name: string): Promise<string[]> {
   const root = skillDir(name);
   const out: string[] = [];
   async function walk(dir: string, prefix: string) {
     const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
-      if (entry.name === ".git") continue;
+      if (entry.name === ".git" || entry.name === ".snapshots") continue;
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
         await walk(join(dir, entry.name), rel);
@@ -184,16 +196,53 @@ export async function listSkillFiles(name: string): Promise<string[]> {
   return out;
 }
 
+// ─── 内容 hash 与快照 ──────────────────────────────────────
+
+/** 计算 skill 内容 hash（sha256: 前缀，对 SKILL.md 正文取 sha256；与运行时段一致）。 */
+export function computeSkillContentHash(skillMdText: string): string {
+  return `sha256:${createHash("sha256").update(skillMdText, "utf8").digest("hex")}`;
+}
+
+/** 去掉 `sha256:` 前缀得到快照目录名（64 hex）；非法抛错。 */
+function hashToSnapshotKey(contentHash: string): string {
+  if (!contentHash.startsWith("sha256:")) {
+    throw new SkillRepoError(`非法 contentHash（须 sha256: 前缀）：${contentHash}`);
+  }
+  const hex = contentHash.slice("sha256:".length);
+  if (!SNAPSHOT_HASH_RE.test(hex)) {
+    throw new SkillRepoError(`非法 contentHash（须 64 hex）：${contentHash}`);
+  }
+  return hex;
+}
+
 /**
- * 读指定版本（commitSha）下的 skill 文件。agent 加载 skill 的核心：按 thread 固化的
- * commitSha 读历史快照，不受工作副本后续编辑影响（§10 不回归）。
- * 文件不存在 / sha 非法 → null（或抛 SkillRepoError，见下）。
+ * 把 skill 工作副本快照到 `<root>/.snapshots/<name>/<hashHex>/`，
+ * 返回内容 hash（`sha256:<64hex>`）。
  *
- * P2 修复(11 Skill P2-4): 大文件/二进制限制。
- * 原实现 git.show 全量读文件,大文件(如 references 下大 markdown 或二进制图片)
- * 会全量灌入 agent 上下文。现加大小上限 + 二进制扩展名检测,超限截断或跳过。
+ * 快照内容 = 工作副本当前全部文件（不含 .snapshots）。同一 hash 已存在则跳过拷贝（幂等）。
+ * 不再有 git commit；版本身份即该内容 hash。
  */
-const SKILL_FILE_MAX_BYTES = 256 * 1024; // 256KB,对齐 readFile 限制
+export async function createSkillSnapshot(name: string): Promise<string> {
+  const skillMd = await readSkillFile(name, "SKILL.md");
+  if (!skillMd) {
+    throw new SkillRepoError(`skill「${name}」缺 SKILL.md，无法快照`);
+  }
+  const contentHash = computeSkillContentHash(skillMd);
+  const hashHex = hashToSnapshotKey(contentHash);
+  const dest = snapshotDir(name, hashHex);
+  if (existsSync(dest)) return contentHash; // 幂等：同内容不重复快照
+  await mkdir(dirname(dest), { recursive: true });
+  await cp(skillDir(name), dest, { recursive: true });
+  return contentHash;
+}
+
+/**
+ * 读指定内容 hash 下的 skill 文件（运行时按冻结 hash 复现历史内容）。
+ * 文件不存在 / hash 非法 → null。
+ *
+ * 大小上限 + 二进制扩展名检测：大文件截断，二进制不读入上下文。
+ */
+const SKILL_FILE_MAX_BYTES = 256 * 1024; // 256KB
 const BINARY_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -228,38 +277,57 @@ const BINARY_EXTENSIONS = new Set([
   ".bin",
 ]);
 
-export async function readSkillFileAtSha(
+export async function readSkillFileAtHash(
   name: string,
+  contentHash: string,
   relPath: string,
-  sha: string,
 ): Promise<string | null> {
   assertValidSkillName(name);
-  safeSkillFilePath(name, relPath); // 词法校验 relPath
-  if (!/^[0-9a-f]{4,40}$/i.test(sha)) {
-    throw new SkillRepoError(`非法 commitSha：${sha}`);
+  const hashHex = hashToSnapshotKey(contentHash);
+  const root = snapshotDir(name, hashHex);
+  const target = resolve(root, relPath);
+  if (target !== root && !target.startsWith(root + sep)) {
+    throw new SkillRepoError(`非法路径（越界快照目录）：${relPath}`);
   }
-  // P2: 二进制文件跳过(不读入上下文)
   const ext = relPath.toLowerCase().slice(relPath.lastIndexOf("."));
-  if (BINARY_EXTENSIONS.has(ext)) {
-    return null;
-  }
-  const git = await ensureRepo();
+  if (BINARY_EXTENSIONS.has(ext)) return null;
   try {
-    const content = await git.show([`${sha}:${name}/${relPath}`]);
-    // P2: 大文件截断
-    if (typeof content === "string" && content.length > SKILL_FILE_MAX_BYTES) {
+    const content = await readFile(target, "utf8");
+    if (content.length > SKILL_FILE_MAX_BYTES) {
       return `${content.slice(0, SKILL_FILE_MAX_BYTES)}\n\n[... 文件过大,已截断到 ${SKILL_FILE_MAX_BYTES} bytes ...]`;
     }
     return content;
-  } catch {
-    return null;
+  } catch (err) {
+    if (isEnoent(err)) return null;
+    throw err;
   }
 }
 
 /**
- * 发布 skill 新版本：把该 skill 工作副本的改动 git add + commit，返回新 commit sha。
- * 无改动 → 抛 SkillRepoError（调用方应提示先编辑再发布）。
+ * 只保留给定 hash 之外的快照（回滚/历史复现按需从 capm 重拉时，可清理旧快照）。
+ * `keepHash` 为空表示清空该 skill 的全部快照。
+ *
+ * 说明：默认策略为「只留当前版本」。调用方在切换 currentVersion 后传入新 hash。
  */
+export async function pruneSkillSnapshots(name: string, keepHash: string | null): Promise<void> {
+  assertValidSkillName(name);
+  const dir = skillSnapshotsDir(name);
+  const keepHex = keepHash ? hashToSnapshotKey(keepHash) : null;
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (keepHex && entry.name === keepHex) continue;
+    await rm(join(dir, entry.name), { recursive: true, force: true });
+  }
+}
+
+/** 删除 skill 工作副本与全部快照（软停用/归档时的清理，非必需）。 */
+export async function removeSkillCache(name: string): Promise<void> {
+  assertValidSkillName(name);
+  await rm(skillDir(name), { recursive: true, force: true });
+  await rm(skillSnapshotsDir(name), { recursive: true, force: true });
+}
+
 /**
  * skill 发布校验。检查 SKILL.md 可解析 + name 非空 + description 显式存在 + tools 引用在已知工具集。
  * @throws SkillValidationError 如果校验失败(路由层应返回 400)。
@@ -268,7 +336,6 @@ export async function readSkillFileAtSha(
  * 因为 description 是 skill 触发关键词的来源,缺失会导致自动匹配失效。
  */
 export function validateSkill(content: string, knownTools?: Set<string>): void {
-  // parseSkillMd 失败(缺 frontmatter / 非法 YAML / 缺 name)统一转 SkillValidationError
   let meta: ReturnType<typeof parseSkillMd>;
   try {
     meta = parseSkillMd(content);
@@ -280,8 +347,6 @@ export function validateSkill(content: string, knownTools?: Set<string>): void {
   if (!meta.name || meta.name.trim().length === 0) {
     throw new SkillValidationError("SKILL.md frontmatter 缺 name 字段");
   }
-  // description 必须显式存在(parseSkillMd 缺 description 时退回 name,这里需要检查原始 frontmatter)
-  // 重新解析原始 YAML 取 description 字段,判断是否显式提供
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (fmMatch) {
     let fmObj: unknown;
@@ -297,7 +362,6 @@ export function validateSkill(content: string, knownTools?: Set<string>): void {
       }
     }
   }
-  // tools 引用校验（可选——knownTools 传入时才检查）
   if (knownTools && meta.tools) {
     for (const t of meta.tools) {
       if (!knownTools.has(t)) {
@@ -307,38 +371,17 @@ export function validateSkill(content: string, knownTools?: Set<string>): void {
   }
 }
 
-export async function commitSkillVersion(name: string, message: string): Promise<string> {
-  // 发布前校验工作副本 SKILL.md（即将 commit 的内容）。
-  // 校验失败 → 抛 SkillRepoError 阻断发布（不再 warn 吞掉）。
-  // 调用方（createSkill 路由等）捕获后返回 400 错误信息给前端。
+/**
+ * 发布 skill 新版本：校验工作副本 SKILL.md → 快照到内容 hash 目录，返回内容 hash。
+ *
+ * 前置：工作副本已由调用方写入（Studio 编辑 / sync 导入）。
+ * 无 SKILL.md → 抛 SkillRepoError。校验失败 → 抛 SkillValidationError。
+ */
+export async function publishSkillSnapshot(name: string): Promise<string> {
   const skillContent = await readSkillFile(name, "SKILL.md");
-  if (skillContent) {
-    validateSkill(skillContent); // 抛 SkillRepoError → 阻断 commit
+  if (!skillContent) {
+    throw new SkillRepoError(`skill「${name}」缺 SKILL.md，无法发布`);
   }
-  const git = await ensureRepo();
-  await git.add([`${name}/`]);
-  const status = await git.status();
-  if (status.staged.length === 0) {
-    throw new SkillRepoError("无改动，无需发布新版本");
-  }
-  await git.commit(message);
-  return (await git.revparse(["HEAD"])).trim();
-}
-
-/** 返回当前 HEAD 是否包含该 skill 的 SKILL.md；用于发布失败后的重试恢复。 */
-export async function getSkillHeadSha(name: string): Promise<string | null> {
-  assertValidSkillName(name);
-  const git = await ensureRepo();
-  try {
-    await git.raw(["cat-file", "-e", `HEAD:${name}/SKILL.md`]);
-    return (await git.revparse(["HEAD"])).trim();
-  } catch {
-    return null;
-  }
-}
-
-/** 两版本间 skill 的 diff（git diff <from> <to> -- <name>/）。 */
-export async function diffSkill(name: string, fromSha: string, toSha: string): Promise<string> {
-  const git = await ensureRepo();
-  return await git.diff([fromSha, toSha, "--", `${name}/`]);
+  validateSkill(skillContent);
+  return createSkillSnapshot(name);
 }

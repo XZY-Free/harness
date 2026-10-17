@@ -1,5 +1,4 @@
 import {
-  contentHashFromGitSha,
   createSkill,
   createSkillVersion,
   getSkillByKey,
@@ -14,8 +13,7 @@ import {
   SkillRepoError,
   SkillValidationError,
   assertValidSkillName,
-  commitSkillVersion,
-  getSkillHeadSha,
+  publishSkillSnapshot,
   writeSkillFile,
 } from "@/lib/skill/repo";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
@@ -90,7 +88,7 @@ export async function POST(req: NextRequest) {
     createdBy: actorUserId,
   });
 
-  // 写 SKILL.md + 初始 commit（版本内容由目录承载，promptTemplate 不再写入）
+  // 写 SKILL.md + 落内容快照（版本身份 = 正文内容 hash；无 git）
   const md = buildSkillMd(
     {
       name,
@@ -103,24 +101,15 @@ export async function POST(req: NextRequest) {
   );
   await writeSkillFile(name, "SKILL.md", md);
 
-  let commitSha: string;
+  let contentHash: string;
   try {
-    commitSha = await commitSkillVersion(name, `${name} v1`);
+    contentHash = await publishSkillSnapshot(name);
   } catch (e) {
-    // S1（11-P1-5）：校验失败(SkillValidationError)→ 400 阻断,不回退
+    // 校验失败(SkillValidationError)→ 400 阻断,不回退
     if (e instanceof SkillValidationError) {
       return apiError("SKILL_VALIDATION_FAILED", e.message, { requestId });
     }
-    if (e instanceof SkillRepoError) {
-      const headSha = await getSkillHeadSha(name);
-      if (headSha) {
-        commitSha = headSha;
-      } else {
-        return apiError("SKILL_COMMIT_FAILED", e.message, { requestId });
-      }
-    } else {
-      return apiError("SKILL_COMMIT_FAILED", (e as Error).message, { requestId });
-    }
+    return apiError("SKILL_COMMIT_FAILED", (e as Error).message, { requestId });
   }
 
   let version: Awaited<ReturnType<typeof createSkillVersion>>;
@@ -128,8 +117,8 @@ export async function POST(req: NextRequest) {
     version = await createSkillVersion({
       tenantId,
       skillId: sk.id,
-      contentRef: commitSha,
-      contentHash: contentHashFromGitSha(commitSha),
+      contentRef: contentHash,
+      contentHash,
       sourceType: "local",
       createdBy: actorUserId,
     });
@@ -157,14 +146,14 @@ export async function POST(req: NextRequest) {
       targetType: "skill",
       targetId: sk.id,
       outcome: "succeeded",
-      metadata: { name, versionId: version.id, commitSha },
+      metadata: { name, versionId: version.id, contentHash },
     });
   } catch {
     /* 审计非关键路径，不阻断 */
   }
-  return apiSuccess({ skillId: sk.id, versionId: version.id, commitSha });
+  return apiSuccess({ skillId: sk.id, versionId: version.id, contentHash });
 }
 
 function defaultSkillBody(name: string): string {
-  return `# ${name}\n\n（在此编写 skill 的工作指令。agent 会通过 readSkillFile 读取本文件。）\n`;
+  return `# ${name}\n\n（在此编写 skill 的工作指令。agent 会读取本文件。）\n`;
 }

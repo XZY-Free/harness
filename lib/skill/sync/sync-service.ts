@@ -28,7 +28,6 @@
  * 不做：定时任务、双向同步、自动改名、物理删除历史。
  */
 
-import { contentHashFromGitSha } from "@/lib/capability/skill-queries";
 import {
   createSkill,
   createSkillVersion,
@@ -342,9 +341,9 @@ async function runSyncInternal(tenant: SyncTenantContext): Promise<SyncResult> {
 
     // 6b. 导入 zip + commit
     const localName = existingMapping?.localName ?? asset.name;
-    let commitSha: string;
+    let contentHash: string;
     try {
-      commitSha = await importArtifactZip(artifact.buffer, localName);
+      contentHash = await importArtifactZip(artifact.buffer, localName);
     } catch (e) {
       if (e instanceof ArtifactImportError) {
         await markMappingError(tenantId, existingMapping, e);
@@ -361,7 +360,7 @@ async function runSyncInternal(tenant: SyncTenantContext): Promise<SyncResult> {
       const version = await createSyncVersion({
         tenantId,
         skillId: localSkillId,
-        commitSha,
+        contentHash,
         actorUserId,
         localName,
       });
@@ -416,8 +415,8 @@ async function runSyncInternal(tenant: SyncTenantContext): Promise<SyncResult> {
       const version = await createSkillVersion({
         tenantId,
         skillId: skill.id,
-        contentRef: commitSha,
-        contentHash: contentHashFromGitSha(commitSha),
+        contentRef: contentHash,
+        contentHash,
         sourceType: "capability_market",
         sourceRef: asset.asset_id,
         createdBy: actorUserId,
@@ -488,7 +487,7 @@ async function runSyncInternal(tenant: SyncTenantContext): Promise<SyncResult> {
 async function createSyncVersion(params: {
   tenantId: string;
   skillId: string;
-  commitSha: string;
+  contentHash: string;
   actorUserId: string;
   localName: string;
 }): Promise<{ id: string; versionNo: number } | null> {
@@ -496,7 +495,7 @@ async function createSyncVersion(params: {
   const existing = await getSkillVersionByContentRef({
     tenantId: params.tenantId,
     skillId: params.skillId,
-    contentRef: params.commitSha,
+    contentRef: params.contentHash,
   });
   if (existing) {
     return { id: existing.id, versionNo: existing.versionNo };
@@ -504,8 +503,8 @@ async function createSyncVersion(params: {
   const version = await createSkillVersion({
     tenantId: params.tenantId,
     skillId: params.skillId,
-    contentRef: params.commitSha,
-    contentHash: contentHashFromGitSha(params.commitSha),
+    contentRef: params.contentHash,
+    contentHash: params.contentHash,
     sourceType: "capability_market",
     createdBy: params.actorUserId,
   });

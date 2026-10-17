@@ -47,6 +47,23 @@ export interface CapabilityCatalogKnowledgeSource {
   description: string;
 }
 
+/**
+ * 冻结能力目录中的 Skill 条目。
+ *
+ * 与 tools/knowledgeSources 并列——本次 invocation 冻结的可用 skill 清单。
+ * `skillVersionId` / `contentHash` 冻结版本身份，运行时 SkillResolver 据此读取内容。
+ */
+export interface CapabilityCatalogSkill {
+  sourceRef: string;
+  skillId: string;
+  skillVersionId: string;
+  skillKey: string;
+  displayName: string;
+  description: string;
+  /** 版本内容 hash（sha256: 前缀）。 */
+  contentHash: string;
+}
+
 export interface CapabilityCatalogSnapshot {
   toolPermissionMode?: ToolPermissionMode;
   version: typeof CAPABILITY_CATALOG_VERSION;
@@ -55,6 +72,7 @@ export interface CapabilityCatalogSnapshot {
   sourceRefs: string[];
   agents: CapabilityCatalogAgent[];
   tools: CapabilityCatalogTool[];
+  skills: CapabilityCatalogSkill[];
   knowledgeSources: CapabilityCatalogKnowledgeSource[];
   unavailableFacts: string[];
 }
@@ -92,6 +110,7 @@ export function buildCapabilityCatalogSnapshot(input: {
   preferredAgentId: string | null;
   agentCandidate: CapabilityCatalogAgent | null;
   tools: CapabilityCatalogTool[];
+  skills?: CapabilityCatalogSkill[];
   knowledgeSources: CapabilityCatalogKnowledgeSource[];
   sourceRefs: string[];
   unavailableFacts?: string[];
@@ -116,6 +135,9 @@ export function buildCapabilityCatalogSnapshot(input: {
       .sort((a, b) =>
         `${a.toolId}\u0000${a.operationId}`.localeCompare(`${b.toolId}\u0000${b.operationId}`),
       ),
+    skills: [...(input.skills ?? [])]
+      .map(clone)
+      .sort((a, b) => a.sourceRef.localeCompare(b.sourceRef)),
     knowledgeSources: [...input.knowledgeSources]
       .map(clone)
       .sort((a, b) => a.sourceRef.localeCompare(b.sourceRef)),
@@ -150,6 +172,7 @@ export function verifyCapabilityCatalogSnapshot(
     typeof snapshot.invocationId !== "string" ||
     !Array.isArray(snapshot.agents) ||
     !Array.isArray(snapshot.tools) ||
+    !Array.isArray(snapshot.skills) ||
     !Array.isArray(snapshot.knowledgeSources) ||
     !Array.isArray(snapshot.sourceRefs) ||
     !Array.isArray(snapshot.unavailableFacts)
@@ -192,6 +215,11 @@ export function capabilityCatalogModelView(snapshot: CapabilityCatalogSnapshot) 
       sourceRef: source.sourceRef,
       displayName: source.displayName,
       description: source.description,
+    })),
+    skills: snapshot.skills.map((skill) => ({
+      sourceRef: skill.sourceRef,
+      displayName: skill.displayName,
+      description: skill.description,
     })),
     unavailableFacts: [...snapshot.unavailableFacts],
   };

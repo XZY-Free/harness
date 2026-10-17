@@ -4,6 +4,7 @@ import {
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { createProductionProviderExecutorRegistry } from "@/lib/capability/provider-executor";
 import { providerExecutorKind } from "@/lib/capability/provider-executor-kind";
+import { getCurrentSkillVersion, listSkillsForMatching } from "@/lib/capability/skill-queries";
 import {
   computeToolExecutionContractDigest,
   parseToolExecutionContract,
@@ -33,6 +34,7 @@ import { and, asc, eq } from "drizzle-orm";
 import {
   type BuiltCapabilityCatalog,
   type CapabilityCatalogAgent,
+  type CapabilityCatalogSkill,
   type CapabilityCatalogTool,
   buildCapabilityCatalogSnapshot,
 } from "./capability-catalog";
@@ -115,6 +117,7 @@ async function buildCapabilityCatalog(
   ];
   const agentCandidate = await loadPreferredAgent(input, scope, sourceRefs, unavailableFacts);
   const tools = await loadAuthorizedTools(input, scope, sourceRefs, unavailableFacts);
+  const skills = await loadAvailableSkills(input, sourceRefs);
   const knowledgeSources = (
     await listDiscoverableKnowledgeBases({
       tenantId: input.tenantId,
@@ -136,11 +139,47 @@ async function buildCapabilityCatalog(
     preferredAgentId: input.preferredAgentId,
     agentCandidate,
     tools,
+    skills,
     knowledgeSources,
     sourceRefs,
     unavailableFacts,
     now: input.now,
   });
+}
+
+/**
+ * 装载本次 invocation 可用（可被运行时读取）的 Skill 清单。
+ *
+ * 事实源：`listSkillsForMatching`（tenant 内 enabled + currentVersion 存在；
+ * 同步镜像仅在绑定 active 时返回）。冻结 versionId / contentHash 供 SkillResolver
+ * 读取内容——Gateway 据此构造 SkillResolver，不再硬编码空列表。
+ *
+ * 无 currentVersion 的 skill 跳过（不可读取，不冻结）。
+ */
+async function loadAvailableSkills(
+  input: CapabilityCatalogInput,
+  sourceRefs: string[],
+): Promise<CapabilityCatalogSkill[]> {
+  const rows = await listSkillsForMatching(input.tenantId);
+  const out: CapabilityCatalogSkill[] = [];
+  for (const skill of rows) {
+    const version = await getCurrentSkillVersion({
+      tenantId: input.tenantId,
+      skillId: skill.id,
+    });
+    if (!version) continue;
+    sourceRefs.push(`skill-version:${version.id}:${version.contentHash}`);
+    out.push({
+      sourceRef: `skill:${skill.id}`,
+      skillId: skill.id,
+      skillVersionId: version.id,
+      skillKey: skill.skillKey,
+      displayName: skill.displayName,
+      description: skill.description ?? "",
+      contentHash: version.contentHash,
+    });
+  }
+  return out;
 }
 
 async function loadPreferredAgent(

@@ -1,5 +1,4 @@
 import {
-  contentHashFromGitSha,
   createSkillVersion,
   getSkillById,
   getSkillVersionByContentRef,
@@ -9,7 +8,7 @@ import { listSkillVersions } from "@/lib/capability/skill-studio-queries";
 import { apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
-import { SkillRepoError, commitSkillVersion, getSkillHeadSha } from "@/lib/skill/repo";
+import { SkillValidationError, publishSkillSnapshot } from "@/lib/skill/repo";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import { assertSkillWriteAccess } from "@/lib/studio/skill-access";
 import type { NextRequest } from "next/server";
@@ -48,55 +47,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = (await req.json().catch(() => ({}))) as { message?: string };
   const message = body.message?.trim() || `${sk.skillKey} 新版本`;
 
-  let commitSha: string;
+  // 发布快照：校验工作副本 SKILL.md → 落内容快照，返回内容 hash。
+  let contentHash: string;
   try {
-    commitSha = await commitSkillVersion(sk.skillKey, message);
+    contentHash = await publishSkillSnapshot(sk.skillKey);
   } catch (e) {
-    if (!(e instanceof SkillRepoError)) {
-      return apiError("SKILL_COMMIT_FAILED", (e as Error).message, { requestId });
+    if (e instanceof SkillValidationError) {
+      return apiError("SKILL_VALIDATION_FAILED", e.message, { requestId });
     }
-    const headSha = await getSkillHeadSha(sk.skillKey);
-    if (!headSha) return apiError("SKILL_NO_CHANGES", e.message, { requestId });
-    const existing = await getSkillVersionByContentRef({
-      tenantId,
-      skillId: sk.id,
-      contentRef: headSha,
-    });
-    if (existing) return apiError("SKILL_NO_CHANGES", e.message, { requestId });
-    commitSha = headSha;
+    return apiError("SKILL_COMMIT_FAILED", (e as Error).message, { requestId });
   }
+  void message; // 快照范式无 commit message；保留 body 解析以兼容旧调用方
 
   const existing = await getSkillVersionByContentRef({
     tenantId,
     skillId: sk.id,
-    contentRef: commitSha,
+    contentRef: contentHash,
   });
   if (existing) {
-    // P1-14:CAS——仅当 currentVersionId 仍是读取时的值才切换,防并发 publish/rollback 互覆盖。
-    const swapped = await setCurrentSkillVersion({
-      tenantId,
-      skillId: sk.id,
-      skillVersionId: existing.id,
-      expectedCurrentVersionId: sk.currentVersionId,
-    });
-    if (!swapped) {
-      return apiError("VERSION_CONFLICT", "skill 当前版本已被并发修改,请刷新后重试", { requestId });
-    }
-    return apiSuccess({
-      skillId: id,
-      versionId: existing.id,
-      version: existing.versionNo,
-      commitSha,
-      recovered: true,
-    });
+    // 内容未变（同 hash 已有版本）：显式返回 no-change，不新建重复版本。
+    return apiError("SKILL_NO_CHANGES", "内容未变化，无需发布新版本", { requestId });
   }
 
   // allowedTools/model/runtime 丢弃（正式用 manifestJson，此处不填）；versionNo 由正式仓储自动分配。
   const version = await createSkillVersion({
     tenantId,
     skillId: sk.id,
-    contentRef: commitSha,
-    contentHash: contentHashFromGitSha(commitSha),
+    contentRef: contentHash,
+    contentHash,
     sourceType: "local",
     createdBy: actorUserId,
   });
@@ -123,10 +101,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       targetType: "skill",
       targetId: id,
       outcome: "succeeded",
-      metadata: { versionId: version.id, commitSha, version: version.versionNo },
+      metadata: { versionId: version.id, contentHash, version: version.versionNo },
     });
   } catch {
     /* 审计非关键路径，不阻断 */
   }
-  return apiSuccess({ skillId: id, versionId: version.id, version: version.versionNo, commitSha });
+  return apiSuccess({
+    skillId: id,
+    versionId: version.id,
+    version: version.versionNo,
+    contentHash,
+  });
 }

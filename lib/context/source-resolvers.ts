@@ -41,6 +41,7 @@ import { db } from "@/lib/db/client";
 import type { MemoryEntry, MemoryScopeType } from "@/lib/persistence/schema/memory";
 import { skillTable as skillTableTable } from "@/lib/persistence/schema/skill";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import { readSkillFileAtHash } from "@/lib/skill/repo";
 import { eq } from "drizzle-orm";
 
 // ─── 源结果状态 ─────────────────────────────────────────────
@@ -374,7 +375,9 @@ export class SkillResolver implements SourceResolver {
       };
     }
 
-    const text = await this.contentLoader.load(version.contentRef).catch(() => null);
+    const text = await this.contentLoader
+      .load(skillRow.skillKey, version.contentRef)
+      .catch(() => null);
     if (text === null) {
       return {
         sourceType: this.sourceType,
@@ -423,16 +426,25 @@ export class SkillResolver implements SourceResolver {
 }
 
 export interface SkillContentLoader {
-  load(contentRef: string): Promise<string>;
+  /**
+   * 按 skill 名与内容引用读取 SKILL.md 正文。
+   * @param skillKey skill 名（缓存目录）
+   * @param contentRef 内容引用（当前范式为 `sha256:<64hex>` 内容 hash）
+   * @returns SKILL.md 正文；不可读返回 null（调用方映射 unavailable）
+   */
+  load(skillKey: string, contentRef: string): Promise<string | null>;
 }
 
+/**
+ * 默认加载器：从本地内容快照缓存读 SKILL.md 正文。
+ *
+ * 缓存布局：`<NEX_SKILLS_DIR>/.snapshots/<skillKey>/<hashHex>/SKILL.md`。
+ * 运行时按冻结的 contentRef（内容 hash）读取，与 Studio/sync 写入的快照同源；
+ * 与 Fragment 的 `computeFragmentContentHash(SKILL.md)` 口径一致（同一份正文 hash）。
+ */
 const defaultSkillContentLoader: SkillContentLoader = {
-  async load(contentRef) {
-    const prefix = "inline+base64:";
-    if (!contentRef.startsWith(prefix)) {
-      throw new Error("Skill content provider 不支持该受控引用");
-    }
-    return Buffer.from(contentRef.slice(prefix.length), "base64url").toString("utf8");
+  async load(skillKey, contentRef) {
+    return readSkillFileAtHash(skillKey, contentRef, "SKILL.md");
   },
 };
 

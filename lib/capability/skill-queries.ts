@@ -619,20 +619,6 @@ export async function publishSkillVersion(params: {
 // ─── 02-4：Studio / sync / provider 补充查询 ────────────────
 
 /**
- * 由 git commit sha 派生正式 contentHash（关口02 02-4 映射约定）。
- *
- * 正式 SkillVersion.contentHash 要求 `sha256:` + 64 hex；Studio / sync 流程以
- * skills/ git repo 的 commit sha 作为内容身份。git sha 本身是 40 hex，不能直接使用，
- * 故取其 sha256（64 hex）作为确定性内容身份 hash：新 commit → 新 hash → 变化可检测；
- * 同一 commit 恒等；格式满足正式不变量。运行时（gateway content）只回传 contentHash，
- * 不做内容重哈希校验，故该映射不破坏运行路径。
- */
-export function contentHashFromGitSha(commitSha: string): string {
-  const digest = createHash("sha256").update(commitSha).digest("hex");
-  return `sha256:${digest}`;
-}
-
-/**
  * 将 Skill.currentVersionId 指向既有版本并发布（Studio create / versions / publish / rollback 共用）。
  *
  * - CAS（P1-14）：expectedCurrentVersionId 提供时，仅当 skill.currentVersionId 与之匹配才切换；

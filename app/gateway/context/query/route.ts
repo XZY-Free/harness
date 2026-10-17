@@ -113,6 +113,7 @@ function buildResolvers(
         resolvers.push(new RecentItemsResolver());
         break;
       case "skill":
+        // 每个冻结 skill 一个 Resolver；allowedSkillIds 为空时构造空 Resolver（→ empty）
         if (allowedSkillIds.length === 0) {
           resolvers.push(new SkillResolver(""));
         } else {
@@ -206,15 +207,20 @@ export async function POST(request: Request): Promise<Response> {
       ),
       // T33：初始压缩材料不是模型可选的 `sources`，而是 Binding 冻结的执行输入，
       // 由 ContextHandle.common.initialCompression 驱动，始终参与装配。
+      // 冻结的可用 skill 清单来自 capabilityCatalog（本次 invocation 冻结的能力事实）；
+      // SkillResolver 据此按 skillId 读取内容，不再硬编码空列表。
       allowedSources: [...BASE_CONTEXT_SOURCES, INITIAL_CHECKPOINT_SOURCE_TYPE],
-      allowedSkillIds: [],
+      allowedSkillIds: capabilityCatalog.skills.map((skill) => skill.skillId),
       query: body.query,
       maxItems: limits.maxItems,
       maxTokens: limits.maxTokens,
       maxSensitivity: limits.maxSensitivity,
     },
     resolvers: [
-      ...buildResolvers(body.sources, []),
+      ...buildResolvers(
+        body.sources,
+        capabilityCatalog.skills.map((skill) => skill.skillId),
+      ),
       ...initialCompressionResolvers(binding, {
         tenantId: principal.tenantId,
         principalType: executionBinding.principalType,

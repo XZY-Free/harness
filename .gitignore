@@ -19,6 +19,8 @@ tsconfig.tsbuildinfo
 upstreams/
 # 预览运行时工作区（运行时生成的用户项目，仅根目录；勿匹配 app/studio/workspaces 路由目录）
 /workspaces/
+# Skill 内容缓存（运行时/Studio 生成的 skill 工作副本与版本快照；NEX_SKILLS_DIR）
+/skills/
 # 工具 / 编排状态
 .omc/
 .omx/
