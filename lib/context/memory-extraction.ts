@@ -28,7 +28,7 @@ import {
 import { db } from "@/lib/db/client";
 import type { MemoryCategory, MemoryScopeType } from "@/lib/persistence/schema/memory";
 import { memoryEntry, memoryExtractionRun } from "@/lib/persistence/schema/memory";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -78,26 +78,38 @@ export interface MemoryExtractionModelPort {
   }): Promise<ExtractedFact[]>;
 }
 
-/** 真实模型实现（结构化输出）。 */
+/**
+ * 真实模型实现。
+ *
+ * 说明：部分 OpenAI 兼容端点（如百炼 qwen-plus）不支持 json_schema 结构化输出，
+ * 故用 generateText + **自解析 JSON**（剥 ```json 围栏 → zod 校验），
+ * 兼容面更广、成本不变（单次调用）。
+ */
 export function configuredMemoryExtractionPort(modelRef: string): MemoryExtractionModelPort {
   return {
     async extract(input) {
       if (!aiConfig.apiKey) throw new Error("LLM_API_KEY 未配置");
-      const { object } = await generateObject({
+      const { text } = await generateText({
         model: getChatModel(modelRef),
-        schema: MEMORY_EXTRACTION_SCHEMA,
         prompt: [
-          "你是记忆提取器。从对话中抽取**值得跨会话记住**的原子事实，并对每条给出与已有记忆的关系决策。",
+          "你是记忆提取器。**只返回一个 json 对象**，形如：",
+          '{"facts":[{"fact":"原子事实","category":"user|feedback|project|reference|decision","action":"ADD|UPDATE|DELETE|NOOP","targetId":null,"reason":null}]}',
+          "不要输出任何解释、markdown 围栏或额外文本，只输出 json。",
+          "从对话中抽取**值得跨会话记住**的原子事实，并对每条给出与已有记忆的关系决策。",
           "只抽取：用户角色/偏好、用户给的纠正或确认、在办工作与决定、外部信息位置、架构/技术决策。",
           "**不要抽取**：能从代码库或对话上下文直接推导的内容、一次性的闲聊、临时状态、已有记忆重复的内容。",
           "决策规则：与已有记忆语义相同 → NOOP；补充/修正某条已有记忆 → UPDATE 并给 targetId；",
-          "与某条已有记忆矛盾（已被新事实取代）→ UPDATE 同一 targetId（由系统标记旧条失效）；确定要删除 → DELETE；",
+          "与某条已有记忆矛盾（已被新事实取代）→ UPDATE 同一 targetId（系统会标记旧条失效）；确定删除 → DELETE；",
           "全新事实 → ADD（targetId 为 null）。宁可少抽，也不要编造。",
           `已有记忆（id 与内容）：${JSON.stringify(input.existing)}`,
           `对话内容：\n${input.transcript}`,
         ].join("\n\n"),
       });
-      return object.facts.map((f) => ({
+      const parsed = MEMORY_EXTRACTION_SCHEMA.safeParse(parseJsonLoose(text));
+      if (!parsed.success) {
+        throw new Error(`记忆提取输出非合法 JSON：${text.slice(0, 200)}`);
+      }
+      return parsed.data.facts.map((f) => ({
         fact: f.fact,
         category: f.category as MemoryCategory,
         action: f.action as MemoryDecisionAction,
@@ -106,6 +118,21 @@ export function configuredMemoryExtractionPort(modelRef: string): MemoryExtracti
       }));
     },
   };
+}
+
+/** 宽松 JSON 解析：剥 ```json 围栏、截取首个 { 到末个 }。 */
+function parseJsonLoose(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fenced?.[1]?.trim() ?? trimmed;
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  const candidate = start >= 0 && end > start ? body.slice(start, end + 1) : body;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
 }
 
 export interface MemoryExtractionResult {
