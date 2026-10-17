@@ -13,7 +13,11 @@ import {
   type KnowledgeEvidenceHit,
   searchKnowledgeEvidence,
 } from "@/lib/context/knowledge-queries";
-import { listActiveMemoryEntriesByScopes } from "@/lib/context/memory-queries";
+import {
+  listActiveMemoryEntriesByScopes,
+  recordMemoryRetrieval,
+} from "@/lib/context/memory-queries";
+import { rankMemoryCandidates } from "@/lib/context/memory-ranking";
 import { isDirectRecentContextItemEligible } from "@/lib/context/recent-item-context-policy";
 import { listRecentContextItemsByThread } from "@/lib/conversations/thread-item-queries";
 /**
@@ -553,8 +557,9 @@ export class MemoryResolver implements SourceResolver {
     scopes.push({ scopeType: "organization", scopeRef: null });
 
     try {
+      // 1. 本地结构化过滤（scope + 时效 + 未失效）；多取一些供相关度重排
       const entries = await listActiveMemoryEntriesByScopes(ctx.tenantId, scopes, {
-        limit: this.limit,
+        limit: Math.max(this.limit, ctx.query ? this.limit * 3 : this.limit),
       });
 
       if (entries.length === 0) {
@@ -566,12 +571,35 @@ export class MemoryResolver implements SourceResolver {
         };
       }
 
-      const fragments = entries.map((entry) => entryToFragment(entry));
+      // 2. query 感知重排（修复「检索不看 query」）；无 query 时按时效
+      const ranked = rankMemoryCandidates(
+        entries.map((e) => ({
+          id: e.id,
+          content: e.contentRedacted,
+          memoryCategory: e.memoryCategory,
+          updatedAt: e.updatedAt,
+          retrievalCount: e.retrievalCount,
+        })),
+        { query: ctx.query ?? null },
+      ).slice(0, this.limit);
+
+      const byId = new Map(entries.map((e) => [e.id, e]));
+      const top = ranked
+        .map((r) => byId.get(r.id))
+        .filter((e): e is MemoryEntry => e !== undefined);
+
+      // 3. 记录命中（retrievalCount++，用于晋升/降权；失败不阻断）
+      void recordMemoryRetrieval(
+        ctx.tenantId,
+        top.map((e) => e.id),
+      );
+
+      const fragments = top.map((entry) => entryToFragment(entry));
       return {
         sourceType: this.sourceType,
         status: "ok",
         fragments,
-        reasonCode: "memory_loaded",
+        reasonCode: ctx.query ? "memory_relevance_ranked" : "memory_loaded",
       };
     } catch (err) {
       return {
