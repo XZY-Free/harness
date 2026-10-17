@@ -583,7 +583,22 @@ export class MemoryResolver implements SourceResolver {
       let entries: MemoryEntry[];
       if (semanticIds.length > 0) {
         // 语义命中的条目：按 id 精确回填（仍受 tenant/active 约束）
-        entries = await listActiveMemoryEntriesByIds(ctx.tenantId, semanticIds);
+        const semanticEntries = await listActiveMemoryEntriesByIds(ctx.tenantId, semanticIds);
+        // **scope 求交**：capm 语义召回是 KB 全局的，必须按本次允许的 scope 过滤，
+        // 否则会带回其它 thread/workspace/agent 的记忆（跨 scope 泄漏）。
+        entries = semanticEntries.filter((e) =>
+          scopes.some(
+            (s) =>
+              s.scopeType === e.scopeType &&
+              ((s.scopeRef ?? null) === null || (e.scopeRef ?? null) === (s.scopeRef ?? null)),
+          ),
+        );
+        if (entries.length === 0) {
+          // 语义命中但都不在本次 scope → 回退本地结构化（不返回空）
+          entries = await listActiveMemoryEntriesByScopes(ctx.tenantId, scopes, {
+            limit: Math.max(this.limit, ctx.query ? this.limit * 3 : this.limit),
+          });
+        }
       } else {
         // 无语义命中（无 query / capm 降级）：本地结构化 + 相关度排序
         entries = await listActiveMemoryEntriesByScopes(ctx.tenantId, scopes, {
