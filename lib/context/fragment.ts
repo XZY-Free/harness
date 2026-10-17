@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Context Fragment 领域类型（阶段 7 S07-C01）。
  *
@@ -20,7 +21,7 @@
  * - 只有平台规则与 Agent 指令可为 instruction 信任级别。
  * - Credential 原值永远不进入 Fragment。
  */
-import { createHash } from "node:crypto";
+import { estimateTokens } from "@/lib/context/budget-estimation";
 
 // ─── Fragment Kind ─────────────────────────────────────────
 
@@ -273,10 +274,18 @@ export function computeFragmentContentHash(text: string): string {
   return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
 
-/** Context 统一 Token 估算，所有 Provider 与运行时守卫使用同一实现。 */
+/**
+ * Context 统一 Token 估算，所有 Provider 与运行时守卫使用同一实现。
+ *
+ * **口径统一（关键）**：改用与 `budget-estimation` 一致的 token 计数——
+ * 若 `gpt-tokenizer` 已加载则用真 tokenizer；否则回退 CJK 友好的字符估算。
+ * 此前本函数用 `char/3` 粗估，与压缩阈值判定（真 tokenizer）口径不一致，
+ * 导致「预算裁剪」与「压缩触发」对同一上下文给出不同 token 数。
+ */
 export function estimateFragmentTokens(text: string): number {
   if (!text) return 0;
-  return Math.max(1, Math.ceil(text.length / 3));
+  // 委托统一实现：真 tokenizer（若已加载）或 CJK 回退估算（不阻塞）。
+  return Math.max(1, estimateTokens(text));
 }
 
 /** 校验 contentHash 是否符合 sha256: 前缀格式。 */

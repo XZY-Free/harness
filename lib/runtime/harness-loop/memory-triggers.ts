@@ -12,7 +12,7 @@
  *
  * 成本红线（用户定）：两者都只在越阈值时才调用 LLM；默认配置下小会话永不触发。
  */
-import { contextConfig } from "@/lib/config";
+import { aiConfig, contextConfig } from "@/lib/config";
 import { compactConversation, shouldCompactContext } from "@/lib/context/memory-compaction";
 import { extractMemoryFromTranscript } from "@/lib/context/memory-extraction";
 import { shouldFlushBeforeCompaction } from "@/lib/context/memory-extraction";
@@ -31,7 +31,7 @@ export interface MemoryTriggerOutcome {
  *
  * @param input.tenantId / invocationId / threadId 主体
  * @param input.inputTokens 当前上下文真实占用（ContextView.tokenAccounting.inputTokens）
- * @param input.contextWindowTokens 模型窗口（缺省 128k 保守）
+ * @param input.model 当前模型（窗口经 resolveTokenBudget 解析 per-model 配置）
  * @param input.transcript 待提取对话文本（调用方从 thread items 取）
  * @param input.modelRef 提取/压缩模型
  */
@@ -40,7 +40,10 @@ export async function runMemoryTriggers(input: {
   invocationId: string;
   threadId: string | null;
   inputTokens: number;
-  contextWindowTokens?: number;
+  /** 当前模型（窗口经 `NEX_CONTEXT_WINDOWS` 解析；缺省 aiConfig.chatModel）。 */
+  model?: string;
+  /** 显式窗口覆盖（测试用；缺省按模型配置解析）。 */
+  contextWindowOverride?: number;
   transcript: string;
   retainedSummary?: string;
   modelRef?: string;
@@ -49,13 +52,13 @@ export async function runMemoryTriggers(input: {
   /** 测试注入：覆盖压缩端口。 */
   compactOverride?: () => Promise<void>;
 }): Promise<MemoryTriggerOutcome> {
-  const contextWindow = input.contextWindowTokens ?? 128_000;
+  const model = input.model ?? aiConfig.chatModel;
   const outcome: MemoryTriggerOutcome = { flushed: false, compacted: false };
 
   // ── 1. flush 优先：压缩前**先抢救记忆**（对标 OpenClaw memoryFlush 的时序）──
   // 语义：一旦接近/到达压缩线，先把可跨会话复用的记忆沉淀下来，再压缩，
   // 否则压缩会把这段历史摘掉、细节永久丢失。
-  if (shouldFlushBeforeCompaction(input.inputTokens, contextWindow)) {
+  if (shouldFlushBeforeCompaction(input.inputTokens, model, input.contextWindowOverride)) {
     try {
       if (input.flushOverride) {
         await input.flushOverride();
@@ -79,7 +82,7 @@ export async function runMemoryTriggers(input: {
   }
 
   // ── 2. 压缩：先落实记忆再压缩历史 ──
-  if (shouldCompactContext(input.inputTokens, contextWindow)) {
+  if (shouldCompactContext(input.inputTokens, model, input.contextWindowOverride)) {
     try {
       if (input.compactOverride) {
         await input.compactOverride();

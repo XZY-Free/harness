@@ -14,8 +14,10 @@
  *   真正的压缩决策仍由上下文组装层负责。
  */
 import { aiConfig, contextConfig } from "@/lib/config";
-import { extractMemoryFromTranscript } from "@/lib/context/memory-extraction";
-import { shouldFlushBeforeCompaction } from "@/lib/context/memory-extraction";
+import {
+  extractMemoryFromTranscript,
+  shouldFlushBeforeCompaction,
+} from "@/lib/context/memory-extraction";
 import type { HarnessLoopView, HarnessMemoryFlushPort } from "@/lib/runtime/harness-loop/loop";
 
 /** 粗略 token 估算：4 字符 ≈ 1 token（与 fragment 估算一致口径）。 */
@@ -42,8 +44,8 @@ function transcriptFromView(view: HarnessLoopView): string {
 export function createMemoryFlushPort(deps: {
   /** 提取模型引用（缺省用 chatModel）。 */
   modelRef?: string;
-  /** 当前会话上下文窗口 tokens（缺省用 128k 保守值）。 */
-  contextWindowTokens?: number;
+  /** 当前模型（窗口经 resolveTokenBudget 解析；缺省 aiConfig.chatModel）。 */
+  model?: string;
   /**
    * 当前上下文**真实占用** tokens 的估算器（由上下文装配层提供，最准确）。
    * 缺省回退到 view 客观尺寸近似（objective + 序列化视图）——此时通常不会触发，
@@ -53,7 +55,7 @@ export function createMemoryFlushPort(deps: {
   /** 精确的待提取文本（可选）；缺省由 view 近似。 */
   transcriptBuilder?: (view: HarnessLoopView) => string;
 }): HarnessMemoryFlushPort {
-  const contextWindow = deps.contextWindowTokens ?? 128_000;
+  const model = deps.model ?? aiConfig.chatModel;
 
   return {
     async flush(view: HarnessLoopView): Promise<void> {
@@ -63,7 +65,7 @@ export function createMemoryFlushPort(deps: {
         : estimateTokens(JSON.stringify(view));
 
       // 未接近压缩 → 不 flush，避免无谓的 LLM 调用（成本红线）
-      if (!shouldFlushBeforeCompaction(estimated, contextWindow)) {
+      if (!shouldFlushBeforeCompaction(estimated, model)) {
         return;
       }
 

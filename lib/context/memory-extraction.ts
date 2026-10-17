@@ -16,6 +16,7 @@
  */
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig, contextConfig } from "@/lib/config";
+import { resolveTokenBudget } from "@/lib/context/budget-estimation";
 import {
   computeCandidateKey,
   computeMemoryContentHash,
@@ -148,18 +149,30 @@ export interface MemoryExtractionResult {
 /**
  * 判定是否应触发"压缩前 flush"（对标 OpenClaw：reserveTokensFloor + softThresholdTokens）。
  *
- * @param estimatedTokens 当前会话 token 估算
- * @param contextWindowTokens 模型上下文窗口
+ * 触发线 = 窗口 - flushReserveTokens - flushSoftThresholdTokens；
+ * 或已越压缩硬线（budgetThreshold）——两者取或（越压缩线必须先抢救记忆）。
+ *
+ * 窗口来源优先级：显式 `contextWindowOverride` → `resolveTokenBudget(model)`（读
+ * `NEX_CONTEXT_WINDOWS`）→ `Infinity`（未配置 → 恒不触发，与既有压缩路径同语义）。
+ *
+ * @param estimatedTokens 当前上下文 token 估算（来自 `ContextView.tokenAccounting.inputTokens`）
+ * @param model 当前模型（解析 per-model 窗口）
  */
 export function shouldFlushBeforeCompaction(
   estimatedTokens: number,
-  contextWindowTokens: number,
+  model: string,
+  contextWindowOverride?: number,
 ): boolean {
+  const budget =
+    contextWindowOverride && Number.isFinite(contextWindowOverride) && contextWindowOverride > 0
+      ? contextWindowOverride
+      : resolveTokenBudget(model);
+  // 未配置窗口（Infinity）→ 不触发（零回归，与 shouldCompress 同语义）
+  if (!Number.isFinite(budget) || budget <= 0) return false;
   const reserveFloor = contextConfig.flushReserveTokens;
   const softThreshold = contextConfig.flushSoftThresholdTokens;
-  const triggerLine = contextWindowTokens - reserveFloor - softThreshold;
-  // 已越过压缩硬线（budgetThreshold）也视为需 flush（尚未压缩前抢救记忆）
-  const hardLine = contextWindowTokens * contextConfig.budgetThreshold;
+  const triggerLine = budget - reserveFloor - softThreshold;
+  const hardLine = budget * contextConfig.budgetThreshold;
   return estimatedTokens >= triggerLine || estimatedTokens >= hardLine;
 }
 

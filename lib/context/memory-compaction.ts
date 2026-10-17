@@ -18,6 +18,7 @@ import { getChatModel } from "@/lib/ai/provider";
  * 成本：压缩是低频事件（会话级，通常一次），单次 LLM 调用；模型端口可注入（测试用 mock）。
  */
 import { aiConfig, contextConfig } from "@/lib/config";
+import { resolveTokenBudget, shouldCompress } from "@/lib/context/budget-estimation";
 import {
   computeSourceRangesHash,
   computeSummaryHash,
@@ -49,16 +50,25 @@ export interface CompactionResult {
 }
 
 /**
- * 是否应触发压缩（对标 Codex 60% 早触发 + 本仓三级阈值）。
+ * 是否应触发压缩。
  *
- * @param estimatedTokens 当前上下文估算
- * @param contextWindowTokens 模型窗口
+ * **复用既有压缩判定**（`budget-estimation.shouldCompress`）——不重复实现：
+ * - 预算来自 `resolveTokenBudget(model)`（读 `NEX_CONTEXT_WINDOWS`）；
+ * - 未配置窗口 → `Infinity` → 恒不压缩（零回归语义，与既有路径一致）。
+ *
+ * @param estimatedTokens 当前上下文估算（应来自 `ContextView.tokenAccounting.inputTokens`）
+ * @param model 当前模型（用于解析 per-model 窗口）
  */
 export function shouldCompactContext(
   estimatedTokens: number,
-  contextWindowTokens: number,
+  model: string,
+  contextWindowOverride?: number,
 ): boolean {
-  return estimatedTokens >= contextWindowTokens * contextConfig.budgetThreshold;
+  const budget =
+    contextWindowOverride && Number.isFinite(contextWindowOverride) && contextWindowOverride > 0
+      ? contextWindowOverride
+      : resolveTokenBudget(model);
+  return shouldCompress(estimatedTokens, budget);
 }
 
 /** 压缩摘要模型端口（可注入 mock，守成本红线）。 */
